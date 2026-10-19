@@ -22,7 +22,7 @@ export const NAV_DEFAULTS = {
   radius: 0.3, // capsule radius (m)
   stepUp: 0.35, // max single riser (m)
   walkNy: 0.62, // min normal.y of a walkable surface (~51.7°; ½×½-amah stairs as ramps are 45°)
-  maxLevels: 4,
+  maxLevels: 6, // the ta'im columns under the aliyah landing hold 5 (+22, +33, +44, roof +55, landing +67)
   tile: 64,
   climbOrth: 0.8, // max |Δh| between orthogonal neighbours worth testing: 0.5 m cells over ½-amah treads can
   //               straddle three 24 cm risers (0.72 m); real ledges are rejected by the sub-step probe
@@ -100,7 +100,8 @@ export function surfaceKind(nyUnit, walkNy) {
  * pos: Float32Array triangle soup (x,y,z × 3 per triangle), world meters.
  * floorAt(x, z, fromY, far) -> y|null: walkable floor probe used to validate steep links (stairs vs ledges);
  *   defaults to makeFloorProbe(pos) (built lazily on the first steep link).
- * cfg: NAV_DEFAULTS + { x0, z0, nx, nz } (grid origin = min corner; cell (i,j) centre = x0+(i+.5)c, z0+(j+.5)c).
+ * cfg: NAV_DEFAULTS + { x0, z0, nx, nz } (grid origin = min corner; cell (i,j) centre = x0+(i+.5)c, z0+(j+.5)c)
+ *   + optional exclude: [[i0, j0, i1, j1], …] inclusive cell rectangles left empty (covered by a finer layer).
  */
 export function* buildGrid(pos, cfgIn, floorAt = null) {
   const cfg = { ...NAV_DEFAULTS, ...cfgIn };
@@ -109,6 +110,13 @@ export function* buildGrid(pos, cfgIn, floorAt = null) {
   const ntx = Math.ceil(nx / T), ntz = Math.ceil(nz / T), nTiles = ntx * ntz;
   const inv = 1 / cell;
   const t0 = now();
+  let skip = null;
+  if (cfg.exclude?.length) {
+    skip = new Uint8Array(nx * nz);
+    for (const [a0, b0, a1, b1] of cfg.exclude) {
+      for (let j = Math.max(0, b0); j <= Math.min(nz - 1, b1); j++) skip.fill(1, j * nx + Math.max(0, a0), j * nx + Math.min(nx - 1, a1) + 1);
+    }
+  }
 
   // ---- pass 1/2: bucket triangles into tiles (bbox, dilated by R for steep ones) ----
   const tileCount = new Uint32Array(nTiles + 1);
@@ -165,7 +173,7 @@ export function* buildGrid(pos, cfgIn, floorAt = null) {
   };
   let sY = new Float32Array(64), sK = new Uint8Array(64), bl = new Float32Array(64);
   const outF = new Float32Array(ML);
-  let entries = 0, tilesDone = 0;
+  let entries = 0, tilesDone = 0, fullCells = 0; // fullCells: columns at maxLevels (a higher floor may be lost)
 
   for (let tb = 0; tb < ntz; tb++) {
     for (let ta = 0; ta < ntx; ta++) {
@@ -230,7 +238,7 @@ export function* buildGrid(pos, cfgIn, floorAt = null) {
       for (let j = tj0; j <= tj1; j++) {
         for (let i = ti0; i <= ti1; i++) {
           let e = head[(j - tj0) * T + (i - ti0)];
-          if (e < 0) continue;
+          if (e < 0 || (skip && skip[j * nx + i])) continue;
           let n = 0, nb = 0;
           for (; e >= 0; e = eNext[e]) {
             if (eKind[e] === BLOCK) {
@@ -247,12 +255,55 @@ export function* buildGrid(pos, cfgIn, floorAt = null) {
           if (!n) continue;
           const c = j * nx + i;
           const k = columnFloors(sY, sK, n, bl, nb, cfg, outF);
+          if (k === ML) fullCells++;
           lvCount[c] = k;
           for (let l = 0; l < k; l++) lvY[c * ML + l] = outF[l];
         }
       }
       tilesDone++;
       yield 0.05 + 0.8 * (tilesDone / nTiles);
+    }
+  }
+
+  // ---- cracks (fine layers): a cell with no surface at all just under a level both of its opposite neighbours
+  // stand on is a crack narrower than two cells (e.g. the 2 cm between a newel stair's top step and the round of the
+  // hole it rises through) — a walker steps across it, so it gets a floor at that level ----
+  let bridged = 0;
+  if (cfg.bridge) {
+    floorAt ||= makeFloorProbe(pos, cfg);
+    const H = cfg.height, add = [];
+    for (let j = 0; j < nz; j++) {
+      for (let i = 0; i < nx; i++) {
+        const c = j * nx + i;
+        if ((skip && skip[c]) || lvCount[c] >= ML) continue;
+        for (let ax = 0; ax < 2; ax++) {
+          const da = ax ? nx : 1;
+          if (ax ? (j === 0 || j === nz - 1) : (i === 0 || i === nx - 1)) continue;
+          const pa = c - da, pb = c + da;
+          for (let la = 0; la < lvCount[pa]; la++) {
+            const y = lvY[pa * ML + la];
+            let yb = NaN;
+            for (let lb = 0; lb < lvCount[pb]; lb++) if (Math.abs(lvY[pb * ML + lb] - y) <= 0.03) { yb = lvY[pb * ML + lb]; break; }
+            if (yb !== yb) continue;
+            let clash = false;
+            for (let l = 0; l < lvCount[c]; l++) { const d = lvY[c * ML + l] - y; if (d > -0.7 && d < H) { clash = true; break; } }
+            if (clash || floorAt(x0 + (i + 0.5) * cell, z0 + (j + 0.5) * cell, y + 0.03, 0.3) !== null) continue;
+            add.push(c, (y + yb) / 2);
+          }
+        }
+      }
+      if ((j & 63) === 63) yield 0.86;
+    }
+    for (let q = 0; q < add.length; q += 2) {
+      const c = add[q], y = add[q + 1];
+      let n = lvCount[c], dup = false;
+      for (let l = 0; l < n; l++) if (Math.abs(lvY[c * ML + l] - y) < 0.05) { dup = true; break; }
+      if (dup || n >= ML) continue;
+      let l = n;
+      while (l > 0 && lvY[c * ML + l - 1] > y) { lvY[c * ML + l] = lvY[c * ML + l - 1]; l--; }
+      lvY[c * ML + l] = y;
+      lvCount[c] = n + 1;
+      bridged++;
     }
   }
 
@@ -387,7 +438,7 @@ export function* buildGrid(pos, cfgIn, floorAt = null) {
     coarse: { n: nC, cx, cy, cz, off: deg, adj: cAdj, w: cW },
     stats: {
       nx, nz, cells, nodes: nNodes, components: nComp, coarseNodes: nC, coarseEdges: pairs.size, triangles: nTri,
-      entries, tiles: nTiles, stairProbes: probes, ms: Math.round(now() - t0),
+      entries, tiles: nTiles, stairProbes: probes, bridged, fullCells, ms: Math.round(now() - t0),
       rasterMs: Math.round(tRaster - t0), linkMs: Math.round(tLinks - tRaster), graphMs: Math.round(now() - tLinks),
     },
   };

@@ -8,7 +8,8 @@
 import { BufferGeometry, BufferAttribute, Box3, Line3, Ray, Vector3, DoubleSide } from 'three';
 import { MeshBVH, BVH, ExtendedTriangle } from 'three-mesh-bvh';
 import { NAV_DEFAULTS, columnFloors, surfaceKind } from './nav/grid-build.js';
-import { a } from '../core/units.js';
+import { a, AMAH } from '../core/units.js';
+import { getTerrain } from '../world/terrain/height.js';
 
 /** collider tags never collided with: door leaves / curtains move, observers pass them (ARCHITECTURE §12) */
 const SKIP_TAG = /\b(door|doors|leaf|leaves|curtain|curtains|parochet|nocollide)\b/i;
@@ -107,6 +108,16 @@ export function createPhysics(ctx) {
   const col = { ys: new Float32Array(64), ny: new Float32Array(64), ks: new Uint8Array(64), bl: new Float32Array(2), out: new Float32Array(8) };
   const cfgFloors = { ...NAV_DEFAULTS, maxLevels: 8 };
   let P = null, I = null; // BVH positions (the soup) and its (reordered) index
+  // the site's terrain height field (world/terrain/height.js) — ground beyond the terrain collider's edge
+  let terrain;
+  const groundY = (x, z) => {
+    if (terrain === undefined) { try { terrain = ctx.el ? getTerrain(ctx) : null; } catch { terrain = null; } }
+    if (!terrain) return null;
+    let h;
+    try { h = terrain.heightASL(x / AMAH, -z / AMAH); } catch { return null; }
+    return Number.isFinite(h) ? h - terrain.DATUM : null; // site Z·amah = (h − datum) m
+  };
+  const outside = (x, z) => !phys.bvh || x < phys.bounds.min.x || x > phys.bounds.max.x || z < phys.bounds.min.z || z > phys.bounds.max.z;
 
   const setTri = (t) => {
     const i0 = I[3 * t] * 3, i1 = I[3 * t + 1] * 3, i2 = I[3 * t + 2] * 3;
@@ -268,12 +279,18 @@ export function createPhysics(ctx) {
      * floorAt(x, z) — the standable WALKING floor at (x, z) (as standFloor: court/hall floors, not roof tops).
      * floorAt(x, z, fromY, minNy = 0.3, far = Infinity) — the highest up-facing surface (normal.y ≥ minNy) in
      * [fromY − far, fromY]; undersides and steep faces are passed through. Returns world y or null.
+     * Beyond the colliders' extent (the terrain collider ends at the tier's draw distance) the site's terrain height
+     * field answers, so the land 350 m – 4 km out (env's horizon profile) always has a height.
      */
     floorAt(x, z, fromY, minNy = 0.3, far = Infinity) {
       if (fromY == null) return phys.standFloor(x, z);
       const n = column(x, z, fromY - far, fromY);
       let best = -Infinity;
       for (let i = 0; i < n; i++) if (col.ny[i] >= minNy && col.ys[i] > best) best = col.ys[i];
+      if (best === -Infinity && outside(x, z)) {
+        const g = groundY(x, z);
+        if (g !== null && g <= fromY && g >= fromY - far) return g;
+      }
       return best === -Infinity ? null : best;
     },
 
@@ -391,11 +408,14 @@ export function createPhysics(ctx) {
      * Ground under a standing capsule: highest walkable surface hit by 7 short downward rays (centre +
      * ring), each projected to the centre along its surface plane. Rays start at feet.y + up (outside
      * solids while walking) and reach `down` below the feet; either winding counts. Returns the height or null.
+     * The ring is the capsule's footprint (0.3 m), its first ray along `dir` (world x/z angle of the motion): the
+     * lower step a stair is entered by is found before the capsule touches the face of the step beyond it, also
+     * when a narrow wedge of a newel stair is approached from its open outer edge.
      */
-    probeGround(feet, up, down, ring = 0.22) {
+    probeGround(feet, up, down, ring = 0.3, dir = 0) {
       if (!phys.bvh) return null;
       for (let k = 0; k < PR; k++) {
-        const an = (k - 1) * Math.PI / 3;
+        const an = dir + (k - 1) * Math.PI / 3;
         prQ.x[k] = feet.x + (k === 0 ? 0 : Math.cos(an) * ring);
         prQ.z[k] = feet.z + (k === 0 ? 0 : Math.sin(an) * ring);
         prQ.y[k] = -Infinity;

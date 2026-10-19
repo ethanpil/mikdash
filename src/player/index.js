@@ -78,6 +78,8 @@ export async function init(ctx) {
     get locked() { return input.state.locked; },
     speeds: { ...SPEEDS, instant: Infinity },
     body: BODY,
+    /** the path (world feet points, read-only) the current goTo walk follows, or null (no walk / not planned yet) */
+    get path() { return auto.job?.path?.pts ?? null; },
     /** walk (or glide/teleport) to a target; resolves true on arrival, false if cancelled/superseded */
     goTo: (target, speed = 'walk') => auto.goTo(target, speed),
     cancel: () => auto.cancel(),
@@ -108,9 +110,23 @@ export async function init(ctx) {
     else ctrl.update(dt, null, input.state);
   }, PRIORITY.player);
 
-  // nav grid: built off-thread once the first frame is on screen (never blocks startup)
-  let kicked = false;
+  // nav grid: built off-thread (the worker is spawned in createNav), started on 'ready' before the first frame.
+  // That frame blocks the main thread for the shader compiles (25–47 s on the HD 4600, any viewport) while the
+  // worker's core would sit idle; started there, nav is ready when the frame ends, and the frame is no slower
+  // (docs/decisions/player-2-fix.md). The far-ground layer reaches the places the UI can send the observer to:
+  // zone stands and event viewpoints.
+  let kicked = false, haveTargets = false;
   const kick = () => { if (!kicked) { kicked = true; nav.rebuild(); } };
-  ctx.bus.on('ready', () => requestAnimationFrame(() => requestAnimationFrame(kick)));
-  setTimeout(kick, 5000);
+  const targets = navTargets().then((pts) => { nav.targets = pts; haveTargets = true; });
+  ctx.bus.on('ready', () => { if (haveTargets) kick(); else targets.then(kick); });
+  setTimeout(() => targets.then(kick), 5000);
+}
+
+/** Site points [X, Y, Z?] the UI sends the observer to (zone stands, event viewpoints); [] when the data is missing. */
+async function navTargets() {
+  const pts = [];
+  const take = (p) => { if (Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1])) pts.push(p); };
+  try { const m = await import('../data/zones-content.js'); for (const z of Object.values(m.ZONE_CONTENT || {})) take(z?.stand); } catch { /* optional */ }
+  try { const m = await import('../data/schedule.js'); for (const e of m.EVENTS || []) take(e?.view?.at); } catch { /* optional */ }
+  return pts;
 }

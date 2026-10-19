@@ -125,9 +125,10 @@ export function createController(ctx, physics) {
           }
         }
       } else s.blocked = false;
-      // vertical: ground snap / gravity
+      // vertical: ground snap / gravity (the probe ring's first ray points along the motion)
       const fall = s.grounded ? 0 : Math.max(0, -(vel.y - BODY.gravity * h) * h);
-      const g = physics.probeGround(feet, BODY.stepUp + 0.05, (s.grounded ? BODY.snapDown : 0.02) + fall);
+      const dir = vel.x !== 0 || vel.z !== 0 ? Math.atan2(vel.z, vel.x) : 0;
+      const g = physics.probeGround(feet, BODY.stepUp + 0.05, (s.grounded ? BODY.snapDown : 0.02) + fall, BODY.radius, dir);
       if (s.grounded) {
         if (g !== null) { feet.y = g; vel.y = 0; s.voidY = null; }
         else if (!physics.bvh || physics.floorAt(feet.x, feet.z, feet.y + 0.4, 0.3) === null) {

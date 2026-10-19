@@ -76,6 +76,12 @@ const STOA_DEPTH = 20;                   // ⚙ "stav lifnim mistav" (Rambam BhB
 const STOA_AISLE = 10;                   // ⚙
 const STOA_ROOF = 20;                    // ⚙ roof top; ≤ MOUNT_EAST_WALL_H so the east side stays under the Parah sight-line
 const STOA_BAY = 10;                     // ⚙ column spacing
+// as built by build-mount (src/world/mount/stoas.js STOA) — recorded as params.overhangs on each stoa, outside the 20-amah band ⚙
+const STOA_FRONT_REACH = 2;              // the front row stands ON the band's inner edge: columns r 1, entablature 2.2 wide, cornice face 22 from the wall
+const ROOF_PARAPET_H = 10 * TEFACH;      // ma'akeh of 10 tefachim on open roof edges (Devarim 22:8) — stoa roofs, gate-bay roof, causeway, bridge
+const STOA_PARAPET_T = 0.8;
+const STOA_GATE_BAY = { halfAlong: 8.1, depth: 11.1, riseNW: 3.6 }; // raised bay over the outer aisle before Shushan, Kiponus, Tadi (clears the gate heads)
+const STOA_ENTABLATURE_Z = 16.4;         // underside of the front architrave (columns below)
 
 // --- soreg & chel (Middot 2:3; lock #26/#44) ---
 const SOREG_H = 10 * TEFACH;             // lattice 10 tefachim — Middot 2:3; Rambam BhB 5:3
@@ -84,8 +90,9 @@ const SOREG_T = 1;                       // ⚙ base thickness (lattice 0.25)
 const CHEL = 10;                         // "the chel, 10 amot" — Middot 2:3 (lock #26: a 10-amah strip, soreg at its outer line)
 const CHEL_STEPS = 12;                   // "12 steps were there" — Middot 2:3; Rambam BhB 6:1
 const CHEL_STEPS_W = 20;                 // ⚙ flight width (gate 10 + 5 each side)
-const SOREG_BREACHES = 13;               // Middot 2:3 (13 breaches, 13 prostrations)
-const PROSTRATIONS_BY_SIDE = { N: 4, S: 4, E: 3, W: 2 };   // Shekalim 6:3 (side counts); positions ⚙
+const SOREG_BREACHES = 13;               // Middot 2:3 (13 breaches, 13 prostrations "opposite them" — no distribution given)
+const PROSTRATIONS_BY_SIDE = { N: 4, S: 4, E: 3, W: 2 };   // ⚙ borrowed: Shekalim 6:3 gives 4N 4S 3E 2W for the prostrations "opposite the
+                                                           //   13 GATES" (the gates view; Abba Yosi b. Chanan, Middot 2:6) — used here only to spread the breaches
 
 // --- the court complex ---
 const COURT_WALL_T = 5;                  // ⚙ lock §58 (EK I 174, 181)
@@ -138,10 +145,14 @@ const WALKWAY = 1;                       // "the place of the kohanim's feet 1 a
 const KEVESH_LEN = 32;                   // kevesh 32 long — Middot 3:3; Rambam BhB 2:13
 const KEVESH_W = 16;                     // ... 16 wide — Middot 3:3
 const SMALL_RAMP_W = 2;                  // ⚙ the two small kevashim (Zevachim 62b; Rambam BhB 2:14)
+const SMALL_RAMP_SLAB = 1;               // ⚙ each branch "goes out from the kevesh" as a slab of its mass, underside 1 below its low end
+                                         //   (sovev branch: open below at +21; yesod branch: its underside is the pavement, so it stands solid)
 const RAMP_SLOPE = 3;                    // "all ramps 3 amot (run) per amah (rise)" except the altar's — Zevachim 63a (Rami b. Chama)
 const RING_ROWS = 6, RING_COLS = 4;      // lock #18: 6 rows of 4 — Middot 3:5 (first opinion)
 const NANASIN = 8;                       // 8 dwarf pillars — Middot 3:5
-const NANAS_H = 5, NANAS_CAP = 1;        // ⚙ shaft height; squared cedar block on top (Middot 3:5)
+const NANAS_H = 3, NANAS_CAP = 1;        // ⚙ shaft 3 ("dwarf" pillars, Middot 3:5) + squared cedar block 1 → top +4 ≈ a man's height, so the
+                                         //   three rows of iron hooks in the block (Z +3 to +4 ≈ 1.45–1.9 m) are within a standing kohen's reach for
+                                         //   the lamb (Tamid 4:2); row spacing ⚙; heavy carcasses are outside the reach rule (altar.nanasin rowsNote)
 const MARBLE_TABLES = 8;                 // Shekalim 6:4; Rambam BhB 5:14
 const BEIT_HADESHEN_WALK = 10;           // "walked to the east of the kevesh about 10 amot" — Tamid 1:4
 const BEIT_HADESHEN_OFF = 3 * TEFACH;    // "3 tefachim from the kevesh" — Tamid 1:4
@@ -188,7 +199,14 @@ const MOKED_DOME_SPRING = 20;            // ⚙ walls to +36, dome (kippah — M
 const GATEHOUSE_ROOF = GATE_H;           // gate roofs 20 above the court floor, marble, negligibly thin — Yoma 31a–b
 const MIKVEH_DEPTH = 3;                  // "amah x amah x 3" — Yoma 31a; En Eitam = gate 20 + 3 = 23 over the Azarah floor
 const UPPER_ROOM_H = 10;                 // ⚙ aliyot over the Water Gate (Beit Avtinas) and Nitzotz
-const CHAMBER_ROOF = GATEHOUSE_ROOF;     // ⚙ six chambers' roofs (Etz/Golah/Gazit "level" — Middot 5:4)
+const CHAMBER_ROOF = GATEHOUSE_ROOF;     // ⚙ six chambers' roofs (Etz/Golah/Gazit "level" — Middot 5:4). Not above the gate roofs: the KG's four
+                                         //   kodesh immersions were in the mikveh on the Parvah roof (Middot 5:3; Yoma 31a) and Abaye takes the
+                                         //   En-Eitam head (+23) from the Water Gate's 20 + 3 — a higher Parvah roof would set a higher head
+const CHAMBER_DOOR_H = 16;               // ⚙ the six chambers' doors. Middot 2:3 reads "all the openings AND gates there, 20 high, 10 wide", but
+                                         //   it is the gates' and great doorways' standard: Zevachim 55b quotes it as "all the GATES there" against the
+                                         //   8-amah pishpeshin and answers "pishpeshin are different" (פשפשין שאני; also the 8-amah lul); Rambam BhB
+                                         //   5:5 has "every GATE of them" (כל שער מהן); Middot 4:3 gives each ta three openings, which cannot be 20 high;
+                                         //   the Moked's pishpash (Middot 1:7). So under the 20-amah roof: 20 − 1 roof slab − 3 lintel course = 16
 const FLIGHT_RISERS = (Z_AZ - Z_MOUNT) / STEP_RISE; // 32 half-steps from a N/S court door down to the chel (EK I 202–215)
 
 // --- real-world context (meters; approximate topography — reconstruction) ---
@@ -202,6 +220,10 @@ const TOPO = {                           // distance outward from each Mount-wal
 };
 const KIDRON_THALWEG_M = 200;            // m east of the E wall; ancient bed ≈ 675 m (today's fill ~10 m higher)
 const PARAH_SITE_M = 800;                // m east of the E wall: crest of Har HaMishchah on the Temple axis (~808 m)
+const PARAH_PYRE = { back: 6, front: 1, halfW: 3, h: 8 }; // ⚙ the arrangement "like a tower with windows, its face west" (Parah 3:8): X from crest−6 to
+                                         //   crest−1 (5 E–W) x 6, 8 high; the heifer lies on its top (Parah 3:9)
+const PARAH_KOHEN_IN = 1;                // ⚙ the kohen stands on the top 1 amah in from its east edge, east of the heifer (Parah 3:9 "stands in the east")
+const HEIFER = { len: 5, w: 2, h: 2 };   // ⚙ envelope of the bound heifer lying on the top, head south (Parah 3:9)
 const OPHEL_GRADE_M = TOPO.S[0][1];      // Chuldah portals open south onto the Ophel street (~727 m)
 
 // -----------------------------------------------------------------------------
@@ -362,7 +384,7 @@ add('mount.gate.chuldah-e', { en: 'Chuldah gate (east)', he: 'שער חולדה 
 add('mount.gate.kiponus', { en: 'Kiponus gate (west)', he: 'שער קיפונוס', kind: 'gate',
   b: [-MOUNT_WALL_T, KIPONUS_Y - GATE_W / 2, Z_MOUNT, 0, KIPONUS_Y + GATE_W / 2, GATE_H],
   src: ['Middot 1:3', 'Middot 2:3', L58], c: 'locked', der: 'center of the W wall (Y 250)',
-  p: { width: GATE_W, height: GATE_H, doors: 2, doorFinish: 'gold-plated', lintel: 'shekufah', use: 'entry and exit', faces: 270, exteriorApproach: 'unsourced (bridge/ramp to the upper city) — reconstruction' } });
+  p: { width: GATE_W, height: GATE_H, doors: 2, doorFinish: 'gold-plated', lintel: 'shekufah', use: 'entry and exit', faces: 270, exteriorApproach: 'unsourced (bridge to the upper city) — reconstruction: context.kiponus-approach', approach: 'context.kiponus-approach' } });
 const MOKED_CX = AZ_GATE_CX[2];                                     // Moked gate is the E-most of the N trio (lock §58)
 add('mount.gate.tadi', { en: 'Tadi gate (north)', he: 'שער טדי', kind: 'gate',
   b: [MOKED_CX - GATE_W / 2, MOUNT, Z_MOUNT, MOKED_CX + GATE_W / 2, MOUNT + MOUNT_WALL_T, GATE_H],
@@ -402,14 +424,41 @@ const stoaBands = {
   south: [0, 0, MOUNT, STOA_DEPTH], north: [0, MOUNT - STOA_DEPTH, MOUNT, MOUNT],
   west: [0, STOA_DEPTH, STOA_DEPTH, MOUNT - STOA_DEPTH], east: [MOUNT - STOA_DEPTH, STOA_DEPTH, MOUNT, MOUNT - STOA_DEPTH],
 };
+// s = along the wall, t = distance from the wall's inner face → site box
+const stoaBox = (side, s0, s1, t0, t1, z0, z1) => {
+  const P = (s, t) => (side === 'south' ? [s, t] : side === 'north' ? [s, MOUNT - t] : side === 'west' ? [t, s] : [MOUNT - t, s]);
+  const a = P(s0, t0), b = P(s1, t1);
+  return bx(a[0], a[1], z0, b[0], b[1], z1);
+};
+const stoaOverhangs = (side) => {
+  const [s0, s1] = side === 'south' || side === 'north' ? [0, MOUNT] : [STOA_DEPTH, MOUNT - STOA_DEPTH];
+  const front = STOA_DEPTH + STOA_FRONT_REACH;
+  return [
+    { part: 'front columns, entablature and cornice', box: stoaBox(side, s0, s1, STOA_DEPTH, front, Z_MOUNT, STOA_ROOF), solidFromZ: STOA_ENTABLATURE_Z,
+      note: `the front row stands on the band's inner edge (columnRowsFromWall ${STOA_DEPTH}): its columns, architrave, frieze and cornice reach ${STOA_FRONT_REACH} beyond the band, up to the roof top (solid from +${STOA_ENTABLATURE_Z}; columns below)` },
+    { part: 'roof parapet', box: stoaBox(side, s0, s1, front - STOA_PARAPET_T, front, STOA_ROOF, r6(STOA_ROOF + ROOF_PARAPET_H)), solidFromZ: STOA_ROOF,
+      note: '10 tefachim on the roof\'s open edge (Devarim 22:8), above the stoa box' },
+    ...stoaGaps[side].map(([a, b]) => {
+      const g = (a + b) / 2, low = side === 'east';
+      const roofZ = low ? MOUNT_EAST_WALL_H - 0.05 : STOA_ROOF + STOA_GATE_BAY.riseNW;
+      return { part: `raised gate bay before ${{ east: 'Shushan', west: 'Kiponus', north: 'Tadi' }[side]}`,
+        box: stoaBox(side, g - STOA_GATE_BAY.halfAlong, g + STOA_GATE_BAY.halfAlong, 0, STOA_GATE_BAY.depth, Z_MOUNT, r6(low ? roofZ + ROOF_PARAPET_H : roofZ)), roofZ,
+        soffitZ: r6(roofZ - (low ? 0.55 : 1)), solidFromZ: r6(roofZ - (low ? 0.55 : 1)),
+        note: (low ? 'its roof flush under the low east wall\'s top, a landing before Shushan HaBirah with a 10-tefach parapet' : 'raised over the outer aisle so its soffit clears the 20-amah gate head and its inner lintel') + '; open below its soffit (the gate passage continues into the aisle)' };
+    }),
+  ];
+};
 for (const [side, [x0, y0, x1, y1]] of Object.entries(stoaBands)) {
+  const overhangs = stoaOverhangs(side);
   add(`mount.stoa.${side}`, { en: `Double stoa — ${side}`, he: 'סטיו לפנים מסטיו', kind: 'zone',
     b: [x0, y0, Z_MOUNT, x1, y1, STOA_ROOF], src: ['Rambam BhB 5:1', 'Tamid 1:3', 'Shekalim 8:4', 'Sukkah 4:4', 'Part I §2.3'], c: 'reconstruction',
     der: `band ${STOA_DEPTH} deep (two aisles of ${STOA_AISLE}) inside the wall; roof top ${STOA_ROOF}`,
     p: { aisles: 2, aisleDepth: STOA_AISLE, columnRowsFromWall: [STOA_AISLE, STOA_DEPTH], bay: STOA_BAY, roofTopZ: STOA_ROOF,
       roofWalkable: true, gateGaps: stoaGaps[side], along: (side === 'east' || side === 'west') ? 'Y' : 'X',
-      materials: 'marble courses as the walls; flat roof (the itztaba roof — Shekalim 8:4)' },
-    n: 'Depth and height unsourced (§20 #7). Kept ≤ the low east wall so the Parah sight-line is never blocked; Tavnit-Heichal 30/45-amah stoas are Josephus-derived and not used.' });
+      materials: 'marble courses as the walls; flat roof (the itztaba roof — Shekalim 8:4)',
+      overhangs, envelopeTopZ: Math.max(...overhangs.map((o) => o.box.max[2])),
+      overhangsNote: 'as built by build-mount (src/world/mount/stoas.js) — outside the band box; the box stays the 20-amah band so its gate gaps, columns and stairs keep their reference ⚙' },
+    n: 'Depth and height unsourced (§20 #7). Kept ≤ the low east wall so the Parah sight-line is never blocked; Tavnit-Heichal 30/45-amah stoas are Josephus-derived and not used. STOA_ROOF stays 20 rather than ≥ gate + 2: no source sets it, and the raised gate bays already clear the gate heads.' });
 }
 // Soreg (lock #26/#44) — an orthogonal path 10 amot (the chel) outside the court complex and its projecting chambers
 // (complex outline incl. the projecting chambers: the Gazit's chol half (west) and Beit HaMoked (north); see §3.4–3.5)
@@ -541,11 +590,12 @@ add('en.music-chambers', { en: 'Chambers of the instruments (under Ezrat Yisrael
 // ===== 3.3 Sha'ar Nikanor, Ezrat Yisrael, Ezrat Kohanim =====================
 const Z_AZ_EAST_TOP = Z_EY + GATE_H + LINTEL_COURSE;   // 35.5 — Azarah E wall low (lock §58 "east low")
 add('azarah.wall.east', { en: 'East wall of the Azarah (Nikanor wall)', he: 'כותל מזרחי של העזרה', kind: 'wall',
-  b: [X_AZ_E, Y_CX_S, Z_MOUNT, X_EN_W, Y_CX_N, Z_AZ_EAST_TOP], src: ['Middot 2:4', L58], c: 'reconstruction',
+  b: [X_AZ_E, Y_AZ_S, Z_MOUNT, X_EN_W, Y_AZ_N, Z_AZ_EAST_TOP], src: ['Middot 2:4', L58], c: 'reconstruction',
   der: `5 thick; low (Middot 2:4; lock §58 "east low"); +${Z_AZ_EAST_TOP} = Nikanor head ${Z_EY + GATE_H} + lintel course ${LINTEL_COURSE} ⚙`,
   fc: { low: 'explicit', thickness: 'locked', height: 'reconstruction' },
   p: { thickness: COURT_WALL_T, openings: ['azarah.gate.nikanor', 'azarah.gate.nikanor.wicket-n', 'azarah.gate.nikanor.wicket-s'],
-    voids: ['azarah.chamber.pinchas', 'azarah.chamber.chavitin'], alsoPierces: ['en.music-chambers'], alsoPiercesNote: 'the two music-chamber doors (en.music-chambers params.rooms[].door)' },
+    voids: ['azarah.chamber.pinchas', 'azarah.chamber.chavitin'], alsoPierces: ['en.music-chambers'], alsoPiercesNote: 'the two music-chamber doors (en.music-chambers params.rooms[].door)',
+    corners: 'spans only between the N and S walls (Y 263–398): the high N/S walls run through the corner squares (X 255–260), as the EN N/S walls run through theirs at X 395–400, so no notch drops to +35½ between the 56 and 46 walls' },
   n: 'Read as one of the "eastern walls" kept low (Middot 2:4; lock §58 court walls "east low"). With it at +56 the Parah line still threads the Nikanor opening, but sees only the lowest ~5 amot of the Heichal doorway.' });
 add('azarah.gate.nikanor', { en: "Sha'ar Nikanor (the Upper Gate)", he: 'שער ניקנור', kind: 'gate',
   b: [X_AZ_E, AXIS_Y - GATE_W / 2, Z_EY, X_EN_W, AXIS_Y + GATE_W / 2, Z_EY + GATE_H],
@@ -564,16 +614,20 @@ add('azarah.gate.nikanor.wicket-s', { en: 'Nikanor — south (left) wicket', he:
   src: ['Middot 2:6', 'Shekalim 6:3', 'EK I 253–254 (Part X §48)'], c: 'reconstruction',
   der: 'mirror of the north wicket', p: { width: WICKET_W, height: WICKET_H, opensInto: 'azarah.chamber.chavitin' } });
 const NIK_CH_LEN = 10, NIK_CH_DEPTH = 7;  // ⚙
+const NIK_CH_DOOR = { w: 4, h: 8 };       // ⚙ door to Ezrat Yisrael, centred on the west face (as built by build-courts); the pishpash scale (Zevachim 55b)
+const nikChDoor = (y0, y1) => ({ face: 'west', x: X_AZ_E - NIK_CH_DEPTH, y: [(y0 + y1) / 2 - NIK_CH_DOOR.w / 2, (y0 + y1) / 2 + NIK_CH_DOOR.w / 2], z: [Z_EY, Z_EY + NIK_CH_DOOR.h], note: 'to Ezrat Yisrael; size and place ⚙' });
 add('azarah.chamber.pinchas', { en: 'Chamber of Pinchas HaMalbish (vestments)', he: 'לשכת פנחס המלביש', kind: 'chamber',
   b: [X_AZ_E - NIK_CH_DEPTH, AXIS_Y + GATE_W / 2 + 1, Z_EY, X_EN_W, AXIS_Y + GATE_W / 2 + 1 + NIK_CH_LEN, Z_EY + GATE_H],
   src: ['Middot 1:4', 'Rambam BhB 5:17', 'Yoma 19a'], c: 'reconstruction',
   der: 'right of the gate for one entering westward = north (Rambam BhB 5:17 "to the right of the east gate"); in the wall + 7 into EY',
-  p: { floorZ: Z_EY, doors: ['wicket to EN (azarah.gate.nikanor.wicket-n)', 'door to Ezrat Yisrael (west face) ⚙'] } });
+  p: { floorZ: Z_EY, doors: ['wicket to EN (azarah.gate.nikanor.wicket-n)', 'door to Ezrat Yisrael (west face) ⚙'], door: nikChDoor(AXIS_Y + GATE_W / 2 + 1, AXIS_Y + GATE_W / 2 + 1 + NIK_CH_LEN),
+    zone: 'lishkat-pinchas', inEzratYisrael: 'Rambam BhB 5:17: "two other chambers were there in Ezrat Yisrael"' } });
 add('azarah.chamber.chavitin', { en: 'Chamber of the Chavitin bakers', he: 'לשכת עושי חביתין', kind: 'chamber',
   b: [X_AZ_E - NIK_CH_DEPTH, AXIS_Y - GATE_W / 2 - 1 - NIK_CH_LEN, Z_EY, X_EN_W, AXIS_Y - GATE_W / 2 - 1, Z_EY + GATE_H],
   src: ['Middot 1:4', 'Rambam BhB 5:17', 'Tamid 1:3'], c: 'reconstruction',
   der: 'left of the gate = south; mirror of Pinchas',
-  p: { floorZ: Z_EY, doors: ['wicket to EN (azarah.gate.nikanor.wicket-s)', 'door to Ezrat Yisrael ⚙'], note: 'the two dawn inspection companies met here (Tamid 1:3)' } });
+  p: { floorZ: Z_EY, doors: ['wicket to EN (azarah.gate.nikanor.wicket-s)', 'door to Ezrat Yisrael ⚙'], door: nikChDoor(AXIS_Y - GATE_W / 2 - 1 - NIK_CH_LEN, AXIS_Y - GATE_W / 2 - 1),
+    zone: 'lishkat-chavitin', note: 'the two dawn inspection companies met here (Tamid 1:3)' } });
 add('azarah.ezrat-yisrael', { en: 'Ezrat Yisrael', he: 'עזרת ישראל', kind: 'floor',
   b: [X_EY_W, Y_AZ_S, Z_EY - 0.5, X_AZ_E, Y_AZ_N, Z_EY], src: ['Middot 2:6', 'Middot 5:1', 'Rambam BhB 5:12', 'Rambam BhB 6:2'], c: 'explicit',
   der: `${AZ_WID} x ${EY} at +${Z_EY} (the first 11 of the 187)`, p: { floorZ: Z_EY } });
@@ -600,7 +654,7 @@ add('azarah.floor', { en: 'Azarah pavement', he: 'רצפת העזרה', kind: 'f
   p: { floorZ: Z_AZ, paving: '"precious stones" (Rambam BhB 1:10)', hollowUnder: 'yes, except under the altar (Zevachim 58a)', includes: 'the Ezrat Kohanim pavement X 233–242 (azarah.ezrat-kohanim is the zone)' } });
 // Rooms inside the wall lines: `voids` = rooms built within a wall's thickness (cut them; the wall continues above and below);
 // `replacedBy` = the wall is omitted along that element's plan; `cutouts` = explicit boxes removed from the wall.
-const azWallsNS = { north: [X_CX_W, Y_AZ_N, X_AZ_E, Y_CX_N], south: [X_CX_W, Y_CX_S, X_AZ_E, Y_AZ_S] };
+const azWallsNS = { north: [X_CX_W, Y_AZ_N, X_EN_W, Y_CX_N], south: [X_CX_W, Y_CX_S, X_EN_W, Y_AZ_S] };   // through both corner squares (W and E)
 const COURT_WALL_FC = { thickness: 'locked', height: 'locked', heightDatum: 'reconstruction' };
 add('azarah.wall.north', { en: 'Azarah wall — north', he: 'כותל העזרה — צפון', kind: 'wall',
   b: [azWallsNS.north[0], azWallsNS.north[1], Z_MOUNT, azWallsNS.north[2], azWallsNS.north[3], Z_AZ + COURT_WALL_H], src: [L58, 'Middot 2:4', 'Rambam BhB 1:8'], c: 'locked',
@@ -651,25 +705,36 @@ for (const [key, side, i, en, he, use] of azGates) {
 {
   const [x0, y0, x1, y1] = gateHouse(AZ_GATE_CX[2], 'S');
   const zr = Z_AZ + GATEHOUSE_ROOF;
+  // as built by build-courts ⚙: ½-amah marble walls; the newel stair fills the east room's depth; the walk runs along the court edge
+  const GATEHOUSE_WALL_T = 0.5, STAIR_R = (y1 - y0) / 2 - GATEHOUSE_WALL_T - 0.05;      // 1.95
+  const stairC = [x1 - GATEHOUSE_WALL_T - STAIR_R - 0.05, (y0 + y1) / 2];                  // 223.25, 260.5
+  const WALK = [y1 - 2, y1 - 0.4];                                                         // 261 .. 262.6
   // the S wall stops at the gatehouse roof over its span, so Beit Avtinas and the mikveh stand on an open roof terrace
   elements['azarah.wall.south'].params.cutouts.push({ id: 'water-gate roof terrace', box: bx(x0, y0, zr, x1, y1, Z_AZ + COURT_WALL_H),
     note: 'wall lowered to the Water Gate house roof (+36) over its 30-amah span: Beit Avtinas is an aliyah "on" the gate (Tamid 1:1; Rambam BhB 8:5) and the mikveh is "on the roof of the Water Gate" (Yoma 31a) ⚙' });
   add('azarah.gate.mayim.house', { en: 'Water Gate gatehouse', he: 'בית שער המים', kind: 'chamber', b: [x0, y0, Z_AZ, x1, y1, zr],
     src: ['Yoma 31a–b', 'Middot 1:4'], c: 'reconstruction', der: `within the wall thickness; roof at gate head +${zr} ("marble, negligibly thin" — Yoma 31b); ${GATEHOUSE_W} wide ⚙`,
     fc: { roofAtGateHead: 'explicit', width: 'reconstruction', withinWall: 'reconstruction' },
-    p: { roofZ: zr, roofTerrace: true,
-      roofStair: { form: 'spiral', box: bx(x1 - 3.5, y0 + 0.5, Z_AZ, x1 - 0.5, y1 - 0.5, zr), steps: (zr - Z_AZ) / STEP_RISE, note: 'access to the roof, Beit Avtinas and the mikveh — unsourced ⚙ (in the east side room of the gatehouse)' } } });
+    p: { roofZ: zr, roofTerrace: true, wallT: GATEHOUSE_WALL_T,
+      roofStair: { form: 'newel spiral', center: [r6(stairC[0]), r6(stairC[1])], radius: STAIR_R, box: bx(stairC[0] - STAIR_R, stairC[1] - STAIR_R, Z_AZ, stairC[0] + STAIR_R, stairC[1] + STAIR_R, zr),
+        steps: (zr - Z_AZ) / STEP_RISE, headOpening: 'its head is an open well in the roof (the box at +36): not walkable',
+        note: 'access to the roof, Beit Avtinas and the mikveh — unsourced ⚙: a newel stair filling the depth of the gatehouse\'s east room (r 1.95 inside ½-amah marble walls, Yoma 31b — as built by build-courts; a 3-amah stair cannot pass a person), its last step turned west onto the terrace walk' },
+      terraceWalk: { box: bx(x0 + 20, WALK[0], zr, stairC[0] - STAIR_R, WALK[1], zr),
+        note: 'the walk along the court-side edge from the stair head past the mikveh to Beit Avtinas\'s east door, behind a 0.4-amah parapet (to Y 263) ⚙. East of the mikveh is the stair\'s open well, and the court\'s S wall rises 20 amot just beyond it (X ≥ 225.75): no further walkable roof there' } } });
   add('azarah.beit-avtinas', { en: 'Beit Avtinas (upper chamber over the Water Gate)', he: 'בית אבטינס', kind: 'chamber',
     b: [x0, y0, zr, x0 + 20, y1, zr + UPPER_ROOM_H], src: ['Tamid 1:1', 'Middot 1:1', 'Yoma 19a', 'Yoma 38a', 'Rambam BhB 8:5'], c: 'reconstruction',
     der: 'aliyah on the Water Gate roof terrace (+36); footprint ⚙',
     fc: { onWaterGate: 'explicit', footprint: 'reconstruction', height: 'reconstruction' },
     p: { floorZ: zr, use: 'incense compounding; KG\'s oath night; kohanic watch post', access: 'from the roof terrace (azarah.gate.mayim.house params.roofStair) ⚙' } });
-  const mx = x0 + 22, my = (y0 + y1) / 2;
+  // tank 3½ x 2½ (as built by build-courts): between the stair well and Beit Avtinas, south of the walk, so the walk stays open ⚙
+  const mx0 = x0 + 22, mx1 = stairC[0] - STAIR_R - 0.05, my0 = y0 + 0.5, my1 = WALK[0];
   add('azarah.mikveh.mayim-roof', { en: 'KG\'s first-immersion mikveh on the Water Gate roof', he: 'מקוה על גבי שער המים', kind: 'fixture',
-    b: [mx, my - 2, zr, mx + 4, my + 2, zr + MIKVEH_DEPTH], src: ['Yoma 31a (Abaye)', 'Yoma 19a', 'Part XIV §65.7'], c: 'reconstruction',
-    der: `water surface = gate head ${GATEHOUSE_ROOF} + mikveh ${MIKVEH_DEPTH} = ${GATEHOUSE_ROOF + MIKVEH_DEPTH} over the Azarah floor = En Eitam head (Yoma 31a); tank 4 x 4 and its place on the terrace ⚙`,
+    b: [mx0, my0, zr, mx1, my1, zr + MIKVEH_DEPTH], src: ['Yoma 31a (Abaye)', 'Yoma 19a', 'Part XIV §65.7'], c: 'reconstruction',
+    der: `water surface = gate head ${GATEHOUSE_ROOF} + mikveh ${MIKVEH_DEPTH} = ${GATEHOUSE_ROOF + MIKVEH_DEPTH} over the Azarah floor = En Eitam head (Yoma 31a); tank ${r6(mx1 - mx0)} x ${r6(my1 - my0)} and its place on the terrace ⚙`,
     fc: { waterSurfaceZ: 'derived', depth: 'explicit', size: 'reconstruction', position: 'reconstruction' },
-    p: { waterSurfaceZ: zr + MIKVEH_DEPTH, enEitamHeadZ: Z_AZ + 23, sanctity: 'chol (roofs not sanctified)', screen: 'linen sheet (Yoma 3:4)', open: 'on the open roof terrace' } });
+    p: { waterSurfaceZ: zr + MIKVEH_DEPTH, enEitamHeadZ: Z_AZ + 23, sanctity: 'chol (roofs not sanctified)', screen: 'linen sheet (Yoma 3:4)', open: 'on the open roof terrace',
+      sizeNote: `outer tank ${r6(mx1 - mx0)} x ${r6(my1 - my0)} (narrowed from 4 x 4 so the terrace walk to Beit Avtinas stays open); water 2.7 x 1.7 x 3 inside its walls ≥ the amah x amah x 3 of Yoma 31a; steps up its west side ⚙`,
+      westSteps: bx(mx0 - 1.6, my0, zr, mx0, my1, zr + MIKVEH_DEPTH + 0.5) } });
 }
 // Nitzotz gatehouse (exedra) + Beit HaNitzotz upper storey (Middot 1:5; Tamid 1:1)
 {
@@ -703,12 +768,15 @@ const GAZIT_SPLIT_X = X_CX_W + COURT_WALL_T / 2;   // 65.5 — rashei pispasin l
 const GAZIT_MID_Y = (GAZIT.y0 + GAZIT.y1) / 2;
 add('azarah.chamber.gazit', { en: 'Lishkat HaGazit (Chamber of Hewn Stone)', he: 'לשכת הגזית', kind: 'chamber',
   b: [GAZIT.x0, GAZIT.y0, Z_AZ, GAZIT.x1, GAZIT.y1, Z_AZ + CHAMBER_ROOF],
-  src: ['Middot 5:4', 'Yoma 25a', 'Yoma 19a', 'Rambam BhB 5:17', 'Rambam BhB 6:7–8', 'Tamid 2:5–5:1', 'Part XI lock #7'], c: 'reconstruction',
+  src: ['Middot 5:4', 'Yoma 25a', 'Yoma 19a', 'Rambam BhB 5:17', 'Rambam BhB 6:7–8', 'Tamid 2:5–5:1', 'Part XI lock #7', 'Middot 2:3 with Zevachim 55b (doors)'], c: 'reconstruction',
   der: `straddles the Azarah W wall in front of the Etz; kodesh (east) half X ${GAZIT_SPLIT_X}–${GAZIT.x1}, chol (west) half ${GAZIT.x0}–${GAZIT_SPLIT_X}; 45 x 20 ⚙`,
   fc: { halfKodeshHalfChol: 'explicit', twoDoors: 'explicit', kodeshEastCholWest: 'derived', northTrio: 'locked', placement: 'reconstruction', footprint: 'reconstruction' },
   p: { form: 'like a great basilica (Yoma 25a)', kodeshHalf: bx(GAZIT_SPLIT_X, GAZIT.y0, Z_AZ, GAZIT.x1, GAZIT.y1, Z_AZ + CHAMBER_ROOF),
     cholHalf: bx(GAZIT.x0, GAZIT.y0, Z_AZ, GAZIT_SPLIT_X, GAZIT.y1, Z_AZ + CHAMBER_ROOF), dividingLine: { x: GAZIT_SPLIT_X, marker: 'rashei pispasin' },
-    doors: [{ to: 'Azarah (kodesh)', face: 'east', x: GAZIT.x1, y: [GAZIT.y0, GOLAH.y0] }, { to: 'chel (chol)', face: 'west', x: GAZIT.x0, y: [GAZIT_MID_Y - 5, GAZIT_MID_Y + 5], flight: 'azarah.chamber.gazit.flight' }],
+    doors: [{ to: 'Azarah (kodesh)', face: 'east', x: GAZIT.x1, y: [GAZIT.y0 + 1, GOLAH.y0 - 1], z: [Z_AZ, Z_AZ + CHAMBER_DOOR_H],
+      note: 'the clear opening: 1-amah piers at the chamber\'s SE corner and before the Golah\'s SW corner (the free stretch of the east face is Y 371–381) ⚙' },
+    { to: 'chel (chol)', face: 'west', x: GAZIT.x0, y: [GAZIT_MID_Y - 5, GAZIT_MID_Y + 5], z: [Z_AZ, Z_AZ + CHAMBER_DOOR_H], flight: 'azarah.chamber.gazit.flight' }],
+    doorRule: 'chamber doors are not the 20 x 10 of Middot 2:3 ("all the openings and gates there"), which is the gates\' and great doorways\' standard. Zevachim 55b quotes the rule as "all the gates there" against the 8-amah pishpeshin of the beit hachalifot and answers "pishpeshin are different" (פשפשין שאני); Rambam BhB 5:5 states it of the gates ("every gate of them", כל שער מהן); Middot 4:3 gives each ta three openings, which cannot be 20 high. Heights (CHAMBER_DOOR_H = 16) and widths ⚙',
     stations: { lottery: [GAZIT.x1 - 8, GAZIT_MID_Y, Z_AZ], sanhedrin: [GAZIT.x0 + 10, GAZIT_MID_Y, Z_AZ] },
     podium: 'azarah.chamber.gazit.podium', roofLevelWith: ['azarah.chamber.golah', 'azarah.chamber.etz'],
     variants: { nWallStraddle: { note: 'lock #7 read as "straddling the N wall": its halves would be N (chol) / S (kodesh), against Yoma 25a\'s lottery-in-the-east / elder-in-the-west; recorded, not built (docs/decisions/site-model-fix.md)' } } },
@@ -722,14 +790,14 @@ add('azarah.chamber.golah', { en: 'Lishkat HaGolah (cistern and wheel)', he: 'ל
   der: 'inside the Azarah east of the Gazit, in front of the Etz; footprint 10 x 10 ⚙',
   fc: { northTrio: 'locked', inFrontOfEtz: 'explicit', footprint: 'reconstruction' },
   p: { cistern: { box: bx(GOLAH.x0 + 2, GOLAH.y0 + 2, Z_MOUNT + 2, GOLAH.x1 - 2, GOLAH.y1 - 2, Z_AZ - 1) }, wheel: 'galgal on the cistern (Middot 5:4)', use: 'supplies water to the whole Azarah',
-    door: { face: 'south', x: [GOLAH.x0 + 3, GOLAH.x1 - 3] } } });
+    door: { face: 'south', x: [GOLAH.x0 + 3, GOLAH.x1 - 3], z: [Z_AZ, Z_AZ + 8], note: 'a small service door (as built) ⚙' } } });
 add('azarah.chamber.etz', { en: 'Lishkat HaEtz = Lishkat Parhedrin (KG\'s chamber)', he: 'לשכת העץ — לשכת פרהדרין', kind: 'chamber',
   b: [ETZ.x0, ETZ.y0, Z_AZ, ETZ.x1, ETZ.y1, Z_AZ + CHAMBER_ROOF],
   src: ['Middot 5:3–4 (Abba Shaul)', 'Rambam BhB 5:17', 'Rambam BhB 6:7', 'Yoma 2a', 'Yoma 8b', 'Yoma 10a', 'Yoma 11a', 'Yoma 19a', 'Part X §52', 'Part XI locks #7, #20'], c: 'reconstruction',
   der: `"behind both of them" (Middot 5:4): inside the Azarah against the N wall and through its thickness, with the Gazit and Golah in front; ${ETZ.x1 - ETZ.x0} x ${ETZ_D} + the 5-amah wall ⚙; roofs of all three level`,
   fc: { inAzarah: 'explicit', behindBoth: 'explicit', roofLevel: 'explicit', northTrio: 'locked', footprint: 'reconstruction' },
   p: { sanctity: 'chol — built in kodesh, opening only to chol (Rambam BhB 6:7); a dwelling, the only chamber with a mezuzah (Yoma 10a)',
-    door: { face: 'north', x: [ETZ.x0 + 10, ETZ.x0 + 20], throughWall: true, flight: 'azarah.chamber.etz.flight' } },
+    door: { face: 'north', x: [ETZ.x0 + 10, ETZ.x0 + 20], z: [Z_AZ, Z_AZ + CHAMBER_DOOR_H], throughWall: true, flight: 'azarah.chamber.etz.flight', note: 'height ⚙ (CHAMBER_DOOR_H)' } },
   n: 'Middot 5:3 counts it among the "six chambers in the Azarah"; Yoma 11a puts Lishkat Parhedrin "inside" Sha\'ar Nikanor; EK (Part X §52) keeps it in the Azarah opening to chol. Yoma 19a\'s inference (Parhedrin south, beside the Water Gate) is the flagged alternative (Register #20).' });
 // south trio (lock #7): Melach, Parvah, Medichin along the S wall
 const SCH_DEPTH = 12;
@@ -738,12 +806,17 @@ const southTrio = [
   ['parvah', azGateX0(0) + GATE_W + 3, azGateX0(0) + GATE_W + 23, 'Lishkat HaParvah (hides)', 'לשכת הפרוה', 'hides of kodashim salted',
     { roofMikveh: { note: 'Beit HaTevilah of the KG on Yom Kippur on its roof (Middot 5:3) — four immersions, ten kiddushin, in kodesh (Yoma 31a)', waterSurfaceZ: Z_AZ + CHAMBER_ROOF + MIKVEH_DEPTH } }],
   ['medichin', azGateX0(0) + GATE_W + 23, azGateX0(0) + GATE_W + 35, 'Lishkat HaMedichin (rinsers)', 'לשכת המדיחין', 'innards of kodashim rinsed',
-    { mesibah: { note: 'a winding stair from it up to the Parvah roof (Middot 5:3)', box: bx(azGateX0(0) + GATE_W + 23, Y_AZ_S, Z_AZ, azGateX0(0) + GATE_W + 27, Y_AZ_S + 4, Z_AZ + CHAMBER_ROOF) } }],
+    { mesibah: { note: 'a winding stair from it up to the Parvah roof (Middot 5:3); a newel stair sized for a person (r 1.9 round a ½-amah newel, ≥ 1.35 of tread — as built by build-courts) in the chamber\'s SW corner, the box incl. the chamber\'s 1-amah walls ⚙',
+      form: 'newel spiral', center: [r6(azGateX0(0) + GATE_W + 23 + 1 + 1.9 + 0.05), r6(Y_AZ_S + 1 + 1.9 + 0.05)], radius: 1.9, steps: CHAMBER_ROOF / STEP_RISE,
+      box: bx(azGateX0(0) + GATE_W + 23, Y_AZ_S, Z_AZ, azGateX0(0) + GATE_W + 28, Y_AZ_S + 5, Z_AZ + CHAMBER_ROOF) } }],
 ];
+const SCH_DOOR_W = 10;                     // ⚙ as built: 10 wide where the chamber allows (6 in the Medichin, beside its stair)
 for (const [key, x0, x1, en, he, use, extra] of southTrio) {
+  const w = Math.min(SCH_DOOR_W, x1 - x0 - 6), dx = key === 'medichin' ? x1 - 2 - w / 2 : (x0 + x1) / 2;
   add(`azarah.chamber.${key}`, { en, he, kind: 'chamber', b: [x0, Y_AZ_S, Z_AZ, x1, Y_AZ_S + SCH_DEPTH, Z_AZ + CHAMBER_ROOF],
     src: ['Middot 5:3', 'Yoma 19a', 'Rambam BhB 5:17', 'Part XI lock #7'], c: 'reconstruction',
-    der: `south trio (lock #7) against the S wall between its gates; ${x1 - x0} x ${SCH_DEPTH} ⚙`, p: { use, ...extra },
+    der: `south trio (lock #7) against the S wall between its gates; ${x1 - x0} x ${SCH_DEPTH} ⚙`,
+    p: { use, ...extra, door: { face: 'north', x: [r6(dx - w / 2), r6(dx + w / 2)], z: [Z_AZ, Z_AZ + CHAMBER_DOOR_H], note: 'onto the court; width and height ⚙ (CHAMBER_DOOR_H)' } },
     n: 'Printed Middot 5:3 puts this trio north — the flagged variant (Register #7).' });
 }
 // Beit HaMoked (Middot 1:5–9; Tamid 1:1; Rambam BhB 5:9–10; locks #8, #43; lock §58 24 x 24)
@@ -831,8 +904,9 @@ flights.push({ id: 'azarah.chamber.etz.flight', side: 'N', along: 'X', from: ETZ
 
 // ----- soreg, its passages and the 13 breach stations (now that the flights are known) -----
 for (const f of flights) soregPassages.push({ at: f.id, side: f.side, along: f.along, from: f.from, to: f.to });
-// stations: counts per side per Shekalim 6:3 (4N 4S 3E 2W); positions evenly spread, then moved ≥ 2 amot clear of any passage ⚙
-// (Shekalim 6:3 sets the prostrations "opposite the 13 gates"; on this soreg line the gates' flights occupy exactly those spots)
+// stations: counts per side borrowed from the gates view of the prostrations (Shekalim 6:3: 4N 4S 3E 2W "opposite the 13 gates") —
+// Middot 2:3's breaches view gives no distribution; positions evenly spread, then moved ≥ 2 amot clear of any passage ⚙
+// (on this soreg line the gates' flights occupy exactly the spots "opposite the gates")
 function pathSegments() { const s = []; for (let i = 0; i < SOREG_PATH.length; i++) s.push([SOREG_PATH[i], SOREG_PATH[(i + 1) % SOREG_PATH.length]]); return s; }
 const BREACH_CLEAR = 2;
 function clearOfPassages(side, v) {
@@ -871,11 +945,12 @@ add('mount.soreg', { en: 'The Soreg (lattice fence)', he: 'סורג', kind: 'wal
 add('mount.soreg.breaches', { en: 'The thirteen repaired breaches (prostration stations)', he: 'שלש עשרה פרצות', kind: 'fixture',
   b: [Math.min(...breachStations.map((s) => s.pos[0])) - 1, Math.min(...breachStations.map((s) => s.pos[1])) - 1, Z_MOUNT,
     Math.max(...breachStations.map((s) => s.pos[0])) + 1, Math.max(...breachStations.map((s) => s.pos[1])) + 1, SOREG_BASE + SOREG_H],
-  src: ['Middot 2:3', 'Shekalim 6:1, 6:3', 'EK I 207 (Part X §49)'], c: 'reconstruction',
-  der: `side counts 4N 4S 3E 2W follow the 13 prostrations (Shekalim 6:3); positions spread evenly and kept ${BREACH_CLEAR} clear of the passages ⚙`,
-  fc: { count: 'explicit', sideCounts: 'explicit', positions: 'reconstruction' },
+  src: ['Middot 2:3', 'Shekalim 6:1', 'Shekalim 6:3 (side counts, gates view)', 'Middot 2:6 (Abba Yosi b. Chanan)', 'EK I 207 (Part X §49)'], c: 'reconstruction',
+  der: `13 breaches (Middot 2:3); their side counts 4N 4S 3E 2W are borrowed from the prostrations "opposite the 13 gates" (Shekalim 6:3) ⚙; positions spread evenly and kept ${BREACH_CLEAR} clear of the passages ⚙`,
+  fc: { count: 'explicit', sideCounts: 'reconstruction', positions: 'reconstruction' },
   p: { count: SOREG_BREACHES, stations: breachStations, breachWidth: 2, note: 'repaired segments of the lattice; one prostration opposite each (Middot 2:3)',
-    gatesNote: 'Shekalim 6:3 sets the prostrations "opposite the thirteen gates" (the 13 of Abba Yosi; EK I 207 draws the breaches opposite the gates). Here the flights of the gates cross the soreg through passages at exactly those spots, so the stations are spread evenly along each side instead ⚙.' } });
+    sideCountsNote: 'Two views of the 13 prostrations: Middot 2:3 sets them opposite the 13 breaches the Greek kings made in the soreg, with no distribution; Shekalim 6:3 (stam) and Abba Yosi b. Chanan (Middot 2:6) set them "opposite the thirteen gates" — and it is that view whose counts are "four in the north, four in the south, three in the east and two in the west". The model shows the breaches view and borrows the gates view\'s side counts only to spread the 13 stations ⚙.',
+    gatesNote: 'EK I 207 draws the breaches opposite the gates. Here the flights of the gates cross the soreg through passages at exactly those spots, so the stations are spread evenly along each side instead ⚙.' } });
 if (breachStations.length !== SOREG_BREACHES) throw new Error('site.js: breach station count');
 
 // ----- chambers on Har HaBayit (reconstruction; Middot 1:1 watch posts, Parah 3:1) -----
@@ -973,11 +1048,15 @@ const branchJunction = (zEnd, yEnd) => { // kevesh z(y) = branch zb(y) = zEnd + 
   return (zEnd + yEnd / RAMP_SLOPE - Z_AZ + k * Y_KEV_FOOT) / (k + 1 / RAMP_SLOPE);
 };
 {
-  const yS = branchJunction(Z_SOVEV, ALT_Y0 + T30), zS = kevZ(yS);
+  const yS = branchJunction(Z_SOVEV, ALT_Y0 + T30), zS = kevZ(yS), zU = Z_SOVEV - SMALL_RAMP_SLAB;
   add('altar.kevesh.ramp-sovev', { en: 'Small ramp to the sovev (east)', he: 'כבש קטן לסובב', kind: 'ramp',
     b: [X_KEV_E, yS, Z_AZ, X_KEV_E + SMALL_RAMP_W, ALT_Y0 + T30, zS], src: ['Zevachim 62b', 'Rambam BhB 2:14'], c: 'reconstruction',
-    der: `leaves the kevesh where both are at +${r6(zS)} and descends 1:3 north to the sovev (+${Z_SOVEV})`,
-    p: { from: [X_KEV_E + SMALL_RAMP_W / 2, r6(yS), r6(zS)], to: [X_KEV_E + SMALL_RAMP_W / 2, ALT_Y0 + T30, Z_SOVEV], width: SMALL_RAMP_W, gap: "a hair's breadth from the altar" } });
+    der: `leaves the kevesh where both are at +${r6(zS)} and descends 1:3 north to the sovev (+${Z_SOVEV}); a slab carried on the kevesh's side, flat underside +${zU} (params.undersideZ; the box runs to the pavement) ⚙`,
+    fc: { exists: 'explicit', leavesTheKevesh: 'explicit', hairsBreadth: 'explicit', slope: 'reconstruction', width: 'reconstruction', carried: 'reconstruction' },
+    p: { from: [X_KEV_E + SMALL_RAMP_W / 2, r6(yS), r6(zS)], to: [X_KEV_E + SMALL_RAMP_W / 2, ALT_Y0 + T30, Z_SOVEV], width: SMALL_RAMP_W, gap: "a hair's breadth from the altar",
+      solidToFloor: false, undersideZ: zU, bondedTo: 'altar.kevesh (its east face)',
+      boxNote: `box = the overall extent down to the pavement, open space below the slab included (as altar.kevesh's boxNote). Build the slab from params.undersideZ (+${zU}) with an underside face; a builder that sweeps from box.min[2] gets the older solid branch, which stays closed`,
+      carriedNote: `"two small ramps go out FROM the kevesh" (Zevachim 62b; Rambam BhB 2:14): a branch of the kevesh's mass, corbelled from its east face with a flat underside ${SMALL_RAMP_SLAB} below the sovev end (south end face ${r6(zS - zU)} high, not ${r6(zS - Z_AZ)} to the pavement); the space below, ${r6(zU - Z_AZ)} high, stays open ⚙` } });
   const yEndY = ALT_Y0 - 2, yY = branchJunction(Z_YESOD, yEndY), zY = kevZ(yY);
   add('altar.kevesh.ramp-yesod', { en: 'Small ramp to the yesod (west)', he: 'כבש קטן ליסוד', kind: 'ramp',
     b: [ALT_X0, yY, Z_AZ, X_KEV_W, ALT_Y0, zY], src: ['Zevachim 62b', 'Rambam BhB 2:14'], c: 'reconstruction',
@@ -985,7 +1064,9 @@ const branchJunction = (zEnd, yEnd) => { // kevesh z(y) = branch zb(y) = zEnd + 
     p: { segments: [
       { box: bx(X_KEV_W - SMALL_RAMP_W, yY, Z_AZ, X_KEV_W, yEndY, zY), from: [X_KEV_W - 1, r6(yY), r6(zY)], to: [X_KEV_W - 1, yEndY, Z_YESOD] },
       { box: bx(ALT_X0, yEndY, Z_AZ, X_KEV_W, ALT_Y0, Z_YESOD), level: Z_YESOD, landsOn: 'altar.yesod (S stub X 202–203 and the W strip X 201–202), stepping north across the face line' }],
-      width: SMALL_RAMP_W, gap: "a hair's breadth from the altar (Zevachim 62b)" } });
+      width: SMALL_RAMP_W, gap: "a hair's breadth from the altar (Zevachim 62b)",
+      solidToFloor: true, undersideZ: Math.max(Z_AZ, Z_YESOD - SMALL_RAMP_SLAB),
+      carriedNote: `the same rule as the sovev branch (a slab of the kevesh's mass, underside ${SMALL_RAMP_SLAB} below its low end +${Z_YESOD}) puts its underside on the pavement, so it stands solid ⚙` } });
   add('altar.machtah-niche', { en: 'Rest of the silver machtah (ramp–altar angle)', he: 'מקום המחתה', kind: 'fixture',
     b: [ALT_X0 + 4, ALT_Y0, Z_AZ, ALT_X0 + 5, ALT_Y0 + T30, Z_AZ + 0.5], src: ['Tamid 1:4'], c: 'reconstruction',
     der: '"in the corner between the kevesh and the altar, west of the kevesh" — on the pavement north of the yesod branch', p: {} });
@@ -1025,11 +1106,14 @@ add('altar.marble-tables', { en: 'The eight marble tables', he: 'שמונה של
 const nanasXs = Array.from({ length: NANASIN }, (_, i) => ALT_X0 + (i + 0.5) * ALTAR / NANASIN);
 const NANAS_Y = r6((Y_TABLES_N + Y_MITB_S) / 2);
 add('altar.nanasin', { en: 'The eight dwarf pillars (nanasin) with hooks', he: 'עמודים ננסין', kind: 'fixture',
-  b: [ALT_X0, Y_TABLES_N, Z_AZ, ALT_X0 + ALTAR, Y_MITB_S, Z_AZ + NANAS_H + NANAS_CAP], src: ['Middot 3:5', 'Tamid 3:5', 'Rambam BhB 5:13'], c: 'reconstruction',
+  b: [ALT_X0, Y_TABLES_N, Z_AZ, ALT_X0 + ALTAR, Y_MITB_S, Z_AZ + NANAS_H + NANAS_CAP], src: ['Middot 3:5', 'Tamid 3:5', 'Tamid 4:2', 'Rambam BhB 5:13', 'EK II 51, 58'], c: 'reconstruction',
   der: 'Beit HaMitbachayim band 12½ (Rambam); one row of 8 at its centre line ⚙; height ⚙',
-  fc: { count: 'explicit', band: 'explicit', cedarCaps: 'explicit', hooks: 'explicit', singleRow: 'reconstruction', height: 'reconstruction' },
-  p: { count: NANASIN, pillars: nanasXs.map((X) => [r6(X), NANAS_Y, Z_AZ]), section: 1, shaftH: NANAS_H,
+  fc: { count: 'explicit', band: 'explicit', cedarCaps: 'explicit', hooks: 'explicit', threeRows: 'explicit', singleRow: 'reconstruction', height: 'reconstruction', rowSpacing: 'reconstruction' },
+  p: { count: NANASIN, pillars: nanasXs.map((X) => [r6(X), NANAS_Y, Z_AZ]), section: 1, shaftH: NANAS_H, capH: NANAS_CAP, topZ: Z_AZ + NANAS_H + NANAS_CAP,
     cap: 'squared cedar block (revi\'in shel erez)', hooks: 'iron, three rows on each (Middot 3:5)',
+    hookRowsZ: [0.2, 0.5, 0.8].map((f) => r6(Z_AZ + NANAS_H + f * NANAS_CAP)),
+    heightNote: `"dwarf" pillars (Middot 3:5; Tamid 3:5): shaft ${NANAS_H} + cedar block ${NANAS_CAP} = ${NANAS_H + NANAS_CAP} amot, about a man's height. The reach rule fixes the lamb's row: the Tamid lamb is hung by a hind leg pierced at the hock ("נוקבו מתוך ערכובו ותולה בו", Tamid 4:2) and flayed downward, so its hook must be within a standing kohen's reach, and the block's rows (Z ${Z_AZ + NANAS_H}–${Z_AZ + NANAS_H + NANAS_CAP} ≈ ${r6(NANAS_H * AMAH).toFixed(2)}–${r6((NANAS_H + NANAS_CAP) * AMAH).toFixed(2)} m) are. Heavy carcasses are outside the rule: hung from the top row a bull would not clear the pavement, and the sources do not say how it was handled. Row spacing (0.3 amah) ⚙`,
+    rowsNote: 'three rows "to each one" (Middot 3:5; Tamid 3:5), in the cedar block: iron hooks cannot be set in the stone (EK II 51). Readings (EK II 58): Rash and Bartenura (so too Shiltei HaGiborim; Tavnit Heichal: "each high or low according to its size") — three rows one above another on the side facing the tables, the low for a lamb, the middle for a ram, the high for a bull, which needs a tall block; Raavyah (in Tosafot Yom Tov) — one row on three sides (N, E, S); Raavad on Tamid — the rows under a broad cedar board laid across two pillars. The model: three rows one above another in a 1-amah block, hooks on all four faces (build-altar); block height and spacing ⚙. Not spread into the shaft: on every reading the rows are in the cedar',
     flayingStations: nanasXs.slice(0, -1).map((X, i) => [r6((X + nanasXs[i + 1]) / 2), NANAS_Y, Z_AZ]),
     flayingNote: 'carcasses hung on the hooks and flayed beside the pillars (Rambam BhB 5:13 "there they hang and flay"); the 7 gaps between the pillars are the flaying stations (Middot 3:5 "between the pillars") ⚙' } });
 add('altar.tzafon', { en: 'The Tzafon (halachic north)', he: 'צפון', kind: 'zone', b: [X_ULAM_E, Y_ALT_N, Z_AZ, X_AZ_E, Y_AZ_N, Z_AZ + 0.01],
@@ -1047,7 +1131,11 @@ add('altar.kiyor.muchni', { en: 'Muchni (Ben Katin\'s wheel machine) and well', 
   b: [KIY.cx - 4, KIY.cy - KIYOR_D / 2 - 5, Z_MOUNT + 2, KIY.cx + 4, KIY.cy + KIYOR_D / 2, Z_AZ + KIYOR_H + 3], src: ['Tamid 1:4', 'Tamid 3:8', 'Yoma 37a–b', 'Rambam BhB 3:18'], c: 'reconstruction',
   der: 'wheel frame south of the kiyor; well beneath it into which the kiyor sinks overnight ⚙',
   p: { wheel: bx(KIY.cx - 4, KIY.cy - KIYOR_D / 2 - 5, Z_AZ, KIY.cx + 4, KIY.cy - KIYOR_D / 2 - 0.5, Z_AZ + KIYOR_H + 3),
-    well: bx(KIY.cx - KIYOR_D / 2, KIY.cy - KIYOR_D / 2, Z_MOUNT + 2, KIY.cx + KIYOR_D / 2, KIY.cy + KIYOR_D / 2, Z_AZ), sanctity: 'chol (Rambam BhB 3:18)', sound: 'its wood heard to Yericho (Tamid 3:8)' } });
+    well: bx(KIY.cx - KIYOR_D / 2, KIY.cy - KIYOR_D / 2, Z_MOUNT + 2, KIY.cx + KIYOR_D / 2, KIY.cy + KIYOR_D / 2, Z_AZ),
+    wellNote: 'an open shaft in the court\'s solid fill (the courts are filled from Z 0 to the pavement): build-courts carves it (listed in azarah.floor params.shafts); build-altar builds the curb, the lift and the laver that sinks into it ⚙ depth',
+    sanctity: 'chol (Rambam BhB 3:18)', sound: 'its wood heard to Yericho (Tamid 3:8)' } });
+elements['azarah.floor'].params.shafts = [{ id: 'altar.kiyor.muchni', box: elements['altar.kiyor.muchni'].params.well,
+  note: 'the kiyor well (Yoma 37a–b): carve it from the court fill, open at the pavement, clear of the Ulam steps (1½ amot north) and the amah channel' }];
 // the 12 Ulam steps (Middot 3:6; lock #25)
 {
   const prof = []; let x = X_ULAM_E + ULAM_RUN;
@@ -1100,9 +1188,13 @@ add('heichal.ulam.tables', { en: 'Showbread tables in the Ulam (marble N, gold S
 add('heichal.ulam.vine', { en: 'The golden vine over the Heichal entrance', he: 'גפן של זהב', kind: 'fixture',
   b: H(X_ULAM_IN_W, AXIS_Y - 12, Z_HEICHAL + GATE_H + 0.5, X_ULAM_IN_W + 1, AXIS_Y + 12, Z_HEICHAL + GATE_H + 5), src: ['Middot 3:8'], c: 'reconstruction',
   der: 'over the Heichal entrance, trained on cedar posts; extent ⚙', p: { posts: 'kelunsot (cedar)', donors: 'leaves, berries, clusters' } });
+const CHAIN_FOOT = 4;                    // ⚙ chain ends 4 amot (≈1.9 m) above the Ulam floor: over a walking man's head, within an upward reach
 add('heichal.ulam.chains', { en: 'Gold chains from the Ulam ceiling', he: 'שרשרות של זהב', kind: 'fixture',
-  b: H(X_ULAM_IN_W + 1, AXIS_Y - 8, Z_HEICHAL + 26, X_ULAM_IN_W + 2, AXIS_Y + 8, Z_KOD_TOP), src: ['Middot 3:8', 'Part XI lock #28'], c: 'reconstruction',
-  der: 'fixed in the Ulam ceiling; young kohanim climbed them to see the crowns ⚙', p: { count: 4 } });
+  b: H(X_ULAM_IN_W + 1, AXIS_Y - 8, Z_HEICHAL + CHAIN_FOOT, X_ULAM_IN_W + 2, AXIS_Y + 8, Z_KOD_TOP), src: ['Middot 3:8', 'Part XI lock #28'], c: 'reconstruction',
+  der: `fixed in the Ulam ceiling (+${Z_KOD_TOP}) and hanging to ${CHAIN_FOOT} amot over its floor, so the young kohanim could take hold and climb them to see the crowns (Middot 3:8) ⚙`,
+  fc: { fixedInTheCeiling: 'explicit', climbedByThePirchei: 'explicit', count: 'reconstruction', length: 'reconstruction', positions: 'reconstruction' },
+  p: { count: 4, topZ: Z_KOD_TOP, bottomZ: Z_HEICHAL + CHAIN_FOOT, spacing: 'evenly over the box\'s Y extent (the two inner ones before the F2 crown windows)',
+    climbNote: '"gold chains fixed in the ceiling of the Ulam, by which the young kohanim climb and see the crowns" (Middot 3:8): a chain one climbs must hang within reach of the floor; ending at +48 (26 amot up) they could not be reached. They end 4 amot up ⚙ — clear of heads, ½ amah beside the ends of the two Ulam tables (top +23.5) — and a climber at the F2 windows (+48–52) is 26–30 amot up' } });
 add('heichal.ulam.nivreshet', { en: 'Queen Helena\'s golden nivreshet', he: 'נברשת של זהב', kind: 'fixture',
   b: H(X_ULAM_IN_W + 1.5, AXIS_Y - 1, Z_HEICHAL + 24, X_ULAM_IN_W + 3.5, AXIS_Y + 1, Z_HEICHAL + 26), src: ['Yoma 37a–b'], c: 'reconstruction',
   der: 'over the Heichal entrance ⚙', p: { note: 'flashes at sunrise — keriat Shema signal' } });
@@ -1164,7 +1256,14 @@ add('heichal.menorah', { en: 'The Menorah', he: 'מנורה', kind: 'fixture',
   src: ['Yoma 33b', 'Menachot 28b', 'Tamid 3:9', 'Rambam BhB 3:1–11', 'Part XI locks #11, #30'], c: 'reconstruction',
   der: 'south, 2½ off the S wall, opposite the Shulchan (E–W station = middle of the inner ⅔ ⚙); 18 tefachim; lamp row E–W (lock #11); branch span 2 ⚙',
   fc: { southSide: 'explicit', wallOffset: 'explicit', height: 'explicit', lampRow: 'locked', branches: 'locked', span: 'reconstruction', eastWestStation: 'reconstruction' },
-  p: { height: MENORAH_H, lampRow: 'E–W', lamps: 7, centerLamp: 'ner ma\'aravi faces the KhK', branches: 'straight diagonals (lock #30)', span: 2,
+  p: { height: MENORAH_H, lampRow: 'E–W', lamps: 7, lampOrder: 'index 0 = the easternmost lamp; 7 lamps evenly over the span',
+    centerLamp: 'the middle lamp (index 3), on the central stem. Under lock #11 (E–W row) it is not the ner ma\'aravi (that is lamp 1, see nerMaaravi), and Tamid\'s rite (3:9, 6:1) gives it no role of its own. In the Rambam\'s N–S row (nerMaaravi.readings.northSouth) it is the ner ma\'aravi: the six branch lamps face it and it faces the KhK (BhB 3:8)',
+    nerMaaravi: { lamp: 1, countFrom: 'east',
+      basis: 'lock #11 (E–W row, Raavad on BhB 3:12) with Tamid 6:1: "he found the two eastern lamps burning, cleaned the eastern and left the western burning, from which he lit the Menorah in the evening" (also Tamid 3:9) — the two eastern lamps are indices 0 and 1, the western of them is index 1, the second from the east (Rashi\'s reading)',
+      readings: {
+        eastWest: { lamp: 1, source: 'Raavad on Rambam BhB 3:12; Tamid 3:9, 6:1; Rashi — lamps E–W, the ner ma\'aravi the second from the east (the model)' },
+        northSouth: { lamp: 3, source: 'Rambam BhB 3:8, 3:12 — lamps N–S "across the width of the House", the ner ma\'aravi the middle lamp, facing the KhK (Register #11)' } } },
+    branches: 'straight diagonals (lock #30)', span: 2,
     stone: { box: bx(X_VESSELS - 0.5, Y_KOD_S + VESSEL_WALL_OFF + 0.75, Z_HEICHAL, X_VESSELS + 0.5, Y_KOD_S + VESSEL_WALL_OFF + 2.25, Z_HEICHAL + 1.5), steps: 3, note: 'stone with three steps before it; the kuz rests on the second (Tamid 3:9) — on its north (front) side ⚙' } } });
 add('heichal.mizbach-hazahav', { en: 'The golden altar (incense)', he: 'מזבח הזהב', kind: 'fixture',
   b: H(X_VESSELS + 2 - GOLDEN_ALTAR[0] / 2, AXIS_Y - GOLDEN_ALTAR[1] / 2, Z_HEICHAL, X_VESSELS + 2 + GOLDEN_ALTAR[0] / 2, AXIS_Y + GOLDEN_ALTAR[1] / 2, Z_HEICHAL + GOLDEN_ALTAR[2]),
@@ -1234,7 +1333,13 @@ add('heichal.outer-wall.south', { en: 'Heichal — outer south wall', he: 'כו�
   der: `5 (outermost on the south); up to +${Z_TAIM_ROOF} ⚙`, fc: OUTER_FC, p: {} });
 add('heichal.lul-west', { en: 'The lul behind the Kaporet (8 amot high)', he: 'לול קטן אחורי בית הכפורת', kind: 'opening',
   b: H(X_HEI_W, AXIS_Y - LUL_W / 2, Z_HEICHAL, X_KHK_W, AXIS_Y + LUL_W / 2, Z_HEICHAL + LUL_H), src: ['Zevachim 55b', 'EK II 178–179', 'Part VII §22 F7'], c: 'reconstruction',
-  der: '8 high (Zevachim 55b), 4 tefachim wide (EK); through the KhK wall, the axial west ta and its outer wall', p: { width: LUL_W, height: LUL_H, smallCurtain: true } });
+  der: '8 high (Zevachim 55b), 4 tefachim wide (EK); through the KhK wall, the axial west ta and its outer wall',
+  fc: { height: 'explicit', behindTheKaporet: 'explicit', width: 'reconstruction', throughTheKhKWall: 'reconstruction' },
+  p: { width: LUL_W, height: LUL_H, smallCurtain: true, walkThrough: false,
+    pierces: ['heichal.wall.west', 'heichal.taim.west (axial cell, lower story)', 'heichal.ta-wall.west'],
+    piercingBasis: 'EK II 178–179: only 4 tefachim wide (hence "lul", not "petach"), with a small curtain, piercing the KhK\'s own wall (with Tosafot on Zevachim 55b; against Mahari). Zevachim 55b gives its purpose: it validates the court behind the Kaporet for eating kodshei kodashim and slaughtering kodashim kalim — an opening of the House itself',
+    darkness: 'the KhK stays the dark chamber of Part VII §22 (no window is attested): the lul is a sanctity opening, not a window, and its small curtain closes it (Yoma 54a\'s count of curtains does not include it; EK supplies it) ⚙',
+    sillNote: `a slot 4 tefachim wide whose sill is the KhK floor (+${Z_HEICHAL}), ${Z_HEICHAL - Z_AZ} above the strip behind the House: not a passage` } });
 // ceiling, aliyah, roof (Middot 4:5–6; Rambam BhB 4:3; locks #6, #27, #40)
 const stackSlab = (i, en, he, x0, y0, x1, y1) => ({ en, he, kind: 'slab', b: H(x0, y0, stackZ[i][0], x1, y1, stackZ[i][1]), src: ['Middot 4:6', 'Rambam BhB 4:3', 'Part XI lock #40'], c: i === 3 || i === 8 ? 'locked' : 'explicit', der: `stack item ${i + 1}: ${STACK[i][0]} ${STACK[i][1]}` });
 add('heichal.ceiling.kiyur', { ...stackSlab(2, 'Ceiling — kiyur (decorated course)', 'כיור', X_KHK_W, Y_KOD_S, X_KODESH_E, Y_KOD_N), p: { form: 'decorated crown course (lock #40)' } });
@@ -1315,8 +1420,9 @@ add('heichal.windows.f2', { en: 'F2 — the crown windows over the entrance', he
   p: { windows: [bx(X_KODESH_E, AXIS_Y - 4, Z_HEICHAL + 26, X_ULAM_IN_W, AXIS_Y - 2, Z_HEICHAL + 30), bx(X_KODESH_E, AXIS_Y + 2, Z_HEICHAL + 26, X_ULAM_IN_W, AXIS_Y + 4, Z_HEICHAL + 30)], contents: 'Zechariah\'s memorial crowns' } });
 add('heichal.ulam-curtain', { en: 'Curtain of the Ulam opening', he: 'פרוכת האולם', kind: 'curtain', b: H(X_ULAM_IN_E - TEFACH, AXIS_Y - ULAM_OPEN_W / 2, Z_HEICHAL, X_ULAM_IN_E, AXIS_Y + ULAM_OPEN_W / 2, Z_HEICHAL + ULAM_OPEN_H),
   src: ['Yoma 54a', 'Rambam Klei HaMikdash 7:16'], c: 'reconstruction', der: 'one of the 13 parochot; hung on the inner face of the opening ⚙', p: { size: [ULAM_OPEN_H, ULAM_OPEN_W] } });
-add('heichal.gate-curtain', { en: 'Curtain of the Heichal gate', he: 'פרוכת שער ההיכל', kind: 'curtain', b: H(X_ULAM_IN_W, AXIS_Y - GATE_W / 2 - 1, Z_HEICHAL, X_ULAM_IN_W + TEFACH, AXIS_Y + GATE_W / 2 + 1, Z_HEICHAL + GATE_H + 1),
-  src: ['Yoma 54a'], c: 'reconstruction', der: 'one of the 13; before the outer doors ⚙', p: {} });
+const CURTAIN_CLEAR = 0.1;               // ⚙ ≈5 cm: a hanging curtain stands clear of the wall face so its folds never touch it
+add('heichal.gate-curtain', { en: 'Curtain of the Heichal gate', he: 'פרוכת שער ההיכל', kind: 'curtain', b: H(X_ULAM_IN_W + CURTAIN_CLEAR, AXIS_Y - GATE_W / 2 - 1, Z_HEICHAL, X_ULAM_IN_W + CURTAIN_CLEAR + TEFACH, AXIS_Y + GATE_W / 2 + 1, Z_HEICHAL + GATE_H + 1),
+  src: ['Yoma 54a'], c: 'reconstruction', der: `one of the 13; before the outer doors, ${CURTAIN_CLEAR} clear of the wall face ⚙`, p: { wallClearance: CURTAIN_CLEAR, wallFaceX: X_ULAM_IN_W } });
 
 // ===== 3.7b Stations, routes and channels (people / sim anchors) =============
 // the 24 night-watch posts (Middot 1:1; Tamid 1:1; Rambam BhB 8:4–9): 3 kohanic, 21 Levite. Places sourced, exact spots ⚙
@@ -1417,7 +1523,17 @@ const mE = (m) => eastFace + m / AMAH;           // meters east of the E wall �
 const zM = (asl) => (asl - DATUM_ASL) / AMAH;    // ASL → site Z
 function topoAt(side, m) { const P = TOPO[side]; if (m <= P[0][0]) return P[0][1]; for (let i = 1; i < P.length; i++) if (m <= P[i][0]) { const [a, za] = P[i - 1], [b, zb] = P[i]; return za + (zb - za) * (m - a) / (b - a); } return P[P.length - 1][1]; }
 const causewayEndM = (() => { for (let m = KIDRON_THALWEG_M; m < 1500; m += 0.5) if (topoAt('E', m) >= DATUM_ASL) return m; return 480; })();
-const PARAH_EYE = [r6(mE(PARAH_SITE_M)), AXIS_Y, r6(zM(topoAt('E', PARAH_SITE_M) + EYE_M))];
+// The Parah burning place (Parah 3:8–9): the heifer lies ON the arrangement ("נתנוה על גב המערכה", head south, face west), the kohen
+// "stands in the east facing west", slaughters, sprinkles toward the KhK, wipes his hand on her body — and then "descends" (ירד) to
+// kindle the fire. So during the sprinkling he stands on the arrangement, at its east end, east of the heifer ⚙ (place on the top).
+const PARAH_X = mE(PARAH_SITE_M), Z_CREST = zM(topoAt('E', PARAH_SITE_M));
+const PYRE = { x0: PARAH_X - PARAH_PYRE.back, x1: PARAH_X - PARAH_PYRE.front, top: Z_CREST + PARAH_PYRE.h };
+const PARAH_STAND = [r6(PYRE.x1 - PARAH_KOHEN_IN), AXIS_Y, r6(PYRE.top)];                       // the kohen's feet, on the arrangement
+const PARAH_EYE = [PARAH_STAND[0], AXIS_Y, r6(PYRE.top + EYE_M / AMAH)];                         // his eye at the sprinkling
+const PARAH_GROUND_EYE = [r6(PARAH_X), AXIS_Y, r6(zM(topoAt('E', PARAH_SITE_M) + EYE_M))];        // a viewer on the crest ground, no pyre
+const HEIFER_BOX = bx(PYRE.x1 - PARAH_KOHEN_IN - 0.5 - HEIFER.w, AXIS_Y - HEIFER.len / 2, PYRE.top, PYRE.x1 - PARAH_KOHEN_IN - 0.5, AXIS_Y + HEIFER.len / 2, PYRE.top + HEIFER.h);
+// the Kiponus approach (unsourced): level with the threshold from the gate west to where the west slope regains the platform level
+const kiponusEndM = (() => { for (let m = TOPO.W[1][0]; m < 600; m += 0.5) if (topoAt('W', m) >= DATUM_ASL) return m; return 235; })();
 add('context.terrain', { en: 'Surrounding topography (approximate)', he: 'סביבת הר הבית', kind: 'zone',
   b: [-MOUNT_WALL_T - 600 / AMAH, -MOUNT_WALL_T - 400 / AMAH, zM(660), eastFace + 1500 / AMAH, MOUNT + MOUNT_WALL_T + 600 / AMAH, zM(820)],
   src: ['Brief: platform ≈ 740 m ASL, Kidron bed 660–680 m, Mount of Olives ridge 800–818 m 700–900 m east'], c: 'reconstruction',
@@ -1436,19 +1552,48 @@ add('context.parah-causeway', { en: 'The Parah causeway (arches upon arches)', h
   src: ['Parah 3:6', 'Middot 1:3', 'Shekalim 4:2'], c: 'reconstruction',
   der: `level deck at the Shushan threshold (Z0) on the axis, from the gate to where the slope regains 740 m (${r6(causewayEndM)} m east)`,
   p: { deckZ: 0, width: GATE_W, tiers: 2, form: 'arches upon arches, each arch over the pier below ("kippah keneged ha\'atum") — against a deep grave',
-    parapet: 1, continuesAs: 'path up the slope to the burning place', alt: 'a deck descending/climbing with the terrain' } });
+    parapet: { thickness: 1, height: r6(ROOF_PARAPET_H), placement: 'inside the 10-amah width (clear deck 8)', note: 'was "parapet: 1" — that is the thickness; the height is 10 tefachim (Devarim 22:8) ⚙' },
+    overhangs: [
+      { part: 'parapets', box: bx(eastFace, AXIS_Y - GATE_W / 2, 0, r6(mE(causewayEndM)), AXIS_Y + GATE_W / 2, r6(ROOF_PARAPET_H)), note: 'two 1-amah parapets on the deck edges, 10 tefachim above the deck (Z0)' },
+      { part: 'lower tier', box: bx(eastFace, AXIS_Y - GATE_W / 2 - 0.5, r6(zM(675)), r6(mE(causewayEndM)), AXIS_Y + GATE_W / 2 + 0.5, 0), note: 'the lower arcade is ½ amah wider each side than the upper (as built by build-mount) ⚙' },
+      { part: 'string course at the tier line', projection: 0.85, note: 'projects 0.85 each side of the deck width (build-mount) ⚙' }],
+    continuesAs: 'path up the slope to the burning place', alt: 'a deck descending/climbing with the terrain' } });
 add('context.parah.pyre', { en: 'The Parah burning place on Har HaMishchah', he: 'מקום שריפת הפרה', kind: 'fixture',
-  b: [PARAH_EYE[0] - 6, AXIS_Y - 3, r6(zM(topoAt('E', PARAH_SITE_M))), PARAH_EYE[0] - 1, AXIS_Y + 3, r6(zM(topoAt('E', PARAH_SITE_M)) + 8)],
-  src: ['Parah 3:8–9', 'Middot 2:4'], c: 'reconstruction', der: 'on the axis at the crest; pyre "like a tower with windows, facade west"; kohen east of it facing west',
-  p: { kohenEye: PARAH_EYE, woods: 'cedar, pine, cypress, smooth fig (Parah 3:8)', facing: 270, mikveh: 'a beit tevilah there (Parah 3:7)' } });
+  b: [r6(PYRE.x0), AXIS_Y - PARAH_PYRE.halfW, r6(Z_CREST), r6(PYRE.x1), AXIS_Y + PARAH_PYRE.halfW, r6(PYRE.top)],
+  src: ['Parah 3:8–9', 'Middot 2:4'], c: 'reconstruction',
+  der: 'on the axis at the crest; the arrangement "like a tower with windows, its face west" (Parah 3:8); the heifer on its top, the kohen standing on it at its east end facing west (Parah 3:9 — he "descends" afterwards) ⚙',
+  fc: { onTheCrest: 'reconstruction', faceWest: 'explicit', heiferOnTop: 'explicit', kohenEastOfHer: 'explicit', kohenRaised: 'derived', size: 'reconstruction' },
+  p: { woods: 'cedar, pine, cypress, smooth fig (Parah 3:8)', facing: 270, mikveh: 'a beit tevilah there (Parah 3:7)', topZ: r6(PYRE.top),
+    heifer: { box: HEIFER_BOX, head: 'south', faces: 270, note: 'bound and laid on the arrangement, head south, face west (Parah 3:9); envelope ⚙' },
+    kohenStand: PARAH_STAND, kohenEye: PARAH_EYE, groundEye: PARAH_GROUND_EYE,
+    kohenNote: 'Parah 3:9: the heifer is put "on the arrangement"; the kohen "stands in the east, facing west", slaughters, sprinkles seven times toward the KhK, wipes his hand on her body, and then "descended (ירד) and kindled the fire" — he stood up on the arrangement beside her. kohenEye is that eye, over the heifer, for the sprinkling (Middot 2:4: "he aims and sees the entrance of the Heichal"); the pyre itself is under his feet and no longer between him and the Heichal (it was 4.7 amot above a ground eye)',
+    groundEyeNote: 'a viewer standing on the crest ground 1 amah east of the arrangement\'s place, when no pyre is built — the daily viewpoint (anchors, map); the Parah line also passes from here (parahSightLine({ stand: \'ground\' }))' } });
 for (const [k, gx] of [['w', chuldahX[0]], ['e', chuldahX[1]]]) {
-  const zP = zChuldah, runIn = 45, rise = -zP, stairRun = rise / STEP_RISE * STEP_TREAD;
+  // the stair: a whole number of risers, each within 1% of ½ (Middot 2:3) since the drop is the real Ophel–platform difference; treads ½
+  const zP = zChuldah, runIn = 45, rise = -zP, risers = Math.round(rise / STEP_RISE), riseEach = rise / risers, stairRun = risers * STEP_TREAD;
   add(`context.chuldah.tunnel-${k}`, { en: `Chuldah passage (${k === 'w' ? 'west' : 'east'})`, he: 'מבוא שערי חולדה', kind: 'zone',
     b: [gx, -MOUNT_WALL_T, zP, gx + GATE_W, runIn + stairRun, 0], src: ['Middot 1:3', 'Rambam BhB 6:9', 'Parah 3:3'], c: 'reconstruction',
-    der: `portal on the S wall at the Ophel grade (${r6(zP)}); level passage north ${runIn} under the vaults, then ${r6(rise / STEP_RISE)} half-steps up to the Mount`,
-    p: { portal: [gx + GATE_W / 2, -MOUNT_WALL_T, r6(zP)], level: bx(gx, -MOUNT_WALL_T, zP, gx + GATE_W, runIn, zP + GATE_H), stairPath: { from: [gx + GATE_W / 2, runIn, r6(zP)], to: [gx + GATE_W / 2, r6(runIn + stairRun), 0], risers: r6(rise / STEP_RISE) },
+    der: `portal on the S wall at the Ophel grade (${r6(zP)}); level passage north ${runIn} under the vaults, then ${risers} steps (rise ${r6(riseEach)} ≈ ½, tread ½) up to the Mount`,
+    p: { portal: [gx + GATE_W / 2, -MOUNT_WALL_T, r6(zP)], level: bx(gx, -MOUNT_WALL_T, zP, gx + GATE_W, runIn, zP + GATE_H),
+      stairPath: { from: [gx + GATE_W / 2, runIn, r6(zP)], to: [gx + GATE_W / 2, r6(runIn + stairRun), 0], risers, rise: r6(riseEach), tread: STEP_TREAD,
+        note: 'whole risers: the drop (real Ophel grade − platform, AMAH-dependent) is divided evenly, each rise within 1% of Middot 2:3\'s ½ amah' },
       exit: [gx + GATE_W / 2, r6(runIn + stairRun), 0], exitSouth: [gx + GATE_W / 2, -MOUNT_WALL_T, r6(zP)], sanctity: 'mechilot opening to Har HaBayit are chol (Rambam BhB 6:9)' },
     n: 'Where the Chuldah passages exit south: the portals open onto the Ophel ~13 m below the platform; length and depth from the real elevation difference ⚙.' });
+}
+{
+  const mW = (m) => -MOUNT_WALL_T - m / AMAH, half = GATE_W / 2 + 1;
+  const lowASL = Math.min(...TOPO.W.filter(([m]) => m <= kiponusEndM).map(([, z]) => z));
+  add('context.kiponus-approach', { en: 'The Kiponus approach (bridge to the upper city)', he: 'מבוא שער קיפונוס', kind: 'ramp',
+    b: [r6(mW(kiponusEndM)), KIPONUS_Y - half, r6(zM(lowASL)), -MOUNT_WALL_T, KIPONUS_Y + half, 0], src: ['Middot 1:3', 'Middot 2:3'], c: 'reconstruction',
+    der: `level deck at the Kiponus threshold (Z0) from the gate west across the Tyropoeon to where the west slope regains 740 m (${r6(kiponusEndM)} m); clear width ${GATE_W} between 1-amah parapets ⚙`,
+    fc: { gateServesEntry: 'explicit', existence: 'reconstruction', form: 'reconstruction', length: 'reconstruction' },
+    p: { deckZ: 0, clearWidth: GATE_W, width: GATE_W + 2, endM: r6(kiponusEndM), endX: r6(mW(kiponusEndM)), gate: 'mount.gate.kiponus',
+      zone: 'outside', zoneNote: 'the deck is outside Har HaBayit, in the city: Jerusalem\'s rung (2), the "outside" zone. It is not part of the gate-kiponus zone (rung 3); unlike the Chuldah passages it does not run under the Mount (Rambam BhB 6:9)',
+      parapet: { thickness: 1, height: r6(ROOF_PARAPET_H), placement: 'outside the gate width (each side)' },
+      overhangs: [{ part: 'parapets', box: bx(mW(kiponusEndM), KIPONUS_Y - half, 0, -MOUNT_WALL_T, KIPONUS_Y + half, ROOF_PARAPET_H), note: '10 tefachim above the deck' }],
+      form: 'a single tier of arches (build-mount: bays 18, piers 4, an opening over the Tyropoeon street) ⚙ — one tier, so as not to read as the Parah\'s halachic double arcade (Parah 3:6)',
+      crosses: `the Tyropoeon (≈${lowASL} m at ${TOPO.W[1][0]} m from the wall; the threshold is 740 m)` },
+    n: 'No source describes the western approach. The gate "serves entry and exit" (Middot 1:3) at the platform level, about 18 m above the Tyropoeon at the wall\'s foot, so a bridge or ramp is implied; a level deck like the Parah causeway is the modest reading.' });
 }
 
 // -----------------------------------------------------------------------------
@@ -1473,7 +1618,7 @@ const gz = (id, e, pad = 3, zpad = 2) => zbx(e.box.min[0] - (e.box.max[0] - e.bo
 zone('gate-shushan', 30, Z_MOUNT, [gz('', elements['mount.gate.shushan'])]);
 zone('gate-chuldah-w', 30, zChuldah, [gz('', elements['mount.gate.chuldah-w']), zb(elements['context.chuldah.tunnel-w'])]);
 zone('gate-chuldah-e', 30, zChuldah, [gz('', elements['mount.gate.chuldah-e']), zb(elements['context.chuldah.tunnel-e'])]);
-zone('gate-kiponus', 30, Z_MOUNT, [gz('', elements['mount.gate.kiponus'])]);
+zone('gate-kiponus', 30, Z_MOUNT, [gz('', elements['mount.gate.kiponus'])]);   // the approach deck west of it is 'outside' (Jerusalem's rung)
 zone('gate-tadi', 30, Z_MOUNT, [gz('', elements['mount.gate.tadi'])]);
 zone('ezrat-nashim', 20, Z_EN, [zbx(X_EN_W, Y_AZ_S, Z_EN - 1, X_EN_E, Y_AZ_N, ZTOP)]);
 zone('en-gate-east', 30, Z_EN, [gz('', elements['en.gate.east'])]);
@@ -1510,6 +1655,8 @@ zone('ulam-upper', 40, Z_ALIYAH, [zbx(X_KODESH_E, Y_ULAM_S, Z_KOD_TOP, X_ULAM_E,
 for (const k of ['gazit', 'golah', 'melach', 'parvah', 'medichin']) zone(k, 30, Z_AZ, [zb(elements[`azarah.chamber.${k}`])]);
 zone('etz-parhedrin', 30, Z_AZ, [zb(elements['azarah.chamber.etz'])]);
 zone('lishkat-hakelim', 30, Z_EY, [zb(elements['azarah.chamber.kelim'])]);
+zone('lishkat-pinchas', 30, Z_EY, [zb(elements['azarah.chamber.pinchas'])]);
+zone('lishkat-chavitin', 30, Z_EY, [zb(elements['azarah.chamber.chavitin'])]);
 zone('lishkat-chashaim', 30, Z_EN, [zb(elements['en.chamber.chashaim'])]);
 zone('lishkat-hakorban', 30, Z_MOUNT, [zb(elements['mount.chamber.korban'])]);
 zone('lishkat-haparochet', 30, Z_MOUNT, [zb(elements['mount.chamber.parochet'])]);
@@ -1574,6 +1721,7 @@ chain('Wall + ta per story (Middot 4:4)', '-', TA_STORY.map((w, k) => P(`story $
 /**
  * Line from the kohen on Har HaMishchah to the Heichal doorway, in the vertical plane Y = axisY.
  * opts: { amah (m), eyeDistM, crestASL, eyeM, walls: { mountEast, enEast, azarahEast, shushanChamber } (top Z overrides; shushanChamber 0 = no chamber),
+ *         stand: 'arrangement' (default: the kohen on the pyre at the sprinkling, Parah 3:9) | 'ground' (a viewer on the crest, no pyre),
  *         target: 'outer'|'inner', level: bool (the Gemara's level-line model) }
  * Returns visible door-height intervals and per-obstacle clearances for the best line.
  */
@@ -1583,12 +1731,20 @@ export function parahSightLine(opts = {}) {
   const eF = MOUNT + MOUNT_WALL_T;
   const groundAt = (x) => { const m = (x - eF) * a; return m < 0 ? null : (topoAt('E', m) - DATUM_ASL) / a; };
   const crestM = opts.eyeDistM ?? PARAH_SITE_M;
-  const eye = opts.level ? null : [eF + scaleM(crestM), ((opts.crestASL ?? topoAt('E', crestM)) - DATUM_ASL + (opts.eyeM ?? EYE_M)) / a];
+  const onPyre = !opts.level && opts.stand !== 'ground';
+  const crestX = eF + scaleM(crestM), crestZ = ((opts.crestASL ?? topoAt('E', crestM)) - DATUM_ASL) / a;
+  const pyreTop = crestZ + PARAH_PYRE.h, kohenX = crestX - PARAH_PYRE.front - PARAH_KOHEN_IN;
+  const eye = opts.level ? null : onPyre ? [kohenX, pyreTop + (opts.eyeM ?? EYE_M) / a] : [crestX, crestZ + (opts.eyeM ?? EYE_M) / a];
   const w = { mountEast: MOUNT_EAST_WALL_H, enEast: Z_EN_EAST_TOP, azarahEast: Z_AZ_EAST_TOP, shushanChamber: MOUNT_EAST_WALL_H + SHUSHAN_CHAMBER_H, ...(opts.walls || {}) };
   const xT = opts.target === 'inner' ? X_KODESH_E : X_ULAM_IN_W;
+  // the east stoa on the axis: its band (taken as solid to the roof, conservatively) plus the solid parts of the overhangs that cross the
+  // axis (front entablature, roof parapet, the raised bay before Shushan — open below its soffit)
+  const stoaE = elements['mount.stoa.east'];
+  const stoaObs = [{ part: 'roof', box: stoaE.box }, ...stoaE.params.overhangs].filter((o) => o.box.min[1] <= AXIS_Y && o.box.max[1] >= AXIS_Y)
+    .map((o) => ({ id: `mount.stoa.east (${o.part})`, x: [o.box.min[0], o.box.max[0]], block: [[o.solidFromZ ?? -50, o.box.max[2]]] }));
   // obstacles crossing the axis (blocked Z intervals)
   const O = [
-    { id: 'mount.stoa.east (roof)', x: [MOUNT - STOA_DEPTH, MOUNT], block: [[-50, STOA_ROOF]] },
+    ...stoaObs,
     { id: 'mount.wall.east + Shushan HaBirah chamber (over the gate)', x: [MOUNT, eF], block: [[-50, 0], [GATE_H, Math.max(w.mountEast, w.shushanChamber || 0)]] },
     { id: 'mount.chel.steps', x: [X_CX_E, X_CX_E + CHEL_STEPS * STEP_TREAD], block: [[-50, Z_EN]] },
     { id: 'en.wall.east (EN gate)', x: [X_EN_E, X_CX_E], block: [[-50, Z_EN], [Z_EN + GATE_H, w.enEast]] },
@@ -1602,6 +1758,11 @@ export function parahSightLine(opts = {}) {
     { id: 'heichal.ulam (floor)', x: [X_ULAM_IN_W, X_ULAM_IN_E], block: [[-50, Z_HEICHAL]] },
   ];
   if (opts.target === 'inner') O.push({ id: 'heichal.gate.great (passage)', x: [X_KODESH_E, X_ULAM_IN_W], block: [[-50, Z_HEICHAL], [Z_HEICHAL + GATE_H, Z_ROOF]] });
+  if (onPyre) {   // the arrangement under the kohen's feet and the heifer lying on it, west of him (Parah 3:9)
+    const hx1 = kohenX - 0.5, hx0 = hx1 - HEIFER.w;
+    O.push({ id: 'context.parah.pyre (the arrangement)', x: [crestX - PARAH_PYRE.back, crestX - PARAH_PYRE.front], block: [[-50, pyreTop]] });
+    O.push({ id: 'the heifer lying on it', x: [hx0, hx1], block: [[pyreTop, pyreTop + HEIFER.h]] });
+  }
   const lineZ = (zt, x) => opts.level ? zt : zt + (eye[1] - zt) * (x - xT) / (eye[0] - xT);
   function clear(zt) {
     for (const o of O) {
@@ -1628,7 +1789,7 @@ export function parahSightLine(opts = {}) {
   const threshold = intervals.length ? intervals[0][0] : null;
   const best = intervals.length ? intervals.reduce((p, q) => (q[1] - q[0] > p[1] - p[0] ? q : p)) : null;
   return {
-    amahMeters: a, eye: eye ? { X: r6(eye[0]), Y: AXIS_Y, Z: r6(eye[1]), distanceFromEastWallM: crestM } : 'level line (Yoma 16a model)', targetPlaneX: xT,
+    amahMeters: a, eye: eye ? { X: r6(eye[0]), Y: AXIS_Y, Z: r6(eye[1]), distanceFromEastWallM: crestM, stand: onPyre ? 'on the arrangement (Parah 3:9)' : 'crest ground' } : 'level line (Yoma 16a model)', targetPlaneX: xT,
     walls: w, visibleIntervals: intervals.map(([p, q]) => [r6(Math.round(p * 100) / 100), r6(Math.round(q * 100) / 100)]), visibleAmot: r6(Math.round(visible * 100) / 100),
     passes: visible > 0, lowestLine: threshold != null ? report(threshold) : null, bestLine: best ? { doorZ: r6((best[0] + best[1]) / 2), clearances: report((best[0] + best[1]) / 2) } : null,
   };
@@ -1652,7 +1813,7 @@ export const SITE = {
   elements,
   zones,
   chains,
-  context: { datumASL: DATUM_ASL, amahMeters: AMAH, parahEye: PARAH_EYE, causewayEndX: r6(mE(causewayEndM)) },
+  context: { datumASL: DATUM_ASL, amahMeters: AMAH, parahEye: PARAH_EYE, parahGroundEye: PARAH_GROUND_EYE, causewayEndX: r6(mE(causewayEndM)), kiponusEndX: r6(-MOUNT_WALL_T - kiponusEndM / AMAH) },
 };
 export function el(id) { return SITE.elements[id]; }
 export function zoneGeometry(id) { return SITE.zones[id] || null; }
@@ -1749,8 +1910,9 @@ export function runChecks() {
   for (const [s, n] of Object.entries(PROSTRATIONS_BY_SIDE)) eq(`breaches on ${s}`, E('mount.soreg.breaches').params.stations.filter((b) => b.side === s).length, n);
   eq('mikveh surface on the Water Gate = En Eitam head (+23 over the Azarah)', E('azarah.mikveh.mayim-roof').box.max[2], Z_AZ + 23);
   // cross-references between elements resolve
-  for (const e of Object.values(SITE.elements)) for (const k of ['openings', 'voids', 'replacedBy', 'alsoPierces', 'roofLevelWith', 'flight', 'stair', 'tunnel', 'opensInto', 'podium', 'carries', 'chamber', 'reachedBy'])
+  for (const e of Object.values(SITE.elements)) for (const k of ['openings', 'voids', 'replacedBy', 'alsoPierces', 'roofLevelWith', 'flight', 'stair', 'tunnel', 'opensInto', 'podium', 'carries', 'chamber', 'reachedBy', 'approach'])
     for (const ref of [].concat(e.params[k] ?? [])) check(`${e.id}.params.${k} → ${ref} exists`, typeof ref === 'string' && !!SITE.elements[ref]);
+  for (const e of Object.values(SITE.elements)) if (e.params.zone) check(`${e.id}.params.zone → ${e.params.zone} is a zone holding it`, !!SITE.zones[e.params.zone] && zoneAtSite((e.box.min[0] + e.box.max[0]) / 2, (e.box.min[1] + e.box.max[1]) / 2, e.box.min[2] + 0.5) === e.params.zone);
   // the explicit open strips of the Azarah N–S chain stay clear (Middot 5:2; Rambam BhB 5:13–15)
   check('Beit HaMoked does not enter the mitbachayim band', E('azarah.moked.hall').box.min[1] >= Y_MITB_S);
   check('Water Gate house does not enter the 12½ south margin', E('azarah.gate.mayim.house').box.max[1] <= Y_AZ_S);
@@ -1893,6 +2055,58 @@ export function runChecks() {
     const withC = parahSightLine().visibleAmot, without = parahSightLine({ walls: { shushanChamber: 0 } }).visibleAmot;
     check(`Shushan HaBirah chamber costs nothing on the real-topography Parah line (${withC} vs ${without})`, Math.abs(withC - without) < 1e-6);
     check('Gemara level-line model still sees part of the doorway with the chamber', parahSightLine({ level: true }).passes); }
+  // ---- site-model-2 checks (builders' requests; docs/decisions/site-model-2.md) ----
+  // the Water Gate roof: a stair a person can pass, a mikveh of at least amah x amah x 3 inside its walls, an open walk to Beit Avtinas
+  { const h = E('azarah.gate.mayim.house'), rs = h.params.roofStair, mk = E('azarah.mikveh.mayim-roof').box, walk = h.params.terraceWalk.box, av = E('azarah.beit-avtinas').box;
+    check('Water Gate roof stair: radius ≥ 1.9 (a person passes) and inside the gatehouse', rs.radius >= 1.9 && inside(rs.box, h.box));
+    check('Water Gate roof mikveh: water ≥ 1 x 1 x 3 inside 0.4-amah walls (Yoma 31a)', mk.max[0] - mk.min[0] - 0.8 >= 1 && mk.max[1] - mk.min[1] - 0.8 >= 1 && mk.max[2] - mk.min[2] >= MIKVEH_DEPTH);
+    check('Water Gate terrace walk runs from the stair head to Beit Avtinas, clear of the mikveh and the stair well', walk.min[0] <= av.max[0] + 1e-9 && walk.max[0] >= rs.box.min[0] - 1e-9 && !overlap2D(walk, mk) && !overlap2D(walk, { min: [rs.box.min[0] + 1e-6, rs.box.min[1]], max: rs.box.max }) && walk.max[1] - walk.min[1] >= 1.5);
+    check('Water Gate roof mikveh stands clear of the stair well', mk.max[0] <= rs.box.min[0] + 1e-9); }
+  { const me = E('azarah.chamber.medichin'), ms = me.params.mesibah;
+    check('Medichin winding stair: radius ≥ 1.9 within its box, inside the chamber', ms.radius >= 1.9 && inside(ms.box, me.box) && ms.center[0] - ms.radius >= ms.box.min[0] && ms.center[0] + ms.radius <= ms.box.max[0] && ms.center[1] + ms.radius <= ms.box.max[1]);
+    const d = me.params.door;
+    check('Medichin door (north face) clear of its winding stair', !overlap2D({ min: [d.x[0], me.box.max[1] - 1], max: [d.x[1], me.box.max[1]] }, ms.box)); }
+  // chamber doors fit under their roofs (Middot 2:3's 20 x 10 is the gates' standard, not the chambers') and keep jambs
+  for (const id of ['azarah.chamber.gazit', 'azarah.chamber.etz', 'azarah.chamber.golah', 'azarah.chamber.melach', 'azarah.chamber.parvah', 'azarah.chamber.medichin', 'azarah.chamber.pinchas', 'azarah.chamber.chavitin']) {
+    const e = E(id), ds = id.endsWith('gazit') ? e.params.doors : [e.params.door];
+    for (const d of ds) check(`${id}: door has a height that fits under the roof slab (z ${d.z})`, Array.isArray(d.z) && d.z[0] === e.box.min[2] && d.z[1] <= e.box.max[2] - 1);
+  }
+  { const d = E('azarah.chamber.gazit').params.doors[0], gz = E('azarah.chamber.gazit').box, go = E('azarah.chamber.golah').box;
+    check('Gazit east door keeps 1-amah piers at the chamber corner and before the Golah', d.y[0] >= gz.min[1] + 1 && d.y[1] <= go.min[1] - 1); }
+  check('chamber roofs not above the gate roofs (the Parvah-roof mikveh under the En-Eitam head, Yoma 31a)', E('azarah.chamber.parvah').params.roofMikveh.waterSurfaceZ <= Z_AZ + 23);
+  // the nanasin: dwarf pillars, the hook rows within a standing kohen's reach; the small sovev ramp carried on the kevesh
+  { const n = E('altar.nanasin').params;
+    check('nanasin: the three hook rows within reach (≤ 4 amot over the court)', n.hookRowsZ.length === 3 && Math.max(...n.hookRowsZ) <= Z_AZ + 4 && n.topZ === E('altar.nanasin').box.max[2]); }
+  { const r = E('altar.kevesh.ramp-sovev'), p = r.params;
+    check('small ramp to the sovev: carried on the kevesh (underside above the pavement), meeting it at the junction; box to the pavement', !p.solidToFloor && r.box.min[2] === Z_AZ && p.undersideZ > Z_AZ && Math.abs(p.from[2] - kevZ(p.from[1])) < 1e-4 && p.undersideZ < Z_SOVEV); }
+  // the Ulam chains reach down to a climber; the lul is a curtained slot through the KhK's own wall; the gate curtain stands clear
+  { const c = E('heichal.ulam.chains').box;
+    check('Ulam chains hang from the ceiling to within reach of the floor (Middot 3:8 "they climb them")', c.max[2] === Z_KOD_TOP && c.min[2] - Z_HEICHAL >= 3.5 && c.min[2] - Z_HEICHAL <= 4.5); }
+  { const l = E('heichal.lul-west');
+    check('lul: pierces the KhK west wall (EK II 178–179), curtained, not a passage', l.box.max[0] === X_KHK_W && l.box.min[0] === X_HEI_W && l.params.smallCurtain && l.params.walkThrough === false); }
+  check('Heichal gate curtain hangs clear of the wall face', E('heichal.gate-curtain').box.min[0] - X_ULAM_IN_W >= 0.05);
+  check('Menorah: ner ma\'aravi is lamp 1 from the east (lock #11 E–W; Tamid 6:1)', E('heichal.menorah').params.nerMaaravi.lamp === 1 && E('heichal.menorah').params.lampRow === 'E–W');
+  // the Chuldah stairs: whole risers within 1% of ½; the Kiponus approach level to where the slope regains the platform
+  for (const k of ['w', 'e']) { const s = E(`context.chuldah.tunnel-${k}`).params.stairPath;
+    check(`Chuldah ${k}: whole risers (${s.risers}), each within 1% of ½ amah`, Number.isInteger(s.risers) && Math.abs(s.rise - STEP_RISE) <= 0.005 && Math.abs(s.risers * s.rise - (s.to[2] - s.from[2])) < 1e-4 && Math.abs(s.to[1] - s.from[1] - s.risers * STEP_TREAD) < 1e-6); }
+  { const k = E('context.kiponus-approach').box;
+    check('Kiponus approach: level deck at the threshold from the W wall to where the slope regains 740 m', k.max[0] === -MOUNT_WALL_T && k.max[2] === E('mount.gate.kiponus').box.min[2] && topoAt('W', kiponusEndM) >= DATUM_ASL - 1e-9 && topoAt('W', kiponusEndM - 1) < DATUM_ASL); }
+  // the east corners of the Azarah: the high N/S walls run through the corner squares; the low E wall spans between them
+  { const e = E('azarah.wall.east').box, n = E('azarah.wall.north').box, s = E('azarah.wall.south').box;
+    check('Azarah E wall spans between the N and S walls; they run through the corner squares (no notch)', e.min[1] === s.max[1] && e.max[1] === n.min[1] && n.max[0] === X_EN_W && s.max[0] === X_EN_W && E('en.wall.north').box.min[0] === X_EN_W); }
+  // the Parah burning place: the kohen stands on the arrangement east of the heifer (Parah 3:9)
+  { const py = E('context.parah.pyre'), p = py.params;
+    check('Parah: the kohen stands on the arrangement, within its top', p.kohenStand[2] === py.box.max[2] && p.kohenStand[0] > py.box.min[0] && p.kohenStand[0] < py.box.max[0]);
+    check('Parah: the heifer lies on the top, west of the kohen', p.heifer.box.min[2] === py.box.max[2] && p.heifer.box.max[0] < p.kohenStand[0] && p.heifer.box.min[0] >= py.box.min[0]);
+    check('Parah: the eye is the standing eye over the stand', Math.abs(p.kohenEye[2] - p.kohenStand[2] - EYE_M / AMAH) < 1e-4 && p.kohenEye[0] === p.kohenStand[0]);
+    check('Parah: the arrangement no longer stands between the eye and the Heichal', p.kohenEye[2] > py.box.max[2]);
+    check(`Parah sight-line passes from a viewer on the crest ground, no pyre (${parahSightLine({ stand: 'ground' }).visibleAmot})`, parahSightLine({ stand: 'ground' }).passes); }
+  // the kiyor well is listed for the court-fill carve and stays clear of the Ulam steps and the open amah
+  { const sh = (E('azarah.floor').params.shafts || []).find((s) => s.id === 'altar.kiyor.muchni');
+    check('kiyor well listed in azarah.floor params.shafts (carved from the court fill)', !!sh && sh.box === E('altar.kiyor.muchni').params.well);
+    check('kiyor well clear of the Ulam steps and the open amah channel', !!sh && !overlap2D(sh.box, E('altar.ulam-steps').box) && !E('azarah.amah-channel').params.openSegments.some((s) => overlap2D(s, sh.box))); }
+  // stoa overhangs recorded; the Parah line clears them (they are obstacles in parahSightLine)
+  for (const s of ['south', 'north', 'west', 'east']) check(`mount.stoa.${s}: overhangs recorded with boxes`, E(`mount.stoa.${s}`).params.overhangs.every((o) => isBox(o.box)));
   // zones
   for (const z of CANONICAL_ZONES) check(`zone ${z} defined`, !!(SITE.zones[z] && SITE.zones[z].boxes.length));
   const zp = [
@@ -1907,6 +2121,9 @@ export function runChecks() {
     [[170, AXIS_Y, 80], 'ulam-upper'], [[230, AXIS_Y, 80], 'azarah'], [[120, 300, 75], 'azarah'], [[300, 330, 80], 'ezrat-nashim'], [[120, 349, Z_TAIM_ROOF + 1], 'taim-roofs'], [[124, 305.5, 62], 'taim-roofs'],
     [[502.5, AXIS_Y, 25], 'shushan-habirah'], [[250, 395, 15], 'lishkat-hakelim'], [[327.5, 398, 8], 'lishkat-chashaim'], [[174.5, 426, 3], 'lishkat-hakorban'], [[148.5, 426, 3], 'lishkat-haparochet'],
     [[375, 440, 3], 'beit-haeven'], [[80, 395, 17], 'etz-parhedrin'], [[93, 386, 17], 'golah'], [[223, 262, 37], 'beit-avtinas'], [[45, 390, 5], 'chel'],
+    [[250.5, 341.5, Z_EY + 0.4], 'lishkat-pinchas'], [[257.5, 343, Z_EY + 0.4], 'lishkat-pinchas'], [[250.5, 319.5, Z_EY + 0.4], 'lishkat-chavitin'], [[257.5, 318, Z_EY + 0.4], 'lishkat-chavitin'],
+    [[250, 336, Z_EY + 0.4], 'ezrat-yisrael'], [[(E('context.kiponus-approach').box.min[0] - MOUNT_WALL_T) / 2, KIPONUS_Y, 0.4], 'outside'],
+    [[-MOUNT_WALL_T - 40, KIPONUS_Y, 0.4], 'outside'], [[-MOUNT_WALL_T / 2, KIPONUS_Y, 0.4], 'gate-kiponus'],
   ];
   for (const [[x, y, z], want] of zp) { const got = zoneAtSite(x, y, z); check(`zoneAt(${r6(x)}, ${r6(y)}, ${r6(z)}) = ${got}, want ${want}`, got === want); }
   // the Parah sight-line must pass with the locked walls (default amah)

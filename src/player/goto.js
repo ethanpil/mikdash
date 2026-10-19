@@ -7,6 +7,8 @@ import { m2w, a, EYE_HEIGHT, headingToYaw } from '../core/units.js';
 /** m/s; 'instant' teleports */
 export const SPEEDS = { slow: 0.8, walk: 1.4, fast: 2.4, run: 4.5 };
 const DEG = Math.PI / 180;
+/** winding stairs: m along the path to the tread kept in the lower part of the frame, and to the view's aim */
+const NEWEL_LOOK = 1.2, NEWEL_YAW = 0.8;
 const warnedSpeeds = new Set();
 
 const wrap = (r) => { r = (r + Math.PI) % (2 * Math.PI); if (r < 0) r += 2 * Math.PI; return r - Math.PI; };
@@ -77,11 +79,89 @@ export function resolveTarget(ctx, physics, target, hintY = null) {
     const exact = Number.isFinite(zHint);
     const feet = m2w(X, Y, 0);
     let y = physics.standFloor(feet.x, feet.z, exact ? a(zHint) : hintY, exact);
+    if (exact && physics.bvh && (y === null || y - a(zHint) > 0.5)) {
+      // the only floor here is on top of something (a wood pile, a table, a wall top): the nearest spot on the
+      // requested level instead (a floor BELOW the requested Z is kept: the Z is then an estimate of the ground)
+      const s = nearOnLevel(physics, feet.x, feet.z, a(zHint), 1.5);
+      if (s) { feet.x = s.x; feet.z = s.z; y = s.y; }
+    }
     if (y === null) y = exact ? a(zHint) : 0;
     feet.y = y;
     return { feet, air: false, heading: target.heading, pitch: target.pitch, label: target.label || `${X},${Y}` };
   }
   return null;
+}
+
+/** Nearest column within r m of (x, z) with a standable floor within 0.35 m of level y: { x, y, z } | null. */
+function nearOnLevel(physics, x, z, y, r) {
+  for (let d = 0.25; d <= r + 1e-6; d += 0.25) {
+    const m = Math.max(8, Math.round((2 * Math.PI * d) / 0.25));
+    let best = null, bd = Infinity;
+    for (let i = 0; i < m; i++) {
+      const an = (i / m) * 2 * Math.PI, px = x + Math.cos(an) * d, pz = z + Math.sin(an) * d;
+      for (const f of physics.floorsAt(px, pz)) {
+        const dy = Math.abs(f - y);
+        if (dy <= 0.35 && dy < bd) { bd = dy; best = { x: px, y: f, z: pz }; }
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+/**
+ * How far along path P from s (≤ maxD) the walker can aim in a straight line: every path vertex passed on the way
+ * lies within tol m (plan) of the line from the feet to the aim point. On a newel stair this keeps the aim on the
+ * stair instead of across the newel.
+ */
+function reach(P, s, maxD, tol, feet) {
+  const { pts, cum } = P;
+  let k0 = 1;
+  while (k0 < pts.length - 1 && cum[k0] <= s + 1e-6) k0++;
+  const ok = (L) => {
+    pointAt(P, s + L, AIM);
+    const ax = AIM.x - feet.x, az = AIM.z - feet.z, l2 = ax * ax + az * az;
+    for (let k = k0; k < pts.length && cum[k] < s + L - 1e-6; k++) {
+      const px = pts[k].x - feet.x, pz = pts[k].z - feet.z;
+      let t = l2 > 0 ? (px * ax + pz * az) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      if (Math.hypot(px - ax * t, pz - az * t) > tol) return false;
+    }
+    return true;
+  };
+  if (ok(maxD)) return maxD;
+  let k1 = k0;
+  while (k1 + 1 < pts.length && cum[k1 + 1] < s + maxD) k1++;
+  for (let k = k1; k >= k0; k--) {
+    const L = cum[k] - s;
+    if (L > 0.05 && L < maxD && ok(L)) return L;
+  }
+  return Math.min(maxD, Math.max(0.05, cum[k0] - s));
+}
+
+/** Mean turning of the path (rad per m, plan) over [s, s + len]: limits the walking speed on tight curves. */
+function curvature(P, s, len) {
+  const { pts, cum } = P;
+  let turn = 0;
+  for (let k = 1; k < pts.length - 1 && cum[k] < s + len; k++) {
+    if (cum[k] <= s) continue;
+    const ax = pts[k].x - pts[k - 1].x, az = pts[k].z - pts[k - 1].z, bx = pts[k + 1].x - pts[k].x, bz = pts[k + 1].z - pts[k].z;
+    if (ax * ax + az * az < 1e-6 || bx * bx + bz * bz < 1e-6) continue;
+    turn += Math.abs(Math.atan2(ax * bz - az * bx, ax * bx + az * bz));
+  }
+  return turn / len;
+}
+
+const AIM = new Vector3();
+
+function pointAt(P, s, out) {
+  const { pts, cum, total } = P;
+  if (s <= 0) return out.copy(pts[0]);
+  if (s >= total) return out.copy(pts[pts.length - 1]);
+  let k = 1;
+  while (k < pts.length - 1 && cum[k] < s) k++;
+  const seg = cum[k] - cum[k - 1] || 1;
+  return out.lerpVectors(pts[k - 1], pts[k], (s - cum[k - 1]) / seg);
 }
 
 export function createAuto(ctx, ctrl, physics, nav) {
@@ -168,16 +248,6 @@ export function createAuto(ctx, ctrl, physics, nav) {
     return { pts, cum, total: cum[cum.length - 1] };
   }
 
-  function pointAt(P, s, out) {
-    const { pts, cum, total } = P;
-    if (s <= 0) return out.copy(pts[0]);
-    if (s >= total) return out.copy(pts[pts.length - 1]);
-    let k = 1;
-    while (k < pts.length - 1 && cum[k] < s) k++;
-    const seg = cum[k] - cum[k - 1] || 1;
-    return out.lerpVectors(pts[k - 1], pts[k], (s - cum[k - 1]) / seg);
-  }
-
   const auto = {
     get active() { return !!job; },
     get job() { return job; },
@@ -199,8 +269,9 @@ export function createAuto(ctx, ctrl, physics, nav) {
         const plan = () => {
           if (job !== j) return;
           if (ctrl.mode === 'fly') {
-            // flying to a floor: come down onto a floor connected to the target, then walk (never through walls)
-            const land = nav.isReady ? nav.landing(ctrl.feet, r.feet, 16) : null;
+            // flying to a floor: come down onto a floor connected to the target, then walk (never through walls);
+            // the spot that makes the quickest trip, gliding at max(5, 3·speed) (see glide) and walking at speed
+            const land = nav.isReady ? nav.landing(ctrl.feet, r.feet, 16, Math.max(5, v * 3) / v) : null;
             if (land) glide(j, land, true); else hop(j);
             return;
           }
@@ -258,10 +329,14 @@ export function createAuto(ctx, ctrl, physics, nav) {
 
       if (j.phase === 'walk') {
         const P = j.path;
-        // progress: project the body onto the next few segments (monotonic)
+        // progress: project the body onto the next few segments (monotonic); a segment wholly above or below the
+        // body (the path passing over itself on a newel stair, a stair under a landing) is not where we are. Only the
+        // segment's height RANGE counts: a string-pulled segment runs straight from a stair head to a far node, so
+        // its interpolated height can be metres off the stair the body is on.
         let bestS = j.s, bestD = Infinity, bestSeg = j.seg;
-        for (let k = j.seg; k < Math.min(j.seg + 4, P.pts.length - 1); k++) {
+        for (let k = j.seg; k < Math.min(j.seg + 6, P.pts.length - 1); k++) {
           const A = P.pts[k], B = P.pts[k + 1];
+          if (feet.y < Math.min(A.y, B.y) - 1.2 || feet.y > Math.max(A.y, B.y) + 1.2) continue;
           const sx = B.x - A.x, sz = B.z - A.z, l2 = sx * sx + sz * sz;
           let t = l2 > 0 ? ((feet.x - A.x) * sx + (feet.z - A.z) * sz) / l2 : 0;
           t = Math.max(0, Math.min(1, t));
@@ -272,36 +347,63 @@ export function createAuto(ctx, ctrl, physics, nav) {
         const end = P.pts[P.pts.length - 1];
         const distGoal = Math.hypot(end.x - feet.x, end.z - feet.z);
         const remaining = Math.max(P.total - j.s, distGoal);
-        if (distGoal < 0.18 || (P.total - j.s < 0.05 && distGoal < 0.6)) { arrive(j); return hold(); }
+        // arrived only on the goal's own level (a stacked path can pass right over or under its end)
+        if (Math.abs(end.y - feet.y) < 0.6 && (distGoal < 0.18 || (P.total - j.s < 0.05 && distGoal < 0.6))) { arrive(j); return hold(); }
 
-        // steering: carrot slightly ahead on the path
-        const look = 0.55 + 0.3 * j.speed;
+        // steering: carrot slightly ahead on the path, never across the inside of a tight curve
+        const look = reach(P, j.s, 0.55 + 0.3 * j.speed, 0.07, feet);
         pointAt(P, j.s + look, tmp);
         let dx = tmp.x - feet.x, dz = tmp.z - feet.z;
         const dl = Math.hypot(dx, dz) || 1;
         dx /= dl; dz /= dl;
-        // view: turn toward a point further ahead; pitch gently toward the ground ahead (stairs!)
-        pointAt(P, j.s + 1.8 + 0.6 * j.speed, tmp2);
+        // view. A winding stair (a tight curve whose floor 1.2 m on is another level): the shaft wall is ~0.75 m
+        // ahead along the walk and the treads lie inside the curve, well below the eye (~37° climbing, ~65°
+        // descending, 1.2 m on), so a view along the walk and the slope shows only wall and soffit. Look across
+        // the curve at the treads 0.8 m on, down so the tread 1.2 m on stays in the lower part of the frame.
+        // Elsewhere: turn toward a point further ahead and pitch gently toward the ground 4 m on (stairs!).
+        const kappa = curvature(P, j.s, 1.5);
+        let pitchT = null;
+        if (kappa > 0.8) {
+          pointAt(P, j.s + NEWEL_LOOK, tmp2);
+          const ny = physics.standFloor(tmp2.x, tmp2.z, tmp2.y, true);
+          if (ny !== null && Math.abs(ny - feet.y) > 0.3) {
+            const d = Math.max(0.5, Math.hypot(tmp2.x - feet.x, tmp2.z - feet.z));
+            const half = ((ctx.camera?.fov || 62) * DEG) / 2;
+            pitchT = Math.max(-0.8, Math.min(-0.05, Math.atan2(ny - feet.y - EYE_HEIGHT, d) + 0.35 * half));
+            pointAt(P, j.s + NEWEL_YAW, tmp2);
+          }
+        }
+        if (pitchT === null) pointAt(P, j.s + Math.max(Math.min(look, 0.6), reach(P, j.s, 1.8 + 0.6 * j.speed, 0.12, feet)), tmp2);
         const vx = tmp2.x - feet.x, vz = tmp2.z - feet.z;
         let yawErr = 0;
         if (Math.hypot(vx, vz) > 0.3) yawErr = turnToward(Math.atan2(-vx, -vz), dt, 2.4);
-        pointAt(P, j.s + 4, tmp2);
-        const hd = Math.max(1.5, Math.hypot(tmp2.x - feet.x, tmp2.z - feet.z));
-        const pitchT = Math.max(-0.28, Math.min(0.28, Math.atan2(tmp2.y - feet.y, hd) * 0.75)) - 0.03;
+        if (pitchT === null) {
+          pointAt(P, j.s + 4, tmp2);
+          const gy = physics.standFloor(tmp2.x, tmp2.z, tmp2.y, true); // the ground there, not the chord's height
+          if (gy !== null) tmp2.y = gy;
+          const hd = Math.max(1.5, Math.hypot(tmp2.x - feet.x, tmp2.z - feet.z));
+          pitchT = Math.max(-0.28, Math.min(0.28, Math.atan2(tmp2.y - feet.y, hd) * 0.75)) - 0.03;
+        }
         ctrl.pitch += (pitchT - ctrl.pitch) * (1 - Math.exp(-dt * 2.2));
         // speed: turn in place while the way lies well off the view (never walk backwards), ease in,
         // slow for sharp turns, ease out at the goal
         const turning = Math.abs(yawErr) > 1.2;
         const turnK = Math.max(0.35, Math.min(1, 1 - Math.abs(yawErr) / 1.6));
         const acc = Math.max(1.6, j.speed * 0.9), dec = Math.max(1.1, j.speed * 0.45);
-        const want = turning ? 0 : Math.min(j.speed * turnK, Math.sqrt(2 * dec * Math.max(0, remaining - 0.1)) + 0.12);
+        // tight curves (newel stairs, corners): keep the turn rate a person (and the view) can follow, ≤ 2 rad/s
+        const vCurve = kappa > 0.2 ? Math.max(0.5, 2.0 / kappa) : Infinity;
+        const want = turning ? 0 : Math.min(j.speed * turnK, vCurve, Math.sqrt(2 * dec * Math.max(0, remaining - 0.1)) + 0.12);
         j.v += Math.max(-2 * acc * dt, Math.min(acc * dt, want - j.v));
         // stuck recovery: hop forward along the path, then give up and teleport
         if (j.s > j.lastS + 0.25) { j.lastS = j.s; j.stuckT = 0; } else if (!turning) j.stuckT += dt;
         if (j.stuckT > 2.2) {
           j.stuckT = 0;
           if (++j.nudges > 3) { hop(j); return hold(); }
-          pointAt(P, j.s + 1.2, tmp); ctrl.place(tmp); j.s += 1.2; j.lastS = j.s;
+          // on the floor nearest the body's own height (the path's interpolated height can be in the air)
+          pointAt(P, j.s + 1.2, tmp);
+          const fy = physics.standFloor(tmp.x, tmp.z, feet.y, true);
+          if (fy !== null) tmp.y = fy;
+          ctrl.place(tmp); j.s += 1.2; j.lastS = j.s;
         }
         return steer(dx, dz, j.v);
       }

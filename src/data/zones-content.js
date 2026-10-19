@@ -541,6 +541,38 @@ export const ZONE_CONTENT = {
     confidenceNote: 'Footprint and place unsourced (lock §58: nominal box); the identity of the donors\' chamber (Shekalim 5:6) with the dawn vessel store (Tamid 3:4) is the Report\'s.',
   },
 
+  'lishkat-pinchas': {
+    name: { en: 'Lishkat Pinchas HaMalbish — the chamber of the vestments', he: 'לשכת פנחס המלביש', translit: 'Lishkat Pinchas HaMalbish' },
+    sanctity: 6,
+    sanctityNote: 'The Rambam counts it among the chambers "in Ezrat Yisrael" (BhB 5:17), and it is shown at that rung. The model builds it partly in the thickness of the Nikanor wall, opening to Ezrat Yisrael by its door and to Ezrat Nashim by the gate\'s right-hand wicket; the sources give it no rung of its own.',
+    access: 'Kohanim, to be dressed and to return their garments; the officer over the vestments and his men. One who comes up from Ezrat Nashim enters by the right-hand wicket of Sha\'ar Nikanor (EK / Chanukat HaBayit: the wickets are these chambers\' doorways).',
+    services: [
+      'Pinchas, the officer over the vestments, keeps the kohanim\'s garments (Shekalim 5:1: "Pinchas over the vestments")',
+      'The chamber stands to the right of the east gate of the Azarah, for one entering westward (Middot 1:4; Rambam BhB 5:17)',
+    ],
+    description: "One of the two chambers that flank Sha'ar Nikanor: \"two chambers it had, one on its right and one on its left — the chamber of Pinchas the dresser and the chamber of the chavitin makers\" (Middot 1:4). Pinchas is the officer \"over the vestments\" in the Mishnah's list of the Temple's officers (Shekalim 5:1). The model puts it north of the gate (the right hand of one entering westward), in the wall and 7 amot into Ezrat Yisrael, 12 × 10 amot, its door to the court 4 × 8 and the gate's north wicket as its doorway to Ezrat Nashim.",
+    sources: ['Middot 1:4', 'Middot 2:6', 'Shekalim 5:1', 'Rambam BhB 5:17', 'Yoma 19a', 'Report §5'],
+    stand: [250.5, 341.5, 13.5],
+    confidence: 'reconstruction',
+    confidenceNote: 'Side (right of the gate = north) from Rambam BhB 5:17; its size, its place in the wall and its doors are reconstruction (site.js azarah.chamber.pinchas).',
+  },
+
+  'lishkat-chavitin': {
+    name: { en: 'Lishkat Osei Chavitin — the chamber of the chavitin bakers', he: 'לשכת עושי חביתין', translit: 'Lishkat Osei Chavitin' },
+    sanctity: 6,
+    sanctityNote: 'The Rambam counts it among the chambers "in Ezrat Yisrael" (BhB 5:17), and it is shown at that rung. The model builds it partly in the thickness of the Nikanor wall, opening to Ezrat Yisrael by its door and to Ezrat Nashim by the gate\'s left-hand wicket.',
+    access: 'Kohanim: the bakers of the Kohen Gadol\'s daily chavitin. One who comes up from Ezrat Nashim enters by the left-hand wicket of Sha\'ar Nikanor (EK / Chanukat HaBayit).',
+    services: [
+      'Before dawn the two companies that searched the Azarah by torchlight, one round the east and one round the west, meet at the place of the chavitin makers: "Shalom — all is well!" — and the chavitin makers are set to make the chavitin (Tamid 1:3; Rambam BhB 8:11)',
+      "The Kohen Gadol's daily minchah: a tenth of an ephah halved, baked in twelve loaves and fried on the griddle, half offered in the morning and half toward evening (Report §64.4, §65)",
+    ],
+    description: "The other chamber flanking Sha'ar Nikanor, to its left for one entering westward (Middot 1:4; Rambam BhB 5:17): here the Kohen Gadol's chavitin were made every day. It is the meeting point of the dawn inspection of the Azarah (Tamid 1:3). The model puts it south of the gate, in the wall and 7 amot into Ezrat Yisrael, 12 × 10 amot, with a hearth and griddle, its door to the court 4 × 8 and the gate's south wicket as its doorway to Ezrat Nashim.",
+    sources: ['Middot 1:4', 'Middot 2:6', 'Tamid 1:3', 'Rambam BhB 5:17', 'Rambam BhB 8:11', 'Report §5', 'Report §64.4'],
+    stand: [250.5, 319.5, 13.5],
+    confidence: 'reconstruction',
+    confidenceNote: 'Side (left of the gate = south) from Rambam BhB 5:17; its size, its place in the wall and its doors are reconstruction (site.js azarah.chamber.chavitin).',
+  },
+
   'ezrat-kohanim': {
     name: { en: 'Ezrat Kohanim — the Court of the Priests', he: 'עזרת כהנים', translit: 'Ezrat Kohanim' },
     sanctity: 7,
