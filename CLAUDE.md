@@ -3,6 +3,16 @@
 Browser 3D walk-through of Har HaBayit and the Second Temple (three.js r186, WebGLRenderer, Vite).
 Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/units and verification tools.
 
+## Standing requirements from the user
+- Accuracy to the research is paramount and drives every scene.
+- People, animals, objects and textures in every scene must be ultra-realistic and properly attired for their role.
+- Something must always be going on: between major rites, individuals' offerings (olah, chatat, asham, shelamim,
+  todah, meal and bird offerings, libations) run whenever the halachah allows (between the two temidim, not on
+  Shabbat) and are watchable from the "Happening now" list and the map; at night, the burning of the day's limbs and
+  fats, the watch and the other night duties continue. `tools/coverage.mjs`/`validate-schedule.mjs` guard this.
+- The map is labeled, shows the user's position and live activity per area, and lets the user select an area and go.
+- Start: slightly before dawn at the outer (Chel) steps leading into the Temple.
+
 ## Ground truth
 - The research lives one level up (`../report/parts/*.md`, `../sources/`). It is the authority.
 - `../engine/temple_manifest.json`, `../diagrams/`, `../video/` are SAMPLES (the user said so): use them only as
@@ -28,6 +38,12 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   steers A*. Half-amah stairs need sub-step probes (|Δh| up to 0.8 m per cell when each rise ≤ 0.35 m).
 - Audio is synthesised in module Workers (`src/audio/worker.js`); `?debug=audio` opens an audition panel.
 - Psalm melodies, choir size on low/medium, insect season: reconstruction (see docs/decisions/audio.md).
+- Offerings: notar is burned by day only; at night the visible burning is the fats and limbs on the altar, turned
+  all night (Rambam TuM 1:6); weekday fats are not burned on Shabbat, so Friday night shows the fire alone.
+  Frequencies in OFFERING_RULES are totals that include the composite sets (yoledet, zav, nazir, metzora): stage
+  from `frequency.alone` with one seeded day quantile, never perDay plus sets.
+- People shaders: no dFdx/fwidth inside pattern branches (ANGLE/D3D11 flattens them; 10–18 s compiles); robes use
+  a bake-time skirt cage + `clothSkin` flatten pass (MAX_BONES 36); people splice their own `lights_fragment_begin`.
 - Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
   give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.

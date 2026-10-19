@@ -37,11 +37,11 @@ Kalya orev is an iron blade, NOT gold spikes). (3) Never use non-traditional or 
 |---|---|
 | `src/core/*`, `src/main.js`, `src/systems.js`, `src/world/index.js`, `src/world/geom.js`, `index.html`, `vite.config.js`, `tools/shot.mjs`, `ARCHITECTURE.md` | orchestrator (ask in your final report if you need a change) |
 | `src/data/site.js` (+ `docs/site-model.md`) | site-model |
-| `src/data/schedule.js`, `src/data/zones-content.js`, `src/data/glossary.js` | schedule-data |
+| `src/data/schedule.js`, `src/data/zones-content.js`, `src/data/glossary.js`, `src/data/offerings.js`, `tools/validate-schedule.mjs`, `tools/coverage.mjs` | schedule-data / offerings-data |
 | `src/world/materials/**` | materials |
 | `src/world/terrain/**`, `src/world/mount/**` | build-mount (terrain, Mount walls/gates/stoas, soreg, chel, causeway, city context) |
 | `src/world/courts/**` | build-courts (Ezrat Nashim, 15 steps, Nikanor, Azarah walls/gates/chambers, Beit HaMoked, underground) |
-| `src/world/altar/**` | build-altar (Mizbeach, kevesh, kiyor, slaughter zone, duchan, Ulam steps) |
+| `src/world/altar/**` | build-altar (Mizbeach, kevesh, kiyor, slaughter zone, Ulam steps) — the duchan, Azarah pavement and amah channel are built by build-courts |
 | `src/world/heichal/**` | build-heichal (Ulam, Heichal, Kodesh, vessels, parochot, KhK, ta'im, roof) |
 | `src/time/**`, `src/env/**` | time-env |
 | `src/render/**` (+ may refine `autoDetect` via a function exported from `src/render/`) | render |
@@ -199,7 +199,10 @@ Conventions used by the data: `view.at` may be `[X, Y, Z]` — Z picks the floor
 `dayTypes: ['occasional']` marks reference-only events that are never active on the clock (shown in the zone
 info as "also here, on its days"). Zone sanctity is numbered 0–10 per the Rambam's count (BhB 7:12–13):
 Eretz Yisrael 0 … Har HaBayit 3 … Heichal 9, Kodesh HaKodashim 10 (`SANCTITY_SCALE` in zones-content.js).
-Validate with `node tools/validate-schedule.mjs`.
+Validate with `node tools/validate-schedule.mjs` and `node tools/coverage.mjs` (no gap > 10 min in watchable activity on
+any day type). Events may carry `offerings: [OFFERING_TYPES ids]` (src/data/offerings.js: step-by-step procedures,
+stations, `offeringWindows(dayType, zmanim, {prevDayType, hebrew})`, `OFFERING_RULES`); time specs also accept
+`{ at: 'midnight', offset }` and `{ clock: 'HH:MM' }`.
 
 **Determinism:** everything the sim shows is a pure function of `(ctx.time.t, date)`; jumping the clock
 re-poses every actor instantly (no accumulated state). Sound cues fire only when time passes a cue moment
@@ -259,12 +262,18 @@ standard, volume, mouse sensitivity/invert, FOV, labels, aggadah layer. Mobile-f
 * **Fires:** pass `size` in metres (omitted = per-kind preset). Static pyre/hearth/brazier fires get the fire-shadow
   slots on high/ultra. `ctx.fx.setFire(id, 0..1)` (eases), `attachTorch(obj, opts)`, `smokeColumn({kind:'incense',…})`,
   `ctx.fx.list()`.
+* **Movables:** `ctx.movables.get('door:<element id>').userData.open(f)` (0 shut … 1 folded back; `openAmount`), also
+  `curtain:<id>`, `wheel:azarah.chamber.golah` (`spin(rad)`), `altar.kiyor` (`raise(f)`), `heichal.menorah.lamp-N`
+  (`setLit`; lamp-1 = ner ma'aravi), `heichal.nivreshet` (`glint()`), `parah.pyre` (`show(bool)`).
 * **Physics/player:** `ctx.physics.floorAt(x,z)` without `fromY` returns the standable walking floor;
   with `fromY` the highest up-facing surface below it. Also `floorsAt`, `standFloor`, `findStand`, `rebuild`.
   `ctx.player.goTo()` resolves a boolean; `teleport`, `setLook`, `setInputEnabled(false)` (UI panels), `floorAtSite`.
   Colliders must be closed with outward normals; tag door leaves `'door'` or register them in `ctx.movables`.
 * **People:** extra role `kohen_offduty`; props `shofar`, `machtah_gold_yk`, `folded_garments`; `setSite(X, Y, { near: Z })`
-  on multi-level spots; crowd `layout: 'prostrate'`; `util.poseAlongPath`, `util.phaseFor`.
+  on multi-level spots; crowd `layout: 'prostrate'`; `util.poseAlongPath`, `util.phaseFor`; `setProps(right, left)`,
+  animal `setLead(human)`; service poses `semichah receive flay carry_limbs wave kemitzah melikah stoke toss salt
+  hold_legs lead`; animal poses `bound bound_tied struggle walk_led stand_halter drink`; birds `pigeon turtledove`.
+  Distinct prop batches are capped per tier (14/22/34/56, nearest first; torches exempt).
 * **Audio:** composite helpers `ctx.audio.libation({people, walk})`, `ctx.audio.tekiahSet(pos)`; the ambience director
   owns all bed loops (sim must not create them; use `ctx.audio.ambience.setPopulation(n)`, `hush()/release()`);
   moving sources `{ follow: object3D }`. Captions via bus `'caption'`.
