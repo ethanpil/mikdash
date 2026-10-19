@@ -1,7 +1,9 @@
 // people/ — procedural, research-grounded people and animals (ARCHITECTURE.md §10).
 //
 //   ctx.people.spawn({ role, seed, site?, heading?, pose?, phase?, prop?, hand? }) -> Actor
-//   ctx.people.spawnAnimal('lamb'|'ram'|'goat'|'bull'|'dove', { seed }) -> Actor (poses: stand walk lie bound graze | dove: stand peck fly)
+//   ctx.people.spawnAnimal('lamb'|'ram'|'goat'|'bull'|'dove'|'pigeon'|'turtledove', { seed }) -> Actor
+//        quadruped poses: stand walk graze lie drink bound bound_tied struggle walk_led stand_led stand_halter;
+//        birds: stand peck perch fly. animal.setLead(humanActor|null, hand) draws a lead rope to the leader's fist.
 //   ctx.people.spawnProp(name) -> Actor-like free prop (setSite / setHeading / setVisible / dispose); a free torch burns
 //   ctx.people.crowd({ roles, count, region:{min:[X,Y],max:[X,Y],z?|near?} | points:[[X,Y,Z?] | {pos,heading,near?}],
 //                      pose, phase, heading, seed, prop, layout?:'prostrate' })
@@ -13,7 +15,11 @@
 //   ctx.people.util.phaseFor(actor|role, pose, distanceMeters) -> walk/run phase that keeps feet planted
 //
 // Actor: object3D, setSite(X,Y,Z?), setPosition(v), setHeading(deg), setPose(name, phase?), setProp(name|null, hand),
+//        setProps(right, left) (one prop per hand, e.g. the limb-bearers of Tamid 4:3), setLead(leader) (animals),
 //        setVisible(b), setSpeed(m/s), dispose(). Phase omitted → the pose animates on its own.
+//   ctx.people.tamid.carriers — the nine bearers' hands in Tamid 4:3 order: [{ right, left, pose }]
+//   Offering poses: semichah semichah_high hold_legs receive flay carry_limbs carry_limbs_walk lead lead_walk wave
+//   kemitzah melikah stoke toss salt (see clips.js); hung carcass props have their origin at the hook.
 //        setSite Z: a number = exact height; { near: Z } = the walking floor nearest Z (stairs, galleries, upper
 //        rooms); omitted = the walking floor (court/hall floors on the site datums — never a roof or beam above).
 //        Floors are re-resolved when the colliders are (re)built.
@@ -72,6 +78,16 @@ export async function init(ctx) {
     animals: ANIMAL_NAMES,
     props: PROP_NAMES,
     poses: Object.keys(HUMAN_CLIPS),
+    // Tamid 4:3: "the first with the head and the right leg — the head in his right hand … the leg in his left";
+    // 6th the entrails in a bazach with the lower legs on top, 7th the fine flour, 8th the chavitin, 9th the wine
+    tamid: {
+      carriers: [
+        { right: 'limb_head', left: 'limb', pose: 'carry_limbs' }, { right: 'limb_foreleg', left: 'limb_foreleg', pose: 'carry_limbs' },
+        { right: 'limb_oketz', left: 'limb', pose: 'carry_limbs' }, { right: 'limb_chazeh', left: 'limb_gerah', pose: 'carry_limbs' },
+        { right: 'limb_dofen', left: 'limb_dofen', pose: 'carry_limbs' }, { right: 'entrails_bazach', left: null, pose: 'carry' },
+        { right: 'solet', left: null, pose: 'carry' }, { right: 'chavitin', left: null, pose: 'carry' }, { right: 'wine_jug', left: null, pose: 'carry' },
+      ],
+    },
     animalPoses: Object.keys(QUAD_CLIPS),
     birdPoses: Object.keys(BIRD_CLIPS),
     get actors() { return [...sys.actors]; },

@@ -68,12 +68,20 @@ export const ROLES = {
   child: { arch: 'child', grey: [0, 0], scale: [0.88, 1.08] },
 };
 
+// Animal palettes — classes: SKIN = bare skin (muzzle), HAIR = (birds) head, GA = fleece / body coat / body
+// plumage, GB = the short-haired face and lower legs (sheep, goat) / head and neck (bull) / wings (birds),
+// STRIPE = (birds) the neck patch. Breed colours are reconstruction (docs/decisions/people-realism.md):
+// fat-tailed sheep with white fleece and brown-to-black face and legs, black goats, red-brown cattle.
+const SHEEP_FACE = ['#6e4a30', '#4a3224', '#9a7350', '#2e2420'];
 export const ANIMALS = {
-  lamb: { rig: 'lamb', build: 'sheep', palette: pal(['#efe9dc', '#ddd2bf'], ['#e8dfd0', '#c9bba4'], ['#efe9dc', '#e9e2d3', '#f2ede2', '#e4dccb'], ['#e9dfd0', '#dbcfbc', '#efe7da', '#d5c8b2'], ['#2a2420', '#3a302a']) },
-  ram: { rig: 'ram', build: 'sheep', horns: true, palette: pal(['#e6dfd0', '#d2c6b0'], ['#e0d6c4', '#bfae94'], ['#e8e1d2', '#ded6c4', '#ece6d9', '#d8cfbd'], ['#e2d8c7', '#d2c6b2', '#e8dfd1', '#c9bca6'], ['#2a2420', '#3a302a']) },
-  goat: { rig: 'goat', build: 'goat', palette: pal(['#2a2420', '#1a1614'], ['#2a2420', '#1a1614'], ['#2b2522', '#211c1a', '#3a302a', '#2a2420'], ['#2b2522', '#211c1a', '#3a302a', '#2a2420'], ['#1a1614', '#2a2420']) },
-  bull: { rig: 'bull', build: 'bull', palette: pal(['#7a4a2e', '#5e3722'], ['#7a4a2e', '#5e3722'], ['#7c4b2f', '#6a3f27', '#86553a', '#5f3a25'], ['#7c4b2f', '#6a3f27', '#86553a', '#5f3a25'], ['#2a2420', '#3a302a']) },
-  dove: { rig: 'dove', build: 'dove', palette: pal(['#8f97a3', '#7d8591'], ['#8f97a3', '#7d8591'], ['#9aa1ab', '#8b929d', '#a3a8b0', '#868d98'], ['#9aa1ab', '#8b929d', '#a3a8b0', '#868d98'], ['#3d4a45', '#4a3d52']) },
+  lamb: { rig: 'lamb', build: 'sheep', palette: pal(['#5a4a46', '#3a302e'], ['#e8dfd0', '#c9bba4'], ['#efe7d6', '#e6dcc8', '#f2ecdf', '#ddd1bb'], SHEEP_FACE, ['#2a2420', '#3a302a']) },
+  ram: { rig: 'ram', build: 'sheep', horns: true, palette: pal(['#5a4a46', '#3a302e'], ['#e0d6c4', '#bfae94'], ['#e8e0cf', '#ddd3bf', '#ebe4d6', '#d6cab3'], SHEEP_FACE, ['#2a2420', '#3a302a']) },
+  goat: { rig: 'goat', build: 'goat', palette: pal(['#2e2626', '#211c1c'], ['#2a2420', '#1a1614'], ['#1c1917', '#232020', '#151312', '#2b2624'], ['#1c1917', '#2a2422', '#151312', '#4a3a2e'], ['#1a1614', '#2a2420']) },
+  bull: { rig: 'bull', build: 'bull', palette: pal(['#3a3030', '#2a2222'], ['#7a4a2e', '#5e3722'], ['#7a4528', '#6b3b22', '#8a5534', '#5c331e'], ['#4e2c18', '#3e2414', '#5e3820', '#2e1c12'], ['#2a2420', '#3a302a']) },
+  // birds: the young pigeon (ben yonah) and the turtledove (tor) — Vayikra 1:14, 5:7, 12:8
+  dove: { rig: 'dove', build: 'dove', kind: 'pigeon', palette: pal(['#b0545a', '#9a4a50'], ['#6f7680', '#646b75'], ['#8f97a3', '#868e9a', '#9aa1ab', '#7f8793'], ['#9ba2ac', '#8f97a1', '#a5abb3', '#87909b'], ['#3f5e52', '#55456a']) },
+  pigeon: { rig: 'dove', build: 'dove', kind: 'pigeon', palette: pal(['#b0545a', '#9a4a50'], ['#6f7680', '#646b75'], ['#8f97a3', '#868e9a', '#9aa1ab', '#7f8793'], ['#9ba2ac', '#8f97a1', '#a5abb3', '#87909b'], ['#3f5e52', '#55456a']) },
+  turtledove: { rig: 'dove', build: 'dove', kind: 'turtledove', palette: pal(['#b0545a', '#9a4a50'], ['#8e8f99', '#7e808a'], ['#b39484', '#a88a7a', '#bb9c8a', '#9f8273'], ['#9a6a48', '#8a5e40', '#a6764f', '#7f573c'], ['#a89a92', '#9a8c86']) },
 };
 
 export const ROLE_NAMES = Object.keys(ROLES);

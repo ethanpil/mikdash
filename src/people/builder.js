@@ -13,7 +13,8 @@ export const CLS = { FIX: 0, SKIN: 1, HAIR: 2, GA: 3, GB: 4, STRIPE: 5 };
 export const PAT = {
   NONE: 0, SKIN: 1, LINEN_BOX: 2, WOOL: 3, METAL: 4, AVNET: 5, TECHELET: 6, EPHOD: 7, LINEN: 8, HAIR: 9,
   FLEECE: 10, WOOD: 11, HORN: 12, GEM: 13, TZITZ: 14, WOOL_CLAVI: 15, REED: 16, MEAT: 17, CORD: 18, FACE: 19,
-  FAT: 20, COAT: 21,
+  FAT: 20, COAT: 21, EYE: 22, HAIR_SHELL: 23, FLEECE_SHELL: 24, FACE1: 25, WOUND: 26, AEYE: 27, ROPE: 28, SALT: 29,
+  BREAD: 30, FLOUR: 31, LIQUID: 32, FEATHER: 33, NAIL: 34, COAT_LONG: 35, MUZZLE: 36, HIDE: 38,
 };
 
 const _c = new Color();
@@ -95,6 +96,8 @@ export class MeshBuilder {
     this.rig = rig;
     this.pos = []; this.uv = []; this.col = []; this.mat = []; this.si = []; this.sw = []; this.idx = [];
     this.seams = [];
+    this.mo = null;        // per-vertex morph deltas (xyz face-shape field, w fullness along the normal) when morph is set
+    this.morph = null;     // (P: Vector3) => [dx, dy, dz, dn] evaluated for every vertex added while set
     this.cur = { color: [1, 1, 1], rough: 0.8, metal: 0, pat: PAT.NONE, cls: CLS.FIX, grp: 0 };
     this.xf = null;
   }
@@ -119,6 +122,11 @@ export class MeshBuilder {
     const c = colOverride || this.cur.color;
     this.col.push(c[0] * shade, c[1] * shade, c[2] * shade);
     this.mat.push(this.cur.rough, this.cur.metal, this.cur.pat, this.cur.cls + 8 * this.cur.grp);
+    if (this.morph || this.mo) {
+      if (!this.mo) this.mo = new Array((this.count - 1) * 4).fill(0);
+      const d = this.morph ? this.morph(P) : null;
+      this.mo.push(d ? d[0] : 0, d ? d[1] : 0, d ? d[2] : 0, d ? d[3] : 0);
+    }
     let ws = typeof w === 'function' ? w(P) : (typeof w === 'number' ? [[w, 1]] : (w || [[0, 1]]));
     if (this.maxInfluences && ws.length > this.maxInfluences) ws = normW(ws.slice().sort((a, b) => b[1] - a[1]).slice(0, this.maxInfluences));
     const s = [0, 0, 0, 0], ww = [0, 0, 0, 0];
@@ -348,6 +356,10 @@ export class MeshBuilder {
     const base = this.count;
     this.pos.push(...o.pos); this.uv.push(...o.uv); this.col.push(...o.col); this.mat.push(...o.mat);
     this.si.push(...o.si); this.sw.push(...o.sw);
+    if (this.mo || o.mo) {
+      if (!this.mo) this.mo = new Array(base * 4).fill(0);
+      if (o.mo) this.mo.push(...o.mo); else for (let i = 0; i < o.pos.length / 3; i++) this.mo.push(0, 0, 0, 0);
+    }
     for (const i of o.idx) this.idx.push(i + base);
     for (const [a, b] of o.seams) this.seams.push([a + base, b + base]);
   }
@@ -390,6 +402,10 @@ export class MeshBuilder {
       wq[big] = Math.max(0, Math.min(255, wq[big] + (255 - s)));
     }
     g.setAttribute('pW', new Uint8BufferAttribute(wq, 4, true));
+    if (this.mo) {
+      while (this.mo.length < n * 4) this.mo.push(0, 0, 0, 0);
+      g.setAttribute('pMorph', new Float32BufferAttribute(this.mo, 4));
+    }
     g.setIndex(n > 65535 ? new Uint32BufferAttribute(this.idx, 1) : new Uint16BufferAttribute(this.idx, 1));
     g.computeVertexNormals();
     // weld seam normals

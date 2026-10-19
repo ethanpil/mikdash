@@ -23,6 +23,11 @@
 // POSITIONS (site amot, X east / Y north / Z up): `pos` is where the action is; `view.at` is a walkable standing spot
 // [X, Y, Z] — Z is the floor level, which the player uses to pick the level (player/goto.js accepts [X,Y(,Z)]).
 //
+// OFFERINGS (optional key): `offerings: [typeId, …]` lists the individual offerings an event stages — ids of
+// OFFERING_TYPES in src/data/offerings.js, which holds each type's steps (actors, stations, props, minutes, sources),
+// the day and night rules, the Cheshvan-weekday frequencies and offeringWindows(dayType, zmanim, opts).
+// COVERAGE: node tools/coverage.mjs checks that something watchable is going on in every minute of every day type.
+//
 // CHOREOGRAPHY MODULES (src/sim/choreo/<id>.js) — what each must stage:
 //   locking-up        the kohen at the keys slab of Beit HaMoked: lifts it, takes the keys, locks from within, a Levi lies
 //                     down outside the door, keys returned, garment spread on the slab, he sleeps on it.
@@ -32,7 +37,12 @@
 //   moked-night       elders asleep on the rovadin, young kohanim on the floor in their own clothes, white garments folded
 //                     by their heads, hearth glowing; one kohen down the winding stair, along the lamp-lit passage to
 //                     the Beit HaTevilah, immersing, warming at the fire, returning.
-//   altar-night       the great pile burning low with the day's limbs and fats; no attendants required by the sources.
+//   altar-night       the great pile burning with the day's limbs and fats. Evening until midnight: kohanim carrying up the
+//                     last fats and limbs, turning them with forks, putting back a limb that springs off (weekday; on
+//                     Friday only until sunset; on Shabbat they put Shabbat's own limbs and fats on and arrange them before
+//                     sunset — Rambam MK 4:3 — and tend them after it). After midnight:
+//                     one kohen turning what lies on the pile now and then, until the clearing — never on Friday night.
+//                     `fats-burning` itself (no participants) is the fire alone.
 //   moked-dawn        volunteers immersing in the Beit HaTevilah; Gevini's call (head of the 15 steps); the officer's
 //                     knock at the Moked's chel door and the door opened.
 //   lotteries         the circle of kohanim, the officer lifting a mitre, fingers raised: 1st lottery in the Moked hall;
@@ -58,7 +68,9 @@
 //                     the magrefah thrown between the Ulam and the altar; everyone running in; Teni out, two lamps, coals
 //                     spread on the golden altar; the incense man alone, all others withdrawn from the Heichal and from
 //                     between the Ulam and the altar; the prostrations (Kohen Gadol held by three, if present).
-//   nikanor-stations  the impure stood at the eastern gate by the head of the ma'amad; a metzora's eighth-day rites.
+//   nikanor-stations  the impure stood at the eastern gate by the head of the ma'amad; a metzora's eighth-day rites;
+//                     mothers after childbirth and the healed zav/zavah standing in the gateway while their birds (or a
+//                     lamb and a bird) are offered (offerings.js: yoledet, zav-zavah).
 //   birkat-kohanim    kohanim on the Ulam steps, the five vessel-holders to the south, hands raised above their heads.
 //   libation-song     segan on the SW horn with the sudarin, two trumpeters on the marble table then beside Ben Arza, the
 //                     pour, flags, cymbal, ≥12 Levites on the duchan with lyres and harps and the boys below; three
@@ -70,14 +82,23 @@
 //                     INCOMING mishmar (Sukkah 56b), after the musafim (Abaye, Yoma 33a–34a).
 //   shabbat-mishmar   the outgoing mishmar dividing its share in the south, the incoming in the north.
 //   sanhedrin         71 in a semicircle in the Gazit's chol half (station 'sanhedrin'); on Shabbat in the Chel.
-//   private-offerings owners leaning and confessing, slaughter in the north, birds at the SE/SW horns, olot on the fire.
+//   private-offerings the continuous stream of individuals' offerings between the temidim, staged from offerings.js
+//                     (OFFERING_TYPES steps, OFFERING_RULES.lanes, offeringWindows): owners leaning and confessing and
+//                     slaughter at the rings (2–6 at once); kohanim catching the blood; hanging and flaying at the
+//                     nanasin, rinsing at the marble tables and Lishkat HaMedichin, hides to the Parvah; blood on the
+//                     four horns from the sovev or thrown at the NE and SW corners below the red line; limbs and fats
+//                     salted on the ramp and carried up (6 carriers for a lamb's limbs); wine at the SW horn; birds
+//                     nipped at the SE horn on the sovev and at the SW corner below; meal-offerings brought to the SW
+//                     corner and the handful taken; waving east of the altar; owners carrying meat out; yesterday's
+//                     leftovers burned east of the ramp in the morning. Kayitz hamizbeach olot in idle hours.
 //   chambers-daily    chavitin bakers; blemished kohanim sorting wood; nazirites cooking and shaving; the Golah wheel;
 //                     hides salted at the Parvah; Beit Garmu baking (Friday); Yochanan and Achiyah reckoning the
 //                     seals against the coins at the NE chamber of Beit HaMoked (evening).
 //   beit-avtinas      (occasional only) the compounding: mortars, the grinder's chant.
 //   courts-daily      Levite gatekeepers at Nikanor; women in the Ezrat Nashim; kohanim eating the most-holy portions in
-//                     the court; on the Mount, people circling to the right (a mourner against the stream, greeted)
-//                     and prostrating opposite a repaired breach of the soreg.
+//                     the court, standing (by day and again in the evening until midnight), then scouring the copper
+//                     pots with hot water and breaking earthenware ones; on the Mount, people circling to the right (a
+//                     mourner against the stream, greeted) and prostrating opposite a repaired breach of the soreg.
 //   tamid-afternoon   the afternoon tamid at the NE corner, 2nd ring (altar.rings params.tamidAfternoon), as the morning,
 //                     with eleven carriers (two with logs); on Shabbat the crew is the incoming mishmar.
 //   menorah-lighting  the afternoon incense (withdrawal again), then the Menorah lit from the western lamp.
@@ -95,6 +116,8 @@ const sunset = (offset = 0) => ({ at: 'sunset', offset });
 const tzeit = (offset = 0) => ({ at: 'tzeit', offset });
 const dayH = (h) => ({ dayHour: h });
 const nightH = (h) => ({ nightHour: h });
+const midnight = (offset = 0) => ({ at: 'midnight', offset }); // halachic midnight (chatzot halailah)
+const clock = (hhmm) => ({ clock: hhmm }); // civil clock — only to cut a night at the civil date line (see night-turning)
 
 /** recurring standing spots (site amot; Z = the floor stood on) */
 const V = {
@@ -272,12 +295,141 @@ export const EVENTS = [
     pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
     view: { at: V.kevesh, heading: 0 },
     summary: `The day's limbs and fats are still burning on the great pile; the fire on the altar never goes out.`,
-    description: `The fats and limbs of the day's offerings may be burned all night, and the mitzvah lasts until dawn (Berachot 1:1; Megillah 2:6). So the altar glows through the night: "a perpetual fire shall be kept burning on the altar; it shall not go out" (Vayikra 6:6).\n\nWhatever has not burned away by morning is pushed to the sides of the altar when the kohanim clear it, and put back on the new pile once it is built (Tamid 2:1, 2:5). In the Second Temple the fire from heaven was there but "did not help": Rabbi Chananya (in the Bavli, Chanina) the segan said he saw it crouching like a dog (Yoma 21b). So the kohanim fed the fire with wood, and the heavenly fire is not shown (report §31).`,
+    description: `The fats and limbs of the day's offerings may be burned all night, and the mitzvah lasts until dawn (Berachot 1:1; Megillah 2:6); the Sages stopped putting them on at midnight, and what lies on the fire is turned until morning (Rambam MK 4:2; Rambam TuM 1:6) — see the evening and night events at the altar. So the altar glows through the night: "a perpetual fire shall be kept burning on the altar; it shall not go out" (Vayikra 6:6).\n\nWhatever has not burned away by morning is pushed to the sides of the altar when the kohanim clear it, and put back on the new pile once it is built (Tamid 2:1, 2:5). In the Second Temple the fire from heaven was there but "did not help": Rabbi Chananya (in the Bavli, Chanina) the segan said he saw it crouching like a dog (Yoma 21b). So the kohanim fed the fire with wood, and the heavenly fire is not shown (report §31).`,
     participants: [],
-    sources: ['Berachot 1:1', 'Megillah 2:6', 'Vayikra 6:2', 'Vayikra 6:6', 'Tamid 2:1', 'Yoma 21b', 'Report §31'],
+    sources: ['Berachot 1:1', 'Megillah 2:6', 'Vayikra 6:2', 'Vayikra 6:6', 'Rambam MK 4:2', 'Rambam TuM 1:6', 'Tamid 2:1', 'Yoma 21b', 'Report §31'],
     sounds: [],
     choreo: 'altar-night',
     importance: 2,
+    layer: 'ritual',
+  },
+  {
+    id: 'evening-altar',
+    title: { en: 'The day\'s last fats and limbs on the fire', he: 'הקטרת חלבים ואברים בלילה' },
+    dayTypes: ['weekday'],
+    when: { start: dayH(9.95), end: midnight(0) },
+    timing: { confidence: 'ordering', note: 'Fats and limbs whose blood was thrown by day may be put on the fire all night; the Sages said until midnight (Rambam MK 4:2; Megillah 2:6). The start, after the afternoon libation, is the model\'s.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
+    view: { at: V.kevesh, heading: 0 },
+    summary: `Into the evening kohanim bring up what is left of the day's fats and limbs, tend the great pile with forks, and put back any limb that springs off — until midnight.`,
+    description: `Fats that could not be burned before the afternoon tamid may still go on the fire through the night: "on it complete all the offerings" is the ideal, not the limit (Pesachim 59b), and the Sages set midnight as the end, to keep people from sin (Rambam MK 4:2–3; Megillah 2:6). Kohanim tend the great pile with shovels and forks (Tamid 2:1); a limb that springs off the altar before midnight is put back, after midnight it is not (Zevachim 9:6; Rambam MK 6:3).\n\nThe afternoon tamid's own limbs, offered at nine and a half hours (Pesachim 5:1), burn on the same pile. The court is locked from within at nightfall (Middot 1:9): the kohanim at the altar and at the meal are on the inside.`,
+    participants: [{ role: 'kohen', count: 4, note: 'tending the pile — number not given' }],
+    sources: ['Rambam MK 4:2–3', 'Rambam TuM 1:6', 'Pesachim 59b', 'Megillah 2:6', 'Berachot 1:1', 'Tamid 2:1', 'Zevachim 9:6', 'Rambam MK 6:3', 'Pesachim 5:1', 'Middot 1:9'],
+    sounds: [],
+    choreo: 'altar-night',
+    importance: 2,
+    layer: 'ritual',
+    offerings: ['olah', 'chatat', 'asham', 'shelamim', 'todah', 'bechor'],
+  },
+  {
+    id: 'friday-last-fats',
+    title: { en: 'Friday: the last fats before Shabbat', he: 'ערב שבת — הקטרה מבעוד יום' },
+    dayTypes: ['friday'],
+    when: { start: dayH(9.95), end: sunset(-2) },
+    timing: { confidence: 'ordering', note: 'Weekday fats are not burned on Shabbat (Rambam TuM 1:7 as read by the Kesef Mishneh, after Rava in Yoma 46a; Pesachim 59b), so the end at sunset is the rule; the start is the model\'s.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
+    view: { at: V.kevesh, heading: 0 },
+    summary: `On Friday afternoon the kohanim hurry the last of the day's fats and limbs onto the fire; after sunset nothing more is put on it.`,
+    description: `The tamid's "beginning" overrides Shabbat but its "end" does not, and "only on Friday" are the limbs of Friday's tamid burned (Rambam TuM 1:7) — while it is still day, not on Friday night, as the Kesef Mishneh explains it, following Rava (Yoma 46a); the burnt-offering of a weekday is not offered on Shabbat (Pesachim 59b; Shabbat 24b). So the fats of Friday's offerings go on the fire before sunset. What could not be burned in time is raised to the altar top on Friday night but not put on the fire (the Ritva, quoted by the Kesef Mishneh on TuM 1:7).\n\nThrough Friday night the pile burns by itself, and the model shows no kohanim tending it. The court is locked at nightfall (Middot 1:9).`,
+    participants: [{ role: 'kohen', count: 4, note: 'number not given' }],
+    sources: ['Rambam TuM 1:7', 'Kesef Mishneh on Rambam TuM 1:7', 'Yoma 46a', 'Ritva on Yoma ch. 1 (in Kesef Mishneh TuM 1:7)', 'Pesachim 59b', 'Shabbat 24b', 'Middot 1:9'],
+    sounds: [],
+    choreo: 'altar-night',
+    importance: 1,
+    layer: 'ritual',
+    offerings: ['olah', 'chatat', 'asham', 'shelamim', 'todah', 'bechor'],
+  },
+  {
+    id: 'shabbat-evening-altar',
+    title: { en: 'Shabbat\'s limbs burn into Saturday night', he: 'אברי שבת במוצאי שבת' },
+    dayTypes: ['shabbat'],
+    when: { start: dayH(9.95), end: midnight(0) },
+    timing: { confidence: 'ordering', note: 'Shabbat\'s own limbs and fats are put on the fire on Shabbat in their time, not left for Saturday night (Rambam MK 4:3); after Shabbat they may be turned until morning (Rambam TuM 1:6–7). The minutes are reconstruction.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
+    view: { at: V.kevesh, heading: 0 },
+    summary: `On Shabbat afternoon the kohanim put the limbs and fats of Shabbat's offerings on the great pile and arrange them; after Shabbat they tend them until midnight.`,
+    description: `No individual offerings were brought today, so the fire holds only the public ones: the two temidim and the two lambs of the Shabbat musaf (Bamidbar 28:9–10; Temurah 2:1). Their burning belongs to Shabbat and overrides it in its time — "they are not delayed until after Shabbat" (Rambam MK 4:3) — so through the afternoon the kohanim who offered the afternoon tamid, the incoming mishmar (Sukkah 56b), put its limbs and fats on the fire and arrange them; Rabbi Meir has leftover limbs set on a pile of their own "even on Shabbat" (Yoma 46a).\n\nAfter Shabbat the same kohanim turn what remains with the forks until midnight (Rambam TuM 1:6; Tamid 2:1).`,
+    participants: [{ role: 'kohen', count: 3, note: 'the incoming mishmar — number not given' }],
+    sources: ['Rambam MK 4:3', 'Yoma 46a', 'Sukkah 56b', 'Rambam TuM 1:6–7', 'Bamidbar 28:9–10', 'Temurah 2:1', 'Tamid 2:1'],
+    sounds: [],
+    choreo: 'altar-night',
+    importance: 1,
+    layer: 'ritual',
+  },
+  {
+    id: 'kodashim-meal-night',
+    title: { en: 'The most-holy portions eaten until midnight', he: 'אכילת קדשי קדשים עד חצות' },
+    dayTypes: WEEKDAYS,
+    when: { start: dayH(9.95), end: midnight(0) },
+    timing: { confidence: 'ordering', note: '"That day and the night until midnight" (Zevachim 5:3) fixes the end; the start, after the afternoon service, is reconstruction.' },
+    zone: 'ezrat-kohanim',
+    pos: [238.5, 300, 16],
+    view: { at: [240, 288, 16], heading: 350 },
+    summary: `After the afternoon service male kohanim eat the day's sin- and guilt-offerings, bird sin-offerings and meal-offering remainders in the court, until midnight.`,
+    description: `Sin- and guilt-offerings, bird sin-offerings and what remains of the meal-offerings are eaten by male kohanim "within the hangings", prepared any way they like, that day and the night until midnight (Zevachim 5:3, 5:5, 6:1, 6:4). The Torah allows until dawn; the Sages set midnight to keep people from sin (Rambam MK 10:8; Berachot 1:1).\n\nThey eat standing, for no one sits in the Azarah (Rambam BhB 7:6). Where in the court they ate, and where the meat was cooked, is not recorded; they are shown in the south-east of the Ezrat Kohanim. On Friday night they eat what was cooked before Shabbat.`,
+    participants: [{ role: 'kohen', count: 12, note: 'male kohanim of the beit av — number not given' }],
+    sources: ['Zevachim 5:3', 'Zevachim 5:5', 'Zevachim 6:1', 'Zevachim 6:4', 'Rambam MK 10:8', 'Berachot 1:1', 'Rambam BhB 7:6'],
+    sounds: [],
+    choreo: 'courts-daily',
+    importance: 1,
+    layer: 'ritual',
+    offerings: ['chatat', 'asham', 'chatat-haof', 'minchat-solet', 'minchat-machavat', 'minchat-marcheshet', 'minchat-maafeh', 'minchat-chotei'],
+  },
+  {
+    id: 'scouring',
+    title: { en: 'Scouring the pots before midnight', he: 'מריקה ושטיפה' },
+    dayTypes: ['weekday'],
+    when: { start: midnight(-40), end: midnight(0) },
+    timing: { confidence: 'ordering', note: 'Before the time of eating runs out (the Sages in Zevachim 11:7); the forty minutes are reconstruction. Not shown on Friday night.' },
+    zone: 'ezrat-kohanim',
+    pos: [238.5, 295, 16],
+    view: { at: [241, 286, 16], heading: 340 },
+    summary: `Copper pots in which a sin-offering was cooked are scoured with hot water and rinsed with cold; earthenware ones are broken — all inside the court.`,
+    description: `A copper vessel in which sacred meat was cooked must be scoured and rinsed, an earthenware one broken, and for a sin-offering this is done in the holy place (Zevachim 11:4, 11:7). Scouring is like the scouring of a cup, with hot water; rinsing like its rinsing, with cold; the spit and the grill are purged in hot water (Zevachim 11:7). The Sages required it before the time for eating ran out; Rabbi Tarfon would have let one pot serve a whole festival (Zevachim 11:7).\n\nA garment spattered with a sin-offering's blood is likewise laundered in the court (Zevachim 11:1–4). The model does not show this work on Friday night.`,
+    participants: [{ role: 'kohen', count: 3, note: 'number not given' }],
+    sources: ['Zevachim 11:1–4', 'Zevachim 11:7'],
+    sounds: [],
+    choreo: 'courts-daily',
+    importance: 1,
+    layer: 'ritual',
+  },
+  {
+    id: 'late-turning',
+    title: { en: 'After midnight: turning the limbs', he: 'מהפכין באברים כל הלילה' },
+    dayTypes: ['weekday', 'shabbat'],
+    when: { start: midnight(0), end: clock('23:59:59') },
+    timing: { confidence: 'reconstruction', note: 'Turning is allowed all night until morning (Rambam TuM 1:6); who did it and how often is not recorded. This is the part of the night before the civil date changes; night-turning continues it. Not on Friday night.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
+    view: { at: V.kevesh, heading: 0 },
+    summary: `After midnight nothing new goes on the fire, but a kohen may still turn the limbs and fats on the pile until the morning.`,
+    description: `After midnight no limb or fat is put on the fire, and one that springs off is not put back (Rambam MK 4:2; Zevachim 9:6). What already lies on the pile — of the tamid or of any offering — is turned all night until the morning: "all night until the morning" (Vayikra 6:2; Rambam TuM 1:6).\n\nWho kept this watch, and how often, the sources do not say; the dawn inspection that opens the court from Beit HaMoked (Tamid 1:3) suggests the court stood shut, so the model shows a single kohen at the pile now and then. Not on Friday night: the end of a weekday's offerings does not override Shabbat (Rambam TuM 1:7 with the Kesef Mishneh; Yoma 46a).`,
+    participants: [{ role: 'kohen', count: 1, note: 'who kept this watch is not recorded' }],
+    sources: ['Rambam TuM 1:6–7', 'Kesef Mishneh on Rambam TuM 1:7', 'Yoma 46a', 'Rambam MK 4:2', 'Zevachim 9:6', 'Vayikra 6:2', 'Tamid 1:3'],
+    sounds: [],
+    choreo: 'altar-night',
+    importance: 1,
+    layer: 'ritual',
+  },
+  {
+    id: 'night-turning',
+    title: { en: 'After midnight: turning the limbs', he: 'מהפכין באברים כל הלילה' },
+    dayTypes: WEEKDAYS,
+    when: { start: clock('00:00'), end: alot(-39) },
+    timing: { confidence: 'reconstruction', note: 'Turning is allowed all night until morning (Rambam TuM 1:6); who did it and how often is not recorded. The small hours of a weekday or Friday follow a weekday night or Saturday night; on Shabbat\'s small hours (Friday night) the pile is left alone. Ends at the clearing (Tamid 2:1).' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
+    view: { at: V.kevesh, heading: 0 },
+    summary: `In the small hours nothing new goes on the fire, but a kohen may still turn the limbs and fats on the pile until the clearing before dawn.`,
+    description: `After midnight no limb or fat is put on the fire, and one that springs off is not put back (Rambam MK 4:2; Zevachim 9:6). What already lies on the pile — of the tamid or of any offering — is turned all night until the morning: "all night until the morning" (Vayikra 6:2; Rambam TuM 1:6). Whatever is still unburned before dawn is pushed to the sides of the altar at the clearing (Tamid 2:1).\n\nWho kept this watch, and how often, the sources do not say; the dawn inspection that opens the court from Beit HaMoked (Tamid 1:3) suggests the court stood shut, so the model shows a single kohen at the pile now and then. Not on Friday night: the end of a weekday's offerings does not override Shabbat (Rambam TuM 1:7 with the Kesef Mishneh; Yoma 46a).`,
+    participants: [{ role: 'kohen', count: 1, note: 'who kept this watch is not recorded' }],
+    sources: ['Rambam TuM 1:6–7', 'Kesef Mishneh on Rambam TuM 1:7', 'Yoma 46a', 'Rambam MK 4:2', 'Zevachim 9:6', 'Vayikra 6:2', 'Tamid 1:3', 'Tamid 2:1'],
+    sounds: [],
+    choreo: 'altar-night',
+    importance: 1,
     layer: 'ritual',
   },
 
@@ -1260,24 +1412,25 @@ export const EVENTS = [
   },
   {
     id: 'private-offerings',
-    title: { en: 'Pilgrims\' offerings: leaning, confession, slaughter', he: 'קרבנות יחיד' },
+    title: { en: 'Individuals\' offerings: leaning, confession, slaughter', he: 'קרבנות יחיד — סמיכה, וידוי ושחיטה' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(106), end: dayH(8.3) },
-    timing: { confidence: 'ordering', note: 'Between the two temidim: the afternoon tamid closes the day\'s offerings (Yoma 33a). The minutes are reconstruction.' },
+    timing: { confidence: 'ordering', note: 'Between the two temidim: nothing before the morning tamid, nothing slaughtered after the afternoon one — "on it complete all the offerings" (Pesachim 58b–59a; Rambam TuM 1:3). The minutes are reconstruction.' },
     zone: 'slaughter-zone',
-    pos: [225, 360, 16],
+    pos: [221, 359.5, 16],
     view: { at: [240, 365, 16], heading: 250 },
-    summary: `Owners lean their hands on their animals and confess; the most-holy offerings are slaughtered in the north; kohanim bring the birds to the altar's southern corners.`,
-    description: `An Israelite enters the Ezrat Kohanim only to lean his hands on his offering, to slaughter it or to wave it (Kelim 1:8). The most-holy offerings are slaughtered in the north (Zevachim 5:1), the lesser ones anywhere in the Azarah (Zevachim 5:7). A bird sin-offering is made at the south-western corner of the altar, a bird olah at the south-eastern (Zevachim 63a; Zevachim 64b); a bird needs no leaning and no slaughter, so its owner — often a woman after childbirth — has no reason to enter here, and only kohanim are shown with the birds (report §59).\n\nAn owner who needs the libations for his offering pays Yochanan ben Pinchas for a seal and hands it to Achiyah for the wine and flour (Shekalim 5:4). The offerings of individuals are not brought on Shabbat. The afternoon tamid closes the day's offerings — "on it complete all the offerings" (Yoma 33a).`,
+    summary: `All day between the temidim, owners lean on their animals and confess; the most-holy offerings are slaughtered at the rings in the north and kohanim catch the blood in silver vessels.`,
+    description: `From the end of the morning tamid until the afternoon one the offerings of individuals come in a steady stream: burnt- and peace-offerings vowed or given freely, thanksgivings, sin- and guilt-offerings, firstlings. An Israelite enters the Ezrat Kohanim only to lean on, slaughter or wave his offering (Kelim 1:8). He leans with both hands and all his strength between the horns, the animal facing west, and confesses — "I have sinned… and this is my atonement"; over a peace-offering he speaks words of praise (Rambam MK 3:13–15). A woman does not lean, nor does anyone on a firstling or a tithe animal (Menachot 9:7–8). It is slaughtered at once, where he leaned (Menachot 9:8), by him or by a kohen, for slaughter is valid by anyone (Zevachim 3:1).\n\nThe most-holy offerings — olah, chatat, asham — are slaughtered and their blood received in the north (Zevachim 5:1–5), at the twenty-four rings (Middot 3:5); the lesser ones anywhere in the court (Zevachim 5:6–8). A kohen catches the blood in a silver vessel and carries it to the altar. None of this on Shabbat: an individual's offering does not override it (Temurah 2:1).\n\nFor an ordinary weekday in Cheshvan the model reckons roughly twenty to seventy animals and twice as many birds, with two to six rings in use at once — a reconstruction, set out in src/data/offerings.js. The libations for an olah or a shelamim are bought by seal from Yochanan ben Pinchas and collected from Achiyah (Shekalim 5:4).`,
     participants: [
       { role: 'israelite', count: 12, note: 'owners — numbers vary from day to day' },
-      { role: 'kohen', count: 8, note: 'including those carrying the birds to the altar' },
+      { role: 'kohen', count: 8, note: 'receiving and carrying the blood; some slaughter' },
     ],
-    sources: ['Kelim 1:8', 'Zevachim 5:1', 'Zevachim 5:7', 'Zevachim 63a', 'Zevachim 64b', 'Shekalim 5:4', 'Yoma 33a', 'Report §59'],
-    sounds: ['sheep', 'doves'],
+    sources: ['Kelim 1:8', 'Menachot 9:7–8', 'Rambam MK 3:13–15', 'Zevachim 3:1', 'Zevachim 5:1–8', 'Middot 3:5', 'Pesachim 58b', 'Pesachim 59a', 'Rambam TuM 1:3', 'Temurah 2:1', 'Shekalim 5:4'],
+    sounds: ['sheep'],
     choreo: 'private-offerings',
     importance: 2,
     layer: 'ritual',
+    offerings: ['olah', 'chatat', 'asham', 'shelamim', 'todah', 'bechor', 'maaser'],
   },
   {
     id: 'kayitz-hamizbeach',
@@ -1296,6 +1449,7 @@ export const EVENTS = [
     choreo: 'private-offerings',
     importance: 1,
     layer: 'ritual',
+    offerings: ['olah'],
   },
   {
     id: 'wood-chamber',
@@ -1325,13 +1479,14 @@ export const EVENTS = [
     pos: [380, 285, 6],
     view: { at: [375, 297, 6], heading: 160 },
     summary: `A nazir who has completed his term cooks his peace-offering, shaves his hair and throws it into the fire under the pot.`,
-    description: `The south-eastern chamber of Ezrat Nashim was the chamber of the nazirites: there they cooked their peace-offerings, shaved their hair and cast it under the pot (Middot 2:5; Nazir 6:8).\n\nOn the day his term ends the nazir brings an olah, a chatat and a shelamim (Bamidbar 6:13–20).`,
-    participants: [{ role: 'nazir', count: 2, note: 'numbers vary' }],
-    sources: ['Middot 2:5', 'Nazir 6:8', 'Bamidbar 6:13–20'],
+    description: `The south-eastern chamber of Ezrat Nashim was the chamber of the nazirites: there they cooked their peace-offerings, shaved their hair and cast it under the pot (Middot 2:5; Nazir 6:8).\n\nOn the day his term ends the nazir brings three animals — a ewe lamb for a chatat, a male lamb for an olah and a ram for a shelamim — with twenty loaves and wafers and their libations (Bamidbar 6:13–20; Nazir 6:8; Menachot 7:2). He shaves after the slaughter of the shelamim (R' Yehudah) or of the chatat (R' Elazar) (Nazir 6:7). The ram is cooked here; the kohen lays its cooked foreleg, a loaf and a wafer on the nazir's palms and waves them, and then he may drink wine (Nazir 6:9). The ram is eaten anywhere in the city that day and night until midnight (Zevachim 5:6).`,
+    participants: [{ role: 'nazir', count: 2, note: 'numbers vary' }, { role: 'kohen', count: 1, note: 'for the waving' }],
+    sources: ['Middot 2:5', 'Nazir 6:7–9', 'Menachot 7:2', 'Zevachim 5:6', 'Bamidbar 6:13–20'],
     sounds: [],
     choreo: 'chambers-daily',
     importance: 1,
     layer: 'ritual',
+    offerings: ['nazir'],
   },
   {
     id: 'metzora',
@@ -1343,16 +1498,17 @@ export const EVENTS = [
     pos: [257.5, 330.5, 13.5],
     view: { at: V.enNikanor, heading: 270 },
     summary: `On his eighth day, after immersing in the metzora'im chamber, he stands in Nikanor's gateway and puts his head, hand and foot inside for the blood.`,
-    description: `The north-western chamber of Ezrat Nashim was the chamber of the metzora'im (Middot 2:5), where they immersed — Rabbi Yehudah says not only metzora'im but anyone (Yoma 30b). On his eighth day the healed metzora stood at Sha'ar Nikanor with his offering; the kohen put the blood of his asham on his right ear, right thumb and right big toe, each thrust in turn into the Azarah (Negaim 14:8–9; Vayikra 14:14).\n\nHe may not enter until the blood of his chatat and asham has been sprinkled for him, so he leans on his offering at this gate (Zevachim 33a). There too the sotah was given to drink and women after childbirth were purified (Sotah 1:5). The report treats the gateway as left unsanctified so that he could stand in it (§59 #5); the passages it cites do not say so in those words.`,
+    description: `The north-western chamber of Ezrat Nashim was the chamber of the metzora'im (Middot 2:5), where they immersed — Rabbi Yehudah says not only metzora'im but anyone (Yoma 30b). He comes shaven of all his hair, head, beard and eyebrows (Negaim 14:3; Vayikra 14:9), with three lambs — an asham, a chatat and an olah — three tenths of flour and a log of oil; a poor man brings two birds for the chatat and olah (Negaim 14:7). The live asham and the log are waved (Menachot 5:6). He leans on the asham, it is slaughtered, and two kohanim take its blood, one in a vessel for the altar and one in his palm for the man, who puts his head, then his hand, then his foot into the gate for the blood on his right ear, thumb and big toe (Negaim 14:8–9; Vayikra 14:14).\n\nThen a kohen pours from the log into his colleague's palm, sprinkles seven times toward the Kodesh HaKodashim, puts oil on the same three places and the rest on the man's head (Negaim 14:10). He may not enter until the blood of his chatat and asham has been sprinkled for him, so he leans on his offering at this gate (Zevachim 33a; Rambam MK 3:11). There too the sotah was given to drink and women after childbirth were purified (Sotah 1:5). The report treats the gateway as left unsanctified so that he could stand in it (§59 #5); the passages it cites do not say so in those words.`,
     participants: [
-      { role: 'israelite', count: 1, note: 'the metzora' },
-      { role: 'kohen', count: 2 },
+      { role: 'israelite', count: 1, note: 'the metzora, shaven' },
+      { role: 'kohen', count: 3 },
     ],
-    sources: ['Negaim 14:8–9', 'Vayikra 14:14', 'Middot 2:5', 'Yoma 30b–31a', 'Zevachim 33a', 'Sotah 1:5', 'Report §59'],
+    sources: ['Negaim 14:3', 'Negaim 14:7–10', 'Vayikra 14:9–20', 'Menachot 5:6', 'Middot 2:5', 'Yoma 30b–31a', 'Zevachim 33a', 'Rambam MK 3:11', 'Sotah 1:5', 'Report §59'],
     sounds: [],
     choreo: 'nikanor-stations',
     importance: 1,
     layer: 'ritual',
+    offerings: ['metzora'],
   },
   {
     id: 'golah-wheel',
@@ -1494,13 +1650,202 @@ export const EVENTS = [
     pos: [238.5, 300, 16],
     view: { at: [240, 288, 16], heading: 350 },
     summary: `The meat of the day's sin- and guilt-offerings is eaten by male kohanim inside the court, cooked any way they wish.`,
-    description: `Sin-offerings and guilt-offerings are most holy: they are eaten within the hangings — inside the Azarah — by male kohanim, prepared in any manner, that day and the night until midnight (Zevachim 5:3, 5:5). What remains of the flour-offerings is likewise eaten by the kohanim in the court (Vayikra 6:9).\n\nThese come from individuals' offerings, so they are not shown on Shabbat. Where in the court they ate is not stated; they are shown in the Ezrat Kohanim, between the two temidim (report §62).`,
+    description: `Sin-offerings and guilt-offerings are most holy: they are eaten within the hangings — inside the Azarah — by male kohanim, prepared in any manner, that day and the night until midnight (Zevachim 5:3, 5:5). What remains of the flour-offerings, and the bird sin-offerings, are likewise eaten by the kohanim in the court (Vayikra 6:9; Zevachim 6:1, 6:4). They eat standing, for no one sits in the Azarah (Rambam BhB 7:6).\n\nThese come from individuals' offerings, so they are not shown on Shabbat. Where in the court they ate is not stated; they are shown in the Ezrat Kohanim, between the two temidim (report §62), and again after the afternoon service until midnight.`,
     participants: [{ role: 'kohen', count: 10, note: 'male kohanim — number not given' }],
-    sources: ['Zevachim 5:3', 'Zevachim 5:5', 'Vayikra 6:9', 'Report §62'],
+    sources: ['Zevachim 5:3', 'Zevachim 5:5', 'Zevachim 6:1', 'Zevachim 6:4', 'Vayikra 6:9', 'Rambam BhB 7:6', 'Report §62'],
     sounds: [],
     choreo: 'courts-daily',
     importance: 1,
     layer: 'ritual',
+    offerings: ['chatat', 'asham', 'chatat-haof', 'minchat-solet', 'minchat-machavat', 'minchat-marcheshet', 'minchat-maafeh', 'minchat-chotei'],
+  },
+  {
+    id: 'private-flaying',
+    title: { en: 'Hooks and marble tables: flaying and rinsing', he: 'הפשט וניתוח' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(110), end: dayH(8.4) },
+    timing: { confidence: 'ordering', note: 'Flaying follows the blood (Rambam MK 5:18), so it trails the slaughter by a few minutes and ends before the afternoon tamid takes the hooks. The minutes are reconstruction.' },
+    zone: 'slaughter-zone',
+    pos: [217, 383.75, 16],
+    view: { at: [226, 366, 16], heading: 340 },
+    summary: `Carcasses hang from the iron hooks on the dwarf pillars; kohanim flay and cut them, rinse the innards on the marble tables, and send the hides to the Parvah.`,
+    description: `North of the rings stood eight dwarf pillars with squared cedar blocks and three rows of iron hooks; the carcasses hung there and were flayed, and the innards were rinsed on marble tables (Middot 3:5; Shekalim 6:4). The animal is not hung by a broken leg: a hole is pierced at the hock (Tamid 4:2). Flaying comes after the blood is thrown (Rambam MK 5:18).\n\nA burnt-offering is cut into its limbs in the tamid's order (Tamid 4:2–3; Rambam MK 6:5–9). From the others only the fats come away for the altar — the fat over and on the innards, the kidneys, the lobe of the liver, and from a sheep the whole fat-tail (Vayikra 3:3–10; Rambam MK 1:18). The stomach is rinsed in Lishkat HaMedichin, the intestines at least three times on the tables (Tamid 4:2; Middot 5:3). The hides of the most-holy offerings go to the kohanim and are salted in the Parvah; those of the lesser ones go home with their owners (Zevachim 12:3; Middot 5:3).`,
+    participants: [
+      { role: 'kohen', count: 10, note: 'flaying, cutting and rinsing — number not given' },
+      { role: 'israelite', count: 3, note: 'owners of peace-offerings waiting for their meat' },
+    ],
+    sources: ['Middot 3:5', 'Shekalim 6:4', 'Tamid 4:2–3', 'Middot 5:3', 'Zevachim 12:3', 'Vayikra 3:3–10', 'Rambam MK 1:18', 'Rambam MK 5:18', 'Rambam MK 6:5–9'],
+    sounds: [],
+    choreo: 'private-offerings',
+    importance: 1,
+    layer: 'ritual',
+    offerings: ['olah', 'chatat', 'asham', 'shelamim', 'todah', 'bechor'],
+  },
+  {
+    id: 'altar-blood',
+    title: { en: 'Blood on the altar: four horns, or two that are four', he: 'מתן דמים' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(107), end: dayH(8.35) },
+    timing: { confidence: 'ordering', note: 'Each blood is thrown a minute or two after its slaughter, and the last before the afternoon tamid (Pesachim 59a). The minutes are reconstruction.' },
+    zone: 'mizbeach',
+    pos: [232, 336, 16],
+    view: { at: [242, 347, 16], heading: 225 },
+    summary: `Kohanim bring the blood to the altar: a sin-offering's on all four horns from the ledge, the others thrown on the north-east and south-west corners below the red line.`,
+    description: `The altar was girded at half its height with a red line, the chut hasikra, dividing the upper bloods from the lower (Middot 3:1). For a sin-offering the kohen climbs the ramp, turns right onto the sovev and puts the blood with his finger on the horns — south-east, north-east, north-west, south-west — dipping afresh for each, then pours the rest on the southern yesod (Zevachim 5:3; Rambam MK 5:7–10).\n\nThe blood of a burnt-, guilt- or peace-offering is thrown from the vessel below the line, on the north-eastern corner and then the south-western, each throw wrapping its corner so that the blood touches all four sides — "two that are four" — and the remainder goes to the southern yesod (Zevachim 5:4–7; Tamid 4:1; Kinnim 1:1; Rambam MK 5:6). A firstling's or a tithe animal's blood is given once against the yesod (Zevachim 5:8) — poured from the vessel, not thrown, in the Rambam's ruling (MK 5:17). The bloods run through two holes at the south-west corner into the channel and out to the Kidron (Middot 3:2).`,
+    participants: [{ role: 'kohen', count: 4, note: 'number not given' }],
+    sources: ['Middot 3:1', 'Middot 3:2', 'Zevachim 5:3–8', 'Tamid 4:1', 'Kinnim 1:1', 'Rambam MK 5:6–10', 'Rambam MK 5:17', 'Pesachim 59a'],
+    sounds: [],
+    choreo: 'private-offerings',
+    importance: 2,
+    layer: 'ritual',
+    offerings: ['olah', 'chatat', 'asham', 'shelamim', 'todah', 'bechor', 'maaser'],
+  },
+  {
+    id: 'altar-limbs',
+    title: { en: 'Salt, ramp and fire: limbs, fats and wine', he: 'הקטרת אברים ואימורים' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(120), end: dayH(8.4) },
+    timing: { confidence: 'ordering', note: 'After the flaying; the fats ought to be on the fire before the afternoon tamid — "on it complete all the offerings" (Pesachim 58b–59b). The minutes are reconstruction.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
+    view: { at: [231, 292, 16], heading: 315 },
+    summary: `Limbs and fats are salted on the ramp and carried up to the great pile; each olah's and shelamim's flour goes up with it, and its wine is poured at the south-west horn.`,
+    description: `Each part is brought to the ramp and salted there with salt from Lishkat HaMelach, then carried up and thrown across the hair's-breadth gap onto the great pile (Rambam MK 6:4; Middot 5:3; Zevachim 62b). The kohanim go up on the east side of the ramp, round to the right and down on the west (Zevachim 6:3). A lamb's limbs take six carriers, and two more its flour and wine; a ram's eleven; a bull's twenty-four (Yoma 2:5–7; Rambam MK 6:10–18).\n\nWith every olah and shelamim go its libations: fine flour mixed with oil, burned whole, and wine — for a lamb three log, a ram four, a bull six (Menachot 9:3, 9:6; Report §65.1). The wine is poured into the silver cup at the south-western horn, the kohen going straight there and back on his heel (Zevachim 6:2–3). The fats ought to burn before the afternoon tamid (Pesachim 59b); what remains burns into the night.`,
+    participants: [{ role: 'kohen', count: 10, note: 'carriers — per animal as above' }],
+    sources: ['Rambam MK 6:4', 'Rambam MK 6:10–18', 'Yoma 2:5–7', 'Middot 5:3', 'Zevachim 6:2–3', 'Zevachim 62b', 'Menachot 9:3', 'Menachot 9:6', 'Pesachim 58b', 'Pesachim 59b', 'Report §65.1'],
+    sounds: [],
+    choreo: 'private-offerings',
+    importance: 2,
+    layer: 'ritual',
+    offerings: ['olah', 'chatat', 'asham', 'shelamim', 'todah', 'bechor', 'nesachim'],
+  },
+  {
+    id: 'bird-offerings',
+    title: { en: 'Birds at the corners of the altar', he: 'קרבנות העוף' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(110), end: dayH(8.4) },
+    timing: { confidence: 'ordering', note: 'Between the temidim, like every individual offering (Pesachim 59a); the minutes are reconstruction.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.keren.se' },
+    view: { at: [240, 296, 16], heading: 320 },
+    summary: `Kohanim nip the birds with a thumbnail: burnt-offering birds on the ledge at the south-east horn, sin-offering birds below the red line at the south-west.`,
+    description: `Turtledoves and young pigeons — the doves only when grown, the pigeons only when young (Chullin 1:5) — are the commonest offering of all: the pair of every mother after childbirth, of the zav and zavah, of the poor. For a bird olah the kohen goes up the ramp onto the sovev to the south-eastern horn, nips off the head at the nape with his thumbnail, drains the blood on the wall, salts the head and throws it on the fire; the crop and feathers he flings to the ash place east of the ramp, then splits, salts and burns the body (Zevachim 6:5; Rambam MK 6:20–23). When the birds are many he works at the south-west, above the line (Zevachim 6:2).\n\nA bird sin-offering is made below the line at the south-western corner: the feet and wings held between his fingers and the neck over his thumb, he nips without severing — "one of the hard services of the Mikdash" (Zevachim 64b) — sprinkles its blood on the wall and squeezes the rest onto the yesod. The altar has only its blood; the kohanim eat the bird (Zevachim 6:2, 6:4; Kinnim 1:1). A bird takes no leaning (Rambam MK 3:7), so its owners stay outside; much of the bird money came through the chest marked "kinnin" (Shekalim 6:5).`,
+    participants: [{ role: 'kohen', count: 4, note: 'at the SE horn and the SW corner — number not given' }],
+    sources: ['Zevachim 6:2', 'Zevachim 6:4', 'Zevachim 6:5', 'Zevachim 64b', 'Kinnim 1:1', 'Chullin 1:5', 'Shekalim 6:5', 'Rambam MK 3:7', 'Rambam MK 6:20–23', 'Rambam MK 7:6–9'],
+    sounds: ['doves'],
+    choreo: 'private-offerings',
+    importance: 2,
+    layer: 'ritual',
+    offerings: ['olat-haof', 'chatat-haof', 'yoledet', 'zav-zavah'],
+  },
+  {
+    id: 'meal-offerings',
+    title: { en: 'Meal-offerings: the handful', he: 'מנחות — קמיצה' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(115), end: dayH(8.4) },
+    timing: { confidence: 'ordering', note: 'By day, between the temidim (Rambam MK 4:6; Pesachim 59a); the minutes are reconstruction.' },
+    zone: 'azarah',
+    pos: [203, 290, 16],
+    view: { at: [200, 286, 16], heading: 15 },
+    summary: `Fine flour, fried cakes and wafers in service vessels: a kohen brings each to the south-west corner, takes a handful, and burns it with the frankincense.`,
+    description: `The meal-offering is the poor man's gift — "whose way is it to bring a meal-offering? the poor man's" (Menachot 104b). Of fine flour with a log of oil and a handful of frankincense, it comes plain, fried on the flat griddle or in the deep pan, or baked in the oven as loaves or wafers (Menachot 5:3, 5:8–9). The flour is ground and sifted outside, but kneaded and baked inside the court, in the court's own pans and metal oven (Rambam MK 12:23); where they stood is not recorded.\n\nThe kohen brings the vessel to the point of the south-western horn, below (Zevachim 6:2), pushes the frankincense aside, takes a full handful with his right hand where the oil has gathered, puts it in a service vessel, salts it and burns it with all the frankincense on the great pile (Menachot 1:2; Rambam MK 13:12–13). The handful may be taken anywhere in the court (Zevachim 6:1). The remainder is eaten by male kohanim within the court, that day and the night until midnight (Zevachim 6:1). The sinner's meal-offering of the very poor has neither oil nor frankincense (Menachot 5:3).`,
+    participants: [
+      { role: 'kohen', count: 3, note: 'number not given' },
+      { role: 'israelite', count: 2, note: 'bringing their flour — numbers vary' },
+    ],
+    sources: ['Menachot 104b', 'Menachot 5:3', 'Menachot 5:8–9', 'Menachot 1:2', 'Zevachim 6:1', 'Zevachim 6:2', 'Rambam MK 12:23', 'Rambam MK 13:12–13', 'Rambam MK 4:6'],
+    sounds: [],
+    choreo: 'private-offerings',
+    importance: 1,
+    layer: 'ritual',
+    offerings: ['minchat-solet', 'minchat-machavat', 'minchat-marcheshet', 'minchat-maafeh', 'minchat-chotei'],
+  },
+  {
+    id: 'tenufah',
+    title: { en: 'Waving: the owner\'s hands, the kohen\'s beneath', he: 'תנופה' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(125), end: dayH(8.4) },
+    timing: { confidence: 'ordering', note: 'After the blood and the flaying, before the fats go up (Rambam MK 9:6, 9:16); the minutes are reconstruction.' },
+    zone: 'ezrat-kohanim',
+    pos: [237.5, 321.5, 16],
+    view: { at: [240.5, 334, 16], heading: 195 },
+    summary: `East of the altar a kohen lays the fats, breast and thigh — and thanksgiving loaves — on the owner's palms, puts his hands beneath, and waves them out and back, up and down.`,
+    description: `The fats of a peace-offering with its breast and thigh are waved "before God", east of the altar (Rambam MK 9:6, after Menachot 61a): the fats on the owner's palms, the breast and thigh on them, the kidneys and liver-lobe above, and for a thanksgiving one loaf of each of its four kinds on top; the kohen's hands beneath, out to each side and back, up and down (Menachot 5:6; Menachot 61b; Rambam MK 9:7–8). A woman's offering is waved by the kohen alone; only a sotah and a woman nazir wave their own (Rambam MK 9:16).\n\nThe fats go up to the altar; only then may the kohanim take the breast and thigh (Pesachim 59b; Rambam MK 9:11). The owner carries the rest out to eat with his household anywhere in Jerusalem — a peace-offering for two days and the night between, a thanksgiving that day and night until midnight, with its loaves (Zevachim 5:6–7; Kelim 1:8). A thanksgiving comes with forty loaves, and one of each kind goes to the kohen (Menachot 7:1–2).`,
+    participants: [
+      { role: 'israelite', count: 3, note: 'owners — numbers vary' },
+      { role: 'kohen', count: 2 },
+    ],
+    sources: ['Menachot 5:6', 'Menachot 61b', 'Menachot 7:1–2', 'Rambam MK 9:6–11', 'Rambam MK 9:16', 'Pesachim 59b', 'Zevachim 5:6–7', 'Kelim 1:8'],
+    sounds: [],
+    choreo: 'private-offerings',
+    importance: 1,
+    layer: 'ritual',
+    offerings: ['shelamim', 'todah', 'nazir'],
+  },
+  {
+    id: 'nikanor-purifications',
+    title: { en: 'Mothers and the healed at the eastern gate', he: 'טהרת יולדות וזבים' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(115), end: dayH(8.3) },
+    timing: { confidence: 'ordering', note: 'Between the temidim, like every individual offering (Pesachim 59a); the minutes are reconstruction.' },
+    zone: 'nikanor',
+    pos: [257.5, 330.5, 13.5],
+    view: { at: [292, 338, 6], heading: 255 },
+    summary: `Women after childbirth stand at Sha'ar Nikanor while their birds — or a lamb and a bird — are offered; a man or woman healed of a flux brings a pair of birds.`,
+    description: `At the eastern gate of the court "they purify the women after childbirth" (Sotah 1:5). Forty days after a son, eighty after a daughter, a mother brings a lamb for a burnt-offering and a dove or young pigeon for a sin-offering, or, if she is poor, two birds (Vayikra 12:6–8). Until it is offered she may not pass into Ezrat Yisrael (Kelim 1:8; Keritot 2:1), and she does not lean (Menachot 9:8): she stands in the gateway while the kohanim offer it, the sin-offering bird first, even before a lamb (Zevachim 89a–90a).\n\nMany simply dropped the price of a pair into the chest marked "kinnin", immersed, and ate sacred food that evening, trusting the kohanim to offer the birds that day (Shekalim 6:5; Eruvin 32a). Demand once drove a pair to a gold dinar, until Rabban Shimon ben Gamliel ruled that one pair covers five births, and the price fell to a quarter of a silver dinar (Keritot 1:7). A man or woman healed of a flux brings a pair too, on the eighth day (Vayikra 15:14, 15:29).`,
+    participants: [
+      { role: 'woman', count: 4, note: 'mothers after childbirth — numbers vary' },
+      { role: 'israelite', count: 1, note: 'a zav' },
+      { role: 'kohen', count: 2 },
+    ],
+    sources: ['Sotah 1:5', 'Vayikra 12:6–8', 'Vayikra 15:14', 'Vayikra 15:29', 'Kelim 1:8', 'Keritot 1:7', 'Keritot 2:1', 'Menachot 9:8', 'Zevachim 10:4', 'Zevachim 89a–90a', 'Shekalim 6:5', 'Eruvin 32a'],
+    sounds: ['doves'],
+    choreo: 'nikanor-stations',
+    importance: 1,
+    layer: 'ritual',
+    offerings: ['yoledet', 'zav-zavah', 'chatat-haof', 'olat-haof'],
+  },
+  {
+    id: 'notar-burning',
+    title: { en: 'Yesterday\'s leftovers burned', he: 'שריפת נותר' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(106), end: sunrise(136) },
+    timing: { confidence: 'reconstruction', note: 'Leftovers are burned by day only (Rambam Pesulei HaMukdashin 19:4–5); the hour is not given — shown after the morning tamid.' },
+    zone: 'kevesh',
+    pos: { el: 'altar.beit-hadeshen' },
+    view: { at: [236, 286, 16], heading: 270 },
+    summary: `Most-holy meat left past its time is burned in the court, east of the ramp — by day only, never at night, and not on Shabbat.`,
+    description: `Meat of a sin- or guilt-offering not eaten in its time becomes notar and must be burned (Vayikra 7:17; Rambam Pesulei HaMukdashin 19:1). It is burned only by day — not at night, and not on Shabbat or a festival (Pesulei HaMukdashin 19:4–5; Pesachim 7:10) — so yesterday's leftovers go to the fire this morning, and Friday's wait until Sunday. Disqualified most-holy offerings, and the fats of disqualified lesser ones, are burned in the court, east of the ramp (Rambam MK 7:3; Zevachim 104b); a lesser offering's leftovers its owner burns at home (Pesulei HaMukdashin 19:7).\n\nThe model takes this burning place east of the ramp to be the ash place of Tamid 1:4, where the morning's ash and the bird crops are laid; the sources do not say whether they were one spot.`,
+    participants: [{ role: 'kohen', count: 2, note: 'number not given' }],
+    sources: ['Vayikra 7:17', 'Rambam Pesulei HaMukdashin 19:1', 'Rambam Pesulei HaMukdashin 19:4–5', 'Rambam Pesulei HaMukdashin 19:7', 'Pesachim 7:10', 'Rambam MK 7:3', 'Zevachim 104b', 'Tamid 1:4'],
+    sounds: [],
+    choreo: 'private-offerings',
+    importance: 1,
+    layer: 'ritual',
+    offerings: ['chatat', 'asham'],
+  },
+  {
+    id: 'bikkurim-late',
+    title: { en: 'First fruits after Sukkot, without the declaration', he: 'ביכורים מן החג ועד חנוכה' },
+    dayTypes: ['occasional'],
+    when: { start: dayH(3), end: dayH(3.3) },
+    timing: { confidence: 'reconstruction', note: 'Brought from Shavuot until Chanukah (Bikkurim 1:3, 1:6). The schedule knows no seasons, so this stays reference-only; offeringWindows() in src/data/offerings.js opens a bikkurim lane by the Hebrew date (22 Cheshvan is in season).' },
+    zone: 'azarah',
+    pos: [201.5, 304.5, 16],
+    view: { at: [200, 286, 16], heading: 60 },
+    summary: `In Cheshvan a farmer may still bring late first fruits — choice olives or dates — and set the basket beside the altar, but he no longer recites the declaration.`,
+    description: `From Shavuot until Sukkot one brings first fruits and recites "My father was a wandering Aramean"; from Sukkot until Chanukah one brings but does not recite — Rabbi Yehudah ben Beteira says he recites (Bikkurim 1:6). They come only from the seven species: not dates of the hills, nor fruit of the valleys, nor olives that are not choice (Bikkurim 1:3); and they require a peace-offering, song, waving and a night in Jerusalem (Bikkurim 2:4).\n\nFrom the Mount on he carries the basket himself, as even King Agrippa did; at the court the Levites sing "I will exalt You, O Lord" (Bikkurim 3:4). The kohen puts his hand beneath the basket and waves it, and it is set down beside the altar, south of the south-western horn; the bringer bows and leaves (Bikkurim 3:6; Rambam Bikkurim 3:12). On 22 Cheshvan a lone basket is a fair sight but a rare one; the processions with the ox and the flute belong to the summer season.`,
+    participants: [
+      { role: 'israelite', count: 1, note: 'the bringer' },
+      { role: 'kohen', count: 1 },
+      { role: 'levi', count: 12, note: 'the song (Bikkurim 3:4) — whether a lone bringer was met with it is not stated' },
+    ],
+    sources: ['Bikkurim 1:3', 'Bikkurim 1:6', 'Bikkurim 2:4', 'Bikkurim 3:4', 'Bikkurim 3:6', 'Rambam Bikkurim 3:12–13'],
+    sounds: [],
+    choreo: 'private-offerings',
+    importance: 1,
+    layer: 'ritual',
+    offerings: ['bikkurim'],
   },
 
   // ======================================================================================== THE AFTERNOON

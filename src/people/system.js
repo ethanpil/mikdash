@@ -5,13 +5,14 @@
 // the skinning, so the CPU cost per figure is a few dozen floats.
 import {
   Group, Object3D, InstancedMesh, InstancedBufferAttribute, BufferGeometry, DynamicDrawUsage, Frustum, Matrix4,
-  Vector3, Sphere,
+  Vector3, Sphere, Mesh, BufferAttribute, MeshStandardMaterial, ShaderMaterial,
 } from 'three';
 import { AnimAtlas } from './anim.js';
 import { LocalPose, blendPose } from './pose.js';
 import { ARCHETYPES, ROLES, ANIMALS } from './roles.js';
 import { buildHumanGeometry } from './human.js';
-import { buildAnimalGeometry } from './animals.js';
+import { buildAnimalGeometry, halterPoint } from './animals.js';
+import { gripOffset } from './clips.js';
 import { PROPS, buildPropGeometry, propAttach, propTip } from './props.js';
 import { createPeopleMaterial, createPeopleDepthMaterials } from './material.js';
 import { CLIP_ALIASES } from './clips.js';
@@ -37,6 +38,9 @@ const _sph = new Sphere();
 const _fa = [0, 0, 0];
 const _fb = [0, 0, 0];
 const _e2 = new Float32Array(16);
+
+// distinct prop batches (draw calls) per frame by tier (low … ultra); see the draw loop
+const PROP_BATCH_CAP = [14, 22, 34, 56];
 
 // --------------------------------------------------------------------------------------------- batches
 class Batch {
@@ -141,17 +145,34 @@ class Arch {
     }
     const mat = createPeopleMaterial({
       atlas: sys.atlas, palette: this.def.palette, lerp: lod < 2, detail: lod === 0 || (lod === 1 && sys.detail >= 1),
-      physical: sys.detail >= 2 && lod < 2, dither: lod >= 1,
+      physical: sys.detail >= 2 && lod < 2, dither: lod >= 1, morph: !this.isAnimal && lod <= 1,
+      groups: this.isAnimal ? ['BEAST'] : this.key === 'kg_gold' ? ['FIG', 'KG'] : ['FIG'],
     });
+    // heroes (LOD0) cast their shadows through the LOD1 proxy below: the same silhouette at an eighth of the
+    // triangles, which matters because every shadow pass (two sun cascades, six faces per torch shadow) draws it
     const b = new Batch(sys, `${this.key}:${lod}`, this.geos[lod], mat, sys.depthFig, {
-      castShadow: !!sys.quality.shadows && lod < 2, cap: lod >= 2 ? 64 : 16,
+      castShadow: !!sys.quality.shadows && (lod === 1 || (lod === 0 && this.isAnimal)), cap: lod >= 2 ? 64 : 16,
     });
     this.batches[lod] = b;
     sys.batches.push(b);
     return b;
   }
+  /** shadow-only stand-in for LOD0 instances (LOD1 geometry; draws nothing in the colour pass) */
+  shadowProxy() {
+    if (this.proxy) return this.proxy;
+    const sys = this.sys;
+    if (!sys.quality.shadows || this.isAnimal) return null;
+    if (!this.geos[1]) this.geos[1] = buildHumanGeometry(this.def.recipe, this.rig, 1);
+    const b = new Batch(sys, `${this.key}:shadow`, this.geos[1], sys.proxyMat, sys.depthFig, { castShadow: true, cap: 16 });
+    b.mesh.receiveShadow = false;
+    this.proxy = b;
+    sys.batches.push(b);
+    return b;
+  }
   dispose() {
     for (const b of this.batches) { if (b) { b.dispose(); b.material.dispose(); } }
+    this.proxy?.dispose();
+    this.proxy = null;
     for (const g of this.geos) g?.dispose();
     this.batches = [null, null, null, null];
     this.geos = [null, null, null, null];
@@ -169,7 +190,7 @@ class PropVariant {
     if (this.batches[lod]) return this.batches[lod];
     const sys = this.sys;
     if (!this.geos[lod]) this.geos[lod] = buildPropGeometry(this.name, this.grip, this.side, lod);
-    const mat = lod === 0 ? sys.propMat0 : sys.propMat1;
+    const mat = sys.propMat(PROPS[this.name]?.flesh ? 'FLESH' : 'PROP', lod);
     const b = new Batch(sys, `prop:${this.name}:${this.grip}:${this.side}:${lod}`, this.geos[lod], mat, sys.depthProp, { castShadow: !!sys.quality.shadows && lod === 0, cap: 8 });
     this.batches[lod] = b;
     sys.batches.push(b);
@@ -189,6 +210,12 @@ function makeTint(R, role, isAnimal) {
   const skin = isAnimal ? R() : clamp(0.42 + (R() + R() + R() - 1.5) * 0.42, 0, 1);
   const grey = lerp(g[0], g[1], R() ** 1.4);
   return [skin, grey, Math.floor(R() * 4) + R() * 0.99, Math.floor(R() * 4) + R() * 0.99];
+}
+/** per-figure shape: [face-shape weight −1…1, fullness −0.6…1] (variety without extra draw calls) */
+function makeMorph(R, isAnimal) {
+  if (isAnimal) return [0, 0];
+  const a = R() * 2 - 1, b = (R() + R()) - 0.9;
+  return [a, Math.max(-0.6, Math.min(1, b))];
 }
 function makeMask(R, role) {
   let m = 0;
@@ -226,12 +253,16 @@ export class Actor {
     this.scale = lerp(sc[0], sc[1], R());
     this.clip = arch ? (arch.clip('stand') || Object.values(arch.entry.clips)[0]) : null;
     this.phase = R();
+    this.morph = makeMorph(R, this.kind !== 'human');
     this.auto = true;
     this.prev = null;
     this.fade = 0;
     this.scratch = -1;
     this.scratchEpoch = -1;
     this.prop = null;
+    this.prop2 = null;
+    this.leader = null;
+    this.leadSide = 'r';
     this.autoProp = null;
     this.visible = true;
     this.heading = 0;
@@ -304,6 +335,26 @@ export class Actor {
     this.sys._syncFlames(this);
     return this;
   }
+  /**
+   * Two props, one per hand (additive API): e.g. the tamid limb-bearers of Tamid 4:3 — setProps('limb_head', 'limb')
+   * with pose 'carry_limbs'. right/left: prop names or null. Outside two-handed poses the left prop is held in the
+   * left fist.
+   */
+  setProps(right, left) {
+    this.setProp(right || null, 'right');
+    if (left && !PROPS[left]) { console.warn(`[people] unknown prop "${left}"`); left = null; }
+    this.prop2 = left ? { name: left, side: 'l' } : null;
+    return this;
+  }
+  /**
+   * Animals: lead on a rope held in the leader's hand (Tamid 3:5 "draws it"); null lets go. The halter shows in
+   * the led poses (walk_led, stand_led, stand_halter, drink); the rope runs from its chin ring to the leader's fist.
+   */
+  setLead(leader, hand = 'right') {
+    this.leader = leader && leader !== this ? leader : null;
+    this.leadSide = /^l/i.test(hand || '') ? 'l' : 'r';
+    return this;
+  }
   /** the prop actually drawn: the one set, else the automatic one (the folded garments of a sleeping kohen) */
   get shownProp() { return this.prop || (this.autoProp ? { name: this.autoProp, side: 'r' } : null); }
   setVisible(b) { this.visible = !!b; this.object3D.visible = this.visible; this.sys._syncFlames(this); return this; }
@@ -314,6 +365,8 @@ export class Actor {
     this.disposed = true;
     if (this.scratch >= 0) { this.sys.atlas.freeScratch(this.scratch); this.scratch = -1; }
     this.prop = null;
+    this.prop2 = null;
+    this.leader = null;
     this.autoProp = null;
     this.sys._syncFlames(this);
     this.object3D.removeFromParent();
@@ -417,7 +470,7 @@ export class Crowd {
     this.x = new Float32Array(n); this.y = new Float32Array(n); this.z = new Float32Array(n);
     this.bx = new Float32Array(n); this.bz = new Float32Array(n);
     this.yaw = new Float32Array(n); this.sc = new Float32Array(n); this.off = new Float32Array(n);
-    this.tint = new Float32Array(n * 4); this.mask = new Float32Array(n);
+    this.tint = new Float32Array(n * 4); this.mask = new Float32Array(n); this.morph = new Float32Array(n * 2);
     this.fadeM = new Float32Array(n).fill(1);
     this.pointH = new Float32Array(n).fill(NaN);
     this.autoY = new Uint8Array(n); this.hintY = new Float32Array(n).fill(NaN);
@@ -446,6 +499,7 @@ export class Crowd {
       this.tint.set(t, i * 4);
       this.mask[i] = animal ? 0 : makeMask(R, def);
       this.off[i] = R();
+      this.morph.set(makeMorph(R, animal), i * 2);
       this.pointH[i] = p.h ?? NaN;
     }
     this.visible = true;
@@ -586,8 +640,19 @@ export class PeopleSystem {
   _makeShared() {
     this.depthFig = createPeopleDepthMaterials(this.atlas, false);
     this.depthProp = createPeopleDepthMaterials(this.atlas, true);
-    this.propMat0 = createPeopleMaterial({ atlas: this.atlas, prop: true, lerp: true, detail: true, physical: this.detail >= 2 });
-    this.propMat1 = createPeopleMaterial({ atlas: this.atlas, prop: true, lerp: true, detail: this.detail >= 1, physical: false });
+    this.propMats = new Map();
+    // the colour pass of a shadow proxy: every vertex outside the clip volume (nothing drawn, almost free)
+    this.proxyMat = new ShaderMaterial({ vertexShader: 'void main() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }', fragmentShader: 'void main() { gl_FragColor = vec4(0.0); }' });
+    this.proxyMat.name = 'people-shadow-proxy';
+  }
+  /** prop material by pattern group ('PROP' vessels/instruments/wood/cloth, 'FLESH' carcass and limbs) and LOD */
+  propMat(group, lod) {
+    const key = `${group}:${lod ? 1 : 0}`;
+    if (!this.propMats.has(key)) {
+      this.propMats.set(key, createPeopleMaterial({ atlas: this.atlas, prop: true, lerp: true, groups: [group],
+        detail: lod ? this.detail >= 1 : true, physical: !lod && this.detail >= 2 }));
+    }
+    return this.propMats.get(key);
   }
 
   // ---------------------------------------------------------------- floors
@@ -753,7 +818,7 @@ export class PeopleSystem {
     for (const a of this.archs.values()) a.dispose();
     for (const p of this.props.values()) p.dispose();
     this.batches = [];
-    for (const m of [this.propMat0, this.propMat1, this.depthFig.depth, this.depthFig.distance, this.depthProp.depth, this.depthProp.distance]) m.dispose();
+    for (const m of [...this.propMats.values(), this.proxyMat, this.depthFig.depth, this.depthFig.distance, this.depthProp.depth, this.depthProp.distance]) m.dispose();
     this._makeShared();
   }
 
@@ -852,6 +917,15 @@ export class PeopleSystem {
     const st = this.stats;
     st.lod[0] = st.lod[1] = st.lod[2] = st.lod[3] = 0;
     st.props = 0;
+    // every distinct prop (name × grip × hand × LOD) is its own instanced batch, i.e. a draw call: at most
+    // PROP_BATCH_CAP of them per frame by tier, given out nearest first — a rare prop far away is not drawn
+    let propBatches = 0;
+    const propCap = PROP_BATCH_CAP[Math.max(0, Math.min(3, this.detail | 0))];
+    const propBatch = (v, lod) => {
+      const b = v.batch(lod);
+      if (b.n === 0) { if (propBatches >= propCap && v.name !== 'torch') return null; propBatches++; }   // a burning torch always shows
+      return b;
+    };
     let heroes = 0;
     const e16 = this._e;
     const fadeFrom = budget + farCap * (1 - FAR_FADE);
@@ -859,7 +933,7 @@ export class PeopleSystem {
       const ci = order ? order[k] : k;
       const owner = C.owner[ci];
       const dist = C.d[ci] < 0 ? C.d[ci] + 1e5 : C.d[ci];
-      let arch, clip, phase, prevClip = null, prevPhase = 0, fade = 0, tint, mask, prop, alpha = 1;
+      let arch, clip, phase, prevClip = null, prevPhase = 0, fade = 0, tint, mask, prop, alpha = 1, mA = 0, mB = 0;
       if (owner instanceof Crowd) {
         const i = C.idx[ci];
         arch = owner.memberArch(i);
@@ -867,7 +941,9 @@ export class PeopleSystem {
         phase = owner.memberPhase(i, clip);
         this._crowdMatrix(owner, i, e16);
         tint = owner.tint.subarray(i * 4, i * 4 + 4);
-        mask = owner.mask[i];
+        mask = owner.mask[i] | (clip.halter ? 24 : 0) | (clip.cord ? 32 : 0);
+        if (owner.off_ && owner.offduty[i]) mask &= ~1;   // asleep under his own mantle: not also wearing it
+        mA = owner.morph[i * 2]; mB = owner.morph[i * 2 + 1];
         prop = owner.memberProp(i);
         alpha = owner.fadeM[i];
       } else {
@@ -876,15 +952,17 @@ export class PeopleSystem {
         prop = a.shownProp;
         if (!a.arch) { // free prop
           const v = this.propVariant(prop.name, 'free', 'r');
-          const b = v.batch(dist < 25 ? 0 : 1);
-          b.push(e16, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1);
-          st.props++;
+          const b = propBatch(v, dist < 25 ? 0 : 1);
+          if (b) { b.push(e16, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1); st.props++; }
           if (a.flames.length) this._placeFreeFlame(a, frame);
           continue;
         }
         arch = a.arch; clip = a.clip; phase = a.phase;
         if (a.prev && a.fade > 0) { prevClip = a.prev.clip; prevPhase = a.prev.phase; fade = a.fade; }
         tint = a.tint; mask = a.mask;
+        if (a.autoProp === 'folded_garments') mask &= ~1;  // asleep under his own mantle (Tamid 1:1): not also wearing it
+        if (arch.isAnimal) mask = (mask & ~56) | (clip.halter ? 8 | (a.leader ? 0 : 16) : 0) | (clip.cord ? 32 : 0);
+        mA = a.morph[0]; mB = a.morph[1];
         if (prevClip && this._crossfade(a, arch, clip, phase, prevClip, prevPhase, fade)) { prevClip = null; fade = -1; }
       }
       // LOD by projected height (LOD3 beyond the budget or when tiny)
@@ -900,17 +978,30 @@ export class PeopleSystem {
       else this.atlas.sample(clip, phase, _fa);
       fade = 0;
       const b = arch.batch(lod);
-      b.push(e16, _fa[0], _fa[1], _fa[2], alpha, _fa[0], _fa[1], _fa[2], mask, tint[0], tint[1], tint[2], tint[3]);
-      // props (none on LOD3 silhouettes except the big ones)
-      if (prop && (lod < 2 || (PROPS[prop.name]?.big && lod < 3) || (PROPS[prop.name]?.big && alpha > 0.5))) {
+      b.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, mA, mB, mask, tint[0], tint[1], tint[2], tint[3]);
+      if (lod === 0) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
+      // props (none on LOD3 silhouettes except the big ones); a second prop (setProps) in the left hand
+      const prop2 = owner instanceof Crowd ? null : owner.prop2;
+      const showP = (pr) => pr && (lod < 2 || (PROPS[pr.name]?.big && lod < 3) || (PROPS[pr.name]?.big && alpha > 0.5));
+      if (showP(prop) || showP(prop2)) {
         const grip = clip.grip || 'fist';
-        const sides = grip === 'pair' ? ['r', 'l'] : [clip.hand || prop.side];
-        const gcls = grip === 'pair' ? 'fist' : grip;
-        for (const side of sides) {
-          const att = propAttach(prop.name, gcls, side, arch.rig);
+        const list = [];
+        if (grip === 'pair') {
+          const pg = clip.pairGrip || 'fist';
+          if (showP(prop)) list.push([prop.name, 'r', pg]);
+          const left = prop2 || prop;
+          if (showP(left)) list.push([left.name, 'l', pg]);
+        } else {
+          if (showP(prop)) list.push([prop.name, clip.hand || prop.side, grip]);
+          if (showP(prop2) && (grip === 'fist' || grip.startsWith('pillow')) && (clip.hand || prop?.side || 'r') !== 'l') list.push([prop2.name, 'l', 'fist']);
+        }
+        for (const [name, side, gcls] of list) {
+          const att = propAttach(name, gcls, side, arch.rig);
           if (!att) continue;
-          const v = this.propVariant(prop.name, att.cls || gcls, side);
-          v.batch(lod).push(e16, _fa[0], _fa[1], _fa[2], 1, _fa[0], _fa[1], _fa[2], 0, att.x, att.y, att.z, att.bone);
+          const v = this.propVariant(name, att.cls || gcls, side);
+          const pb = propBatch(v, lod);
+          if (!pb) continue;
+          pb.push(e16, _fa[0], _fa[1], _fa[2], 1, _fa[0], _fa[1], _fa[2], 0, att.x, att.y, att.z, att.bone);
           st.props++;
         }
       }
@@ -930,6 +1021,7 @@ export class PeopleSystem {
     }
     // flames of bearers not drawn this frame (behind the camera, culled): follow the pose anyway
     this._updateFlames(frame);
+    this._updateRopes();
     for (const b of this.batches) b.end();
     st.figures = figures;
     st.drawn = limit;
@@ -938,6 +1030,45 @@ export class PeopleSystem {
     st.far = st.lod[3];
     st.dropped = Math.max(0, n - limit);
     st.batches = this.batches.reduce((s, b) => s + (b.n > 0 ? 1 : 0), 0);
+  }
+
+  /** lead ropes: from each led animal's halter (chin ring) to its leader's fist, sagging a little */
+  _updateRopes() {
+    const list = [];
+    for (const a of this.actors) {
+      if (!a.leader || a.disposed || !a.visible || !a.arch?.isAnimal || !a.clip?.halter) continue;
+      const h = a.leader;
+      if (h.disposed || !h.visible || !h.arch || h.arch.isAnimal) continue;
+      list.push(a);
+    }
+    if (!list.length && !this.ropes) return;
+    if (!this.ropes) this.ropes = new RopeSet(this.root);
+    const R = this.ropes;
+    R.begin();
+    for (const a of list) {
+      const h = a.leader;
+      const A = this._bonePoint(a, a.arch, a.arch.rig.index.head, halterPoint(a.arch.rig), _v);
+      const side = a.leadSide || 'r';
+      const hb = h.arch.rig.index[`hand_${side}`];
+      const g = gripOffset(h.arch.rig, side);
+      const hr = h.arch.rig.rest[hb];
+      const Bp = this._bonePoint(h, h.arch, hb, new Vector3(hr.x + g.x, hr.y + g.y, hr.z + g.z), _v2);
+      if (A && Bp) R.add(Bp, A);
+    }
+    R.end();
+  }
+
+  /** world position of a rest-space point carried by a bone of an actor in its current pose */
+  _bonePoint(a, arch, bone, restPoint, out) {
+    if (!a.clip) return null;
+    this.atlas.sample(a.clip, a.phase, _fb);
+    this.atlas.boneMatrix(arch.rig, _fb[0], _fb[1], _fb[2], bone, _m2);
+    const rp = arch.rig.rest[bone];
+    out.set(restPoint.x - rp.x, restPoint.y - rp.y, restPoint.z - rp.z).applyMatrix4(_m2);
+    a.object3D.updateWorldMatrix(true, false);
+    this._actorMatrix(a, this._e);
+    _m.fromArray(this._e);
+    return out.applyMatrix4(_m);
   }
 
   _updateFlames(frame) {
@@ -997,8 +1128,76 @@ export class PeopleSystem {
     for (const c of [...this.crowds]) c.dispose();
     for (const a of this.archs.values()) a.dispose();
     for (const p of this.props.values()) p.dispose();
+    this.ropes?.dispose();
     this.root.removeFromParent();
   }
+}
+
+/** One dynamic mesh for every lead rope (one draw call): a four-sided tube along a sagging curve. */
+class RopeSet {
+  constructor(parent, max = 24, seg = 14) {
+    this.max = max; this.seg = seg; this.side = 5;
+    const nv = max * (seg + 1) * this.side;
+    this.pos = new Float32Array(nv * 3);
+    this.nrm = new Float32Array(nv * 3);
+    const idx = [];
+    for (let r = 0; r < max; r++) {
+      const b = r * (seg + 1) * this.side;
+      for (let i = 0; i < seg; i++) for (let k = 0; k < this.side - 1; k++) {
+        const a0 = b + i * this.side + k, a1 = a0 + 1, c0 = a0 + this.side, c1 = c0 + 1;
+        idx.push(a0, c0, a1, a1, c0, c1);
+      }
+    }
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(this.pos, 3).setUsage(DynamicDrawUsage));
+    g.setAttribute('normal', new BufferAttribute(this.nrm, 3).setUsage(DynamicDrawUsage));
+    g.setIndex(idx);
+    this.geo = g;
+    this.mesh = new Mesh(g, new MeshStandardMaterial({ color: 0x8f7a5c, roughness: 0.92 }));
+    this.mesh.name = 'people:lead-ropes';
+    this.mesh.frustumCulled = false;
+    this.mesh.castShadow = true;
+    this.mesh.matrixAutoUpdate = false;
+    parent.add(this.mesh);
+    this.n = 0;
+  }
+  begin() { this.n = 0; }
+  add(A, B) {
+    if (this.n >= this.max) return;
+    const r = this.n++;
+    const dist = A.distanceTo(B);
+    const sag = Math.max(0.03, 0.18 * Math.max(0, 1.25 - dist));
+    const T = new Vector3(), N = new Vector3(), Bn = new Vector3(), up = new Vector3(0, 1, 0), p = new Vector3(), q = new Vector3();
+    const at = (t, o) => o.lerpVectors(A, B, t).addScaledVector(up, -sag * 4 * t * (1 - t));
+    let o = r * (this.seg + 1) * this.side * 3;
+    for (let i = 0; i <= this.seg; i++) {
+      const t = i / this.seg;
+      at(t, p);
+      at(Math.min(1, t + 0.02), q); T.copy(q); at(Math.max(0, t - 0.02), q); T.sub(q).normalize();
+      N.crossVectors(T, up); if (N.lengthSq() < 1e-6) N.set(1, 0, 0); N.normalize();
+      Bn.crossVectors(N, T).normalize();
+      for (let k = 0; k < this.side; k++) {
+        const a = (k / (this.side - 1)) * Math.PI * 2;
+        const cx = Math.cos(a), cy = Math.sin(a);
+        const nx = N.x * cx + Bn.x * cy, ny = N.y * cx + Bn.y * cy, nz = N.z * cx + Bn.z * cy;
+        this.pos[o] = p.x + nx * 0.0055; this.pos[o + 1] = p.y + ny * 0.0055; this.pos[o + 2] = p.z + nz * 0.0055;
+        this.nrm[o] = nx; this.nrm[o + 1] = ny; this.nrm[o + 2] = nz;
+        o += 3;
+      }
+    }
+  }
+  end() {
+    const per = (this.seg + 1) * this.side;
+    this.geo.setDrawRange(0, this.n * this.seg * (this.side - 1) * 6);
+    this.mesh.visible = this.n > 0;
+    if (!this.n) return;
+    const pa = this.geo.attributes.position, na = this.geo.attributes.normal;
+    pa.clearUpdateRanges(); na.clearUpdateRanges();
+    pa.addUpdateRange(0, this.n * per * 3); na.addUpdateRange(0, this.n * per * 3);
+    pa.needsUpdate = true; na.needsUpdate = true;
+    this.geo.computeBoundingSphere();
+  }
+  dispose() { this.mesh.removeFromParent(); this.geo.dispose(); this.mesh.material.dispose(); }
 }
 
 function isShown(o) {

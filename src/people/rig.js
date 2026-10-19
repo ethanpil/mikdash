@@ -6,7 +6,7 @@
 // children (larger head fraction, shorter legs). Statures are reconstruction (docs/decisions/people.md).
 import { Vector3 } from 'three';
 
-export const MAX_BONES = 32; // texture block width = MAX_BONES * 3 texels
+export const MAX_BONES = 36; // texture block width = MAX_BONES * 3 texels
 
 export const HUMAN_BONES = [
   'root', 'pelvis', 'spine', 'chest', 'neck', 'head',
@@ -14,6 +14,9 @@ export const HUMAN_BONES = [
   'clav_r', 'uarm_r', 'farm_r', 'hand_r', 'fing_r', 'idx_r', 'thb_r',
   'thigh_l', 'shin_l', 'foot_l', 'toe_l', 'thigh_r', 'shin_r', 'foot_r', 'toe_r',
   'fing2_l', 'idx2_l', 'fing2_r', 'idx2_r',
+  // skirt cage (computed at bake time from the legs — see cloth.js): upper panel (hip → knee) and hem panel
+  // (knee → hem) per side, so long robes cover the shins when kneeling, prostrating, sitting or lying
+  'skt_l', 'skt_r', 'skh_l', 'skh_r',
 ];
 const HUMAN_PARENT = {
   pelvis: 'root', spine: 'pelvis', chest: 'spine', neck: 'chest', head: 'neck',
@@ -22,6 +25,7 @@ const HUMAN_PARENT = {
   thigh_l: 'pelvis', shin_l: 'thigh_l', foot_l: 'shin_l', toe_l: 'foot_l',
   thigh_r: 'pelvis', shin_r: 'thigh_r', foot_r: 'shin_r', toe_r: 'foot_r',
   fing2_l: 'fing_l', idx2_l: 'idx_l', fing2_r: 'fing_r', idx2_r: 'idx_r',
+  skt_l: 'pelvis', skt_r: 'pelvis', skh_l: 'skt_l', skh_r: 'skt_r',
 };
 
 // Fractions of stature. adult ≈ classical canon; child/boy have proportionally larger heads, shorter legs.
@@ -88,6 +92,8 @@ export function humanRig(type = 'man') {
     set(`shin_${s}`, hx * 1.0, f.knee * H, -0.004);
     set(`foot_${s}`, hx * 0.98, f.ankle * H, 0.012);
     set(`toe_${s}`, hx * 0.98 + sg * 0.004, 0.016, 0.012 - (f.foot * 0.62) * H);
+    set(`skt_${s}`, hx, f.hip * H, 0.0);          // pivots with the hip joint
+    set(`skh_${s}`, hx, f.knee * H, -0.004);      // pivots at the knee
   }
   const dims = {
     H, type, sex: B.sex, young: !!B.young, style: B.style || null,
@@ -117,11 +123,13 @@ const QUAD_PARENT = {
 };
 
 // withers height H, body length L (point of shoulder → point of buttock), half body width W, head length, neck
+// lamb = male yearling of the fat-tailed breed; ram = second-year ram; goat = second-year male goat (se'ir);
+// bull = young bull (par). Reconstruction of local breeds (docs/decisions/people-realism.md).
 export const QUAD_TYPES = {
-  lamb: { H: 0.64, L: 0.74, W: 0.18, head: 0.22, neck: 0.20, legW: 0.05, stride: 0.62, up: 0.7 },
-  ram: { H: 0.78, L: 0.90, W: 0.22, head: 0.27, neck: 0.24, legW: 0.06, stride: 0.75, up: 0.65 },
-  goat: { H: 0.70, L: 0.80, W: 0.15, head: 0.24, neck: 0.25, legW: 0.055, stride: 0.72, up: 0.85 },
-  bull: { H: 1.35, L: 1.70, W: 0.33, head: 0.48, neck: 0.36, legW: 0.1, stride: 1.40, up: 0.15 },
+  lamb: { H: 0.66, L: 0.76, W: 0.165, head: 0.22, neck: 0.20, legW: 0.046, stride: 0.62, up: 0.66 },
+  ram: { H: 0.8, L: 0.93, W: 0.2, head: 0.27, neck: 0.24, legW: 0.056, stride: 0.75, up: 0.62 },
+  goat: { H: 0.72, L: 0.82, W: 0.15, head: 0.24, neck: 0.26, legW: 0.05, stride: 0.72, up: 0.82 },
+  bull: { H: 1.3, L: 1.5, W: 0.32, head: 0.48, neck: 0.36, legW: 0.1, stride: 1.40, up: 0.16 },
 };
 
 export function quadRig(type = 'lamb') {
@@ -139,7 +147,8 @@ export function quadRig(type = 'lamb') {
   set('chest', 0, shY + 0.05 * H, zf + 0.18 * L);
   // neck carriage: sheep/goats hold the head up, cattle carry it low and forward
   const up = Q.up ?? 0.7, fw = Math.sqrt(1 - up * up);
-  const n0 = new Vector3(0, shY + 0.1 * H, zf - 0.02 * L);
+  // cattle carry the neck level with the back and the head low; sheep and goats hold the neck up
+  const n0 = new Vector3(0, shY + (type === 'bull' ? -0.02 : type === 'goat' ? 0.08 : 0.06) * H, zf - 0.02 * L);
   const nd = new Vector3(0, up, -fw - 0.2).normalize();
   const hp = n0.clone().addScaledVector(nd, Q.neck);
   set('neck', n0.x, n0.y, n0.z);

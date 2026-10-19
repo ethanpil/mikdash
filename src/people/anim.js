@@ -8,6 +8,7 @@ import { MAX_BONES, getRig } from './rig.js';
 import { PoseBuilder, LocalPose, poseToSkin, blendPose } from './pose.js';
 import { HUMAN_CLIPS } from './clips.js';
 import { QUAD_CLIPS, BIRD_CLIPS } from './animal-clips.js';
+import { clothCage, clothSkin } from './cloth.js';
 
 export const BLOCK_ROWS = 1024;
 export const BLOCK_W = MAX_BONES * 3;
@@ -54,16 +55,17 @@ export class AnimAtlas {
       clips[name] = {
         name, start: f, frames: c.frames, loop: !!c.loop, rate: c.rate ?? 0.2,
         stride: typeof c.stride === 'string' ? rig.dims[c.stride] : (c.stride || 0),
-        grip: c.grip || 'fist', hand: c.hand || null,
+        grip: c.grip || 'fist', hand: c.hand || null, halter: !!c.halter, cord: !!c.cord, pairGrip: c.pairGrip || null,
       };
       for (let i = 0; i < c.frames; i++) {
         const ph = c.loop ? i / c.frames : i / (c.frames - 1);
         P.reset();
-        try { c.fn(P, rig, ph); } catch (e) {
+        try { c.fn(P, rig, ph); if (rig.kind === 'human') clothCage(P, rig); } catch (e) {
           if (!this._warned) { console.error(`[people] clip ${name} failed on ${rigKey}`, e); this._warned = true; }
           P.reset();
         }
         poseToSkin(rig, P.lp, grown, f * FLOATS_PER_FRAME);
+        if (rig.kind === 'human') clothSkin(rig, grown, f * FLOATS_PER_FRAME);
         const lo = f * LOCAL_STRIDE;
         locals.set(P.lp.q, lo);
         locals.set(P.lp.t, lo + MAX_BONES * 4);
@@ -139,6 +141,7 @@ export class AnimAtlas {
     const off = F * FLOATS_PER_FRAME;
     this.master.fill(0, off, off + FLOATS_PER_FRAME);
     poseToSkin(rig, lp, this.master, off);
+    if (rig.kind === 'human') clothSkin(rig, this.master, off);
     const bx = F >> 10, y = F & (BLOCK_ROWS - 1);
     const start = (y * this.width + bx * BLOCK_W) * 4;
     const toH = DataUtils.toHalfFloat;

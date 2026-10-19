@@ -2,6 +2,7 @@
 import { EVENTS, DAY_TYPES, eventsFor } from '../src/data/schedule.js';
 import { SITE, zoneAtSite } from '../src/data/site.js';
 import { computeZmanim } from '../src/time/zmanim.js';
+import { OFFERING_TYPES, OFFERING_RULES, STATIONS } from '../src/data/offerings.js';
 
 const errors = [], warns = [];
 const err = (m) => errors.push(m), warn = (m) => warns.push(m);
@@ -23,6 +24,7 @@ function resolver(z) {
     }
     if (spec.dayHour !== undefined) return wrap(z.sunrise + spec.dayHour * z.shaahDay);
     if (spec.nightHour !== undefined) return wrap(z.sunset + spec.nightHour * z.shaahNight);
+    if (spec.clock !== undefined) { const m = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(String(spec.clock)); return m ? wrap(+m[1] * 60 + +m[2] + (+m[3] || 0) / 60) : NaN; }
     return NaN;
   };
 }
@@ -65,7 +67,8 @@ for (const e of EVENTS) {
   if (typeof e.choreo !== 'string' || !/^[a-z-]+$/.test(e.choreo)) err(`${tag}: choreo`);
   if (![1, 2, 3].includes(e.importance)) err(`${tag}: importance`);
   if (!LAYERS.has(e.layer)) err(`${tag}: layer`);
-  const extra = Object.keys(e).filter((k) => !['id', 'title', 'dayTypes', 'when', 'timing', 'zone', 'pos', 'view', 'summary', 'description', 'participants', 'sources', 'sounds', 'choreo', 'importance', 'layer'].includes(k));
+  if (e.offerings !== undefined && !(Array.isArray(e.offerings) && e.offerings.length && e.offerings.every((o) => OFFERING_TYPES[o]))) err(`${tag}: offerings ${e.offerings} (ids of OFFERING_TYPES in src/data/offerings.js)`);
+  const extra = Object.keys(e).filter((k) => !['id', 'title', 'dayTypes', 'when', 'timing', 'zone', 'pos', 'view', 'summary', 'description', 'participants', 'sources', 'sounds', 'choreo', 'importance', 'layer', 'offerings'].includes(k));
   if (extra.length) err(`${tag}: unexpected keys ${extra}`);
 }
 
@@ -102,13 +105,19 @@ const SEQ = [
   ['friday-blasts-work', 'friday-blasts-holy'], ['friday-blasts-holy', 'locking-up'], ['afternoon-song', 'locking-up'],
   ['afternoon-song', 'seals'], ['seals', 'friday-blasts-work'], ['seals', 'locking-up'], ['song-weekday', 'kodashim-meal'], ['kodashim-meal', 'tamid-afternoon'],
   ['locking-up', 'moked-night'],
+  // individuals' offerings (src/data/offerings.js): after the morning song, before the afternoon tamid; the evening after it
+  ...['private-flaying', 'altar-blood', 'altar-limbs', 'bird-offerings', 'meal-offerings', 'tenufah', 'nikanor-purifications', 'notar-burning']
+    .flatMap((id) => [['song-weekday', id], ['song-friday', id], [id, 'tamid-afternoon']]),
+  ['afternoon-song', 'evening-altar'], ['afternoon-song', 'friday-last-fats'], ['afternoon-song', 'kodashim-meal-night'],
+  ['afternoon-song-shabbat', 'shabbat-evening-altar'], ['evening-altar', 'late-turning'], ['shabbat-evening-altar', 'late-turning'],
+  ['night-turning', 'clearing-altar'], ['scouring', 'late-turning'],
 ];
 // [a, b]: a starts no later than b starts (within 12 h)
 const SEQ_START = [['locking-up', 'night-watch'], ['night-watch', 'ish-har-habayit'], ['fats-burning', 'locking-up'], ['maamad-morning', 'tamid-slaughter'], ['gate-levites', 'tamid-slaughter']];
 const byId = Object.fromEntries(EVENTS.map((e) => [e.id, e]));
 for (const [a, b] of SEQ) if (!byId[a] || !byId[b]) err(`SEQ names unknown event ${a} / ${b}`);
 // events wholly inside another's window
-const INSIDE = [['sleeping-guard', 'ish-har-habayit'], ['mesibah-keri', 'moked-night'], ['magrefah', 'maamad-morning'], ['tamid-slaughter', 'maamad-morning'],
+const INSIDE = [['scouring', 'kodashim-meal-night'], ['late-turning', 'fats-burning'], ['night-turning', 'fats-burning'], ['sleeping-guard', 'ish-har-habayit'], ['mesibah-keri', 'moked-night'], ['magrefah', 'maamad-morning'], ['tamid-slaughter', 'maamad-morning'],
   ['impure-east-gate', 'maamad-morning'], ['tamid-afternoon', 'maamad-afternoon'], ['afternoon-song', 'maamad-afternoon']];
 for (const ds of DATES) {
   const T = times(zFor(ds));
@@ -226,6 +235,25 @@ for (const e of EVENTS) {
   const ch = chambersAt(v).filter((c) => c !== ROOMS[vz]); if (ch.length) warn(`${e.id}: view inside chamber ${ch}`);
   const dist = Math.hypot(p[0] - v[0], p[1] - v[1]);
   viewRows.push(`${e.id.padEnd(26)} pos ${pz.padEnd(22)} view ${String(vz).padEnd(22)} d=${dist.toFixed(1)}`);
+}
+
+// ---------------------------------------------------------------- offering stations (src/data/offerings.js)
+for (const [id, st] of Object.entries(STATIONS)) {
+  if (!SITE.zones[st.zone]) err(`station ${id}: zone ${st.zone} not in site.js`);
+  if (st.el && !SITE.elements[st.el]) err(`station ${id}: element ${st.el} not in site.js`);
+  const p = st.at || (st.el && st.f ? point({ el: st.el, f: st.f }) : null);
+  if (p && st.zone !== 'outside') { const zz = zoneAtSite(p[0], p[1], p[2] + 0.5); if (zz !== st.zone) warn(`station ${id}: point in zone ${zz}, stated ${st.zone}`); }
+}
+for (const t of Object.values(OFFERING_TYPES)) for (const s of t.steps || []) for (const a of [].concat(s.at || [])) if (!STATIONS[a]) err(`offering ${t.id} step ${s.id}: unknown station ${a}`);
+// frequency: the sets' yields name real types, and each component's remainder after the sets is ≥ 0 with lo ≤ hi
+{
+  const F = OFFERING_RULES.frequency;
+  for (const s of F.sets) {
+    const y = OFFERING_TYPES[s]?.frequency?.yields;
+    if (!y) { err(`frequency: set ${s} has no frequency.yields`); continue; }
+    for (const c of Object.keys(y)) if (!OFFERING_TYPES[c]?.frequency || F.sets.includes(c)) err(`frequency: set ${s} yields unknown or composite type ${c}`);
+  }
+  for (const [id, [lo, hi]] of Object.entries(F.alone)) if (!(lo >= 0 && hi >= lo)) err(`frequency: ${id} alone [${lo}, ${hi}] — the sets bring more than the type's total`);
 }
 
 // ---------------------------------------------------------------- report

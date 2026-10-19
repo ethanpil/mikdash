@@ -53,8 +53,10 @@ function armHang(P, s, k = {}) {
   P.rot(`clav_${s}`, 0, 0, (k.shrug || 0) * sg);
   P.rot(`uarm_${s}`, k.flex ?? 4, (k.twist || 0) * sg, -(k.add ?? hangAdduction(P.rig)) * sg);
   P.rot(`farm_${s}`, k.elbow ?? 10, (k.ftwist ?? 12) * sg, 0);
-  P.rot(`hand_${s}`, k.wrist ?? 0, 0, (k.dev ?? 0) * sg);
-  P.fingers(s, k.curl ?? 30, k.icurl ?? 22, 16);
+  P.rot(`hand_${s}`, k.wrist ?? 4, 0, (k.dev ?? 0) * sg);
+  // a relaxed hand: the fingers held together in a soft cascade (index least, little finger most — the cascade
+  // across the three is modelled in the mesh), the thumb alongside the index
+  P.fingers(s, k.curl ?? 30, k.icurl ?? 22, k.thumb ?? 4);
 }
 
 function breathe(P, ph, a = 1) {
@@ -154,7 +156,7 @@ function walkBody(P, r, ph, o = {}) {
       P.rot(`uarm_${s}`, 3 + A * f, 0, -(run ? 8 : hangAdduction(r) - 1) * sg);
       P.rot(`farm_${s}`, (run ? 78 : 12) + (run ? 12 : 9) * Math.max(0, f), 6 * sg, 0);
       P.rot(`hand_${s}`, 0, 0, 0);
-      P.fingers(s, run ? 70 : 26, run ? 60 : 20, 16);
+      P.fingers(s, run ? 70 : 36, run ? 60 : 28, 16);
     }
   }
   feetCycle(P, r, ph, run
@@ -241,9 +243,11 @@ function keyFlat(P, r) { // full-length hishtachavayah: face down, arms & legs s
     P.rot(`farm_${s}`, 6, 0, 0);
     P.rot(`hand_${s}`, 0, 80 * sg, 0);
     P.fingers(s, 6, 4, 8, 6);
-    P.rot(`thigh_${s}`, 0, 0, 11 * sg);
-    P.rot(`shin_${s}`, -2, 0, 0);
-    P.rot(`foot_${s}`, -78, 0, 0);
+    // the legs rest on the floor (thighs, knees and the tops of the feet down), a little apart: the hips flex
+    // toward the floor from the chest-supported pelvis and the knees take it back (the robe lies on them — cloth.js)
+    P.rot(`thigh_${s}`, 12.5, 0, 5 * sg);
+    P.rot(`shin_${s}`, -12, 0, 0);
+    P.rot(`foot_${s}`, -66, 0, 0);
     P.rot(`toe_${s}`, 10, 0, 0);
   }
 }
@@ -565,6 +569,191 @@ export const HUMAN_CLIPS = {
   },
 };
 
+// ------------------------------------------------------------------------------------------- offering poses
+// For the sim's individual offerings and the tamid (docs/decisions/people-realism.md):
+//   semichah — the owner leans both hands on the animal's head "with all his strength" (Menachot 9:8; Yoma 36a);
+//   hold_legs — the limb-winners hold the bound tamid (Tamid 4:1; Rambam Temidin 1:10 — held by hand);
+//   receive — kabbalah: the blood caught in the mizrak under the throat;
+//   flay — at the hook, knife in the right hand, the left drawing the hide down (Tamid 4:2);
+//   carry_limbs(_walk) — a limb on each open palm as Tamid 4:3 lists them (setProps(right, left));
+//   lead(_walk) — leading an animal on a rope (Tamid 3:5 "he draws it"; animal.setLead(actor));
+//   wave — tenufah: the portions on the palms moved to and fro, up and down (Menachot 61a);
+//   kemitzah — the handful of a meal offering taken with three fingers closed over the palm (Menachot 11a);
+//   melikah — the bird held in the left hand, its nape nipped with the right thumbnail (Vayikra 1:15; Zevachim 64b);
+//   stoke — turning the limbs on the pyre with the fork (Tamid 1:4; 2:5 — all night);
+//   toss — laying a limb onto the fire; salt — salting the limbs on the ramp (Tamid 4:3).
+const palmUp = (s) => ({ thumb: V(s === 'r' ? 1 : -1, 0.25, -0.05), fingers: V(s === 'r' ? -0.05 : 0.05, 0.12, -1) });
+const palmDown = (s) => ({ thumb: V(s === 'r' ? -1 : 1, 0.1, -0.15), fingers: V(0, -0.35, -1) });
+
+function carryLimbsArms(P, r, ph, lift = 0) {
+  const d = r.dims, k = d.H / 1.67;
+  for (const [s, sg] of [['r', 1], ['l', -1]]) {
+    const h = palmUp(s);
+    openHand(P, s, V(sg * 0.2 * k, d.H * 0.6 + lift, -0.24 * k), h.thumb, h.fingers, { curl: 28, icurl: 22, thumb: 14, elbow: [0.5, -1, 0.6] });
+  }
+}
+
+function leadArm(P, r, back) {
+  const d = r.dims, k = d.H / 1.67;
+  fist(P, r, 'r', V(0.22 * k, d.H * (back ? 0.5 : 0.53), (back ? 0.06 : -0.16) * k), V(0.15, 0.4, back ? 0.9 : -0.9), V(-1, -0.2, 0), { elbow: [0.4, -1, back ? -0.2 : 0.4], curl: 88 });
+}
+
+export const OFFERING_CLIPS = {
+  semichah: {
+    frames: 16, loop: true, rate: 0.25,
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const press = 0.5 + 0.5 * sin(ph * TAU);
+      stance(P, r, { dy: -0.04 * k, pz: 0.08 * k, pp: -14, lean: -20 - 2 * press, chest: -10, head: -14, lz: -0.06, rz: 0.1 });
+      for (const [s, sg] of [['r', 1], ['l', -1]]) {
+        const h = palmDown(s);
+        openHand(P, s, V(sg * 0.05 * k, 0.66 - 0.01 * press, -0.5 * k), h.thumb, h.fingers, { curl: 14, icurl: 8, thumb: 6, elbow: [0.8, -0.6, 0.4] });
+      }
+      breathe(P, ph, 1.4);
+    },
+  },
+  semichah_high: { // on a bull's head
+    frames: 16, loop: true, rate: 0.25,
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const press = 0.5 + 0.5 * sin(ph * TAU);
+      stance(P, r, { lean: -6 - 2 * press, chest: -4, head: -6, lz: -0.08, rz: 0.12 });
+      for (const [s, sg] of [['r', 1], ['l', -1]]) {
+        const h = palmDown(s);
+        openHand(P, s, V(sg * 0.07 * k, 1.12 - 0.01 * press, -0.46 * k), h.thumb, h.fingers, { curl: 14, icurl: 8, thumb: 6, elbow: [0.9, -0.5, 0.3] });
+      }
+      breathe(P, ph, 1.4);
+    },
+  },
+  hold_legs: {
+    frames: 16, loop: true, rate: 0.3,
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      keyKneel(P, r);
+      P.rot('spine', -16, 0, 0); P.rot('chest', -14, 0, 0); P.rot('neck', 6, 0, 0); P.rot('head', -16, 0, 0);
+      const tug = 0.01 * sin(ph * TAU * 2);
+      for (const [s, sg] of [['r', 1], ['l', -1]]) {
+        const h = palmDown(s);
+        openHand(P, s, V(sg * 0.1 * k, 0.24 + tug, -0.5 * k), h.thumb, V(0, -0.8, -0.6), { curl: 70, icurl: 66, thumb: 40, elbow: [0.8, -0.3, 0.5] });
+      }
+    },
+  },
+  receive: {
+    frames: 16, loop: true, rate: 0.3, grip: 'fist', hand: 'r',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const b = 0.005 * sin(ph * TAU);
+      stance(P, r, { dy: -0.2 * k, pz: 0.13 * k, pp: -32, lean: -26, chest: -14, neck: 4, head: -18, lz: -0.04, rz: 0.08 });
+      fist(P, r, 'r', V(0.02 * k, 0.34 * k + b, -0.52 * k), V(0, 1, -0.1), V(-1, 0, -0.2), { elbow: [0.9, -0.3, 0.3] });
+      const h = palmUp('l');
+      openHand(P, 'l', V(-0.1 * k, 0.33 * k + b, -0.5 * k), h.thumb, h.fingers, { curl: 30, elbow: [0.9, -0.3, 0.3] });
+    },
+  },
+  flay: {
+    frames: 32, loop: true, rate: 0.35, grip: 'fist', hand: 'r',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const cut = sin(ph * TAU), pull = 0.5 + 0.5 * sin(ph * TAU + 1.2);
+      stance(P, r, { lean: -6, chest: -4, head: -10 + 4 * cut, lz: -0.06, rz: 0.06, cy: 6 * cut });
+      fist(P, r, 'r', V(0.06 * k, d.H * (0.6 - 0.05 * cut), -0.33 * k), V(-0.2, 0.3, -1), V(-1, -0.3, 0), { elbow: [0.7, -1, 0.3] });
+      openHand(P, 'l', V(-0.1 * k, d.H * (0.64 - 0.04 * pull), -(0.3 + 0.03 * pull) * k), V(1, 0.2, -0.3), V(0, -0.6, -1), { curl: 62, icurl: 55, thumb: 35, elbow: [0.7, -1, 0.3] });
+    },
+  },
+  carry_limbs: {
+    frames: 16, loop: true, rate: 0.2, grip: 'pair', pairGrip: 'palm',
+    fn(P, r, ph) { stance(P, r, { lean: 1 }); carryLimbsArms(P, r, ph); breathe(P, ph); },
+  },
+  carry_limbs_walk: {
+    frames: 32, loop: true, stride: 'stride', grip: 'pair', pairGrip: 'palm',
+    fn(P, r, ph) { walkBody(P, r, ph, { noArms: true }); carryLimbsArms(P, r, ph, 0.006 * cos(2 * TAU * ph)); },
+  },
+  lead: {
+    frames: 16, loop: true, rate: 0.15, grip: 'fist', hand: 'r',
+    fn(P, r, ph) { stance(P, r, { cy: -4 }); armHang(P, 'l'); leadArm(P, r, false); breathe(P, ph); },
+  },
+  lead_walk: {
+    frames: 32, loop: true, stride: 'stride', grip: 'fist', hand: 'r',
+    fn(P, r, ph) { walkBody(P, r, ph); leadArm(P, r, true); },
+  },
+  wave: {
+    frames: 32, loop: true, rate: 0.4, grip: 'pair', pairGrip: 'palm',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      // to and fro (molich u'mevi), then up and down (ma'aleh u'morid)
+      const fwd = ph < 0.5 ? sin(ph * 2 * TAU) : 0, up = ph >= 0.5 ? sin((ph - 0.5) * 2 * TAU) : 0;
+      stance(P, r, { lean: -3 - 3 * fwd, chest: -2 });
+      for (const [s, sg] of [['r', 1], ['l', -1]]) {
+        const h = palmUp(s);
+        openHand(P, s, V(sg * 0.13 * k, d.H * (0.62 + 0.05 * up), -(0.3 + 0.09 * fwd) * k), h.thumb, h.fingers, { curl: 24, elbow: [0.6, -1, 0.5] });
+      }
+    },
+  },
+  kemitzah: {
+    frames: 32, loop: true, rate: 0.3, grip: 'palm', hand: 'l',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const dip = smooth(0.1, 0.35, ph) * (1 - smooth(0.6, 0.85, ph));
+      stance(P, r, { lean: -8, chest: -4, head: -16 });
+      const h = palmUp('l');
+      openHand(P, 'l', V(-0.06 * k, d.H * 0.56, -0.3 * k), h.thumb, h.fingers, { curl: 30, elbow: [0.6, -1, 0.5] });
+      const hd = palmDown('r');
+      openHand(P, 'r', V(0.02 * k, d.H * (0.66 - 0.05 * dip), -0.31 * k), hd.thumb, V(0, -0.9, -0.4), { curl: 20 + 70 * smooth(0.3, 0.5, ph) * (1 - smooth(0.9, 1, ph)), icurl: 15, thumb: 20, elbow: [0.6, -1, 0.4] });
+    },
+  },
+  melikah: {
+    frames: 24, loop: true, rate: 0.3, grip: 'palm', hand: 'l',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const nip = smooth(0.3, 0.45, ph) * (1 - smooth(0.75, 0.9, ph));
+      stance(P, r, { lean: -6, chest: -4, head: -14 });
+      const h = palmUp('l');
+      openHand(P, 'l', V(-0.06 * k, d.H * 0.62, -0.3 * k), h.thumb, h.fingers, { curl: 45, elbow: [0.6, -1, 0.5] });
+      openHand(P, 'r', V(0.01 * k, d.H * (0.67 - 0.012 * nip), -0.34 * k), V(-0.4, 0.2, -1), V(0.2, -1, -0.3), { curl: 70, icurl: 45, thumb: 30 + 30 * nip, elbow: [0.6, -1, 0.4] });
+    },
+  },
+  stoke: {
+    frames: 24, loop: true, rate: 0.35, grip: 'fist', hand: 'r',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const s = sin(ph * TAU);
+      stance(P, r, { lean: -4 - 3 * s, chest: -2, cy: 6, py: 4, head: -8, lz: -0.14, rz: 0.12 });
+      const ax = V(-0.12, -0.32, -0.94).normalize();
+      const top = V(0.14 * k, d.H * (0.62 + 0.02 * s), (-0.06 - 0.12 * s) * k);
+      fist(P, r, 'r', top, ax.clone().negate(), V(-1, 0, 0.2), { elbow: [0.6, -1, 0.3] });
+      fist(P, r, 'l', top.clone().addScaledVector(ax, 0.4 * k), ax.clone().negate(), V(1, 0, -0.2), { elbow: [0.6, -1, 0.3] });
+    },
+  },
+  toss: {
+    frames: 32, loop: false, rate: 1 / 1.6, grip: 'pair', pairGrip: 'palm',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const up = smooth(0.1, 0.55, ph) * (1 - smooth(0.75, 1, ph));
+      stance(P, r, { lean: -4 - 6 * up, chest: -3 * up, head: -6 });
+      for (const [s, sg] of [['r', 1], ['l', -1]]) {
+        const h = palmUp(s);
+        openHand(P, s, V(sg * 0.15 * k, d.H * (0.6 + 0.16 * up), -(0.24 + 0.22 * up) * k), h.thumb, h.fingers.clone().add(V(0, 0.6 * up, 0)), { curl: 22 - 14 * up, elbow: [0.6, -1, 0.5] });
+      }
+    },
+  },
+  salt: {
+    frames: 24, loop: true, rate: 0.6, grip: 'palm', hand: 'l',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      stance(P, r, { lean: -6, head: -10 });
+      const h = palmUp('l');
+      openHand(P, 'l', V(-0.08 * k, d.H * 0.58, -0.27 * k), h.thumb, h.fingers, { curl: 30, elbow: [0.6, -1, 0.5] });
+      const take = 1 - smooth(0.15, 0.4, ph) * (1 - smooth(0.85, 1, ph));
+      const fling = smooth(0.45, 0.55, ph) * (1 - smooth(0.6, 0.85, ph));
+      openHand(P, 'r', V((-0.03 + 0.12 * (1 - take)) * k, d.H * (0.62 + 0.04 * (1 - take)), (-0.28 - 0.1 * fling) * k),
+        V(-0.5, 0.2, -1), V(-0.2, -1, -0.6 - fling), { curl: 70 - 50 * fling, icurl: 60 - 50 * fling, thumb: 40, elbow: [0.6, -1, 0.3] });
+    },
+  },
+};
+Object.assign(HUMAN_CLIPS, OFFERING_CLIPS);
+
 // name aliases for the sim's convenience
-export const CLIP_ALIASES = { stand_still: 'stand', prostration: 'prostrate', kneel_down: 'kneel', lot: 'circle_lot', sleeping: 'sleep' };
+export const CLIP_ALIASES = {
+  stand_still: 'stand', prostration: 'prostrate', kneel_down: 'kneel', lot: 'circle_lot', sleeping: 'sleep',
+  kabbalah: 'receive', tenufah: 'wave', hefshet: 'flay', carry_limb: 'carry_limbs', led: 'walk_led', bind: 'bound',
+};
 export { handQ, fist };
