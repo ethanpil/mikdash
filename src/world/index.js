@@ -1,7 +1,7 @@
 // Builds the static world. Each builder owns one folder and returns an Object3D (or null).
 // Builders register colliders / anchors / fires on ctx while building (see core/context.js).
 // Order matters only for anchors other builders might read (none should — read ctx.site instead).
-import { Group, Mesh, PlaneGeometry, MeshStandardMaterial, BoxGeometry, MeshBasicMaterial } from 'three';
+import { Group, Mesh, MeshBasicMaterial } from 'three';
 import { createMaterialLibrary } from './materials/index.js';
 import * as terrain from './terrain/index.js';
 import * as mount from './mount/index.js';
@@ -9,6 +9,7 @@ import * as courts from './courts/index.js';
 import * as altar from './altar/index.js';
 import * as heichal from './heichal/index.js';
 import { siteBoxGeometry } from './geom.js';
+import { buildTestScene } from './testscene.js';
 
 export const BUILDERS = [
   ['terrain', terrain],
@@ -39,13 +40,15 @@ export async function buildWorld(ctx, onProgress = () => {}) {
     ctx.buildTimes ||= {};
     ctx.buildTimes[name] = Math.round(performance.now() - t0);
   }
-  // Fallback ground so an empty scaffold still renders and is walkable.
-  if (!world.children.length) {
-    const g = new PlaneGeometry(4000, 4000).rotateX(-Math.PI / 2);
-    const ground = new Mesh(g, new MeshStandardMaterial({ color: 0x9a8f7a, roughness: 1 }));
-    ground.receiveShadow = true;
-    world.add(ground);
-    ctx.addCollider(g, 'fallback-ground');
+  // Fallback test plaza while the real builders are still stubs (or ?debug=testscene).
+  if (!world.children.length || ctx.params.debug.has('testscene')) world.add(buildTestScene(ctx));
+  // Material swatch preview (?debug=mats) — implemented by the materials task in materials/preview.js.
+  if (ctx.params.debug.has('mats')) {
+    try {
+      const mod = await import('./materials/preview.js');
+      const obj = await mod.buildPreview(ctx);
+      if (obj) world.add(obj);
+    } catch (e) { console.warn('[world] materials preview unavailable', e); }
   }
   if (ctx.params.debug.has('boxes')) world.add(debugElements(ctx));
   onProgress('done', 1);
