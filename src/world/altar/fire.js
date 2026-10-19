@@ -1,0 +1,278 @@
+// The altar top: the ash floor of the ma'arachah place, the tapuach and the three ma'arachot (lock #17, R' Yosi).
+//
+// Tamid 2:2 — the tapuach, the ash mound in the middle of the altar ("at times ~300 kor"); Tamid 2:3 — "they began to
+// bring up gizrin (cut pieces) to arrange the fire": all woods are valid except olive and vine, the custom: branch-wood
+// (marbiyot) of fig, walnut and oil-tree (pine); Tamid 2:4 — the great pile to the east, its face east, the inner ends
+// of the gizrin touching the tapuach, with air between the gizrin where the kindling was lit; Tamid 2:5 — the second
+// pile for the incense coals opposite the SW horn, drawn 4 amot north (fine fig wood); Yoma 45a (R' Yosi) — the third
+// pile, for keeping the fire. The gizer itself (Zevachim 62b): "the gizrin Moshe made — length an amah, width an amah,
+// thickness as the strickle of a heaped se'ah; R' Yirmiyah: in a shortened amah". Positions/sizes from site.js
+// altar.maarachah-area params. Second Temple: an ordinary wood fire (fx 'pyre'), smoke straight up; no heavenly glow.
+import { Group, Mesh, OctahedronGeometry, Matrix4, Quaternion, Euler, Vector3 } from 'three';
+import { heightField, polarField, logGeometry, logBetween, rng, noise2, Mesher } from './lib.js';
+import { applyWorldUV, mergeGeometries } from '../geom.js';
+
+export function buildFire(A) {
+  const { el, d, B, ctx } = A;
+  const R = rng(A.seed ^ 0x5a17);
+  const nz = noise2(A.seed + 17);
+  const maar = el('altar.maarachah-area');
+  const Z = maar.box.min[2];
+  const [mx0, my0] = maar.box.min, [mx1, my1] = maar.box.max;
+  const tp = maar.params.tapuach;
+  const [tcx, tcy] = tp.center;
+  const TR = tp.radius, TH = tp.height;
+  const piles = Object.fromEntries(maar.params.piles.map((p) => [p.id, p]));
+  const ASH = 'ash';
+  const BARK = 'timber_rough', END = A.mat('timber_pile_end', 'timber_rough');
+  // charred wood and charcoal: the materials task's timber_charred once it exists; meanwhile the darkest non-metal key
+  // (glass_dark: charcoal's satin black) — never the fresh bark, which hid the burnt core
+  const CHAR = A.mat('timber_charred', A.mat('glass_dark', BARK));
+  const GIZ = A.mat('timber_split', A.mat('wood_lattice', BARK));   // riven faces of the two Moshe-standard gizrin
+  const jitter = (s) => (R() - 0.5) * 2 * s;
+
+  // ---------------------------------------------------------------- the tapuach: heaped ash at its angle of repose
+  // a broad, slightly flattened crown, straight flanks (tan ≈ 0.84, 40°: site.js's 3 high on a radius of 4 leaves no
+  // room for gentler flanks), a soft talus toe running 0.6 amah past the radius into the floor drift; irregular
+  // low-frequency lobes; slumps and shovel scoops at detail ≥ 2.
+  // Everything is sampled in plan (X, Y), so the surface is continuous through the crown (no pinched star).
+  const SL = 0.84, RE = TR + 0.6;
+  const span = 2 * TH / SL - RE, rTot = RE - span;      // flank length; crown radius + toe width
+  const rCr = rTot * 0.6, rFl = rCr + span, apr = RE - rFl;
+  const prof = (r) => (r <= rCr ? TH - (SL / (2 * rCr)) * r * r
+    : r <= rFl ? TH - SL * rCr / 2 - SL * (r - rCr)
+      : r < RE ? (SL / (2 * apr)) * (RE - r) * (RE - r) : 0);
+  const lobe = (t) => 1 + 0.085 * nz(Math.cos(t) * 0.9 + 3.1, Math.sin(t) * 0.9 + 7.3, 2) + 0.03 * nz(Math.cos(t) * 2.2 + 11, Math.sin(t) * 2.2 + 5, 2);
+  const scoops = [];
+  if (d >= 2) for (let i = 0; i < 6; i++) {
+    const a = R() * Math.PI * 2, rr = TR * (0.45 + 0.35 * R());
+    scoops.push({ x: tcx + Math.cos(a) * rr, y: tcy + Math.sin(a) * rr, a, w: 0.35 + 0.2 * R(), l: 0.55 + 0.3 * R(), dep: 0.1 + 0.08 * R() });
+  }
+  const tapZ = (X, Y) => {
+    const dx = X - tcx, dy = Y - tcy, t = Math.atan2(dy, dx);
+    const r01 = Math.hypot(dx, dy) / (RE * lobe(t));
+    if (r01 >= 1) return Z - 0.03;
+    const flank = Math.sin(Math.PI * Math.min(1, r01 * 1.15));     // 0 at the crown's centre and at the toe
+    let h = prof(r01 * RE);
+    if (d >= 1) h += 0.16 * nz(X * 0.45 + 4, Y * 0.45 - 2, 3) * flank;                    // lumps of dumped shovelfuls
+    if (d >= 2) h += 0.07 * nz(X * 1.6 - 9, Y * 1.6 + 3, 2) * flank;                       // slumps
+    for (const s of scoops) {                                                              // shovel scoops on the flanks
+      const ux = X - s.x, uy = Y - s.y, ca = Math.cos(s.a), sa = Math.sin(s.a);
+      const along = (ux * ca + uy * sa) / s.l, across = (-ux * sa + uy * ca) / s.w;
+      h -= s.dep * Math.exp(-(along * along + across * across) * 2.2);
+    }
+    return Z - 0.03 + Math.max(0, h);
+  };
+  const rings = [8, 12, 20, 28][d], segs = [16, 28, 44, 60][d];
+  B.geo(polarField(tcx, tcy, rings, segs, (t) => RE * lobe(t), (r01, t, X, Y) => tapZ(X, Y), (u) => 0.35 * u * u + 0.65 * u), ASH, { collide: true, cast: true });
+
+  // ---------------------------------------------------------------- the ash floor of the 24 × 24 (a fine drift, 0 at the edge)
+  const n = [1, 24, 40, 56][d];
+  const ashH = (X, Y) => {
+    const edge = Math.min(X - mx0, mx1 - X, Y - my0, my1 - Y);
+    const fall = Math.min(1, Math.max(0, edge / 1.2));
+    const dr = Math.hypot(X - tcx, Y - tcy);
+    const skirt = Math.max(0, 1 - Math.max(0, dr - TR * 0.85) / 2.5) * 0.12;   // ash spilling off the tapuach
+    return Z + fall * (0.025 + 0.03 * (nz(X * 0.45, Y * 0.45, 3) + 1) + skirt);
+  };
+  B.geo(heightField(mx0, my0, mx1, my1, n, n, d === 0 ? () => Z : ashH), ASH, { collide: true, cast: true });
+
+  // ---------------------------------------------------------------- wood
+  const seg = [5, 7, 8, 10][d], rows = d === 0 ? 1 : d === 1 ? 2 : 3;
+  const sides = [], caps = [], chars = [];
+  /** a billet from site point a to b (amot), radius r; o: { char, taper (radius factor at a), squash, roll } */
+  const addLog = (a, b, r, o = {}) => {
+    const { matrix, len } = logBetween(a, b);
+    const rb = r * A.AMAH * (0.92 + 0.16 * R());
+    const g = logGeometry(len, rb * (o.taper ?? 1), rb * (0.88 + 0.12 * R()), seg, R, d >= 2 ? 0.07 : 0.04, rows, o.squash ?? 1, o.roll ?? 0);
+    g.side.applyMatrix4(matrix);
+    g.caps.applyMatrix4(matrix);
+    if (o.char) chars.push(g.side, g.caps); else { sides.push(g.side); caps.push(g.caps); }
+  };
+  const section = () => (R() < 0.35 ? { squash: 0.55 + 0.15 * R(), roll: R() * Math.PI } : {});   // split or round
+  const GL = 5 / 6;                                      // a gizer: one shortened amah (5 tefachim ⚙) — Zevachim 62b
+
+  // the bed of coals and ash the great pile has burnt down into: deepest at its heart, toward the tapuach
+  const gp = piles.great.box;
+  const [gx0, gy0, gz0] = gp.min, [gx1, gy1, gz1] = gp.max;
+  const gcx = (gx0 + gx1) / 2, gcy = (gy0 + gy1) / 2;
+  const bcx = gx0 + 1.5, bcy = gcy, brx = 3.4, bry = (gy1 - gy0) / 2 + 0.3, bedH = 0.55;
+  const bedZ = (X, Y) => {
+    const q = Math.hypot((X - bcx) / brx, (Y - bcy) / bry);
+    if (q >= 1) return Z - 0.02;
+    return Z - 0.02 + bedH * Math.pow(1 - q * q, 0.8) * (1 + (d >= 1 ? 0.25 * nz(X * 1.1 + 2, Y * 1.1 - 6, 2) : 0));
+  };
+  B.geo(polarField(bcx, bcy, [4, 6, 9, 12][d], [14, 22, 30, 40][d], (t) => 1 / Math.hypot(Math.cos(t) / brx, Math.sin(t) / bry),
+    (r01, t, X, Y) => bedZ(X, Y)), ASH, { collide: true, cast: true });
+  // how far a billet has burnt: 1 at the heart of the bed, 0 at the fresh outer faces
+  const burnAt = (X, Y, j) => Math.max(0, 1 - Math.hypot((X - bcx) / (brx * 0.8), (Y - bcy) / (bry * 0.75))) * (1 - 0.06 * j);
+
+  // the great pile: rows of gizrin east–west, laid end to end so the innermost ends touch the tapuach (Tamid 2:4),
+  // layered crosswise-offset with air between the rows, narrowing upward; the east ends staggered (the face east);
+  // burnt from the inside — the heart a hollow over the coals, charred and shortened billets slumped into it
+  const lr = 0.12;                                       // mean billet radius ≈ 6 cm (branch-wood, marbiyot)
+  const layerH = 2 * lr * 0.88, sp = 2 * lr * 1.55;
+  const nL = Math.max(1, Math.floor((gz1 - gz0 - lr) / layerH) + 1);
+  const mJ = (j) => 0.15 + j * 0.18;                     // side margin of layer j (the pile narrows upward)
+  for (let j = 0; j < nL; j++) {
+    const z = gz0 + lr * 0.8 + j * layerH;
+    const ys = [];
+    for (let y = gy0 + mJ(j) + (j % 2 ? sp / 2 : 0); y <= gy1 - mJ(j); y += sp) ys.push(y);
+    const m2 = mJ(Math.min(nL, j + 2));
+    ys.forEach((y0, ri) => {
+      const y = y0 + jitter(0.05);
+      // inner end: march west until the mound's surface stands at the billet's height (its end touches the tapuach)
+      let xin = gx0 + jitter(0.25);
+      for (let x = gx0 + 1.0; x > gx0 - 2.6; x -= 0.05) { if (tapZ(x, y) >= z - lr * 0.4) { xin = x + 0.03; break; } }
+      const xout = gx1 - j * 0.12 + 0.3 - R() * 0.9;      // staggered, broken east ends
+      if (xout - xin < 0.5) return;
+      const edgeRow = ri < 2 || ri >= ys.length - 2 || y < gy0 + m2 + sp || y > gy1 - m2 - sp;
+      let x = xout, first = true;
+      while (x - xin > 0.2) {
+        let L = Math.min(GL * (0.9 + 0.2 * R()), x - xin);
+        const last = x - L - xin < 0.25;
+        if (last) L = x - xin;
+        const xa = x - L, xm = x - L / 2;
+        const b = burnAt(xm, y, j);
+        const top = j >= nL - 2, visible = top || edgeRow || first || last || b > 0.2;
+        const buried = z + lr < bedZ(xm, y) - 0.02;
+        if (visible && !buried) {
+          if (b > 0.62 && j <= 4) { /* burnt away: the hollow heart over the coals */ }
+          else if (b > 0.4) {
+            // charred, shortened, tapering toward the heart; a third slumped 10–25° into the bed
+            const Ls = L * (0.45 + 0.35 * R()), slump = R() < 0.33 ? (10 + 15 * R()) * Math.PI / 180 : 0;
+            const zz = z - (b - 0.4) * 0.5;
+            const inner = [x - Ls, y + jitter(0.06), zz - Ls * Math.sin(slump)], outer = [x - 0.02, y + jitter(0.06), zz];
+            addLog(inner, outer, lr * (0.65 + 0.4 * R()), { char: true, taper: 0.45 + 0.3 * R(), ...section() });
+          } else {
+            const yaw = jitter(0.035), pitch = jitter(0.025);
+            addLog([xa + 0.02, y - yaw, z + jitter(0.03) - pitch], [x - 0.02, y + yaw, z + jitter(0.03) + pitch], lr * (0.75 + 0.5 * R()),
+              { char: b > 0.22 && R() < 0.5, ...section() });
+          }
+        }
+        x = xa - 0.03 - R() * 0.08;
+        first = false;
+      }
+    });
+  }
+  const gTop = gz0 + lr * 0.8 + (nL - 1) * layerH + lr;
+
+  // the second pile (incense coals, Tamid 2:5) and the third (keeping the fire, Yoma 45a): cribs of gizrin over a
+  // heap of coals, the billets a shortened amah long, laid end to end where the crib is wider than one
+  const crib = (box, r, perLayer, layers, charredLayers) => {
+    const [x0, y0, z0] = box.min, [x1, y1] = box.max;
+    const runs = (a0, a1) => {                           // billets end to end across [a0, a1]
+      const k = Math.max(1, Math.round((a1 - a0) / (GL + 0.06))), w = (a1 - a0) / k, out = [];
+      for (let i = 0; i < k; i++) out.push([a0 + i * w + 0.03 + R() * 0.05, a0 + (i + 1) * w - 0.03 - R() * 0.05]);
+      return out;
+    };
+    for (let j = 0; j < layers; j++) {
+      const z = z0 + 0.12 + r + j * 2 * r * 0.92;
+      const ew = j % 2 === 0;
+      for (let i = 0; i < perLayer; i++) {
+        const t = (i + 0.5) / perLayer;
+        const o = { char: j < charredLayers, ...section() };
+        if (ew) { const y = y0 + 0.15 + t * (y1 - y0 - 0.3) + jitter(0.04); for (const [a, b] of runs(x0 + 0.05, x1 - 0.05)) addLog([a, y, z], [b, y + jitter(0.05), z], r * (0.8 + 0.4 * R()), o); }
+        else { const x = x0 + 0.15 + t * (x1 - x0 - 0.3) + jitter(0.04); for (const [a, b] of runs(y0 + 0.05, y1 - 0.05)) addLog([x, a, z], [x + jitter(0.05), b, z], r * (0.8 + 0.4 * R()), o); }
+      }
+    }
+    // the coals heaped inside
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rr = Math.min(x1 - x0, y1 - y0) * 0.55;
+    B.geo(polarField(cx, cy, [3, 4, 6, 8][d], [10, 16, 22, 28][d], (t) => rr * (1 + 0.08 * Math.sin(3 * t)), (r01) => z0 - 0.02 + 0.32 * (1 - r01 * r01)), ASH, { collide: true, cast: true });
+    return { cx, cy, rr, z0 };
+  };
+  const cribI = crib(piles.incense.box, 0.08, 5, 4, 2);          // fine fig wood
+  const cribK = crib(piles['kiyum-haesh'].box, 0.11, 6, 4, 1);
+
+  // ---------------------------------------------------------------- charcoal and half-burnt chunks (detail ≥ 1)
+  if (d >= 1) {
+    const oct = new OctahedronGeometry(1, 0);
+    const q = new Quaternion(), e = new Euler(), sv = new Vector3(), pv = new Vector3(), mtx = new Matrix4();
+    const chunk = (X, Y, Zs, size) => {
+      e.set(R() * 6.3, R() * 6.3, R() * 6.3);
+      q.setFromEuler(e);
+      const sz = size * A.AMAH;
+      sv.set(sz * (0.8 + 0.6 * R()), sz * (0.45 + 0.3 * R()), sz * (0.6 + 0.5 * R()));
+      pv.set(X * A.AMAH, (Zs + size * 0.12) * A.AMAH, -Y * A.AMAH);
+      chars.push(applyWorldUV(oct.clone().applyMatrix4(mtx.compose(pv, q, sv))));
+    };
+    const nT = [0, 26, 55, 85][d];
+    for (let i = 0; i < nT; i++) {                       // over the tapuach's flanks and toe, thicker toward the toe
+      const a = R() * Math.PI * 2, r01 = 0.4 + 0.6 * Math.sqrt(R());
+      const X = tcx + Math.cos(a) * RE * lobe(a) * r01, Y = tcy + Math.sin(a) * RE * lobe(a) * r01;
+      chunk(X, Y, Math.max(tapZ(X, Y), ashH(X, Y)), 0.035 + 0.055 * R());
+    }
+    const nB = [0, 20, 40, 64][d];
+    for (let i = 0; i < nB; i++) {                       // on the great pile's coal bed, round its hollow heart
+      const a = R() * Math.PI * 2, rq = Math.sqrt(R()) * 0.85;
+      const X = bcx + Math.cos(a) * brx * rq, Y = bcy + Math.sin(a) * bry * rq;
+      chunk(X, Y, bedZ(X, Y), 0.06 + 0.09 * R());
+    }
+    for (const c of [cribI, cribK]) for (let i = 0; i < [0, 6, 12, 18][d]; i++) {   // on the small piles' coal heaps
+      const a = R() * Math.PI * 2, rq = Math.sqrt(R()) * 0.9, X = c.cx + Math.cos(a) * c.rr * rq, Y = c.cy + Math.sin(a) * c.rr * rq;
+      chunk(X, Y, c.z0 - 0.02 + 0.32 * (1 - rq * rq), 0.04 + 0.05 * R());
+    }
+  }
+
+  const merged = (list) => (list.length ? mergeGeometries(list, false) : null);
+  for (const [list, key] of [[sides, BARK], [caps, END], [chars, CHAR]]) {
+    const g = merged(list);
+    if (g) B.geo(g, key, { collide: false, cast: true });
+  }
+
+  // ---------------------------------------------------------------- ash spilt onto the walkway beside the piles
+  // low drifts straddling the ma'arachah line, their rims buried under the walkway and the floor ash (no open edge)
+  const drift = (cx, cy, rx, ry, hh) => B.geo(polarField(cx, cy, [2, 3, 4, 5][d], [10, 14, 18, 22][d],
+    (t) => 1 / Math.hypot(Math.cos(t) / rx, Math.sin(t) / ry),
+    (r01, t, X, Y) => Z - 0.012 + hh * (1 - r01 * r01) * (1 + (d >= 1 ? 0.35 * nz(X * 2.1, Y * 2.1, 2) : 0))), ASH, { collide: false, cast: false });
+  drift(mx1 + 0.05, gy0 + 1.1, 0.75, 1.3, 0.05);
+  drift(mx1 + 0.1, gcy + 0.4, 0.85, 1.6, 0.06);
+  drift(mx1 + 0.05, gy1 - 1.0, 0.7, 1.2, 0.045);
+  drift(mx0 - 0.05, (piles.incense.box.min[1] + piles.incense.box.max[1]) / 2, 0.6, 1.0, 0.04);
+
+  // simple solid colliders for the piles (the logs themselves are not colliders)
+  const col = new Mesher();
+  for (const p of Object.values(piles)) col.box([p.box.min[0] + 0.2, p.box.min[1] + 0.2, p.box.min[2]], [p.box.max[0] - 0.2, p.box.max[1] - 0.2, p.box.max[2] - 0.2]);
+  ctx.addCollider(col.geometry(), 'altar:piles');
+
+  // ---------------------------------------------------------------- the two gizrin laid on the great pile (movable)
+  // "two gizrei etzim" of the order of the day (Yoma 2:5, 26b; 22a) — Moshe's standard read literally (Zevachim 62b):
+  // a shortened amah long and wide, as thick as the strickle of a heaped se'ah (≈ 2 etzba'ot ⚙): riven boards
+  const two = new Group();
+  two.name = 'altar.two-logs';
+  {
+    const parts = [];
+    const W = GL / 2, TK = 1 / 12;
+    for (const dy of [-0.55, 0.55]) {
+      const yc = gcy + dy + jitter(0.08), xc = gx1 - 1.6 + jitter(0.15);   // laid on from the pile's face, east
+      const { matrix, len } = logBetween([xc - GL / 2, yc, gTop + TK / 2 + 0.01], [xc + GL / 2, yc + jitter(0.08), gTop + TK / 2 + 0.03]);
+      const g = logGeometry(len, W * A.AMAH, W * A.AMAH * 0.96, Math.max(8, seg + 2), R, 0.03, rows, TK / (2 * W));
+      g.side.applyMatrix4(matrix); g.caps.applyMatrix4(matrix);
+      parts.push(g.side, g.caps);
+    }
+    const mesh = new Mesh(mergeGeometries(parts, false), ctx.mats.get(GIZ));
+    mesh.name = 'altar.two-logs:mesh';
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    two.add(mesh);
+  }
+  A.group.add(two);
+  A.movables.set(two.name, two);
+
+  // ---------------------------------------------------------------- fires (fx: 'pyre' — ordinary wood fire, smoke straight up)
+  // The great pile burns end to end with two emitters 2.7 amot (1.3 m) apart: fx clusters same-kind fires within 1.6 m
+  // into ONE light, which takes the fire-shadow slot — a second, unshadowed light leaked through the altar onto the
+  // yesod and the pavement. Both emitters smoke, so the great pile's column is two overlapping, fire-lit columns —
+  // wider and denser than the small piles' single thin ones.
+  const gMain = [gcx + 0.4, gcy, Z + 0.9], gInner = [gcx + 0.4 - 2.7, gcy + 0.3, Z + bedH];
+  A.fires.push(ctx.addFire({ id: 'altar.maarachah.great', kind: 'pyre', pos: gMain, size: 2.4, intensity: 1, schedule: 'always', smoke: true }));
+  A.fires.push(ctx.addFire({ id: 'altar.maarachah.great.inner', kind: 'pyre', pos: gInner, size: 1.9, intensity: 0.9, schedule: 'always', smoke: true }));
+  const cen = (b) => [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2];
+  // the incense pile is a bed of coals with low flames; the third pile a modest fire
+  const [ix, iy] = cen(piles.incense.box);
+  A.fires.push(ctx.addFire({ id: 'altar.maarachah.incense', kind: 'pyre', pos: [ix, iy, Z + 0.4], size: 0.75, intensity: 0.6, schedule: 'always', smoke: true }));
+  const [kx, ky] = cen(piles['kiyum-haesh'].box);
+  A.fires.push(ctx.addFire({ id: 'altar.maarachah.kiyum', kind: 'pyre', pos: [kx, ky, Z + 0.5], size: 1.15, intensity: 0.75, schedule: 'always', smoke: true }));
+
+  return { gTop, tapuachTop: tapZ(tcx, tcy) };
+}
