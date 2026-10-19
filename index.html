@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mikdash — Walk the Second Temple</title>
+  <meta name="description" content="An immersive, source-grounded 3D walk through Har HaBayit and the Second Temple, following the daily service hour by hour." />
+  <meta name="theme-color" content="#0d0b08" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230d0b08%22/%3E%3Cpath d=%22M8 26V12h16v14M12 26v-8h8v8M6 12l10-6 10 6%22 stroke=%22%23d4a640%22 stroke-width=%222%22 fill=%22none%22/%3E%3C/svg%3E" />
+  <style>
+    html, body { margin: 0; height: 100%; background: #0d0b08; overflow: hidden; }
+    #scene { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; }
+    #boot { position: fixed; inset: 0; display: grid; place-items: center; color: #e8dcc0;
+      font: 15px/1.4 Georgia, serif; background: #0d0b08; transition: opacity .8s; z-index: 50; }
+    #boot .bar { width: min(320px, 70vw); height: 2px; background: #3a3226; margin-top: 14px; }
+    #boot-progress { height: 100%; width: 0; background: #d4a640; transition: width .3s; }
+    body.booted #boot { opacity: 0; pointer-events: none; }
+    body.shot #boot { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+  <div id="ui-root"></div>
+  <div id="boot"><div><div style="font-size:34px;letter-spacing:.06em;text-align:center">מקדש</div>
+    <div style="text-align:center;opacity:.8">Mikdash</div><div class="bar"><div id="boot-progress"></div></div>
+    <div id="boot-label" style="text-align:center;margin-top:8px;opacity:.7;font-size:13px">Loading…</div></div></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

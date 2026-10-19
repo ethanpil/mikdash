@@ -1,0 +1,118 @@
+#!/usr/bin/env node
+// Headless screenshot harness (parallel-safe: each run starts its own Vite dev server on a free port).
+//
+//   node tools/shot.mjs [options] "<query>" [more queries...]
+//   node tools/shot.mjs --batch shots.json          # [{ "name": "altar", "query": "at=...&look=..." }, ...]
+//
+// Options:
+//   --out DIR        output directory (default shots/)
+//   --name NAME      file name for a single query (default derived from query)
+//   --q TIER         quality tier low|medium|high|ultra (default medium) — appended unless query has q=
+//   --w W --h H      viewport size (default 1280x720)
+//   --timeout S      seconds to wait for window.__mikdashReady (default 120)
+//   --keep-ui        do not add shot=1 (renders the UI too; clock keeps running)
+//   --eval "JS"      evaluate JS in the page after ready (result printed), e.g. "__mikdash.renderer.info.render"
+//
+// Prints: saved paths, console errors/warnings, GPU string, draw calls/triangles, build times.
+// Then Read the PNGs to look at them.
+import { createServer } from 'vite';
+import { chromium } from 'playwright-core';
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const args = process.argv.slice(2);
+const opt = { out: 'shots', q: 'medium', w: 1280, h: 720, timeout: 120, keepUi: false, evals: [] };
+const queries = [];
+for (let i = 0; i < args.length; i++) {
+  const a = args[i];
+  if (a === '--out') opt.out = args[++i];
+  else if (a === '--name') opt.name = args[++i];
+  else if (a === '--q') opt.q = args[++i];
+  else if (a === '--w') opt.w = +args[++i];
+  else if (a === '--h') opt.h = +args[++i];
+  else if (a === '--timeout') opt.timeout = +args[++i];
+  else if (a === '--keep-ui') opt.keepUi = true;
+  else if (a === '--eval') opt.evals.push(args[++i]);
+  else if (a === '--batch') {
+    const list = JSON.parse(readFileSync(args[++i], 'utf8'));
+    for (const it of list) queries.push({ name: it.name, query: it.query });
+  } else queries.push({ name: null, query: a.replace(/^\?/, '') });
+}
+if (!queries.length) queries.push({ name: 'default', query: '' });
+
+const EDGE = [
+  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
+].find((p) => existsSync(p));
+
+function slug(s) {
+  return (s || 'default').replace(/[^a-z0-9.,=-]+/gi, '_').replace(/[=,]/g, '-').slice(0, 80) || 'default';
+}
+
+const server = await createServer({
+  root, logLevel: 'error', configFile: join(root, 'vite.config.js'),
+  server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null },
+});
+await server.listen();
+const base = server.resolvedUrls.local[0];
+const browser = await chromium.launch({
+  executablePath: EDGE, headless: true,
+  args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader',
+    '--autoplay-policy=no-user-gesture-required'],
+});
+mkdirSync(resolve(root, opt.out), { recursive: true });
+let failures = 0;
+try {
+  for (const { name, query } of queries) {
+    const page = await browser.newPage({ viewport: { width: opt.w, height: opt.h } });
+    const logs = [];
+    page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(`[${m.type()}] ${m.text()}`); });
+    page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
+    const qs = new URLSearchParams(query);
+    if (!opt.keepUi && !qs.has('shot')) qs.set('shot', '1');
+    if (!qs.has('q')) qs.set('q', opt.q);
+    const url = `${base}?${qs}`;
+    const t0 = Date.now();
+    await page.goto(url, { waitUntil: 'load', timeout: opt.timeout * 1000 });
+    try {
+      await page.waitForFunction(() => globalThis.__mikdashReady === true, null, { timeout: opt.timeout * 1000, polling: 250 });
+    } catch { logs.push('[harness] timed out waiting for __mikdashReady'); failures++; }
+    const info = await page.evaluate(() => {
+      const c = globalThis.__mikdash;
+      if (!c) return { error: globalThis.__mikdashError || 'no ctx' };
+      const r = c.renderer;
+      let gpu = '';
+      try {
+        const gl = r.getContext();
+        const ext = gl.getExtension('WEBGL_debug_renderer_info');
+        gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+      } catch { /* ignore */ }
+      return {
+        tier: c.quality?.key, gpu, fps: Math.round(c.engine.fps),
+        calls: r.info.render.calls, triangles: r.info.render.triangles,
+        geometries: r.info.memory.geometries, textures: r.info.memory.textures,
+        buildTimes: c.buildTimes, time: c.time?.t, error: globalThis.__mikdashError,
+      };
+    }).catch((e) => ({ error: String(e) }));
+    const evals = [];
+    for (const js of opt.evals) {
+      evals.push(await page.evaluate((code) => {
+        try { return JSON.stringify((0, eval)(code)); } catch (e) { return `ERR ${e.message}`; }
+      }, js).catch((e) => `ERR ${e.message}`));
+    }
+    const file = resolve(root, opt.out, `${name || opt.name || slug(query)}.png`);
+    await page.screenshot({ path: file });
+    console.log(`\n=== ${file}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    console.log(`url: ${url}`);
+    console.log(`info: ${JSON.stringify(info)}`);
+    evals.forEach((e, i) => console.log(`eval[${i}]: ${e}`));
+    if (logs.length) console.log(`console (${logs.length}):\n  ${logs.slice(0, 40).join('\n  ')}`);
+    await page.close();
+  }
+} finally {
+  await browser.close();
+  await server.close();
+}
+process.exit(failures ? 1 : 0);
