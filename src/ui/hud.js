@@ -2,7 +2,7 @@
 // travel status, the fade veil, and floating tags over active events. Updated from one throttled ticker.
 import { Vector3 } from 'three';
 import { h, he, icon, setText } from './dom.js';
-import { seasonal, seasonalLabel, clock } from './format.js';
+import { seasonal, seasonalLabel, clock, accessLead } from './format.js';
 import { m2w, w2m } from '../core/units.js';
 import { LADDER, RESTRICTED_RUNG } from './data.js';
 
@@ -146,17 +146,22 @@ export function createHud(app) {
   // ---------------- zone ----------------
   // ARCHITECTURE §12: the observer may walk anywhere; crossing into a place an Israelite could not enter is announced
   // once per visit (a toast with the place's own access rule), and the card's border turns red-gold while there.
-  let zoneId, prevRung = null;
+  let zoneId, prevRung = null, pendingNotice = null;
   const noticed = new Map(); // zone id -> time of the last notice (ms), so boundary flapping does not repeat it
   function accessNotice(id, z, r) {
     if (r === null || r < RESTRICTED_RUNG || (prevRung !== null && r <= prevRung)) return;
     if (ctx.settings?.get('captions') === false || app.introOpen?.()) return;
+    // toasts hide under the map (a walk seen on the map): announce it once the map closes, if still there
+    if (app.openPanel?.() === 'map') { pendingNotice = { id, z, r }; return; }
+    showNotice(id, z, r);
+  }
+  function showNotice(id, z, r) {
     const now = performance.now();
     if (now - (noticed.get(id) ?? -Infinity) < 90000) return;
     noticed.set(id, now);
     const L = LADDER[r];
     const access = String(z?.access || '').trim();
-    const rule = (access.match(/^.*?\.(?=\s|$)/)?.[0] || access) || `${L.rule}.`; // first sentence (no lookbehind: old Safari)
+    const rule = accessLead(access) || `${L.rule}.`; // its lead sentence(s) (no lookbehind: old Safari)
     const observer = r >= 9 ? ' You see it here as an observer.' : '';
     toast({ en: `${z?.name?.en || L.en} — ${rule}${observer}${L.src ? ` (${L.src})` : ''}`, he: z?.name?.he || L.he }, 7000);
   }
@@ -290,6 +295,11 @@ export function createHud(app) {
     tSlow = 0;
     updateTime();
     setZone(data.currentZoneId());
+    if (pendingNotice && app.openPanel?.() !== 'map') {
+      const p = pendingNotice;
+      pendingNotice = null;
+      if (p.id === zoneId) showNotice(p.id, p.z, p.r);
+    }
     const active = data.active();
     const key = active.map((e) => e.id).join('|') + (ctx.settings?.get('labels') === false ? '0' : '1');
     if (key !== lastActiveKey) { lastActiveKey = key; syncTags(active); }

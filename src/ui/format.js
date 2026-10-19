@@ -123,3 +123,19 @@ export function addDays(dateString, n) {
 export function prettyId(id) {
   return String(id || '').split(/[-_.]/).filter(Boolean).map((w) => w[0].toUpperCase() + w.slice(1)).join(' ');
 }
+
+/**
+ * The lead of a zone's `access` text: its first sentence, or the first two when the first is only a terse heading
+ * ("Kohanim.", "As the court.") — the zone content puts the substance in the sentence after it.
+ */
+export function accessLead(text) {
+  const t = String(text || '').trim();
+  const sentences = t.match(/[^.]*?\.(?=\s|$)|[^.]+$/g) || [];
+  let out = '';
+  for (const s of sentences.slice(0, 2)) {
+    out = `${out} ${s.trim()}`.trim();
+    if (out.length >= 40) break;
+  }
+  return out || t;
+}
+

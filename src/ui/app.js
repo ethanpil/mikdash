@@ -42,6 +42,7 @@ export function mountUi(ctx) {
   const panels = {};
   let current = null, lastFocus = null;
   app.panelOpen = () => !!current;
+  app.openPanel = () => current?.name || null;
   const getPanel = (name) => {
     if (!FACTORIES[name]) return null;
     if (!panels[name]) { panels[name] = FACTORIES[name](app); root.append(panels[name].el); }
@@ -69,7 +70,7 @@ export function mountUi(ctx) {
   }
   let coverRaf = 0;
   window.addEventListener('resize', () => { cancelAnimationFrame(coverRaf); coverRaf = requestAnimationFrame(cover); });
-  const SIDES = ['right', 'left', 'card', 'modal'];
+  const SIDES = ['right', 'left', 'card', 'modal', 'map'];
   function show(p, opts) {
     lastFocus = document.activeElement;
     p.el.classList.add('open');
@@ -85,10 +86,13 @@ export function mountUi(ctx) {
   }
   function hide(p) {
     p.el.classList.remove('open');
+    p.onClose?.();
     root.classList.remove('mk-panel-open', ...SIDES.map((s) => `mk-open-${s}`));
     if (p.modal) backdrop.classList.remove('open');
     hud.root.inert = false;
     hud.setExpanded(p.name, false);
+    // uncover the HUD first: focus() does nothing on a visibility:hidden button (the map button under the map)
+    for (const el of hud.coverable) el.classList.remove('mk-covered');
     const lf = lastFocus;
     lastFocus = null;
     if (p.el.contains(document.activeElement)) {
@@ -112,6 +116,8 @@ export function mountUi(ctx) {
   const VERB = { instant: 'Moving', slow: 'Strolling', walk: 'Walking', fast: 'Hurrying', run: 'Running' };
   const midSentence = (name) => String(name).replace(/^The /, 'the ');
   let goToken = 0;
+  /** the walk in progress, for the map's route line: { key, at: [X,Y(,Z)], label, speed, verb } | null */
+  app.trip = null;
   /** label: a place name, or { event: title } when going to watch an event */
   app.goTo = (target, label = 'that spot', { speed, keepMap = false } = {}) => {
     speed = speed || ctx.settings.get('travelSpeed') || 'walk';
@@ -119,12 +125,15 @@ export function mountUi(ctx) {
     if (typeof ctx.player?.goTo !== 'function') { ctx.bus.emit('ui:goto', { target, speed }); return; }
     const token = ++goToken;
     const ev = typeof label === 'object' ? label.event : null;
+    const at = Array.isArray(target?.at) ? target.at : null;
+    app.trip = at ? { key: token, at, label: ev ? `watch: ${ev}` : midSentence(label), speed, verb: VERB[speed] || 'Walking' } : null;
     if (speed !== 'instant') hud.travel(ev ? `${VERB[speed] || 'Walking'} to watch: ${ev}` : `${VERB[speed] || 'Walking'} to ${midSentence(label)}`);
     Promise.resolve(ctx.player.goTo(target, speed)).then((ok) => {
       if (token !== goToken) return;
+      app.trip = null;
       hud.travel(null);
       if (ok && speed !== 'instant') hud.toast(ev ? `In place to watch: ${ev}` : `Arrived at ${midSentence(label)}`, 2600);
-    }).catch((e) => { if (token === goToken) hud.travel(null); console.error('[ui] goTo failed', e); });
+    }).catch((e) => { if (token === goToken) { hud.travel(null); app.trip = null; } console.error('[ui] goTo failed', e); });
   };
   app.goToEvent = (ev, speed) => {
     const target = app.data.viewTarget(ev);
@@ -155,7 +164,12 @@ export function mountUi(ctx) {
   root.classList.add('mk-intro-open');
   root.append(intro.el);
   app.introOpen = () => intro.open;
-  ctx.bus.on('ready', () => (resume ? intro.enter() : intro.show()));
+  ctx.bus.on('ready', () => {
+    if (resume) intro.enter(); else intro.show();
+    // build the map's model, list and plan in idle time, so the first M opens at once
+    const warm = () => { try { getPanel('map')?.prewarm?.(); } catch (e) { console.error('[ui] map prewarm failed', e); } };
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(warm, { timeout: 3000 }); else setTimeout(warm, 1500);
+  });
 
   // ---------------- keyboard ----------------
   const typing = (t) => !!t?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]');
@@ -180,7 +194,7 @@ export function mountUi(ctx) {
     if (e.key === 'Escape' && current) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      app.close();
+      if (!current.onEscape?.()) app.close(); // a panel may use Esc first (e.g. to clear the map's search box)
       return;
     }
     if (typing(e.target) || e.repeat) return;
@@ -221,6 +235,8 @@ export function mountUi(ctx) {
     close: () => app.close(),
     toggle: (name) => app.toggle(name),
     get panel() { return current?.name || null; },
+    /** debugging / tests: the map's view and selection (null until the map has been opened once) */
+    get map() { return panels.map?.api || null; },
     hints: (on = true) => (on ? hud.showHints() : hud.hideHints()),
     enter: () => intro.enter(),
   };

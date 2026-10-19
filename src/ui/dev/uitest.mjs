@@ -49,7 +49,7 @@ try {
   await page.keyboard.press('Tab');
   check('Tab skips invisible event tags', await ev(() => { const a = document.activeElement; return !(a?.classList?.contains('mk-tag') && +getComputedStyle(a).opacity < 0.2); }),
     await ev(() => document.activeElement?.className || 'body'));
-  check('location card label names the place', await ev(() => /Har HaBayit/.test(document.querySelector('.mk-loc').getAttribute('aria-label'))),
+  check('location card label names the place', await ev(() => { const id = __mikdash.zones?.current; const n = (__mikdash.zones?.content?.[id]?.name?.en || '').split(' — ')[0]; return !!n && document.querySelector('.mk-loc').getAttribute('aria-label').includes(n); }),
     await ev(() => document.querySelector('.mk-loc').getAttribute('aria-label')));
   await ev(() => document.activeElement?.blur?.());
 
@@ -156,7 +156,7 @@ try {
   await ev(() => __mikdash.time.set(__mikdash.time.fromZmani('day', 8.6)));
   await page.waitForTimeout(400);
   const act = await ev(() => [...document.querySelectorAll('[data-panel=time] .mk-ev.is-active .mk-ev__title')].map((e) => e.textContent));
-  check('happening now at day 8.6 lists the afternoon Tamid', act.some((t) => /afternoon Tamid/.test(t)), act.join(' | '));
+  check('happening now at day 8.6 lists the afternoon Tamid', act.some((t) => /afternoon tamid/i.test(t)), act.join(' | '));
   await page.screenshot({ path: resolve(root, out, 'test-time-afternoon.png') });
 
   // Go (instant) on the first active row → teleports via fade
@@ -174,11 +174,12 @@ try {
   await ev(() => __mikdash.settings.set('travelSpeed', 'walk'));
   await ev(() => __mikdash.ui.open('map'));
   await page.waitForTimeout(400);
-  const mb = await page.locator('[data-panel=map] canvas').boundingBox();
-  await page.mouse.click(mb.x + mb.width * 0.5, mb.y + mb.height * 0.75);
+  // a click selects a place; a double-click goes there (the map closes so the walk is seen)
+  const mb = await page.locator('[data-panel=map] .mk-mapv__stage').boundingBox();
+  await page.mouse.dblclick(mb.x + mb.width * 0.5, mb.y + mb.height * 0.75);
   await page.waitForTimeout(600);
   const st = await ev(() => ({ hidden: document.querySelector('.mk-status').hidden, text: document.querySelector('.mk-status').textContent, mode: __mikdash.player.mode, panel: __mikdash.ui.panel }));
-  check('map click starts a walk with a status pill (map stays open)', !st.hidden && st.panel === 'map', `${st.text} · mode ${st.mode}`);
+  check('map double-click starts a walk with a status pill (map closes)', !st.hidden && st.panel === null, `${st.text} · mode ${st.mode}`);
   await page.screenshot({ path: resolve(root, out, 'test-walking.png') });
   await ev(() => __mikdash.player.cancel());
   await page.waitForTimeout(300);
