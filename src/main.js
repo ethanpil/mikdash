@@ -5,6 +5,7 @@ import { resolveTier } from './core/quality.js';
 import { createContext } from './core/context.js';
 import { buildWorld } from './world/index.js';
 import { SYSTEMS } from './systems.js';
+import { installShaderLogFilter } from './render/log-filter.js';
 
 const params = readParams();
 
@@ -16,6 +17,7 @@ function setLoading(label, frac) {
 }
 
 async function boot() {
+  installShaderLogFilter(); // benign ANGLE/D3D X4122 warnings, before any shader compiles
   const canvas = document.getElementById('scene');
   const engine = new Engine(canvas, params);
   const quality = resolveTier(params.q, engine.renderer);

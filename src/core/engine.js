@@ -3,7 +3,7 @@
 // The render/ subsystem may replace the final draw with engine.setRenderFn(fn).
 import {
   WebGLRenderer, Scene, PerspectiveCamera, Timer, SRGBColorSpace, ACESFilmicToneMapping,
-  PCFSoftShadowMap,
+  PCFShadowMap,
 } from 'three';
 
 export const PRIORITY = {
@@ -25,7 +25,7 @@ export class Engine {
     this.renderer.outputColorSpace = SRGBColorSpace;
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.type = PCFShadowMap; // PCFSoftShadowMap was removed in r186
 
     this.scene = new Scene();
     this.camera = new PerspectiveCamera(params.fov || 62, 1, 0.08, 9000);
@@ -89,7 +89,7 @@ export class Engine {
 
   tick(ts) {
     this.timer.update(ts);
-    const dt = Math.min(this.timer.getDelta(), 0.1);
+    const dt = Math.max(0, Math.min(this.timer.getDelta(), 0.1)); // Timer can return a negative first delta
     this.fps = this.fps * 0.95 + (dt > 0 ? 1 / dt : 60) * 0.05;
     for (const u of this.updaters) {
       try { u.fn(dt, this.ctx); } catch (e) {

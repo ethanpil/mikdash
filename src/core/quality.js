@@ -1,5 +1,6 @@
 // Quality tiers. ctx.quality is one of these objects (a copy), chosen by URL ?q=, saved setting, or auto-detect.
 // Subsystems READ these knobs; they never hard-code device assumptions.
+import { detectTier } from '../render/detect.js';
 // The render/ owner may refine autoDetect() and add knobs; keep existing keys stable.
 
 export const TIERS = {
@@ -22,7 +23,7 @@ export const TIERS = {
   high: {
     key: 'high', label: 'High — discrete GPU',
     pixelRatioCap: 1.5, renderScale: 1.0,
-    shadows: true, shadowMapSize: 4096, cascades: 3,
+    shadows: true, shadowMapSize: 4096, cascades: 2,
     post: true, ao: true, bloom: true, aa: 'smaa', godrays: false,
     textureSize: 2048, anisotropy: 8, detail: 2,
     maxFigures: 450, maxFireLights: 8, terrainSegments: 320, drawDistance: 6000,
@@ -30,7 +31,7 @@ export const TIERS = {
   ultra: {
     key: 'ultra', label: 'Ultra — maximum realism',
     pixelRatioCap: 2.0, renderScale: 1.0,
-    shadows: true, shadowMapSize: 4096, cascades: 4,
+    shadows: true, shadowMapSize: 4096, cascades: 2,
     post: true, ao: true, bloom: true, aa: 'smaa', godrays: true,
     textureSize: 2048, anisotropy: 16, detail: 3,
     maxFigures: 1200, maxFireLights: 12, terrainSegments: 512, drawDistance: 8000,
@@ -39,8 +40,13 @@ export const TIERS = {
 
 export const TIER_ORDER = ['low', 'medium', 'high', 'ultra'];
 
-/** Rough GPU/device classification. render/ may replace with a better heuristic. */
+/** GPU/device classification — delegated to render/detect.js (GPU string + cached micro-benchmark). */
 export function autoDetect(renderer) {
+  try { const k = detectTier(renderer); if (TIERS[k]) return k; } catch (e) { console.warn('[quality] detectTier failed', e); }
+  return legacyDetect(renderer);
+}
+
+function legacyDetect(renderer) {
   const nav = globalThis.navigator || {};
   const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent || '');
   let gpu = '';

@@ -15,6 +15,19 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - Simulation is a pure function of sim time so the clock can be scrubbed/jumped instantly.
 - `THREE.Clock` is deprecated in r186 → engine uses `THREE.Timer`.
 - Dev machine GPU is an Intel HD 4600: the `low` tier is tuned against it.
+- three r186: `PCFSoftShadowMap` is removed (use `PCFShadowMap`); cascaded sun shadows use the native
+  `three/addons/lights/SunLight.js` (exactly 2 cascades), not `CSM.js`, which clobbers material `onBeforeCompile`.
+- `postprocessing` BlendFunction.SCREEN darkens HDR values ≥ 1 — use ADD for light in scene-linear buffers.
+  Its GodRaysEffect rejects a sun disc near the far plane, so render/ has custom sun shafts (ultra).
+- Light units: photometric × `ctx.env.preExposure`; tone mapping AgX + look (gain 1.15 for ACES parity).
+- Env replaces three's fog and tonemapping shader chunks globally (aerial perspective before tone mapping).
+- Materials are baked on the GPU at load (`src/world/materials/gen`). On ANGLE/D3D11 keep generator shaders
+  loop-free, read noise from basis textures, single output: ALU noise or MRT costs 0.3–3 s per program on the
+  HD 4600. Features narrower than a texel must be widened/faded or they alias. `?matfx=0`, `?mattex=0` debug.
+- Nav is built in a Worker by rasterising collider triangles into a 0.5 m multi-level grid; a coarse block graph
+  steers A*. Half-amah stairs need sub-step probes (|Δh| up to 0.8 m per cell when each rise ≤ 0.35 m).
+- Audio is synthesised in module Workers (`src/audio/worker.js`); `?debug=audio` opens an audition panel.
+- Psalm melodies, choir size on low/medium, insect season: reconstruction (see docs/decisions/audio.md).
 
 ## Tools
 - `npm run dev` / `npm run build`

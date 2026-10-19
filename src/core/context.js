@@ -44,13 +44,13 @@ export function createContext(engine, params, quality) {
     fires: [],
     /**
      * spec: { id, kind: 'pyre'|'hearth'|'torch'|'lamp'|'menorah'|'brazier', pos: Vector3|[X,Y,Z] amot,
-     *         size: meters (rough flame size), intensity: 0..1, color?: hex,
+     *         size?: meters (flame size; omitted = per-kind preset), intensity: 0..1, color?: hex,
      *         schedule?: 'always'|'night'|'service' , smoke?: bool }
      */
     addFire(spec) {
       const pos = spec.pos instanceof Vector3 ? spec.pos.clone()
         : units.m2w(spec.pos[0], spec.pos[1], spec.pos[2] ?? 0);
-      const f = { intensity: 1, size: 1, kind: 'torch', schedule: 'always', ...spec, pos };
+      const f = { intensity: 1, kind: 'torch', schedule: 'always', ...spec, pos }; // size (m) optional: FX applies per-kind presets
       ctx.fires.push(f);
       return f;
     },

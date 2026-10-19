@@ -50,8 +50,29 @@ export function worldBoxGeometry(center, size) {
 
 /** Bake a mesh's (or object's) transform into a cloned non-indexed-compatible geometry. */
 export function bakeGeometry(geometry, matrix) {
-  const g = geometry.clone();
-  if (matrix) g.applyMatrix4(matrix);
+  let g = geometry.clone();
+  if (matrix) {
+    g.applyMatrix4(matrix);
+    if (matrix.determinant() < 0) g = flipWinding(g); // applyMatrix4 does not re-wind mirrored parts
+  }
+  return g;
+}
+
+/** Reverse triangle winding (for geometry baked through a mirroring transform). */
+export function flipWinding(geometry) {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry;
+  for (const name of Object.keys(g.attributes)) {
+    const at = g.attributes[name];
+    const n = at.itemSize;
+    const arr = at.array;
+    for (let i = 0; i < at.count; i += 3) {
+      for (let k = 0; k < n; k++) {
+        const a = (i + 1) * n + k, b = (i + 2) * n + k;
+        const tmp = arr[a]; arr[a] = arr[b]; arr[b] = tmp;
+      }
+    }
+    at.needsUpdate = true;
+  }
   return g;
 }
 

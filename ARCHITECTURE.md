@@ -154,7 +154,11 @@ Default date **2026-11-02** (Monday, 22 Cheshvan — ordinary weekday, psalm 48)
 
 ## 8. Zones — geometry in `site.zones`, content in `src/data/zones-content.js`
 
-Canonical zone ids (both tasks must use these; may add sub-zones):
+site.js also provides `zoneAtSite(X,Y,Z)`, `zoneGeometry(id)`, `CANONICAL_ZONES`, station lists (e.g. `mount.watch-posts`,
+`azarah.stations.kalpi`, `azarah.achsadra-route`) and `runChecks()`. Element `confidence` = its weakest defining number;
+`params.fieldConfidence` holds per-field detail.
+Canonical zone ids (both tasks must use these; may add sub-zones; site.js added: taim-roofs, ulam-upper,
+lishkat-hakelim, lishkat-chashaim, lishkat-hakorban, lishkat-haparochet, beit-haeven, shushan-habirah, …):
 `outside, kidron, har-hamishchah, parah-causeway, har-habayit, stoa, chel, soreg, gate-shushan, gate-chuldah-w,
 gate-chuldah-e, gate-kiponus, gate-tadi, ezrat-nashim, en-gate-east, en-chamber-wood, en-chamber-lepers,
 en-chamber-nazirites, en-chamber-oil, en-gallery, fifteen-steps, music-chambers, nikanor, ezrat-yisrael,
@@ -178,8 +182,9 @@ export const EVENTS = [{
   when: { start: <time spec>, end: <time spec> },  // see ctx.time.resolve; ordering is sourced, minutes are reconstruction
   timing: { confidence: 'explicit'|'ordering'|'reconstruction', note },
   zone: 'slaughter-zone',
-  pos: [X, Y, Z],                                   // where it happens (site amot)
-  view: { at: [X, Y], heading },                    // where an observer should stand to watch it
+  pos: [X, Y, Z] | { el: 'altar.top', f: [fx, fy, fz] },   // where it happens (site amot), or a site element
+                                                    // ref: f = fractions within el.box (0..1 per axis; default [.5,.5,1] = top centre)
+  view: { at: [X, Y] | { el, f }, heading },        // where an observer should stand to watch it (walkable!)
   summary,                                          // one line for the "happening now" list
   description,                                      // 1–3 short paragraphs, plain English, Hebrew terms transliterated
   participants: [{ role: 'kohen', count: 9, note }],
@@ -239,7 +244,29 @@ or slider to set any time, play/pause and speed, date; **"Happening now"** list 
 here, who may enter, what is happening now (from schedule), with **sources**. Settings: quality, amah
 standard, volume, mouse sensitivity/invert, FOV, labels, aggadah layer. Mobile-friendly. No UI in `shot=1`.
 
-## 14. Verification
+## 14. As-built API additions (summary — full detail in `docs/API.md`)
+
+* **Light units:** scene values = photometric value × `ctx.env.preExposure`; the tone mapper applies `ctx.env.exposure`
+  (≈1). Fires/lamps/emissives must follow this. `ctx.env.sunLight` is the single shadow-casting key light (sun by day,
+  moon when the sun is below −4°). Custom ShaderMaterials with `fog: true` must include the stock fog chunks (env
+  replaces them for aerial perspective; additive emitters use `mkFogTransmittance()` + `#define MK_FOG_DONE`).
+* **Fires:** pass `size` in metres (omitted = per-kind preset). Static pyre/hearth/brazier fires get the fire-shadow
+  slots on high/ultra. `ctx.fx.setFire(id, 0..1)` (eases), `attachTorch(obj, opts)`, `smokeColumn({kind:'incense',…})`,
+  `ctx.fx.list()`.
+* **Physics/player:** `ctx.physics.floorAt(x,z)` without `fromY` returns the standable walking floor;
+  with `fromY` the highest up-facing surface below it. Also `floorsAt`, `standFloor`, `findStand`, `rebuild`.
+  `ctx.player.goTo()` resolves a boolean; `teleport`, `setLook`, `setInputEnabled(false)` (UI panels), `floorAtSite`.
+  Colliders must be closed with outward normals; tag door leaves `'door'` or register them in `ctx.movables`.
+* **People:** extra role `kohen_offduty`; props `shofar`, `machtah_gold_yk`, `folded_garments`; `setSite(X, Y, { near: Z })`
+  on multi-level spots; crowd `layout: 'prostrate'`; `util.poseAlongPath`, `util.phaseFor`.
+* **Audio:** composite helpers `ctx.audio.libation({people, walk})`, `ctx.audio.tekiahSet(pos)`; the ambience director
+  owns all bed loops (sim must not create them; use `ctx.audio.ambience.setPopulation(n)`, `hush()/release()`);
+  moving sources `{ follow: object3D }`. Captions via bus `'caption'`.
+* **UI:** `ctx.ui.fade(to, ms)`, `open(panel)`; settings keys `quality amah volume mouseSensitivity invertY fov headBob
+  labels aggadah reducedMotion captions musicStyle`. Wants `ctx.zones.current` = zone id string,
+  `ctx.zones.content` = ZONE_CONTENT, `ctx.schedule.active/upcoming/at` returning EVENTS objects (optional `t0/t1`).
+
+## 15. Verification
 
 * `npm run build` must pass. `node tools/shot.mjs [--q low|medium|high|ultra] "at=X,Y&look=H,P&t=…"` renders
   a PNG under `shots/` and prints console errors + draw calls/triangles; Read the PNG to inspect it.
