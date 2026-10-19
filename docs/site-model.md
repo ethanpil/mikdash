@@ -1,0 +1,573 @@
+# Site model — `src/data/site.js`
+
+> The only geometric authority for the 3D builders (ARCHITECTURE.md §4). Tables in this file are generated from `site.js`;
+> regenerate after any change. Decisions and their alternatives are logged in `docs/decisions/site-model.md` and, for the
+> verification pass, `docs/decisions/site-model-fix.md`. §9 is the verification log (each reviewer finding and its disposition).
+
+Self-check: `runChecks()` → **PASS** (1492 checks, 0 failures). 189 elements, 66 zones, 24 dimension chains.
+
+```sh
+node --input-type=module -e "import('file:///C:/Code/temple-walk/mikdash/src/data/site.js').then(m=>console.log(m.runChecks()))"
+```
+
+## 1. Frame, sources, method
+
+* **Frame**: X east, Y north, Z up, in amot (building amah = 6 tefachim). Origin = SW corner of the 500 × 500 *clear interior* of Har HaBayit (walls stand outside it, lock §58). Z = 0 = threshold of the Shushan (eastern) gate.
+* **Axis**: `SITE.axisY = 330.5` — the Heichal axis is the Azarah's N–S centreline (lock §58, lock #13).
+* **Datums**: mount 0 · ezratNashim 6 · ezratYisrael 13.5 · azarah 16 · heichalFloor 22 · taimRoofs 55 ⚙ · kodeshCeiling 62 · aliyahFloor 67 · roof 112 · crown 116.
+* **Authority**: the report parts (§0.3–0.4, Parts I–V, VII §22, IX §37–38, X §46–52, XI locks, XIV §64) and the Hebrew texts in `sources/`. Every Mishnah Middot number used was re-read in the Hebrew (ch. 1–5); also Tamid 1–4, 7; Parah 3; Shekalim 6; Rambam BhB 2–6; Yoma 10a–11a, 16a–17a, 19a, 25a, 31a, 37a, 51b–54a; Zevachim 53b–54b, 59a, 62b–63a; Shekalim 5–6; Rambam BhB 1:9, 8:4–12.
+* **Method**: named constants with citations (§1 of the file) → derived positions (§2) → elements (§3) → zones (§4) → chains (§5) → sight-line (§6) → checks (§8). The sample manifest was not read until the model was finished, and then only for §9 below.
+* **Real-world context** (Kidron, Har HaMishchah, causeway, Chuldah portals, wall feet) is defined in **meters** relative to the wall faces and converted with the page's amah (`core/units.js` `AMAH`), so the landscape stays real while the sanctuary scales with the chosen amah.
+* **Confidence**: `explicit` (number stated in a primary source) · `derived` (follows by arithmetic) · `locked` (a Part XI lock chose between sources or fixed an EK placement ⚙) · `reconstruction` (not fixed by the sources; modest, logged).
+  An element carries the label of the **weakest number that defines its box**; `params.fieldConfidence` lists the stronger parts
+  field by field (e.g. the EN corner chambers: `{ interior: 'explicit', height: 'reconstruction', … }`). `runChecks()` enforces it:
+  any ⚙ in an element's derivation, notes or params makes it `reconstruction`, unless `fieldConfidence` names the ⚙ part `reconstruction`.
+
+## 2. API
+
+```js
+import { SITE, el, zoneGeometry, zoneAtSite, parahSightLine, runChecks, CANONICAL_ZONES } from './data/site.js';
+el('heichal.kodesh').box            // { min:[X,Y,Z], max:[X,Y,Z] } amot
+el('altar.ulam-steps').params       // kind-specific: steps, rise, treads, profile, ascentHeading …
+zoneGeometry('azarah')              // { boxes:[[min,max],…], priority, floorZ }
+zoneAtSite(X, Y, Z)                 // highest priority containing box wins; ties → smallest box
+parahSightLine({ amah, eyeDistM, crestASL, walls, target:'outer'|'inner', level })   // walls: { mountEast, enEast, azarahEast, shushanChamber }
+```
+
+Conventions builders should know:
+* `box` is the element's overall extent. Where geometry is not a single box the detail is in `params`: `pieces`/`segments`/`cells`/`rooms` (sub-boxes), `path` (closed orthogonal polylines: soreg, ma'akeh, kalya orev), `profile` (stairs and stepped walls). **Build from the sub-boxes, not the box**, wherever they exist: `heichal.otem` (the T is two pieces), `heichal.taim.roofs` (the mesibah and water-house voids stay open), `altar.yesod`, `altar.kevesh` (`groundPiece` + the 2-amah `flying` span, which must not be extruded to the floor), `altar.nanasin` (`pillars`, `flayingStations`), `altar.marble-tables` (`tables`).
+* **Mount wall feet**: `params.footProfile.points` gives the exterior grade along the wall (X for N/S walls, Y for E/W); the N and S walls drop to the lower E/W grades at the corners. `box.min[2]` is only the lowest point.
+* **Podiums**: parts of chambers at +16 that stand outside the court walls sit on explicit substructures (`azarah.chamber.gazit.podium`, `azarah.moked.podium`, solid from Z 0 to 16; the Moked's has the underground stair shaft as a void).
+* **Stepped Heichal walls**: N/S/W walls are 7 / 6 / 5 thick at the three ta'im stories (wall + ta = 12, Middot 4:4), 5 above. Their `box` is the widest (7) extent, so it overlaps the ta'im boxes; use `params.profile` and the `cells`.
+* **Rooms in walls**: each wall lists what is cut from it. `params.openings` = gates, doors and windows (cut the element's box). `params.voids` = rooms built within the wall's thickness (cut their boxes; the wall continues above and below: Nitzotz exedra and Beit HaNitzotz, Etz, Kelim, the Water Gate house, Pinchas and Chavitin, Chasha'im). `params.replacedBy` = the wall is omitted along that element's plan, full height (Beit HaMoked, Gazit). `params.cutouts` = explicit boxes removed (the S wall above the Water Gate house, so Beit Avtinas and the KG's mikveh stand on an open roof terrace at +36). `alsoPierces` = the music-chamber doors. `runChecks()` verifies that every chamber, gate, opening or fixture inside a court wall is listed or in a cutout.
+* **Stairs**: `ascentHeading` is the compass heading of the ascent. Rise ½ / tread ½ unless stated (Middot 2:3). The 15 steps are concentric half-rings (`stepRadii`). `heichal.taim.roof-stair` (`climb` + `landing`, the landing open below) takes the walk from the ta'im roofs (+55) up to the aliyah door (+67). `heichal.chalifot.*.wicket` are sanctity openings (`walkThrough: false`), not routes.
+* **Stations and routes** for people/sim: `mount.watch-posts` (the 24 night posts), `azarah.stations` (the kalpi), `azarah.achsadra-route` (the dawn inspection circuit, two polylines), `azarah.amah-channel` (`path`, `openSegments`), `altar.nanasin.params.flayingStations`, `azarah.chamber.gazit.params.stations`, `mount.chamber.*.params.guardPost`.
+* **Spawn**: `el('mount.chel.steps').params.foot` is the foot of the 12 chel steps on the east axis (face 270°).
+
+## 3. Dimension chains (self-checked)
+
+| Chain | Axis | Parts | Total | Expected | OK |
+|---|---|---|---|---|---|
+| Har HaBayit E–W (margins + complex) | X | west margin 63 + Azarah W wall 5 + Azarah 187 + Nikanor wall 5 + Ezrat Nashim 135 + EN E wall 5 + east margin 100 | 500 | 500 | ✓ |
+| Har HaBayit N–S (margins + complex) | Y | south margin 258 + S wall 5 + Azarah/EN width 135 + N wall 5 + north margin 97 | 500 | 500 | ✓ |
+| Azarah E–W (Middot 5:1) | X | mekom drisat Yisrael 11 + mekom drisat haKohanim 11 + the Mizbeach 32 + between the Ulam and the Mizbeach 22 + the Heichal 100 + behind the Beit HaKaporet 11 | 187 | 187 | ✓ |
+| Azarah N–S (Rambam BhB 5:13–15) | Y | N wall → mitbachayim 8 + Beit HaMitbachayim 12.5 + place of the tables 8 + place of the rings 24 + rings → altar 8 + the Mizbeach 32 + the kevesh (ground) 30 + kevesh → S wall 12.5 | 135 | 135 | ✓ |
+| Azarah N–S (Middot 5:2 as written) | Y | kevesh and Mizbeach 62 + Mizbeach → rings 8 + place of the rings 24 + rings → tables 4 + tables → nanasin 4 + nanasin → wall 8 + remainder (kevesh–wall + place of the nanasin) 25 | 135 | 135 | ✓ |
+| Heichal E–W (Middot 4:7) | X | Ulam wall 5 + Ulam 11 + Heichal wall 6 + Kodesh 40 + amah traksin 1 + Kodesh HaKodashim 20 + Heichal wall 6 + ta 6 + ta wall 5 | 100 | 100 | ✓ |
+| Heichal N–S body (Middot 4:7) | Y | mesibah wall 5 + mesibah 3 + ta wall 5 + ta 6 + Heichal wall 6 + interior 20 + Heichal wall 6 + ta 6 + ta wall 5 + beit horadat hamayim 3 + wall 5 | 70 | 70 | ✓ |
+| Ulam front (Middot 4:7) | Y | wing N (beit hachalifot) 15 + body 70 + wing S 15 | 100 | 100 | ✓ |
+| Heichal height (Middot 4:6) | Z | otem 6 + kodesh 40 + kiyur 1 + beit dilpah 2 + tikrah 1 + ma'azivah 1 + aliyah 40 + kiyur 1 + beit dilpah 2 + tikrah 1 + ma'azivah 1 + ma'akeh 3 + kalya orev 1 | 100 | 100 | ✓ |
+| Elevation ladder to the Heichal floor | Z | 12 chel steps 6 + 15 steps 7.5 + 1-amah step 1 + 3 duchan half-steps 1.5 + 12 Ulam steps 6 | 22 | 22 | ✓ |
+| Otem = Ulam-step rise | Z | otem 6 | 6 | 6 | ✓ |
+| Altar plan (Middot 3:1) | X | ma'arachah 24 + walkway x2 2 + keranot x2 2 + sovev inset x2 2 + yesod inset x2 2 | 32 | 32 | ✓ |
+| Altar height (lock #2) | Z | yesod 1 + to the sovev 5 + to the top 3 + keranot 1 | 10 | 10 | ✓ |
+| Kevesh length (Middot 3:3, 5:2) | Y | on the ground 30 + over the yesod 1 + over the sovev 1 | 32 | 32 | ✓ |
+| 12 Ulam steps run (Middot 3:6) | X | tread 1 1 + tread 2 1 + tread 3 3 + tread 4 1 + tread 5 1 + tread 6 3 + tread 7 1 + tread 8 1 + tread 9 3 + tread 10 1 + tread 11 1 + tread 12 4 + apron at the foot 1 | 22 | 22 | ✓ |
+| Ulam lintels (Middot 3:7) | Y | opening 20 + overhang x2 per beam x5 10 | 30 | 30 | ✓ |
+| Azarah N/S gate stations (lock §58) | X | gap 39.25 + gate 10 + gap 39.25 + gate 10 + gap 39.25 + gate 10 + gap 39.25 | 187 | 187 | ✓ |
+| Chuldah trisection (lock §58) | X | corner → gate 160 + gate 10 + gate → gate 160 + gate 10 + gate → corner 160 | 500 | 500 | ✓ |
+| EN along its W wall | Y | SW chamber (40 + wall) 42 + free stretch 51 + NW chamber 42 | 135 | 135 | ✓ |
+| Tzafon (Rambam BhB 5:15) | Y | N wall → altar 60.5 | 60.5 | 60.5 | ✓ |
+| Tzafon length (Rambam BhB 5:15) | X | Ulam → E wall 76 | 76 | 76 | ✓ |
+| Ta'im count (Middot 4:3) | - | north 15 + south 15 + west 8 | 38 | 38 | ✓ |
+| En Eitam head (Yoma 31a) | Z | gate 20 + mikveh 3 | 23 | 23 | ✓ |
+| Wall + ta per story (Middot 4:4) | - | story 1: wall 7 + ta 5 0 + story 2: wall 6 + ta 6 0 + story 3: wall 5 + ta 7 0 | 0 | 0 | ✓ |
+
+## 4. The Parah sight-line test (Middot 2:4; Yoma 16a–b; Rambam BhB 6:5; Parah 3:9)
+
+**Question.** From the kohen standing at the head of Har HaMishchah (Middot 2:4), does the line to the Heichal doorway pass over the low east wall of Har HaBayit and through the open gates (Ezrat Nashim east gate, Nikanor, the Ulam opening)?
+
+**Observer.** On the Temple axis at the crest of the Mount of Olives, 800 m east of the Mount's east wall, ground 808 m ASL, eye +1.6 m. Platform (Z0) = 740 m ASL. In site amot (Naeh 48 cm): eye at X 2171.67, Z **+145**. The pyre site is `context.parah.pyre`. Terrain in between (Kidron bed ≈675 m at 200 m, slope to the crest) is included in the test and never blocks.
+
+**Target.** The doorway of the Heichal: the great gate, 20 × 10, threshold +22. "Outer plane" = its face toward the Ulam (X 163); "inner plane" = the face into the Kodesh (X 157).
+
+**Obstacles modeled** (in the vertical plane of the axis): the east stoa roof (+20), the east Mount wall over the Shushan gate with the Shushan HaBirah chamber on it (+20 → +28), the chel steps, the Ezrat Nashim east wall/gate, the 15 steps and landing, the Nikanor wall/gate, the court floors, the altar (yesod, body to the sovev +22, top +25 — the axis crosses the altar, which lies 7 amot north and 25 south of it, lock #4), the Ulam steps (stepped profile), the Ulam front wall and opening, the Ulam floor. Fires, the tapuach and the horns are off the axis.
+
+### Results (default amah 48 cm unless stated)
+
+| Scenario | Walls (Mount E / EN E / Azarah E top) | Visible heights of the doorway (Z) | Visible |
+|---|---|---|---|
+| **Model as built** (east walls low = gate head + 2; Shushan HaBirah chamber to +28) — outer plane | 22 (+28) / 28 / 35.5 | 22.57–27.84 ∪ 30.25–42 | **17.02 of 20 amot** |
+| same — without the Shushan HaBirah chamber | 22 / 28 / 35.5 | 22.57–27.84 ∪ 30.25–42 | 17.02 |
+| same — inner plane (into the Kodesh) | same | 22.2–27.49 ∪ 29.91–41.69 | 17.07 |
+| same — R' Moshe Feinstein amah (53.98 cm) | same | 22.67–28.13 ∪ 30.54–42 | 16.92 |
+| same — Chazon Ish amah (57.6 cm) | same | 22.74–28.31 ∪ 30.71–42 | 16.86 |
+| Azarah E wall high (+56), EN E wall low | 22 / 28 / 56 | 22.57–27.84 | 5.27 |
+| **Court east walls at the 40-amah baseline** (only the Mount E wall low) | 22 / 46 / 56 | **none** | **0 — FAILS** |
+| Gemara's level-line model (Yoma 16a), walls as built | 22 (+28) / 28 / 35.5 | 28–33.49 ∪ 35.5–42 | 11.99 |
+| same, without the Shushan HaBirah chamber | 22 / 28 / 35.5 | 25–25.99 ∪ 28–33.49 ∪ 35.5–42 | 12.98 |
+| Level-line model, court east walls high | 22 (+28) / 46 / 56 | **none** | 0 (0.99 without the chamber: 25–25.99) |
+| Level-line model, court walls high, Mount E wall also 40 | 40 / 46 / 56 | **none** | 0 |
+
+Clearances of the lowest visible line (as built, outer plane): 
+
+| Obstacle | Line Z (east → west end) | Clearance (amot; − = blocked) |
+|---|---|---|
+| mount.stoa.east (roof) | 43.11 → 41.89 | 21.89 |
+| mount.wall.east + Shushan HaBirah chamber (over the gate) | 43.42 → 43.11 | 15.11 |
+| mount.chel.steps | 37.38 → 37.02 | 31.02 |
+| en.wall.east (EN gate) | 37.02 → 36.71 | 8.71 |
+| en.steps15 + landing | 29.55 → 28.48 | 14.98 |
+| azarah.wall.east (Nikanor) | 28.48 → 28.18 | 5.02 |
+| court floors (EY/EK) | 28.18 → 26.84 | 10.84 |
+| altar.yesod (W strip) | 24.95 → 24.89 | 7.89 |
+| altar.body (to the sovev) | 26.78 → 24.95 | 2.95 |
+| altar.top (ma'arachah level) | 26.71 → 25.01 | 0.01 |
+| heichal.ulam.wall-front (opening) | 23.55 → 23.24 | 1.24 |
+| heichal.ulam (floor) | 23.24 → 22.57 | 0.57 |
+
+Clearances of the best line (middle of the largest visible band, door Z 36.13):
+
+| Obstacle | Line Z | Clearance |
+|---|---|---|
+| mount.stoa.east (roof) | 54.39 → 53.31 | 33.31 |
+| mount.wall.east + Shushan HaBirah chamber (over the gate) | 54.66 → 54.39 | 26.39 |
+| mount.chel.steps | 49.3 → 48.97 | 42.97 |
+| en.wall.east (EN gate) | 48.97 → 48.7 | 20.7 |
+| en.steps15 + landing | 42.33 → 41.38 | 27.88 |
+| azarah.wall.east (Nikanor) | 41.38 → 41.11 | 5.61 |
+| court floors (EY/EK) | 41.11 → 39.92 | 23.92 |
+| altar.yesod (W strip) | 38.24 → 38.18 | 21.18 |
+| altar.body (to the sovev) | 39.86 → 38.24 | 16.24 |
+| altar.top (ma'arachah level) | 39.81 → 38.29 | 13.29 |
+| heichal.ulam.wall-front (opening) | 36.99 → 36.72 | 14.72 |
+| heichal.ulam (floor) | 36.72 → 36.13 | 14.13 |
+
+### Findings
+
+1. **Real topography.** From the real crest (≈+145 amot), the line falls only about 0.07 amah per amah. It reaches the Mount's east wall at ≈+43 to +55, far above the Shushan gate's head (+20). It passes **over** the Ezrat Nashim east gate at ≈+37 to +49, not through it. It then threads the **Nikanor opening** (+13½ to +33½) or passes over a low Nikanor wall, clears the **altar top (+25)**, and enters the Ulam opening. The lowest visible door height is set by the altar's top edge (clearance 0.01). The gap in the visible band (≈27.8 to 30.3) is the Nikanor lintel course (+33½ to +35½).
+2. **What blocks if the court walls are "high".** With the Ezrat Nashim east wall at the 40-amah baseline (+46), **nothing is visible**: that wall blocks every line. The Mount's east wall is *not* the binding one under real topography: it could stand up to ≈+59.27 and still leave a view. The Shushan HaBirah chamber on it (top +28) costs nothing; it could rise to ≈+43 (48 cm; +42 / +41½ at the Feinstein / Chazon Ish amah) before the view shrinks.
+3. **Minimal research-consistent adjustment** (adopted, and it is what lock §58 says: "court walls … height baseline 40 ⚙ (east low)"). Treat every eastern wall on the axis as "the eastern wall" of Middot 2:4 and keep it low: gate head + a 2-amah lintel course. That gives the Mount E wall +22, the EN E wall +28 and the Azarah (Nikanor) E wall +35½. The binding thresholds are:
+   * EN east wall: any view needs ≤ +41.36 (with Nikanor wall high) / ≤ +53.89 (Nikanor wall low). The undiminished view needs ≤ +36.73. So **≈ +36½ is the real limit; +28 leaves ≈ 8.7 amot of margin.**
+   * Azarah east (Nikanor) wall: not needed for *a* view (the line threads the gate, 5.27 amot visible). Low, it shows 17.02 amot, including the doorway's upper half.
+4. **The Gemara's own model** (Yoma 16a: "if REbY, the doorway is concealed [by the 20-amah gate against the +22 floor]") is a *level* line. Under it, with the court walls high, exactly one band survives: **+25 to +26**, between the altar top (+25) and the EN gate head (+26). The Mount's east wall must then be below ≈+25.98. That is precisely why Rambam BhB 6:5 says the wall *above the gate* was made low. Our +22 wall satisfies both models. The Shushan HaBirah chamber that the report places over the gate (Part X §48; Part XIV §65.4) takes the level line's 25–26 band; with the court east walls low that model still sees 28–33½ and 35½–42 (11.99 amot), and under real topography the chamber costs nothing. This tension is logged in `docs/decisions/site-model-fix.md`.
+5. **Robustness.** Eye 650–900 m east and 790–818 m ASL: 16.6–17.4 amot visible. From the causeway's landing (480 m, 740 m) still 8.75 amot. All three amah standards behave the same (16.9–17.0 amot).
+6. **Caveats.** The test assumes the gate doors and the Ulam/Heichal curtains drawn open, and nothing standing on the axis (people, the magrefah, smoke — altar smoke rises straight up and the piles are off-axis). The altar is the tightest constraint. A tall tapuach on the axis would hide the lowest 1–2 amot of the doorway; at its modeled centre and radius it does not.
+
+## 5. Element table
+
+`confidence` is the weakest number that defines the element's box; `params.fieldConfidence` (in site.js) lists the stronger parts field by field.
+
+| id | name | kind | box (min → max, amot) | derivation | sources | confidence |
+|---|---|---|---|---|---|---|
+| `mount.floor` | Har HaBayit pavement — רצפת הר הבית | floor | [0, 0, -1] → [500, 500, 0] | 500 x 500 clear interior at the datum Z0 | Middot 2:1; Rambam BhB 5:1; Parah 3:3; EK I 184 (Part X §47) | explicit |
+| `mount.wall.south` | Har HaBayit wall — south — חומת הר הבית — דרום | wall | [-5, -5, -58.33] → [505, 0, 40] | thickness 5 outside the square; height 40 above Z0 (lock §58 baseline) | Middot 2:1; Part XI §58 (EK placement locks); EK I 174 (Part X §47) | locked |
+| `mount.wall.north` | Har HaBayit wall — north — חומת הר הבית — צפון | wall | [-5, 500, -58.33] → [505, 505, 40] | thickness 5 outside the square; height 40 above Z0 (lock §58 baseline) | Middot 2:1; Part XI §58 (EK placement locks); EK I 174 (Part X §47) | locked |
+| `mount.wall.west` | Har HaBayit wall — west — חומת הר הבית — מערב | wall | [-5, 0, -37.5] → [0, 500, 40] | thickness 5 outside the square; height 40 above Z0 (lock §58 baseline) | Middot 2:1; Part XI §58 (EK placement locks); EK I 174 (Part X §47) | locked |
+| `mount.wall.east` | Har HaBayit wall — east — חומת הר הבית — מזרח | wall | [500, 0, -58.33] → [505, 500, 22] | low (Middot 2:4; Rambam BhB 6:5); +22 = gate 20 + lintel course 2, chosen ⚙ (EK's "not less than 22" is for the high walls) | Middot 2:4; Rambam BhB 6:5; Part XI §58 (EK placement locks); EK I 174, 181 (Part X §47) | reconstruction |
+| `mount.gate.chuldah-w` | Chuldah gate (west) — שער חולדה (מערבי) | gate | [160, -5, -27.08] → [170, 0, -7.08] | S wall trisected 160 \| 10 \| 160 \| 10 \| 160 (lock §58); portal at the Ophel grade | Middot 1:3; Middot 2:3; Part XI §58 (EK placement locks) | locked |
+| `mount.gate.chuldah-e` | Chuldah gate (east) — שער חולדה (מזרחי) | gate | [330, -5, -27.08] → [340, 0, -7.08] | S wall trisection (lock §58) | Middot 1:3; Middot 2:3; Part XI §58 (EK placement locks) | locked |
+| `mount.gate.kiponus` | Kiponus gate (west) — שער קיפונוס | gate | [-5, 245, 0] → [0, 255, 20] | center of the W wall (Y 250) | Middot 1:3; Middot 2:3; Part XI §58 (EK placement locks) | locked |
+| `mount.gate.tadi` | Tadi gate (north) — שער טדי | gate | [205.75, 500, 0] → [215.75, 505, 20] | opposite the Beit HaMoked gate (lock §58) | Middot 1:3; Middot 2:3; Middot 1:9; Part XI §58 (EK placement locks) | locked |
+| `mount.gate.shushan` | Shushan gate (the Eastern Gate) — שער המזרח — שושן הבירה | gate | [500, 325.5, 0] → [505, 335.5, 20] | on the Heichal axis Y = 330.5 (lock §58); threshold = datum Z0 | Middot 1:3; Middot 2:3; Middot 2:4; Kelim 17:9; Rambam BhB 6:5; Part XI §58 (EK placement locks) | locked |
+| `mount.gate.shushan.chamber` | Shushan HaBirah — the chamber over the Eastern Gate — שושן הבירה | chamber | [500, 324.5, 22] → [505, 336.5, 28] | on the lintel course over the gate (+22), within the wall's thickness, the gate's width + 1-amah walls; top +28 ⚙ (= the low EN east wall, so the Parah line loses nothing under real topography) | Kelim 17:9; Middot 1:3; Menachot 98a; Part X §48 (EK I 167–168); Part XIV §65.4; Rambam BhB 6:5 | reconstruction |
+| `mount.stoa.south` | Double stoa — south — סטיו לפנים מסטיו | zone | [0, 0, 0] → [500, 20, 20] | band 20 deep (two aisles of 10) inside the wall; roof top 20 | Rambam BhB 5:1; Tamid 1:3; Shekalim 8:4; Sukkah 4:4; Part I §2.3 | reconstruction |
+| `mount.stoa.north` | Double stoa — north — סטיו לפנים מסטיו | zone | [0, 480, 0] → [500, 500, 20] | band 20 deep (two aisles of 10) inside the wall; roof top 20 | Rambam BhB 5:1; Tamid 1:3; Shekalim 8:4; Sukkah 4:4; Part I §2.3 | reconstruction |
+| `mount.stoa.west` | Double stoa — west — סטיו לפנים מסטיו | zone | [0, 20, 0] → [20, 480, 20] | band 20 deep (two aisles of 10) inside the wall; roof top 20 | Rambam BhB 5:1; Tamid 1:3; Shekalim 8:4; Sukkah 4:4; Part I §2.3 | reconstruction |
+| `mount.stoa.east` | Double stoa — east — סטיו לפנים מסטיו | zone | [480, 20, 0] → [500, 480, 20] | band 20 deep (two aisles of 10) inside the wall; roof top 20 | Rambam BhB 5:1; Tamid 1:3; Shekalim 8:4; Sukkah 4:4; Part I §2.3 | reconstruction |
+| `mount.chel.steps` | The twelve steps of the Chel — שתים עשרה מעלות שבחיל | stair | [400, 320.5, 0] → [406, 340.5, 6] | 12 x rise 0.5 = +6; run 6 in the inner part of the 10-amah chel, at the EN east gate; width 20 ⚙ | Middot 2:3; Rambam BhB 6:1; Part XI lock #45 | reconstruction |
+| `en.floor` | Ezrat Nashim pavement — עזרת הנשים | floor | [260, 263, 5] → [395, 398, 6] | 135 x 135 at +6 (12 chel steps) | Middot 2:5; Rambam BhB 5:7; Rambam BhB 6:1 | explicit |
+| `en.wall.north` | Ezrat Nashim wall — north — כותל עזרת הנשים — צפון | wall | [260, 398, 0] → [400, 403, 46] | 5 thick; top = EN floor + 40 (lock §58 baseline, read above this court's floor ⚙) | Part XI §58 (EK placement locks); Middot 2:4 | locked |
+| `en.wall.south` | Ezrat Nashim wall — south — כותל עזרת הנשים — דרום | wall | [260, 258, 0] → [400, 263, 46] | 5 thick; top = EN floor + 40 (lock §58 baseline, read above this court's floor ⚙) | Part XI §58 (EK placement locks); Middot 2:4 | locked |
+| `en.wall.east` | Ezrat Nashim wall — east (low) — כותל מזרחי של עזרת הנשים | wall | [395, 263, 0] → [400, 398, 28] | low (Middot 2:4; lock §58 "east low"); +28 = gate head 26 + lintel course 2 ⚙ | Middot 2:4; Part XI §58 (EK placement locks) | reconstruction |
+| `en.gate.east` | East gate of Ezrat Nashim — השער היוצא למזרח | gate | [395, 325.5, 6] → [400, 335.5, 26] | on the axis; threshold at the head of the chel steps (+6); 20 x 10 | Sukkah 5:4; Middot 2:3; Middot 2:4 | derived |
+| `en.chamber.nazirites` | Chamber of the Nazirites — לשכת הנזירים | chamber | [353, 263, 6] → [395, 305, 28] | interior 40 x 40 in the SE corner; inner walls 2 ⚙, height 22 ⚙ (top +28 = the low east wall) | Middot 2:5; Rambam BhB 5:7–8; Part XI lock #23 | reconstruction |
+| `en.chamber.wood` | Chamber of the Wood (Dir HaEtzim) — לשכת דיר העצים | chamber | [353, 356, 6] → [395, 398, 28] | interior 40 x 40 in the NE corner; inner walls 2 ⚙, height 22 ⚙ (top +28 = the low east wall) | Middot 2:5; Rambam BhB 5:7–8; Part XI lock #23 | reconstruction |
+| `en.chamber.lepers` | Chamber of the Metzora'im — לשכת המצורעים | chamber | [260, 356, 6] → [302, 398, 28] | interior 40 x 40 in the NW corner; inner walls 2 ⚙, height 22 ⚙ (top +28 = the low east wall) | Middot 2:5; Rambam BhB 5:7–8; Part XI lock #23 | reconstruction |
+| `en.chamber.oil` | Chamber of Oils (Beit Shamanya) — לשכת בית שמניה | chamber | [260, 263, 6] → [302, 305, 28] | interior 40 x 40 in the SW corner; inner walls 2 ⚙, height 22 ⚙ (top +28 = the low east wall) | Middot 2:5; Rambam BhB 5:7–8; Part XI lock #23 | reconstruction |
+| `en.gallery` | Gezuztra — the women's gallery — גזוזטרא | slab | [302, 263, 16] → [395, 398, 19] | balconies 4 deep, floor +16 (10 above EN) ⚙, parapet 2 | Middot 2:5; Sukkah 51b–52a; Rambam BhB 5:9 | reconstruction |
+| `en.chamber.chashaim` | Lishkat Chasha'im (Chamber of Secret Gifts) — לשכת חשאים | chamber | [320, 394, 6] → [335, 403, 16] | nominal box (lock §58, footprint unsourced): in the EN N wall + 4 under the gallery, floor +6, roof = gallery floor +16 ⚙ | Shekalim 5:6; Part III §9.3; Part XII §60; Part XI §58 (EK placement locks) | reconstruction |
+| `en.steps15` | The fifteen semicircular steps — חמש עשרה מעלות | stair | [260, 313, 6] → [277.5, 348, 13.5] | 15 x rise ½ = +7½ (6 → 13½); semicircles about [260, 330.5], landing r 10.5 ⚙, foot r 17.5 | Middot 2:5; Rambam BhB 6:2; Sukkah 5:4; Part XI lock #45 | reconstruction |
+| `en.music-chambers` | Chambers of the instruments (under Ezrat Yisrael) — לשכות כלי השיר | chamber | [244, 283, 6] → [260, 378, 13] | cellars in the 7½-amah step between EN (+6) and EY (+13½), flanking the 15 steps; doors through the Azarah E wall into EN | Middot 2:6; Rambam BhB 6:6; Shiltei HaGiborim 3 (Part X §45) | reconstruction |
+| `azarah.wall.east` | East wall of the Azarah (Nikanor wall) — כותל מזרחי של העזרה | wall | [255, 258, 0] → [260, 403, 35.5] | 5 thick; low (Middot 2:4; lock §58 "east low"); +35.5 = Nikanor head 33.5 + lintel course 2 ⚙ | Middot 2:4; Part XI §58 (EK placement locks) | reconstruction |
+| `azarah.gate.nikanor` | Sha'ar Nikanor (the Upper Gate) — שער ניקנור | gate | [255, 325.5, 13.5] → [260, 335.5, 33.5] | centered on the axis opposite the Heichal (Rambam BhB 5:4); threshold +13½ at the head of the 15 steps | Middot 1:4; Middot 2:3; Middot 2:6; Rambam BhB 5:4–5; Yoma 38a; Part XI lock #14 | derived |
+| `azarah.gate.nikanor.wicket-n` | Nikanor — north (right) wicket — פשפש ימני של שער ניקנור | opening | [255, 337.5, 13.5] → [260, 340.5, 21.5] | one on its right, one on its left; = doorway of the flanking chamber built in the wall (EK/Chanukat HaBayit) | Middot 2:6; Shekalim 6:3; EK I 253–254, 288–289 (Part X §48) | reconstruction |
+| `azarah.gate.nikanor.wicket-s` | Nikanor — south (left) wicket — פשפש שמאלי של שער ניקנור | opening | [255, 320.5, 13.5] → [260, 323.5, 21.5] | mirror of the north wicket | Middot 2:6; Shekalim 6:3; EK I 253–254 (Part X §48) | reconstruction |
+| `azarah.chamber.pinchas` | Chamber of Pinchas HaMalbish (vestments) — לשכת פנחס המלביש | chamber | [248, 336.5, 13.5] → [260, 346.5, 33.5] | right of the gate for one entering westward = north (Rambam BhB 5:17 "to the right of the east gate"); in the wall + 7 into EY | Middot 1:4; Rambam BhB 5:17; Yoma 19a | reconstruction |
+| `azarah.chamber.chavitin` | Chamber of the Chavitin bakers — לשכת עושי חביתין | chamber | [248, 314.5, 13.5] → [260, 324.5, 33.5] | left of the gate = south; mirror of Pinchas | Middot 1:4; Rambam BhB 5:17; Tamid 1:3 | reconstruction |
+| `azarah.ezrat-yisrael` | Ezrat Yisrael — עזרת ישראל | floor | [244, 263, 13] → [255, 398, 13.5] | 135 x 11 at +13.5 (the first 11 of the 187) | Middot 2:6; Middot 5:1; Rambam BhB 5:12; Rambam BhB 6:2 | explicit |
+| `azarah.duchan` | The 1-amah step and the duchan of the Levites — מעלה ודוכן | stair | [242, 263, 13.5] → [244, 398, 16] | riser 1 at X 244 → +14.5 (tread 1 ⚙), then 3 half-steps → +16 | Middot 2:6 (REbY); Rambam BhB 6:3; Rambam BhB 6:6; Arachin 2:6; Part XI lock #10 | reconstruction |
+| `azarah.ezrat-kohanim` | Ezrat Kohanim — עזרת כהנים | zone | [233, 263, 16] → [244, 398, 16.01] | 135 x 11 at +16 (2½ above EY) | Middot 2:6; Middot 5:1; Rambam BhB 6:3 | explicit |
+| `azarah.floor` | Azarah pavement — רצפת העזרה | floor | [68, 263, 15] → [242, 398, 16] | X 68–242 at +16: the court from behind the Kaporet through Ezrat Kohanim (mekom drisat haKohanim, X 233–244) up to the foot of the duchan | Middot 5:1–2; Rambam BhB 1:10; Rambam BhB 5:12; Zevachim 24a | explicit |
+| `azarah.wall.north` | Azarah wall — north — כותל העזרה — צפון | wall | [63, 398, 0] → [255, 403, 56] | 5 thick; top = Azarah floor + 40 = 56 (lock §58 baseline, read above this court's floor ⚙) | Part XI §58 (EK placement locks); Middot 2:4; Rambam BhB 1:8 | locked |
+| `azarah.wall.south` | Azarah wall — south — כותל העזרה — דרום | wall | [63, 258, 0] → [255, 263, 56] | 5 thick; top 56 (lock §58 baseline, read above this court's floor ⚙); lowered to the Water Gate house roof over its span | Part XI §58 (EK placement locks); Middot 2:4 | locked |
+| `azarah.wall.west` | Azarah wall — west — כותל העזרה — מערב | wall | [63, 263, 0] → [68, 398, 56] | 5 thick; top 56 (lock §58 baseline, read above this court's floor ⚙) | Part XI §58 (EK placement locks); Middot 2:4 | locked |
+| `azarah.gate.delek` | Sha'ar HaDelek — שער הדלק | gate | [107.25, 258, 16] → [117.25, 263, 36] | S wall, west of three at 39¼ spacing → center X 112.25 | Middot 1:4–5; Middot 2:3; Rambam BhB 5:4; Yoma 31a–b; Part XI lock #9; Part XI §58 (EK placement locks) | locked |
+| `azarah.gate.delek.flight` | Sha'ar HaDelek — exterior steps — מעלות שער הדלק | stair | [107.25, 242, 0] → [117.25, 258, 16] | 32 x rise ½ / tread ½ from +16 to the Mount; run 16 | Middot 2:3; Rambam BhB 6:1–4; EK I 202–215 (Part X §49) | reconstruction |
+| `azarah.gate.bechorot` | Sha'ar HaBechorot — שער הבכורות | gate | [156.5, 258, 16] → [166.5, 263, 36] | S wall, middle of three at 39¼ spacing → center X 161.5 | Middot 1:4–5; Middot 2:3; Rambam BhB 5:4; Yoma 31a–b; Part XI lock #9; Part XI §58 (EK placement locks) | locked |
+| `azarah.gate.bechorot.flight` | Sha'ar HaBechorot — exterior steps — מעלות שער הבכורות | stair | [156.5, 242, 0] → [166.5, 258, 16] | 32 x rise ½ / tread ½ from +16 to the Mount; run 16 | Middot 2:3; Rambam BhB 6:1–4; EK I 202–215 (Part X §49) | reconstruction |
+| `azarah.gate.mayim` | Sha'ar HaMayim (Water Gate) — שער המים | gate | [205.75, 258, 16] → [215.75, 263, 36] | S wall, east of three at 39¼ spacing → center X 210.75 | Middot 1:4–5; Middot 2:3; Rambam BhB 5:4; Yoma 31a–b; Part XI lock #9; Part XI §58 (EK placement locks) | locked |
+| `azarah.gate.mayim.flight` | Sha'ar HaMayim (Water Gate) — exterior steps — מעלות שער המים | stair | [205.75, 242, 0] → [215.75, 258, 16] | 32 x rise ½ / tread ½ from +16 to the Mount; run 16 | Middot 2:3; Rambam BhB 6:1–4; EK I 202–215 (Part X §49) | reconstruction |
+| `azarah.gate.nitzotz` | Sha'ar HaNitzotz — שער הניצוץ | gate | [107.25, 398, 16] → [117.25, 403, 36] | N wall, west of three at 39¼ spacing → center X 112.25 | Middot 1:4–5; Middot 2:3; Rambam BhB 5:4; Yoma 31a–b; Part XI lock #9; Part XI §58 (EK placement locks) | locked |
+| `azarah.gate.nitzotz.flight` | Sha'ar HaNitzotz — exterior steps — מעלות שער הניצוץ | stair | [107.25, 403, 0] → [117.25, 419, 16] | 32 x rise ½ / tread ½ from +16 to the Mount; run 16 | Middot 2:3; Rambam BhB 6:1–4; EK I 202–215 (Part X §49) | reconstruction |
+| `azarah.gate.korban` | Sha'ar HaKorban — שער הקרבן | gate | [156.5, 398, 16] → [166.5, 403, 36] | N wall, middle of three at 39¼ spacing → center X 161.5 | Middot 1:4–5; Middot 2:3; Rambam BhB 5:4; Yoma 31a–b; Part XI lock #9; Part XI §58 (EK placement locks) | locked |
+| `azarah.gate.korban.flight` | Sha'ar HaKorban — exterior steps — מעלות שער הקרבן | stair | [156.5, 403, 0] → [166.5, 419, 16] | 32 x rise ½ / tread ½ from +16 to the Mount; run 16 | Middot 2:3; Rambam BhB 6:1–4; EK I 202–215 (Part X §49) | reconstruction |
+| `azarah.gate.mayim.house` | Water Gate gatehouse — בית שער המים | chamber | [195.75, 258, 16] → [225.75, 263, 36] | within the wall thickness; roof at gate head +36 ("marble, negligibly thin" — Yoma 31b); 30 wide ⚙ | Yoma 31a–b; Middot 1:4 | reconstruction |
+| `azarah.beit-avtinas` | Beit Avtinas (upper chamber over the Water Gate) — בית אבטינס | chamber | [195.75, 258, 36] → [215.75, 263, 46] | aliyah on the Water Gate roof terrace (+36); footprint ⚙ | Tamid 1:1; Middot 1:1; Yoma 19a; Yoma 38a; Rambam BhB 8:5 | reconstruction |
+| `azarah.mikveh.mayim-roof` | KG's first-immersion mikveh on the Water Gate roof — מקוה על גבי שער המים | fixture | [217.75, 258.5, 36] → [221.75, 262.5, 39] | water surface = gate head 20 + mikveh 3 = 23 over the Azarah floor = En Eitam head (Yoma 31a); tank 4 x 4 and its place on the terrace ⚙ | Yoma 31a (Abaye); Yoma 19a; Part XIV §65.7 | reconstruction |
+| `azarah.gate.nitzotz.exedra` | Sha'ar HaNitzotz — exedra — אכסדרה של שער הניצוץ | chamber | [100.25, 393, 16] → [124.25, 403, 36] | "like an exedra" — open colonnaded gatehouse; roof +36; 24 wide ⚙ | Middot 1:5; Yoma 19a | reconstruction |
+| `azarah.beit-hanitzotz` | Beit HaNitzotz (upper storey) — בית הניצוץ | chamber | [100.25, 393, 36] → [124.25, 403, 46] | "an upper storey built on top" — kohanim watch above (Middot 1:5); footprint and height ⚙ | Middot 1:1; Middot 1:5; Tamid 1:1 | reconstruction |
+| `azarah.chamber.kelim` | Lishkat HaKelim (Chamber of the Vessels) — לשכת הכלים | chamber | [244, 391, 13.5] → [255, 403, 33.5] | nominal box (lock §58, footprint unsourced): NE corner of the court, 7 into Ezrat Yisrael and through the N wall; floor +13½ ⚙ | Shekalim 5:6; Tamid 3:4; Part III §9.3; Part XII §60; Part XI §58 (EK placement locks) | reconstruction |
+| `azarah.chamber.gazit` | Lishkat HaGazit (Chamber of Hewn Stone) — לשכת הגזית | chamber | [43, 371, 16] → [88, 391, 36] | straddles the Azarah W wall in front of the Etz; kodesh (east) half X 65.5–88, chol (west) half 43–65.5; 45 x 20 ⚙ | Middot 5:4; Yoma 25a; Yoma 19a; Rambam BhB 5:17; Rambam BhB 6:7–8; Tamid 2:5–5:1; Part XI lock #7 | reconstruction |
+| `azarah.chamber.gazit.podium` | Lishkat HaGazit — substructure of the chol half — יסוד לשכת הגזית | slab | [43, 371, 0] → [63, 391, 16] | solid masonry from the Mount (Z0) up to the Azarah floor (+16) under the part outside the W wall ⚙ | Yoma 25a; Rambam BhB 6:8; EK I 174, 184 (Part X §47) | reconstruction |
+| `azarah.chamber.golah` | Lishkat HaGolah (cistern and wheel) — לשכת הגולה | chamber | [88, 381, 16] → [98, 391, 36] | inside the Azarah east of the Gazit, in front of the Etz; footprint 10 x 10 ⚙ | Middot 5:4; Yoma 19a; Rambam BhB 5:17 | reconstruction |
+| `azarah.chamber.etz` | Lishkat HaEtz = Lishkat Parhedrin (KG's chamber) — לשכת העץ — לשכת פרהדרין | chamber | [68, 391, 16] → [98, 403, 36] | "behind both of them" (Middot 5:4): inside the Azarah against the N wall and through its thickness, with the Gazit and Golah in front; 30 x 7 + the 5-amah wall ⚙; roofs of all three level | Middot 5:3–4 (Abba Shaul); Rambam BhB 5:17; Rambam BhB 6:7; Yoma 2a; Yoma 8b; Yoma 10a; Yoma 11a; Yoma 19a; Part X §52; Part XI locks #7, #20 | reconstruction |
+| `azarah.chamber.melach` | Lishkat HaMelach (salt) — לשכת המלח | chamber | [75, 263, 16] → [95, 275, 36] | south trio (lock #7) against the S wall between its gates; 20 x 12 ⚙ | Middot 5:3; Yoma 19a; Rambam BhB 5:17; Part XI lock #7 | reconstruction |
+| `azarah.chamber.parvah` | Lishkat HaParvah (hides) — לשכת הפרוה | chamber | [120.25, 263, 16] → [140.25, 275, 36] | south trio (lock #7) against the S wall between its gates; 20 x 12 ⚙ | Middot 5:3; Yoma 19a; Rambam BhB 5:17; Part XI lock #7 | reconstruction |
+| `azarah.chamber.medichin` | Lishkat HaMedichin (rinsers) — לשכת המדיחין | chamber | [140.25, 263, 16] → [152.25, 275, 36] | south trio (lock #7) against the S wall between its gates; 12 x 12 ⚙ | Middot 5:3; Yoma 19a; Rambam BhB 5:17; Part XI lock #7 | reconstruction |
+| `azarah.moked.hall` | Beit HaMoked (the Hearth House) — בית המוקד | chamber | [198.75, 390, 16] → [222.75, 414, 46] | 24 x 24 (lock §58) straddling the N wall at the Moked gate (center X 210.75); 8 into the Azarah / 16 out ⚙ so it enters only the 8-amah strip (Middot 5:2); kodesh/chol line at Y 402 → 12 \| 12 (lock #43) | Middot 1:5–9; Tamid 1:1; Tamid 3:3; Rambam BhB 5:9–10; Part XI locks #8, #43; Part XI §58 (EK placement locks) | reconstruction |
+| `azarah.moked.podium` | Beit HaMoked — substructure of the chol part — יסוד בית המוקד | slab | [198.75, 403, 0] → [222.75, 414, 16] | solid masonry from the Mount (Z0) up to the hall floor (+16) under the part north of the N wall ⚙ | Rambam BhB 5:9; EK I 174, 184 (Part X §47) | reconstruction |
+| `azarah.gate.moked` | Sha'ar Beit HaMoked (door to the Azarah) — שער בית המוקד | gate | [205.75, 390, 16] → [215.75, 392, 36] | the Moked gate is the door of the hall into the Azarah (E-most of the N trio, center X 210.75); its Y follows the hall ⚙ | Middot 1:5; Middot 1:7; Tamid 1:3; Rambam BhB 8:11; Part XI lock #9; Part XI §58 (EK placement locks) | reconstruction |
+| `azarah.moked.door-chel` | Beit HaMoked — door to the Chel — פתח בית המוקד לחיל | opening | [205.75, 412, 16] → [215.75, 414, 36] | second door, to the chel (north face, opposite the gate) ⚙ position | Middot 1:7; Rambam BhB 5:9 | reconstruction |
+| `azarah.moked.flight` | Beit HaMoked — steps down to the Chel — מעלות בית המוקד | stair | [205.75, 414, 0] → [215.75, 430, 16] | 32 half-steps from +16 to the Mount | Middot 2:3; EK I 202–215 | reconstruction |
+| `azarah.moked.chamber.lambs` | Chamber of the Tamid lambs — לשכת טלאי קרבן | chamber | [200.75, 392, 16] → [205.75, 398, 26] | SW corner of the hall, 5 (E–W) x 6 ⚙, flanking the Azarah gate so its 10 amot stay clear; kodesh half | Middot 1:6; Tamid 3:3; Yoma 15b–17a; Part XI locks #8, #43 | reconstruction |
+| `azarah.moked.chamber.showbread` | Chamber of the Showbread bakers (Beit Garmu) — לשכת עושי לחם הפנים | chamber | [215.75, 392, 16] → [220.75, 398, 26] | SE corner of the hall, 5 (E–W) x 6 ⚙, flanking the Azarah gate so its 10 amot stay clear; kodesh half | Middot 1:6; Tamid 3:3; Yoma 15b–17a; Part XI locks #8, #43 | reconstruction |
+| `azarah.moked.chamber.altar-stones` | Chamber of the defiled altar stones — לשכה שגנזו בה בני חשמונאי את אבני המזבח | chamber | [215.75, 406, 16] → [220.75, 412, 26] | NE corner of the hall, 5 (E–W) x 6 ⚙, flanking the chel door so its 10 amot stay clear; chol half | Middot 1:6; Tamid 3:3; Yoma 15b–17a; Part XI locks #8, #43 | reconstruction |
+| `azarah.moked.chamber.tevilah-descent` | Chamber of the descent to the Beit HaTevilah — לשכה שבה יורדין לבית הטבילה | chamber | [200.75, 406, 16] → [205.75, 412, 26] | NW corner of the hall, 5 (E–W) x 6 ⚙, flanking the chel door so its 10 amot stay clear; chol half | Middot 1:6; Tamid 3:3; Yoma 15b–17a; Part XI locks #8, #43 | reconstruction |
+| `azarah.moked.keys-slab` | The keys slab (marble, ring and chain) — טבלא של שיש — מקום המפתחות | slab | [210.25, 403, 15.5] → [211.25, 404, 16] | 1 x 1 amah in the hall floor (Middot 1:9); in the chol half, since the officer slept on it and there is no sitting, let alone sleeping, in the kodesh (Yoma 25a); position ⚙ near the hall centre | Middot 1:9; Yoma 25a; Part IX §37.1 | reconstruction |
+| `azarah.underground.stair` | Winding stair down from the Moked — מסיבה — ירידה | stair | [201.25, 406.5, -12] → [205.25, 411.5, 16] | spiral of 56 half-steps from +16 to -12 | Middot 1:6; Middot 1:9; Tamid 1:1 | reconstruction |
+| `azarah.underground.passage` | The passage under the Birah — מסיבה ההולכת תחת הבירה | zone | [201.25, 411, -12] → [205.25, 450, -4] | vaulted passage north under the Mount; route and depth ⚙ (the Birah's location is §20 #8) | Middot 1:9; Tamid 1:1; Rambam BhB 5:11; Rambam BhB 6:9; Part XI lock #21 | reconstruction |
+| `azarah.underground.beit-hatevilah` | Beit HaTevilah (immersion house) — בית הטבילה | chamber | [194.25, 450, -15] → [212.25, 468, -4] | underground under the north of the Mount ⚙; mikveh ≥ 1 x 1 x 3 (Yoma 31a) | Tamid 1:1; Middot 1:9; Rambam BhB 5:11; Yoma 31a | reconstruction |
+| `azarah.chamber.gazit.flight` | Lishkat HaGazit — steps to the Chel — מעלות לשכת הגזית | stair | [27, 376, 0] → [43, 386, 16] | 32 half-steps west from the chol door | Yoma 25a; EK I 202–215 | reconstruction |
+| `azarah.chamber.etz.flight` | Lishkat Parhedrin — steps to the Chel — מעלות לשכת פרהדרין | stair | [78, 403, 0] → [88, 419, 16] | 32 half-steps north from its door in the N wall | Yoma 10a; Rambam BhB 6:7; EK I 202–215 | reconstruction |
+| `mount.soreg` | The Soreg (lattice fence) — סורג | wall | [32.5, 247.5, 0] → [410.5, 424.5, 2.67] | closed path 10 amot outside the court complex (incl. its projecting chambers); lattice 1.666667 (10 tefachim) on a 1-amah base | Middot 2:3; Rambam BhB 5:3; Kelim 1:8; Part XI lock #26/#44; EK I 202–215 (Part X §49) | locked |
+| `mount.soreg.breaches` | The thirteen repaired breaches (prostration stations) — שלש עשרה פרצות | fixture | [32, 247, 0] → [411, 414, 2.67] | side counts 4N 4S 3E 2W follow the 13 prostrations (Shekalim 6:3); positions spread evenly and kept 2 clear of the passages ⚙ | Middot 2:3; Shekalim 6:1, 6:3; EK I 207 (Part X §49) | reconstruction |
+| `mount.chamber.parochet` | Lishkat HaParochet (Chamber of the Curtain) — לשכת הפרכת | chamber | [141.5, 420, 0] → [155.5, 432, 12] | on the Mount just outside the soreg, flanking the foot of the Korban gate flight; 14 x 12 x 12 ⚙ | Middot 1:1; Rambam BhB 8:9; Shekalim 5:1; Shekalim 8:4–5; Ketubot 106a; Part III §9.3; Part XII §60 | reconstruction |
+| `mount.chamber.korban` | Lishkat HaKorban (Chamber of the Offerings) — לשכת הקרבן | chamber | [167.5, 420, 0] → [181.5, 432, 12] | on the Mount just outside the soreg, flanking the foot of the Korban gate flight; 14 x 12 x 12 ⚙ | Middot 1:1; Middot 1:5; Rambam BhB 8:9; Part III §9.3; Part XII §60 | reconstruction |
+| `mount.chamber.beit-haeven` | Lishkat Beit HaEven (the Stone House) — לשכת בית האבן | chamber | [365, 432, 0] → [385, 447, 12] | "the chamber facing the Birah, to the north-east" (Parah 3:1): on the Mount NE of the court complex, its door facing north toward the Birah (whose site is open — §20 #8; the underground passage runs north) ⚙ | Parah 3:1; Yoma 2a; Part III §9.3 | reconstruction |
+| `altar.yesod` | Mizbeach — yesod (base) — יסוד המזבח | fixture | [201, 305.5, 16] → [233, 337.5, 17] | rise 1, inset 1; along the whole N and W faces, "eating" 1 amah into S and E; none at the SE (Rav: in structure) | Middot 3:1; Zevachim 53b–54a; Rambam BhB 2:7, 2:10; Part XI locks #2–#4 | explicit |
+| `altar.body` | Mizbeach — body to the sovev (30 x 30) — גוף המזבח | fixture | [202, 306.5, 16] → [232, 336.5, 22] | rise 5 above the yesod, inset 1 → 30 x 30 to +6 (stands on the floor where the yesod is absent) | Middot 3:1; Zevachim 54a | explicit |
+| `altar.sovev` | Mizbeach — sovev (circuit ledge) — סובב | slab | [202, 306.5, 21.99] → [232, 336.5, 22] | the 1-amah ledge between the 30- and 28-squares at +6 over the court | Middot 3:1; Zevachim 62a (karkov) | explicit |
+| `altar.top` | Mizbeach — upper body (28 x 28) — ראש המזבח | fixture | [203, 307.5, 22] → [231, 335.5, 25] | 3 above the sovev → top at 9 over the court (+25) | Middot 3:1; Zevachim 59b–60a (R' Yosi); Rambam BhB 2:5; Part XI locks #2, #3 | locked |
+| `altar.keren.sw` | Mizbeach — SW keren (horn) — קרן המזבח | fixture | [203, 307.5, 25] → [204, 308.5, 26] | 1 x 1 x 1 hollow cube at the corner of the 28-square | Middot 3:1; Zevachim 54a–b | explicit |
+| `altar.keren.se` | Mizbeach — SE keren (horn) — קרן המזבח | fixture | [230, 307.5, 25] → [231, 308.5, 26] | 1 x 1 x 1 hollow cube at the corner of the 28-square | Middot 3:1; Zevachim 54a–b | explicit |
+| `altar.keren.nw` | Mizbeach — NW keren (horn) — קרן המזבח | fixture | [203, 334.5, 25] → [204, 335.5, 26] | 1 x 1 x 1 hollow cube at the corner of the 28-square | Middot 3:1; Zevachim 54a–b | explicit |
+| `altar.keren.ne` | Mizbeach — NE keren (horn) — קרן המזבח | fixture | [230, 334.5, 25] → [231, 335.5, 26] | 1 x 1 x 1 hollow cube at the corner of the 28-square | Middot 3:1; Zevachim 54a–b | explicit |
+| `altar.walkway` | Mizbeach — kohanim's walkway — מקום הילוך רגלי הכהנים | zone | [204, 308.5, 25] → [230, 334.5, 25.01] | 1-amah ring inside the horns (26 → 24) | Middot 3:1 | explicit |
+| `altar.maarachah-area` | Mizbeach — place of the ma'arachah (24 x 24) — מקום המערכה | zone | [205, 309.5, 25] → [229, 333.5, 25.01] | 24 x 24 at +25 | Middot 3:1; Tamid 2:2–5; Part XI lock #17 | explicit |
+| `altar.chut-hasikra` | Chut HaSikra (red line) — חוט הסיקרא | fixture | [202, 306.5, 20.95] → [232, 336.5, 21.05] | half of the 10 → +5 over the court (Rambam: 29 of 58 tefachim) | Middot 3:1; Zevachim 53a; Rambam BhB 2:9 | derived |
+| `altar.shitin` | The two drain holes at the SW corner — שני נקבים — שיתין | fixture | [201, 305.5, 16.8] → [202, 306.5, 17] | on the SW yesod corner | Middot 3:2; Rambam BhB 2:11; Zevachim 61b–62a | explicit |
+| `altar.libation-cups` | Silver libation cups at the SW horn — ספלים של כסף | fixture | [204, 307.5, 25] → [205, 308.5, 25.5] | beside the SW horn on top ⚙ | Sukkah 4:9; Sukkah 48b; Part XI lock #29 | reconstruction |
+| `altar.shit-slab` | Marble slab over the shit (SW, in the pavement) — טבלא של שיש — לשית | slab | [200, 304.5, 15.75] → [201, 305.5, 16] | 1 x 1 in the pavement at the SW corner | Middot 3:3; Rambam BhB 2:12; Part IX §37.1 | derived |
+| `altar.kevesh` | Kevesh (the altar ramp) — כבש המזבח | ramp | [209, 275.5, 16] → [225, 307.5, 25] | 32 x 16, south, centered on the altar ⚙; 30 on the ground + flies 1 over the yesod line and 1 over the sovev; rises 9 | Middot 3:3; Middot 5:2; Rambam BhB 2:13; Zevachim 62b–63a | reconstruction |
+| `altar.kevesh.ramp-sovev` | Small ramp to the sovev (east) — כבש קטן לסובב | ramp | [225, 302.08, 16] → [227, 306.5, 23.47] | leaves the kevesh where both are at +23.474576 and descends 1:3 north to the sovev (+22) | Zevachim 62b; Rambam BhB 2:14 | reconstruction |
+| `altar.kevesh.ramp-yesod` | Small ramp to the yesod (west) — כבש קטן ליסוד | ramp | [201, 292.31, 16] → [209, 305.5, 20.73] | leaves the kevesh at +20.728814, descends 1:3 north to +17, then runs level west along the S face to the SW corner, where it meets the S stub and the W yesod along the face (X 201–203) | Zevachim 62b; Rambam BhB 2:14 | reconstruction |
+| `altar.machtah-niche` | Rest of the silver machtah (ramp–altar angle) — מקום המחתה | fixture | [205, 305.5, 16] → [206, 306.5, 16.5] | "in the corner between the kevesh and the altar, west of the kevesh" — on the pavement north of the yesod branch | Tamid 1:4 | reconstruction |
+| `altar.kevesh.revuvah` | Revuvah (window in the kevesh, west face) — רבובה | opening | [208.9, 290, 17] → [209, 291, 18] | window 1 x 1 in the west face (position along the ramp ⚙) | Middot 3:3; Rambam BhB 2:14 | reconstruction |
+| `altar.table.marble` | Marble table west of the kevesh ("table of the fats") — שלחן של שיש | fixture | [205, 285, 16] → [206, 287, 17.5] | west of the kevesh at its lower half ⚙ | Shekalim 6:4; Rambam BhB 2:15; Tamid 7:3; Tamid 4:3 | reconstruction |
+| `altar.table.silver` | Silver table west of the kevesh — שלחן של כסף | fixture | [205, 280, 16] → [206, 282, 17.5] | west of the kevesh ⚙ | Shekalim 6:4; Rambam BhB 2:15 | reconstruction |
+| `altar.beit-hadeshen` | Beit HaDeshen (place of the ashes) — בית הדשן | fixture | [225.5, 284.5, 16] → [227.5, 286.5, 16.5] | from the kevesh foot, facing north, ~10 amot along its east side; 3 tefachim off the ramp; 2 x 2 ⚙ | Tamid 1:4; Zevachim 64a | reconstruction |
+| `altar.rings` | The 24 rings (taba'ot) — טבעות | fixture | [201, 345.5, 16] → [233, 369.5, 16.3] | 6 rows x 4 in the 24-amah band 8 north of the altar; E–W extent = the altar's 32 ⚙ | Middot 3:5; Middot 5:2; Tamid 4:1; Rambam BhB 5:14; Part XI lock #18 | reconstruction |
+| `altar.marble-tables` | The eight marble tables — שמונה שלחנות של שיש | fixture | [201, 369.5, 16] → [233, 377.5, 17.5] | the 8-amah tables band (Rambam BhB 5:14 = Middot 5:2 "rings → tables 4, tables → nanasin 4"); one row centred in the band ⚙; size 2½ x 1½ x 1½ ⚙ | Shekalim 6:4; Middot 3:5; Middot 5:2; Rambam BhB 5:14; Tamid 3:5 | reconstruction |
+| `altar.nanasin` | The eight dwarf pillars (nanasin) with hooks — עמודים ננסין | fixture | [201, 377.5, 16] → [233, 390, 22] | Beit HaMitbachayim band 12½ (Rambam); one row of 8 at its centre line ⚙; height ⚙ | Middot 3:5; Tamid 3:5; Rambam BhB 5:13 | reconstruction |
+| `altar.tzafon` | The Tzafon (halachic north) — צפון | zone | [179, 337.5, 16] → [255, 398, 16.01] | N wall → altar N face 60.5 x Ulam line → E wall 76 | Rambam BhB 5:15–16; Middot 5:2; Zevachim 58b; Yoma 16a–17a | derived |
+| `altar.kiyor` | The Kiyor (laver) — כיור | fixture | [188, 315, 16] → [192, 319, 19] | "between the Ulam and the altar, drawn south" — mid-strip (X 190 = the middle of the 22) just south of the Ulam steps; diameter 4 ⚙ so 12 kohanim stand round its 12 spigots at once (circumference ≈ 12½); height 3 ⚙ | Middot 3:6; Zevachim 59a; Tamid 1:4; Tamid 3:8; Yoma 37a; Rambam BhB 3:18 | reconstruction |
+| `altar.kiyor.muchni` | Muchni (Ben Katin's wheel machine) and well — מוכני | fixture | [186, 310, 2] → [194, 319, 22] | wheel frame south of the kiyor; well beneath it into which the kiyor sinks overnight ⚙ | Tamid 1:4; Tamid 3:8; Yoma 37a–b; Rambam BhB 3:18 | reconstruction |
+| `altar.ulam-steps` | The twelve steps of the Ulam — מעלות האולם | stair | [179, 320.5, 16] → [201, 340.5, 22] | rise ½ x 12 = 6; treads 1+1+3+1+1+3+1+1+3+1+1+4 = 21; level apron 1 at the foot by the altar ⚙; width 20 ⚙ | Middot 3:6; Yoma 4:3 ("the fourth rovad"); Tamid 7:2; Part XI lock #25 | reconstruction |
+| `altar.bein-haulam` | Between the Ulam and the Mizbeach — בין האולם ולמזבח | zone | [179, 263, 16] → [201, 398, 16.01] | 22 amot E–W across the court | Middot 3:6; Middot 5:1; Kelim 1:9; Tamid 5:6 (magrefah) | explicit |
+| `heichal.otem` | Otem (solid podium) — אטם | slab | [79, 280.5, 16] → [179, 380.5, 22] | 6 amot above grade under the T-plan; the 12 Ulam steps climb it | Middot 4:6; Part XI lock #39; Rosh (Part X §50) | locked |
+| `heichal.ulam.wall-front` | Ulam — front wall — כותל האולם | wall | [174, 280.5, 22] → [179, 380.5, 112] | E–W chain item 1 (5); spans the full 100 | Middot 4:7; Middot 3:7–8 | derived |
+| `heichal.ulam.wall-n` | Ulam — north end wall — כותל האולם — צפון | wall | [163, 375.5, 22] → [174, 380.5, 112] | thickness ⚙ = 5 | Middot 4:7 | reconstruction |
+| `heichal.ulam.wall-s` | Ulam — south end wall — כותל האולם — דרום | wall | [163, 280.5, 22] → [174, 285.5, 112] | thickness ⚙ = 5 | Middot 4:7 | reconstruction |
+| `heichal.ulam.opening` | The Ulam opening (40 x 20, no doors) — פתחו של אולם | opening | [174, 320.5, 22] → [179, 340.5, 62] | 40 high x 20 wide on the axis | Middot 2:3; Middot 3:7; Rambam BhB 4:8; Yoma 54a | explicit |
+| `heichal.ulam.lintels` | The five milah lintels with stone courses — חמש מלתראות של מילת | fixture | [174, 315.5, 62] → [179, 345.5, 71] | lowest 22 (1 over each side), each +2, top 30; a stone course between each pair; depths ⚙ 1 | Middot 3:7; Rambam BhB 4:8 | reconstruction |
+| `heichal.ulam` | The Ulam (porch hall) — אולם | zone | [163, 285.5, 22] → [174, 375.5, 62] | interior 11 deep; height = 40 (ceiling height unsourced ⚙, set = Kodesh) | Middot 4:7; Middot 3:8; Shekalim 6:4; Yoma 37a–b | reconstruction |
+| `heichal.ulam.tables` | Showbread tables in the Ulam (marble N, gold S) — שני שלחנות באולם | fixture | [163.5, 323, 22] → [165.5, 338, 23.5] | "inside the Ulam at the entrance of the House"; which side each stands is unsourced ⚙ | Shekalim 6:4; Menachot 99b; Rambam BhB 3:16 | reconstruction |
+| `heichal.ulam.vine` | The golden vine over the Heichal entrance — גפן של זהב | fixture | [163, 318.5, 42.5] → [164, 342.5, 47] | over the Heichal entrance, trained on cedar posts; extent ⚙ | Middot 3:8 | reconstruction |
+| `heichal.ulam.chains` | Gold chains from the Ulam ceiling — שרשרות של זהב | fixture | [164, 322.5, 48] → [165, 338.5, 62] | fixed in the Ulam ceiling; young kohanim climbed them to see the crowns ⚙ | Middot 3:8; Part XI lock #28 | reconstruction |
+| `heichal.ulam.nivreshet` | Queen Helena's golden nivreshet — נברשת של זהב | fixture | [164.5, 329.5, 46] → [166.5, 331.5, 48] | over the Heichal entrance ⚙ | Yoma 37a–b | reconstruction |
+| `heichal.chalifot.n` | Beit HaChalifot — north wing — בית החליפות | zone | [163, 365.5, 22] → [174, 375.5, 62] | the 15-amah projection of the Ulam beyond the 70 body; height = the Ulam interior ⚙ | Middot 4:7; Sukkah 56a–b; Shiltei HaGiborim (Part X §50) | reconstruction |
+| `heichal.chalifot.n.wicket` | Beit HaChalifot north — 8-amah wicket — פשפש בבית החליפות | opening | [157, 369, 22] → [163, 372, 30] | west wall of the wing, opening onto the court flank; 8 high (Zevachim 55b); width ⚙ | Zevachim 55b; Part IX §37.2; Part VII §22 F6 | reconstruction |
+| `heichal.chalifot.s` | Beit HaChalifot — south wing — בית החליפות | zone | [163, 285.5, 22] → [174, 295.5, 62] | the 15-amah projection of the Ulam beyond the 70 body; height = the Ulam interior ⚙ | Middot 4:7; Sukkah 56a–b; Shiltei HaGiborim (Part X §50) | reconstruction |
+| `heichal.chalifot.s.wicket` | Beit HaChalifot south — 8-amah wicket — פשפש בבית החליפות | opening | [157, 289, 22] → [163, 292, 30] | west wall of the wing, opening onto the court flank; 8 high (Zevachim 55b); width ⚙ | Zevachim 55b; Part IX §37.2; Part VII §22 F6 | reconstruction |
+| `heichal.wall.east` | Heichal — east wall (great gate wall; rear of the Ulam) — כותל ההיכל — מזרח | wall | [157, 280.5, 22] → [163, 380.5, 112] | E–W chain item 3 (6), continued across the wings | Middot 4:7; Middot 4:1–2 | derived |
+| `heichal.gate.great` | The great gate of the Heichal (four doors) — השער הגדול | gate | [157, 325.5, 22] → [163, 335.5, 42] | 20 x 10 on the axis in the 6-amah wall | Middot 4:1; Middot 2:3; Rambam BhB 4:7; Tamid 3:6–7; Yoma 54a | explicit |
+| `heichal.gate.wicket-n` | North wicket of the great gate (daily entry) — פשפש צפוני | opening | [157, 348, 22] → [163, 351, 30] | leads from the Ulam into the NE ta (whence into the Heichal) — so it sits in front of the north ta, 1½ in from the wall line ⚙; size ⚙ | Middot 4:2; Middot 4:3; Tamid 3:7; Rambam BhB 4:6 | reconstruction |
+| `heichal.gate.wicket-s` | South wicket of the great gate (never entered) — פשפש דרומי | opening | [157, 310, 22] → [163, 313, 30] | mirror of the north wicket (offset and size ⚙) | Middot 4:2; Yechezkel 44:2 | reconstruction |
+| `heichal.kodesh` | The Kodesh (Heichal hall) — היכל — קודש | zone | [117, 320.5, 22] → [157, 340.5, 62] | 40 x 20 x 40 | Middot 4:7; Middot 4:6; Middot 4:1; Yoma 52a | explicit |
+| `heichal.amah-traksin` | Amah Traksin (the amah between the curtains) — אמה טרקסין | zone | [116, 320.5, 22] → [117, 340.5, 62] | 1 amah; no wall (Bava Batra 3a) | Middot 4:7; Yoma 51b–52b; Rambam BhB 4:2; Part XI locks #5, #42 | locked |
+| `heichal.parochet.outer` | Outer Parochet (pinned back at its south end) — פרוכת חיצונה | curtain | [116.83, 320.5, 22] → [117, 340.5, 62] | a tefach thick, its east face on the Kodesh's 40th amah; 40 x 20 | Yoma 51b–52b; Shekalim 8:5; Rambam BhB 4:2; Part XI locks #5, #42 | locked |
+| `heichal.parochet.inner` | Inner Parochet (pinned back at its north end) — פרוכת פנימית | curtain | [116, 320.5, 22] → [116.17, 340.5, 62] | a tefach thick on the KhK's line; clear gap 4 tefachim (1 + 4 + 1 = the amah) | Yoma 51b–52b; Rambam BhB 4:2; Part XI locks #5, #42 | locked |
+| `heichal.khk` | Kodesh HaKodashim — קודש הקודשים | zone | [96, 320.5, 22] → [116, 340.5, 62] | 20 x 20 x 40; empty but for the Even Shetiyah | Middot 4:7; Yoma 21b; Yoma 53b; Shekalim 4:4; Part XI lock #15 | explicit |
+| `heichal.even-shetiyah` | Even Shetiyah (Foundation Stone) — אבן שתיה | fixture | [97, 329, 22] → [99, 332, 22.13] | in the west of the chamber, 3 etzba'ot high; footprint ⚙ ≥ the Aron 2½ x 1½ | Yoma 5:2 (53b); Rambam BhB 4:1; Part XI lock #15 | reconstruction |
+| `heichal.shulchan` | The Shulchan (table of the showbread) — שלחן | fixture | [129.5, 337.17, 22] → [131.17, 338, 23.25] | north, 2½ off the N wall; length E–W; top 10 x 5 tefachim; E–W position = middle of the inner ⅔ ⚙ | Yoma 33b; Menachot 98b; Menachot 96a; Rambam BhB 3:12–17; Part XI locks #12, #31–#33 | reconstruction |
+| `heichal.menorah` | The Menorah — מנורה | fixture | [129.33, 323, 22] → [131.33, 323.5, 25] | south, 2½ off the S wall, opposite the Shulchan (E–W station = middle of the inner ⅔ ⚙); 18 tefachim; lamp row E–W (lock #11); branch span 2 ⚙ | Yoma 33b; Menachot 28b; Tamid 3:9; Rambam BhB 3:1–11; Part XI locks #11, #30 | reconstruction |
+| `heichal.mizbach-hazahav` | The golden altar (incense) — מזבח הזהב | fixture | [131.83, 330, 22] → [132.83, 331, 24] | centered N–S, "between the Shulchan and the Menorah, drawn outward" (east) by 2 ⚙; inside the inner ⅔ | Shemot 30:1–10; Yoma 33b; Rambam BhB 3:17 | reconstruction |
+| `heichal.sotah-slab` | The Sotah slab (marble, with ring) — טבלא של שיש — עפר סוטה | slab | [155, 337, 21.75] → [156, 338, 22] | entering, turned right = north, just within the great gate; 1 x 1; 1½ north of the jamb and 1 in from the wall face, beyond the inner door leaf ⚙ | Sotah 2:2; Shiltei HaGiborim 33 (Part X §53); Part IX §37.1; Part VII §22 F13 | reconstruction |
+| `heichal.wall.north` | Heichal — north wall — כותל ההיכל — צפון | wall | [89, 340.5, 22] → [157, 347.5, 112] | interior face at Y 340.5; 7 / 6 / 5 thick by ta story (wall + ta = 12), 5 above | Middot 4:7; Middot 4:4; 1 Melachim 6:6 | derived |
+| `heichal.wall.south` | Heichal — south wall — כותל ההיכל — דרום | wall | [89, 313.5, 22] → [157, 320.5, 112] | as the north wall | Middot 4:7; Middot 4:4 | derived |
+| `heichal.wall.west` | Heichal — west wall — כותל ההיכל — מערב | wall | [89, 313.5, 22] → [96, 347.5, 112] | interior face at X 96; 7 / 6 / 5 by story | Middot 4:7; Middot 4:4 | derived |
+| `heichal.taim.north` | Ta'im — north (5 over 5 over 5) — תאים — צפון | chamber | [89, 345.5, 22] → [157, 352.5, 55] | widths 5/6/7 by story (Middot 4:4); 3 stories of 11 ⚙ → roofs +55, below the F1 windows (Part VII §22) | Middot 4:3–4; Rambam BhB 4:10; Part XI lock #38; Part VII §22 | reconstruction |
+| `heichal.taim.south` | Ta'im — south (5 over 5 over 5) — תאים — דרום | chamber | [89, 308.5, 22] → [157, 315.5, 55] | widths 5/6/7 by story (Middot 4:4); 3 stories of 11 ⚙ → roofs +55, below the F1 windows (Part VII §22) | Middot 4:3–4; Rambam BhB 4:10; Part XI lock #38; Part VII §22 | reconstruction |
+| `heichal.taim.west` | Ta'im — west (3 over 3, 2 over them) — תאים — מערב | chamber | [84, 308.5, 22] → [91, 352.5, 55] | the 6-amah ta of the E–W chain; 3 + 3 + 2 cells; widths 5/6/7 by story (Middot 4:4); 3 stories of 11 ⚙ → roofs +55, below the F1 windows (Part VII §22) | Middot 4:3–4; Middot 4:7; Part XI lock #38; Part VII §22 | reconstruction |
+| `heichal.ta.door-ne` | NE ta — door into the Heichal — פתח מן התא להיכל | opening | [150, 340.5, 22] → [153, 347.5, 30] | the daily route: wicket → NE ta → Heichal; position ⚙ | Middot 4:2–3; Tamid 3:7 | reconstruction |
+| `heichal.ta-wall.north` | Ta'im outer wall — north — כותל התא — צפון | wall | [84, 352.5, 22] → [157, 357.5, 55] | 5 (Middot 4:7); up to the ta'im roofs +55 ⚙ | Middot 4:7 | reconstruction |
+| `heichal.ta-wall.south` | Ta'im outer wall — south — כותל התא — דרום | wall | [84, 303.5, 22] → [157, 308.5, 55] | 5 (Middot 4:7); up to the ta'im roofs +55 ⚙ | Middot 4:7 | reconstruction |
+| `heichal.ta-wall.west` | Ta'im outer wall — west — כותל התא — מערב | wall | [79, 295.5, 22] → [84, 365.5, 55] | E–W chain item 9 (5), closing the N/S voids at their west ends; up to +55 ⚙ | Middot 4:7 | reconstruction |
+| `heichal.mesibah` | The Mesibah (winding ascent) — מסיבה | stair | [84, 357.5, 22] → [157, 360.5, 55] | 3-amah void on the north; rises from the NE (+22) to the NW onto the ta'im roofs (+55 ⚙); then W and S on the roofs, and up the roof stair to the aliyah door (+67) | Middot 4:5; Middot 4:7; Rambam BhB 4:12; EK II 180–182 (roofless) | reconstruction |
+| `heichal.mesibah-wall` | Mesibah wall — כותל המסיבה | wall | [79, 360.5, 22] → [157, 365.5, 55] | 5 (outermost on the north); up to +55 ⚙ | Middot 4:7; EK II 180–182 | reconstruction |
+| `heichal.beit-horadat-hamayim` | Beit Horadat HaMayim (water-descent house) — בית הורדת המים | zone | [84, 300.5, 22] → [157, 303.5, 55] | 3-amah void on the south, open to the sky above the ta'im roofs (+55 ⚙) | Middot 4:7; Rambam BhB 4:5; Part XI lock #41 | reconstruction |
+| `heichal.outer-wall.south` | Heichal — outer south wall — כותל — דרום | wall | [79, 295.5, 22] → [157, 300.5, 55] | 5 (outermost on the south); up to +55 ⚙ | Middot 4:7 | reconstruction |
+| `heichal.lul-west` | The lul behind the Kaporet (8 amot high) — לול קטן אחורי בית הכפורת | opening | [79, 330.17, 22] → [96, 330.83, 30] | 8 high (Zevachim 55b), 4 tefachim wide (EK); through the KhK wall, the axial west ta and its outer wall | Zevachim 55b; EK II 178–179; Part VII §22 F7 | reconstruction |
+| `heichal.ceiling.kiyur` | Ceiling — kiyur (decorated course) — כיור | slab | [96, 320.5, 62] → [157, 340.5, 63] | stack item 3: kiyur 1 | Middot 4:6; Rambam BhB 4:3; Part XI lock #40 | explicit |
+| `heichal.ceiling.dilpah` | Ceiling — beit dilpah (drip void) — בית דילפא | slab | [96, 320.5, 63] → [157, 340.5, 65] | stack item 4: beit dilpah 2 | Middot 4:6; Rambam BhB 4:3; Part XI lock #40 | locked |
+| `heichal.ceiling.tikrah` | Ceiling — tikrah — תקרה | slab | [96, 320.5, 65] → [157, 340.5, 66] | stack item 5: tikrah 1 | Middot 4:6; Rambam BhB 4:3; Part XI lock #40 | explicit |
+| `heichal.ceiling.maazivah` | Ceiling — ma'azivah (fill) = aliyah floor — מעזיבה | slab | [96, 320.5, 66] → [157, 340.5, 67] | stack item 6: ma'azivah 1 | Middot 4:6; Rambam BhB 4:3; Part XI lock #40 | explicit |
+| `heichal.aliyah` | The Aliyah (upper storey) — עליה | zone | [96, 320.5, 67] → [157, 340.5, 107] | 40 high over the Kodesh + KhK | Middot 4:5–6; Yoma 54a; Rambam BhB 4:3; Rambam BhB 7:23 | explicit |
+| `heichal.aliyah.door` | Door of the Aliyah (south) — פתחה של עליה | opening | [132, 315.5, 67] → [142, 320.5, 87] | opens south (Middot 4:5) onto the landing of the roof stair; 20 x 10 (Middot 2:3 standard); X 132–142 ⚙ = centred on the part of the aliyah over the Kodesh (X 117–157, centre 137), not over the KhK | Middot 4:5; Middot 2:3; Rambam BhB 4:12 | reconstruction |
+| `heichal.roof.kiyur` | Roof — kiyur — כיור | slab | [96, 320.5, 107] → [157, 340.5, 108] | stack item 8: kiyur 1 | Middot 4:6; Rambam BhB 4:3; Part XI lock #40 | explicit |
+| `heichal.roof.dilpah` | Roof — beit dilpah — בית דילפא | slab | [96, 320.5, 108] → [157, 340.5, 110] | stack item 9: beit dilpah 2 | Middot 4:6; Rambam BhB 4:3; Part XI lock #40 | locked |
+| `heichal.roof.tikrah` | Roof — tikrah — תקרה | slab | [96, 320.5, 110] → [157, 340.5, 111] | stack item 10: tikrah 1 | Middot 4:6; Rambam BhB 4:3; Part XI lock #40 | explicit |
+| `heichal.roof.maazivah` | Roof — ma'azivah (roof surface) — מעזיבה | slab | [96, 320.5, 111] → [157, 340.5, 112] | stack item 11: ma'azivah 1 | Middot 4:6; Rambam BhB 4:3; Part XI lock #40 | explicit |
+| `heichal.roof` | Heichal roof (main) — גג ההיכל | slab | [91, 280.5, 111.99] → [179, 380.5, 112] | roof surface +112 over the aliyah block and the Ulam block (T outline) | Middot 4:6; Rambam BhB 4:3 | derived |
+| `heichal.maakeh` | Ma'akeh (parapet, 3) — מעקה | wall | [91, 280.5, 112] → [179, 380.5, 115] | 3 amot around the roof outline | Middot 4:6; Rambam BhB 4:3; Part XI lock #6 | explicit |
+| `heichal.kalya-orev` | Kalya orev (iron blade, 1 amah) — כלה עורב | fixture | [91, 280.5, 115] → [179, 380.5, 116] | on the parapet → crown +116 (Part XIV §64.1) | Middot 4:6; Rambam BhB 4:3; Menachot 107a; Part XI locks #6, #27 | locked |
+| `heichal.taim.roofs` | Roofs of the ta'im (walk to the aliyah) — גגות התאים | slab | [79, 295.5, 54] → [157, 365.5, 55] | +55 ⚙: below the F1 windows (+56–61), with the mesibah and the water-descent house open between the pieces | Middot 4:5; Part VII §22; EK II 180–182 | reconstruction |
+| `heichal.taim.roof-stair` | Stair from the ta'im roofs to the Aliyah door — מעלות לפתח העליה | stair | [118, 304, 55] → [142, 315.5, 67] | 24 half-steps (+55 → +67) along the south roof, rising east (Middot 4:5 "he walked in the south, facing east, to the door of the aliyah"), then a landing to the door ⚙ | Middot 4:5; Rambam BhB 4:12; Part VII §22 | reconstruction |
+| `heichal.windows.f1` | F1 — the Heichal windows (shekufim atumim) — חלונות שקופים אטומים | opening | [121, 315.5, 56] → [153, 345.5, 61] | high band of the Kodesh N/S walls (+56 to +61), above the ta'im roofline (+55) as Part VII §22 requires; count unstated → 5 per side ⚙ | 1 Melachim 6:4; Menachot 86b; Rashi ad loc.; Part VII §22 | reconstruction |
+| `heichal.windows.f2` | F2 — the crown windows over the entrance — חלונות העטרות | opening | [157, 326.5, 48] → [163, 334.5, 52] | two windows in the Heichal E wall above the great gate, facing the Ulam; size ⚙ | Middot 3:8; Bartenura ad loc.; Zechariah 6:14; Part XI lock #28 | reconstruction |
+| `heichal.ulam-curtain` | Curtain of the Ulam opening — פרוכת האולם | curtain | [173.83, 320.5, 22] → [174, 340.5, 62] | one of the 13 parochot; hung on the inner face of the opening ⚙ | Yoma 54a; Rambam Klei HaMikdash 7:16 | reconstruction |
+| `heichal.gate-curtain` | Curtain of the Heichal gate — פרוכת שער ההיכל | curtain | [163, 324.5, 22] → [163.17, 336.5, 43] | one of the 13; before the outer doors ⚙ | Yoma 54a | reconstruction |
+| `mount.watch-posts` | The 24 night-watch posts — משמרות הלילה | zone | [1, 0, -27.08] → [499, 499, 38] | 3 kohanic + 21 Levite posts at the places Middot 1:1 names; the spot at each place ⚙ | Middot 1:1–2; Tamid 1:1; Rambam BhB 8:4–10; Part I §2 (24 posts); Part VIII §28 | reconstruction |
+| `azarah.stations` | Service stations in the Azarah — מקומות בעזרה | zone | [236, 343, 16] → [241, 347, 18] | "the east of the Azarah, to the north of the altar" (Yoma 37a): in Ezrat Kohanim, opposite the altar's north part ⚙ | Yoma 3:9 (37a); Yoma 39a; Part VI App. B | reconstruction |
+| `azarah.amah-channel` | The amah (water channel of the Azarah) — האמה | fixture | [198.5, 238, -10] → [505, 305.5, 16] | open channel 1 wide in the pavement from the altar's SW corner, past the kevesh foot, out under the Water Gate, then covered under the Mount to the Kidron; course ⚙ | Middot 3:2; Tamid 5:5; Pesachim 5:8; Yoma 58b; Middot 2:6; Part III §9.4 | reconstruction |
+| `azarah.achsadra-route` | The dawn inspection circuit (along the achsadra) — בדיקת העזרה באכסדרא | zone | [73.5, 269.5, 13.5] → [247.5, 389.5, 18] | two torch-lit companies from the Moked pishpash, east and west round the court, meeting at the chavitin bakers' chamber; polylines ⚙ kept clear of every structure | Tamid 1:3; Rambam BhB 8:11; Rambam BhB 1:9; Middot 1:7 | reconstruction |
+| `context.terrain` | Surrounding topography (approximate) — סביבת הר הבית | zone | [-1255, -838.33, -166.67] → [3630, 1755, 166.67] | profiles: meters outward from each wall face → elevation ASL; Z = (ASL − 740) / AMAH | Brief: platform ≈ 740 m ASL, Kidron bed 660–680 m, Mount of Olives ridge 800–818 m 700–900 m east | reconstruction |
+| `context.kidron` | Nachal Kidron — נחל קדרון | zone | [630, -833.33, -150] → [1192.5, 1333.33, 0] | valley 60–330 m east of the wall; thalweg 200 m at ≈675 m ASL | Middot 3:2; Yoma 58b; Shekalim 4:2 | reconstruction |
+| `context.har-hamishchah` | Har HaMishchah (Mount of Olives) — הר המשחה | zone | [1192.5, -833.33, -83.33] → [2588.33, 1333.33, 150] | west slope from the Kidron to the crest ≈808 m at 800 m east | Middot 1:3; Middot 2:4; Parah 3:6–9 | reconstruction |
+| `context.parah-causeway` | The Parah causeway (arches upon arches) — כבש הפרה | ramp | [505, 325.5, -135.42] → [1505, 335.5, 0] | level deck at the Shushan threshold (Z0) on the axis, from the gate to where the slope regains 740 m (480 m east) | Parah 3:6; Middot 1:3; Shekalim 4:2 | reconstruction |
+| `context.parah.pyre` | The Parah burning place on Har HaMishchah — מקום שריפת הפרה | fixture | [2165.67, 327.5, 141.67] → [2170.67, 333.5, 149.67] | on the axis at the crest; pyre "like a tower with windows, facade west"; kohen east of it facing west | Parah 3:8–9; Middot 2:4 | reconstruction |
+| `context.chuldah.tunnel-w` | Chuldah passage (west) — מבוא שערי חולדה | zone | [160, -5, -27.08] → [170, 72.08, 0] | portal on the S wall at the Ophel grade (-27.083333); level passage north 45 under the vaults, then 54.166666 half-steps up to the Mount | Middot 1:3; Rambam BhB 6:9; Parah 3:3 | reconstruction |
+| `context.chuldah.tunnel-e` | Chuldah passage (east) — מבוא שערי חולדה | zone | [330, -5, -27.08] → [340, 72.08, 0] | portal on the S wall at the Ophel grade (-27.083333); level passage north 45 under the vaults, then 54.166666 half-steps up to the Mount | Middot 1:3; Rambam BhB 6:9; Parah 3:3 | reconstruction |
+
+## 6. Zones (ARCHITECTURE.md §8)
+
+All canonical ids are defined (checked). Priority: higher wins; ties → smaller box. Boxes include Z so stacked places (ta'im / aliyah / roof; tunnels under the Mount) resolve.
+
+| zone | priority | floorZ | boxes |
+|---|---|---|---|
+| `outside` | 0 | — | [-3000, -3000, -300] → [6000, 4000, 600] |
+| `kidron` | 2 | -135.42 | [630, -833.33, -150] → [1192.5, 1333.33, 0] |
+| `har-hamishchah` | 2 | 141.67 | [1192.5, -833.33, -83.33] → [2588.33, 1333.33, 150] |
+| `parah-causeway` | 4 | 0 | [505, 325.5, -1] → [1505, 335.5, 6] |
+| `har-habayit` | 5 | 0 | [-5, -5, -40] → [505, 505, 140] |
+| `stoa` | 8 | 0 | [0, 0, 0] → [500, 20, 20]<br>[0, 480, 0] → [500, 500, 20]<br>[0, 20, 0] → [20, 480, 20]<br>[480, 20, 0] → [500, 480, 20] |
+| `chel` | 10 | 0 | [53, 248, -1] → [410, 413, 12]<br>[188.75, 403, -1] → [232.75, 424, 12]<br>[33, 361, -1] → [63, 401, 12] |
+| `soreg` | 12 | 0 | [52.25, 247.25, -1] → [410.75, 248.75, 4]<br>[409.25, 247.25, -1] → [410.75, 413.75, 4]<br>[232, 412.25, -1] → [410.75, 413.75, 4]<br>[232, 412.25, -1] → [233.5, 424.75, 4]<br>[188, 423.25, -1] → [233.5, 424.75, 4]<br>[188, 412.25, -1] → [189.5, 424.75, 4]<br>[52.25, 412.25, -1] → [189.5, 413.75, 4]<br>[52.25, 400.25, -1] → [53.75, 413.75, 4]<br>[32.25, 400.25, -1] → [53.75, 401.75, 4]<br>[32.25, 360.25, -1] → [33.75, 401.75, 4]<br>[32.25, 360.25, -1] → [53.75, 361.75, 4]<br>[52.25, 247.25, -1] → [53.75, 361.75, 4] |
+| `gate-shushan` | 30 | 0 | [497, 325.5, -1] → [508, 335.5, 22] |
+| `gate-chuldah-w` | 30 | -27.08 | [160, -8, -28.08] → [170, 3, -5.08]<br>[160, -5, -27.08] → [170, 72.08, 0] |
+| `gate-chuldah-e` | 30 | -27.08 | [330, -8, -28.08] → [340, 3, -5.08]<br>[330, -5, -27.08] → [340, 72.08, 0] |
+| `gate-kiponus` | 30 | 0 | [-8, 245, -1] → [3, 255, 22] |
+| `gate-tadi` | 30 | 0 | [205.75, 497, -1] → [215.75, 508, 22] |
+| `ezrat-nashim` | 20 | 6 | [260, 263, 5] → [395, 398, 140] |
+| `en-gate-east` | 30 | 6 | [392, 325.5, 5] → [403, 335.5, 28] |
+| `en-chamber-wood` | 25 | 6 | [353, 356, 6] → [395, 398, 28] |
+| `en-chamber-lepers` | 25 | 6 | [260, 356, 6] → [302, 398, 28] |
+| `en-chamber-nazirites` | 25 | 6 | [353, 263, 6] → [395, 305, 28] |
+| `en-chamber-oil` | 25 | 6 | [260, 263, 6] → [302, 305, 28] |
+| `en-gallery` | 26 | 16 | [302, 394, 16] → [353, 398, 22]<br>[302, 263, 16] → [353, 267, 22]<br>[391, 305, 16] → [395, 322.5, 22]<br>[391, 338.5, 16] → [395, 356, 22] |
+| `fifteen-steps` | 27 | 6 | [260, 313, 5.5] → [277.5, 348, 19.5] |
+| `music-chambers` | 28 | 6 | [244, 348, 6] → [255, 378, 13]<br>[255, 350, 6] → [260, 354, 12]<br>[244, 283, 6] → [255, 313, 13]<br>[255, 307, 6] → [260, 311, 12] |
+| `nikanor` | 35 | 13.5 | [254, 325.5, 13] → [261, 335.5, 33.5] |
+| `azarah` | 15 | 16 | [68, 263, 13] → [255, 398, 140] |
+| `ezrat-yisrael` | 22 | 13.5 | [244, 263, 13] → [255, 398, 60] |
+| `ezrat-kohanim` | 22 | 16 | [233, 263, 14] → [244, 398, 60] |
+| `slaughter-zone` | 21 | 16 | [179, 337.5, 15.5] → [255, 398, 50] |
+| `bein-haulam-lamizbeach` | 23 | 16 | [179, 263, 15.5] → [201, 398, 60] |
+| `mizbeach` | 30 | 16 | [201, 305.5, 15.5] → [233, 337.5, 34] |
+| `kevesh` | 31 | 16 | [207, 275.5, 15.5] → [227, 307.5, 31] |
+| `kiyor` | 32 | 16 | [186, 310, 15.5] → [194, 320, 24] |
+| `ulam-steps` | 30 | 16 | [179, 320.5, 15.5] → [200, 340.5, 28] |
+| `ulam` | 40 | 22 | [163, 285.5, 21.5] → [179, 375.5, 62] |
+| `beit-hachalifot` | 41 | 22 | [163, 365.5, 22] → [174, 375.5, 62]<br>[163, 285.5, 22] → [174, 295.5, 62] |
+| `heichal` | 40 | 22 | [117, 320.5, 21.5] → [157, 340.5, 62]<br>[157, 325.5, 21.5] → [163, 335.5, 42] |
+| `amah-traksin` | 45 | 22 | [116, 320.5, 22] → [117, 340.5, 62] |
+| `kodesh-hakodashim` | 45 | 22 | [96, 320.5, 22] → [116, 340.5, 62] |
+| `taim` | 40 | 22 | [89, 345.5, 22] → [157, 352.5, 55]<br>[89, 308.5, 22] → [157, 315.5, 55]<br>[84, 308.5, 22] → [91, 352.5, 55] |
+| `mesibah` | 41 | 22 | [84, 357.5, 22] → [157, 360.5, 55] |
+| `aliyah` | 42 | 67 | [96, 320.5, 66.5] → [157, 340.5, 107] |
+| `roof` | 42 | 112 | [91, 280.5, 111.5] → [179, 380.5, 122] |
+| `taim-roofs` | 42 | 55 | [79, 345.5, 54.5] → [157, 357.5, 61]<br>[79, 360.5, 54.5] → [157, 365.5, 61]<br>[79, 357.5, 54.5] → [88, 360.5, 61]<br>[79, 315.5, 54.5] → [91, 345.5, 61]<br>[79, 303.5, 54.5] → [157, 315.5, 61]<br>[79, 300.5, 54.5] → [84, 303.5, 61]<br>[79, 295.5, 54.5] → [157, 300.5, 61]<br>[118, 304, 55] → [142, 315.5, 70] |
+| `ulam-upper` | 40 | 67 | [157, 280.5, 62] → [179, 380.5, 111.5] |
+| `gazit` | 30 | 16 | [43, 371, 16] → [88, 391, 36] |
+| `golah` | 30 | 16 | [88, 381, 16] → [98, 391, 36] |
+| `melach` | 30 | 16 | [75, 263, 16] → [95, 275, 36] |
+| `parvah` | 30 | 16 | [120.25, 263, 16] → [140.25, 275, 36] |
+| `medichin` | 30 | 16 | [140.25, 263, 16] → [152.25, 275, 36] |
+| `etz-parhedrin` | 30 | 16 | [68, 391, 16] → [98, 403, 36] |
+| `lishkat-hakelim` | 30 | 13.5 | [244, 391, 13.5] → [255, 403, 33.5] |
+| `lishkat-chashaim` | 30 | 6 | [320, 394, 6] → [335, 403, 16] |
+| `lishkat-hakorban` | 30 | 0 | [167.5, 420, 0] → [181.5, 432, 12] |
+| `lishkat-haparochet` | 30 | 0 | [141.5, 420, 0] → [155.5, 432, 12] |
+| `beit-haeven` | 30 | 0 | [365, 432, 0] → [385, 447, 12] |
+| `shushan-habirah` | 31 | 22 | [500, 324.5, 22] → [505, 336.5, 28] |
+| `beit-hamoked` | 32 | 16 | [198.75, 390, 16] → [222.75, 414, 46] |
+| `underground-passage` | 30 | -12 | [201.25, 406.5, -12] → [205.25, 411.5, 16]<br>[201.25, 411, -12] → [205.25, 450, -4] |
+| `beit-hatevilah` | 32 | -12 | [194.25, 450, -15] → [212.25, 468, -4] |
+| `beit-avtinas` | 33 | 36 | [195.75, 258, 36] → [215.75, 263, 46]<br>[217.75, 258.5, 36] → [221.75, 262.5, 39]<br>[195.75, 258, 35.5] → [225.75, 263, 46] |
+| `beit-hanitzotz` | 33 | 36 | [100.25, 393, 36] → [124.25, 403, 46] |
+| `gate-delek` | 31 | 16 | [107.25, 255, 15] → [117.25, 266, 38]<br>[107.25, 242, 0] → [117.25, 258, 16] |
+| `gate-bechorot` | 31 | 16 | [156.5, 255, 15] → [166.5, 266, 38]<br>[156.5, 242, 0] → [166.5, 258, 16] |
+| `gate-mayim` | 31 | 16 | [205.75, 255, 15] → [215.75, 266, 38]<br>[205.75, 242, 0] → [215.75, 258, 16] |
+| `gate-nitzotz` | 31 | 16 | [107.25, 395, 15] → [117.25, 406, 38]<br>[107.25, 403, 0] → [117.25, 419, 16] |
+| `gate-korban` | 31 | 16 | [156.5, 395, 15] → [166.5, 406, 38]<br>[156.5, 403, 0] → [166.5, 419, 16] |
+| `gate-moked` | 31 | 16 | [205.75, 387, 15] → [215.75, 395, 38]<br>[205.75, 412, 16] → [215.75, 414, 36]<br>[205.75, 414, 0] → [215.75, 430, 16] |
+
+## 7. Differences vs the sample manifest
+
+Compared only after the model was complete. Most locked placements agree, because both follow Part XI §58: margins, wall thickness, gate stations, the axis, the T-plan chains and the vertical stack.
+Differences come from three causes: (a) errors in the sample (marked **bold**); (b) a literal reading of a primary source where the sample was schematic; (c) a different reconstruction choice. Every row was checked against the sample's box.
+
+| this model | sample id | this model's box | sample box | why |
+|---|---|---|---|---|
+| `mount.wall.east` | `hhb.wall.east` | [500, 0, -58.33] → [505, 500, 22] | [500, 0, 0] → [505, 500, 20] | Top +22 not +20. The wall over the gate is "low" (Middot 2:4; Rambam BhB 6:5); +22 = gate 20 + a 2-amah lintel course is our choice ⚙ (EK's "not under 22" is his minimum for the *high* walls, so it is not cited for this one). The Shushan HaBirah chamber stands on it over the gate. Foot extended down to the real exterior grade. |
+| `mount.wall.south` | `hhb.wall.south` | [-5, -5, -58.33] → [505, 0, 40] | [-5, -5, 0] → [505, 0, 40] | Same plan. The foot follows the exterior grade along the wall: the Ophel grade (≈727 m) for most of it, blending over 40 m to the lower Tyropoeon (W) and Kidron (E) grades at the corners, so no corner column is left open. The Chuldah portals open south at the Ophel grade. |
+| `mount.wall.west` | `hhb.wall.west` | [-5, 0, -37.5] → [0, 500, 40] | [-5, 0, 0] → [0, 500, 40] | Same plan; foot at the Tyropoeon grade (approx.). |
+| `mount.gate.chuldah-w` | `hhb.gate.chuldah_w` | [160, -5, -27.08] → [170, 0, -7.08] | [160, -5, 0] → [170, 0, 20] | Same station (lock §58). Threshold at the Ophel grade (−27 at 48 cm), with a passage rising north to the Mount (`context.chuldah.tunnel-w`). The sample puts the gate at Z0, which leaves no "exit south". |
+| `mount.gate.chuldah-e` | `hhb.gate.chuldah_e` | [330, -5, -27.08] → [340, 0, -7.08] | [330, -5, 0] → [340, 0, 20] | As Chuldah W. |
+| `mount.soreg` | `soreg` | [32.5, 247.5, 0] → [410.5, 424.5, 2.67] | [53, 248, 0] → [410, 413, 2.67] | The sample has a plain rectangle 10 out from the court walls. Here it is a closed orthogonal path 10 amot outside the *whole* complex, including the parts that project beyond its walls (the Gazit's chol half to the west, Beit HaMoked to the north). It has passages where the chel steps and the court flights cross its line, sits on a 1-amah base (lock #26) and carries 13 breach stations kept clear of the passages. |
+| `mount.chel.steps` | `chel.stair.east` | [400, 320.5, 0] → [406, 340.5, 6] | [400, 315.5, 0] → [410, 345.5, 6] | Run is 12 × ½ = 6 against the EN wall (Rambam BhB 6:1: walk level to the end of the chel, then ascend). The sample spreads the box over the full 10. Width 20, not 30. |
+| `en.wall.east` | `en.wall.east` | [395, 263, 0] → [400, 398, 28] | [395, 263, 0] → [400, 398, 46] | **+28, not +46.** Lock §58 marks the court walls "east low". With a 40-amah EN east wall the real-topography Parah line is fully blocked (§4). |
+| `en.chamber.wood` | `en.chamber.ne` | [353, 356, 6] → [395, 398, 28] | [355, 358, 6] → [395, 398, 26] | Interior 40 × 40 (Middot 2:5) plus 2-amah inner walls; the sample's 40 × 40 is the outer box. Walls 22 high (top +28, level with the low EN east wall, never above it) with a 20 × 10 door toward the court. |
+| `en.chamber.lepers` | `en.chamber.nw` | [260, 356, 6] → [302, 398, 28] | [260, 358, 6] → [300, 398, 26] | As above. |
+| `en.chamber.nazirites` | `en.chamber.se` | [353, 263, 6] → [395, 305, 28] | [355, 263, 6] → [395, 303, 26] | As above. |
+| `en.chamber.oil` | `en.chamber.sw` | [260, 263, 6] → [302, 305, 28] | [260, 263, 6] → [300, 303, 26] | As above. |
+| `en.gallery` | `en.gallery` | [302, 263, 16] → [395, 398, 19] | [260, 263, 16] → [395, 398, 17] | Balconies along N, S and E between the corner chambers, open over the east gate opening, with a parapet. The sample has a full ring slab running through the chambers and across the 15 steps and both gates. |
+| `en.steps15` | `en.stair.15` | [260, 313, 6] → [277.5, 348, 13.5] | — | Landing radius 10½, foot radius 17½ (15 risers, ½ treads). The sample's foot radius of 25 runs into the corner chambers (\|Δy\| ≥ 25½) and leaves no room for the music-chamber doors, which must open onto the EN floor between the stair and the chambers. |
+| `en.music-chambers` | `en.chambers.music` | [244, 283, 6] → [260, 378, 13] | [244, 310.5, 6] → [255, 350.5, 13.5] | Two rooms *flanking* the stair (Part II §4.5 "these flanked the stair") with doors through the Nikanor wall. The sample has one box directly behind the stair. |
+| `azarah.wall.east` | `azarah.wall.east` | [255, 258, 0] → [260, 403, 35.5] | [255, 263, 0] → [260, 398, 56] | **+35½, not +56** (east low; it shows the upper half of the Heichal doorway to the Parah kohen). Extended over the corners (Y 258–403). |
+| `azarah.gate.nikanor.wicket-n` | `azarah.gate.nikanor.pishpash_n` | [255, 337.5, 13.5] → [260, 340.5, 21.5] | [255, 350, 13.5] → [260, 355, 23.5] | Beside the gate (7–10 amot off the axis), 3 × 8, opening into Lishkat Pinchas HaMalbish built in the wall (EK / Chanukat HaBayit). The sample's wicket is 19½–24½ off the axis, outside any landing of the 15 steps. |
+| `azarah.gate.nikanor.wicket-s` | `azarah.gate.nikanor.pishpash_s` | [255, 320.5, 13.5] → [260, 323.5, 21.5] | [255, 306, 13.5] → [260, 311, 23.5] | As north; into Lishkat Osei Chavitin. |
+| `azarah.duchan` | `azarah.duchan` | [242, 263, 13.5] → [244, 398, 16] | [243.5, 263, 13.5] → [244, 398, 16] | 2 amot deep: a 1-amah riser with a 1-amah tread, then 3 half-steps with ½ treads (Rambam BhB 6:3). The sample uses a 0.5-deep sliver. |
+| `azarah.floor` | `azarah.floor.main` | [68, 263, 15] → [242, 398, 16] | [68, 263, 15.5] → [244, 398, 16] | Runs to the foot of the duchan (X 242), so Ezrat Kohanim (X 233–244) is paved; the duchan (X 242–244) is its own stair element. The sample's slab runs on to 244 under the duchan. |
+| `altar.yesod` | `altar.yesod` | [201, 305.5, 16] → [233, 337.5, 17] | [201, 305.5, 16] → [233, 337.5, 17] | Built as pieces: N and W full, plus 1-amah stubs on S and E; none at the SE (Middot 3:1; Zevachim 54a, Rav). The sample has a full 32 × 32 slab with a note. |
+| `altar.body` | `altar.body` | [202, 306.5, 16] → [232, 336.5, 22] | [202, 306.5, 17] → [232, 336.5, 22] | Starts at the court floor, because where the yesod is absent the body stands on the pavement. |
+| `altar.keren.sw` | `altar.keren.sw` | [203, 307.5, 25] → [204, 308.5, 26] | [202, 306.5, 25] → [203, 307.5, 26] | **Horns on the corners of the 28-square top** (Middot 3:1: the place of the horns is the outer amah of the 28 → 26). All four of the sample’s horns are shifted 1 amah west and 1 amah south (an off-by-one), so its SW/SE horns overhang the sovev on the south and its SW/NW horns overhang it on the west. |
+| `altar.kevesh` | `altar.kevesh` | [209, 275.5, 16] → [225, 307.5, 25] | [209, 275.5, 16] → [225, 305.5, 25] | Runs 32 to the 28-square (Y 275½–307½): 30 on the ground and flying 1 over the yesod line and 1 over the sovev (Middot 5:2 gemara), given as a ground piece plus a flying span (params). The sample stops at the 32-footprint, a 30-long ramp. |
+| `altar.kevesh.ramp-sovev` | `altar.kevesh.small_e` | [225, 302.08, 16] → [227, 306.5, 23.47] | [225, 297.5, 20] → [228, 303.5, 22] | Derived: leaves the kevesh where both are at +7.47 and descends at the 1:3 ramp slope (Zevachim 63a) to the sovev face. The sample has a free-standing box. |
+| `altar.kevesh.ramp-yesod` | `altar.kevesh.small_w` | [201, 292.31, 16] → [209, 305.5, 20.73] | [206, 297.5, 16] → [209, 303.5, 17] | L-shaped: descends 1:3 to the yesod height, then runs level west along the S face to the SW corner, where it meets the S stub and the W yesod along 2 amot. The sample's branch ends 3 amot short of the yesod. |
+| `altar.shit-slab` | `altar.slab.shit` | [200, 304.5, 15.75] → [201, 305.5, 16] | [199.5, 304, 15.98] → [200.5, 305, 16] | Diagonal off the SW corner, in the pavement (1 × 1). |
+| `altar.beit-hadeshen` | `service.beit_hadeshen` | [225.5, 284.5, 16] → [227.5, 286.5, 16.5] | [226, 293.5, 16] → [228, 295.5, 17] | **≈10 amot north of the kevesh foot along its east side**, 3 tefachim off the ramp (Tamid 1:4). The sample's is ≈19 from the foot. |
+| `altar.rings` | `service.rings` | [201, 345.5, 16] → [233, 369.5, 16.3] | [205, 345.5, 16] → [229, 369.5, 16.3] | E–W extent is the altar's 32 (the morning and afternoon tamid rings are at its NW and NE corners, Tamid 4:1). The sample uses 24. |
+| `altar.marble-tables` | `service.tables` | [201, 369.5, 16] → [233, 377.5, 17.5] | [201, 373.5, 16] → [229, 381.5, 17.5] | **Y 369½–377½.** Rambam's chain is followed exactly (wall 8 · mitbachayim 12½ · tables 8 · rings 24 · 8). The sample inserts an extra 4 (Middot's "rings → tables 4") *in addition to* Rambam's 8-amah tables band. That leaves only 4 between the nanasin and the wall, against the explicit 8 (Middot 5:2). Middot 3:5's "tables between the pillars" is logged as a variant; the flaying stations stand between the nanasin. |
+| `altar.nanasin` | `service.nanasin` | [201, 377.5, 16] → [233, 390, 22] | [201, 381.5, 16] → [229, 394, 24] | Y 377½–390, i.e. 8 from the N wall (Middot 5:2). The sample's band ends 4 from the wall (same chain error). |
+| `altar.kiyor` | `service.kiyor` | [188, 315, 16] → [192, 319, 19] | [188, 306.5, 16] → [192, 310.5, 19] | Just south of the 20-wide Ulam steps and inside the altar's N–S span ("between the Ulam and the altar, drawn south"; Zevachim 59a), with the muchni and the well. |
+| `altar.ulam-steps` | `stair.ulam` | [179, 320.5, 16] → [201, 340.5, 22] | [179, 322.5, 16] → [201, 338.5, 22] | 20 wide (the Ulam opening) not 16, with an explicit profile: treads 1,1,3 ×3 then 1,1,4 = 21, four rovadim (Yoma 4:3), and a 1-amah apron at the foot. |
+| `heichal.chalifot.n.wicket` | `heichal.chalifot.n.pishpash` | [157, 369, 22] → [163, 372, 30] | [162.8, 371.5, 22] → [163, 374.5, 30] | Cut through the 6-amah wall from the wing to the court flank. A sanctity opening (Zevachim 55b), not a route: its sill is 6 above the court. The sample has a 0.2-thick sliver. |
+| `heichal.wall.east` | `heichal.wall.east` | [157, 280.5, 22] → [163, 380.5, 112] | [157, 314.5, 22] → [163, 346.5, 116] | Spans the whole Ulam block (Y 280½–380½) as the rear wall of the wings. Top at the roof (+112); the parapet and kalya orev are separate. |
+| `heichal.gate.wicket-n` | `heichal.gate.pishpash_n` | [157, 348, 22] → [163, 351, 30] | [157, 341.5, 22] → [163, 344, 32] | Placed in front of the NE ta (Y 348–351), so the officer "entered the ta and from the ta the Heichal" (Middot 4:2, Tanna Kamma). The sample's wicket enters the Heichal N wall itself (R' Yehudah's in-the-wall walk). |
+| `heichal.gate.wicket-s` | `heichal.gate.pishpash_s` | [157, 310, 22] → [163, 313, 30] | [157, 317, 22] → [163, 319.5, 32] | Mirror. |
+| `heichal.parochet.inner` | `curtain.devir.inner` | [116, 320.5, 22] → [116.17, 340.5, 62] | [115.92, 320.5, 22] → [116, 340.5, 62] | **Inside the amah traksin** (116–116.17). The sample hangs it 1 amah west of the outer curtain *inside the KhK* (115.92–116), shrinking the 20-amah KhK. Lock #42: the two curtain lines a tefach thick within the amah (1 + 4 + 1 tefachim). |
+| `heichal.parochet.outer` | `curtain.devir.outer` | [116.83, 320.5, 22] → [117, 340.5, 62] | [116.92, 320.5, 22] → [117, 340.5, 62] | A tefach thick (the sample: half a tefach). |
+| `heichal.even-shetiyah` | `fixture.even_shetiyah` | [97, 329, 22] → [99, 332, 22.13] | [98, 329, 22] → [101, 332, 22.13] | 2 (E–W) × 3 (N–S), 1 amah off the west wall; footprint unsourced either way. |
+| `heichal.shulchan` | `fixture.shulchan` | [129.5, 337.17, 22] → [131.17, 338, 23.25] | [128, 337, 22] → [130, 338, 23.5] | Top 10 × 5 tefachim (lock #31, R' Yehudah), height 1¼; centred in the inner two-thirds (Rambam BhB 3:17). |
+| `heichal.menorah` | `fixture.menorah` | [129.33, 323, 22] → [131.33, 323.5, 25] | [128, 323, 22] → [130, 324, 25] | Same rule for its E–W station; base 2 × ½ with the 3-step stone on its north (front) side. |
+| `heichal.mizbach-hazahav` | `fixture.mizbach_zahav` | [131.83, 330, 22] → [132.83, 331, 24] | [134, 330, 22] → [135, 331, 24] | 2 amot east of the Shulchan/Menorah line ("drawn outward") and inside the inner ⅔ (X ≤ 143.67). The sample's 134–135 is also inside; same idea. |
+| `heichal.sotah-slab` | `fixture.sotah_slab` | [155, 337, 21.75] → [156, 338, 22] | [154.5, 338, 21.98] → [155.5, 339, 22] | North, 1½ beyond the gate jamb, 1–2 amot inside the wall face (clear of the inner door leaf). |
+| `heichal.wall.west` | `heichal.wall.west` | [89, 313.5, 22] → [96, 347.5, 112] | [90, 314.5, 22] → [96, 346.5, 116] | Stepped 7/6/5 by story. |
+| `heichal.taim.north` | `heichal.flank.ta_n` | [89, 345.5, 22] → [157, 352.5, 55] | [79, 346.5, 22] → [163, 352.5, 62] | **Up to +55**: three stories of 11 ⚙, so the high Kodesh windows (F1, +56–61) open above the ta'im roofline (Part VII §22). Widths 5/6/7 by story with 15 cells. The sample stops the flank at +62, across the window band. |
+| `heichal.lul-west` | `heichal.lul_west` | [79, 330.17, 22] → [96, 330.83, 30] | [78.8, 330.17, 22] → [79, 330.83, 30] | Pierces the KhK west wall, the axial west ta and its outer wall (EK II 178). The sample has a sliver in the outer face only. |
+| `heichal.aliyah.door` | `heichal.door.aliyah` | [132, 315.5, 67] → [142, 320.5, 87] | [132, 295.5, 67] → [135, 300.5, 72] | In the aliyah's own south wall at +67 (20 × 10, Middot 2:3), centred on the part of the aliyah over the Kodesh, reached by a 24-step flight from the south ta'im roof (Middot 4:5). The sample places a 3 × 5 door in the body's outermost south wall. |
+| `heichal.roof` | `heichal.roof.maazivah` | [91, 280.5, 111.99] → [179, 380.5, 112] | [79, 295.5, 111] → [179, 365.5, 112] | The main roof (+112) covers only the aliyah block and the Ulam block (T outline); the ta'im flanks have their own roofs at +55 with the mesibah and the water-descent house open between them. The sample covers the whole body at +112. |
+| `heichal.maakeh` | `heichal.maakeh` | [91, 280.5, 112] → [179, 380.5, 115] | [79, 295.5, 111] → [179, 365.5, 114] | **+112 → +115**, standing on the roof. The sample has 111 → 114. |
+| `heichal.kalya-orev` | `heichal.kalya_orev` | [91, 280.5, 115] → [179, 380.5, 116] | [79, 295.5, 114] → [179, 365.5, 115] | **+115 → +116 = the crown** (Part XIV §64.1). The sample ends at +115, one amah short. |
+| `azarah.chamber.gazit` | `azarah.chamber.gazit` | [43, 371, 16] → [88, 391, 36] | [98, 390, 16] → [116, 398, 26] | **Straddles the Azarah WEST wall** at its north end, in front of the Etz. Yoma 25a (Abaye): the lottery was in its *east* in kodesh and the elder sat in its *west* in chol, so its kodesh/chol division runs N–S, which on the Azarah's outline only the W wall gives. Its chol half stands on a substructure from the Mount. The sample has an 18 × 8 box wholly inside the Azarah. |
+| `azarah.chamber.golah` | `azarah.chamber.golah` | [88, 381, 16] → [98, 391, 36] | [130, 390, 16] → [148, 398, 26] | East of the Gazit and in front of the Etz, with cistern and wheel. |
+| `azarah.chamber.etz` | `azarah.chamber.etz` | [68, 391, 16] → [98, 403, 36] | [158, 390, 16] → [176, 398, 26] | **Behind both** the Gazit and the Golah (Middot 5:4), inside the Azarah against the N wall and through its thickness (Middot 5:3 "six chambers in the Azarah"; Yoma 11a), opening only north to the chel, so its interior is chol (Rambam BhB 6:7): the KG's dwelling with the mezuzah. The sample has a third box in a row. |
+| `azarah.chamber.melach` | `azarah.chamber.melach` | [75, 263, 16] → [95, 275, 36] | [98, 263, 16] → [116, 271, 26] | Between the SW corner and Sha'ar HaDelek. The sample's box (X 98–116) covers the Delek gate opening. |
+| `azarah.chamber.parvah` | `azarah.chamber.parvah` | [120.25, 263, 16] → [140.25, 275, 36] | [123, 263, 16] → [141, 271, 26] | Between Delek and Bechorot, with the KG's mikveh on its roof. |
+| `azarah.chamber.medichin` | `azarah.chamber.medichin` | [140.25, 263, 16] → [152.25, 275, 36] | [148, 263, 16] → [166, 271, 26] | Next to the Parvah with the winding stair to its roof. The sample's box (148–166) covers the Bechorot gate. |
+| `azarah.moked.hall` | `azarah.chamber.moked` | [198.75, 390, 16] → [222.75, 414, 46] | [198.75, 394, 0] → [222.75, 418, 30] | 24 × 24 (lock) entering the Azarah only through the 8-amah strip north of the nanasin (Middot 5:2), floor +16 (on a substructure north of the wall), domed. Kodesh/chol line at Y 402 (12 \| 12, lock #43); four 5 × 6 corner chambers that leave both 10-amah doors clear; the pishpash in the gate's east leaf. The sample's hall stands on the Mount (floor 0) and runs through the soreg line. |
+| `altar.keren.se` | `altar.keren.se` | [230, 307.5, 25] → [231, 308.5, 26] | [229, 306.5, 25] → [230, 307.5, 26] | Same off-by-one correction (sample X 229–230, Y 306½–307½: half off the top). |
+| `altar.keren.nw` | `altar.keren.nw` | [203, 334.5, 25] → [204, 335.5, 26] | [202, 333.5, 25] → [203, 334.5, 26] | Same horn correction. |
+| `altar.keren.ne` | `altar.keren.ne` | [230, 334.5, 25] → [231, 335.5, 26] | [229, 333.5, 25] → [230, 334.5, 26] | Same horn correction. |
+| `azarah.gate.moked` | `azarah.gate.moked` | [205.75, 390, 16] → [215.75, 392, 36] | [205.75, 398, 16] → [215.75, 403, 36] | The Moked gate is the hall’s door into the Azarah, on its south face at Y 390. The sample cuts an opening in the N wall line. |
+| `azarah.moked.keys-slab` | `moked.slab.keys` | [210.25, 403, 15.5] → [211.25, 404, 16] | [209, 404, 15.98] → [210, 405, 16] | In the hall's **chol** half (Y 403–404): the officer slept on it (Middot 1:9), and there is no sitting, let alone sleeping, in the kodesh (Yoma 25a). |
+| `mount.soreg` | `chel.zone` | [32.5, 247.5, 0] → [410.5, 424.5, 2.67] | [53, 248, 0] → [410, 413, 6] | The chel follows the soreg path (jogs around the Gazit's chol half and Beit HaMoked), at Mount level; see zones `chel`/`soreg`. |
+| `heichal.ulam.wall-front` | `heichal.ulam.wall_front` | [174, 280.5, 22] → [179, 380.5, 112] | [174, 280.5, 22] → [179, 380.5, 116] | Walls stop at the roof (+112); the ma’akeh (+112→115) and kalya orev (+115→116) are separate elements on top. Same plan. |
+| `heichal.chalifot.s.wicket` | `heichal.chalifot.s.pishpash` | [157, 289, 22] → [163, 292, 30] | [162.8, 286.5, 22] → [163, 289.5, 30] | As north. |
+| `heichal.taim.west` | `heichal.ta.west_axis` | [84, 308.5, 22] → [91, 352.5, 55] | [84, 320.5, 22] → [90, 340.5, 62] | West ta'im as a strip of 3 + 3 + 2 cells (Middot 4:3) over Y 308½–352½ with story widths 5/6/7, up to the ta'im roofs (+55). The sample has one 20-long axial cell to +62. |
+| `heichal.taim.west` | `heichal.ta.west_stack` | [84, 308.5, 22] → [91, 352.5, 55] | [79, 314.5, 22] → [90, 346.5, 62] | As above (the sample’s stack box spans the W wall zone too). |
+| `heichal.ta-wall.west` | `heichal.wall.ta_w` | [79, 295.5, 22] → [84, 365.5, 55] | [79, 314.5, 22] → [84, 346.5, 62] | Spans the whole body width (Y 295½–365½), closing the mesibah and water-house voids at their west ends, up to the ta'im roofs (+55). |
+| `heichal.ta-wall.north` | `heichal.flank.ta_wall_n` | [84, 352.5, 22] → [157, 357.5, 55] | [79, 352.5, 22] → [163, 357.5, 62] | Flank layers in the same N–S positions (Middot 4:7). They stop at the Ulam's rear wall (X 157), where the sample runs to 163, and rise to the ta'im roofs (+55), where the sample stops at +62. |
+| `heichal.mesibah` | `heichal.flank.mesibah` | [84, 357.5, 22] → [157, 360.5, 55] | [79, 357.5, 22] → [163, 360.5, 62] | As above; here a stair (66 half-steps with landings) rising NE → NW to the ta'im roofs (Middot 4:5), roofless (EK) and open above. |
+| `heichal.mesibah-wall` | `heichal.flank.mesibah_wall` | [79, 360.5, 22] → [157, 365.5, 55] | [79, 360.5, 22] → [163, 365.5, 62] | As above. |
+| `heichal.taim.north` | `heichal.flank.ta_n` | [89, 345.5, 22] → [157, 352.5, 55] | [79, 346.5, 22] → [163, 352.5, 62] | **Up to +55**: three stories of 11 ⚙, so the high Kodesh windows (F1, +56–61) open above the ta'im roofline (Part VII §22). Widths 5/6/7 by story with 15 cells. The sample stops the flank at +62, across the window band. |
+| `heichal.taim.south` | `heichal.flank.ta_s` | [89, 308.5, 22] → [157, 315.5, 55] | [79, 308.5, 22] → [163, 314.5, 62] | As north. |
+| `heichal.ta-wall.south` | `heichal.flank.ta_wall_s` | [84, 303.5, 22] → [157, 308.5, 55] | [79, 303.5, 22] → [163, 308.5, 62] | As north. |
+| `heichal.beit-horadat-hamayim` | `heichal.flank.water` | [84, 300.5, 22] → [157, 303.5, 55] | [79, 300.5, 22] → [163, 303.5, 62] | As north. |
+| `heichal.outer-wall.south` | `heichal.flank.outer_s` | [79, 295.5, 22] → [157, 300.5, 55] | [79, 295.5, 22] → [163, 300.5, 62] | As north. |
+| `heichal.wall.north` | `heichal.flank.wall_n` | [89, 340.5, 22] → [157, 347.5, 112] | [79, 340.5, 22] → [163, 346.5, 116] | Stepped 7/6/5 by ta’im story (Middot 4:4); top at the roof. |
+| `heichal.wall.south` | `heichal.flank.wall_s` | [89, 313.5, 22] → [157, 320.5, 112] | [79, 314.5, 22] → [163, 320.5, 116] | As north. |
+| `heichal.ceiling.kiyur` | `heichal.ceiling.kiyur` | [96, 320.5, 62] → [157, 340.5, 63] | [79, 295.5, 62] → [179, 365.5, 63] | The ceiling courses span the interior (Kodesh + KhK, X 96–157 × Y 320½–340½); the sample spreads them over the whole 100 × 70 footprint. Same Z (Middot 4:6). |
+| `heichal.ceiling.dilpah` | `heichal.ceiling.dilpah` | [96, 320.5, 63] → [157, 340.5, 65] | [79, 295.5, 63] → [179, 365.5, 65] | As kiyur. |
+| `heichal.ceiling.tikrah` | `heichal.ceiling.tikrah` | [96, 320.5, 65] → [157, 340.5, 66] | [79, 295.5, 65] → [179, 365.5, 66] | As kiyur. |
+| `heichal.ceiling.maazivah` | `heichal.ceiling.maazivah` | [96, 320.5, 66] → [157, 340.5, 67] | [79, 295.5, 66] → [179, 365.5, 67] | As kiyur. |
+| `heichal.roof.kiyur` | `heichal.roof.kiyur` | [96, 320.5, 107] → [157, 340.5, 108] | [79, 295.5, 107] → [179, 365.5, 108] | Over the aliyah only; the roof outline is the T (aliyah + Ulam blocks). |
+| `heichal.roof.dilpah` | `heichal.roof.dilpah` | [96, 320.5, 108] → [157, 340.5, 110] | [79, 295.5, 108] → [179, 365.5, 110] | As above. |
+| `heichal.roof.tikrah` | `heichal.roof.tikrah` | [96, 320.5, 110] → [157, 340.5, 111] | [79, 295.5, 110] → [179, 365.5, 111] | As above. |
+| `heichal.windows.f1` | `windows.heichal` | [121, 315.5, 56] → [153, 345.5, 61] | — | A band +56–61 in the Kodesh N/S walls, 5 per side ⚙, opening above the ta'im roofs (+55) as Part VII §22 requires; the sample has a note only. |
+| `heichal.windows.f2` | `windows.crowns` | [157, 326.5, 48] → [163, 334.5, 52] | — | Two windows 2 × 4 above the gate (Z 48–52), above the vine; the sample has a note only. |
+| `mount.wall.north` | `hhb.wall.north` | [-5, 500, -58.33] → [505, 505, 40] | [-5, 500, 0] → [505, 505, 40] | Same plan; foot at the northern grade (approx.), blending to the lower W and E grades at the corners. |
+| `en.wall.south` | `en.wall.south` | [260, 258, 0] → [400, 263, 46] | [260, 258, 0] → [395, 263, 46] | **Runs to X 400**, through the corner. The sample stops at 395 while its east wall spans only Y 263–398, leaving a 5 × 5 hole at both east corners of Ezrat Nashim. |
+| `en.wall.north` | `en.wall.north` | [260, 398, 0] → [400, 403, 46] | [260, 398, 0] → [395, 403, 46] | As south (corner hole closed). |
+| `altar.chut-hasikra` | `altar.red_line` | [202, 306.5, 20.95] → [232, 336.5, 21.05] | [201, 305.5, 21] → [233, 337.5, 21.02] | A band on the faces of the 30-square body at +21. The sample draws it on the 32-square outline, where on the S and E sides there is only air (the yesod is 1 high and mostly absent there). |
+| `altar.shitin` | `altar.nostrils` | [201, 305.5, 16.8] → [202, 306.5, 17] | [200.5, 305.7, 16] → [201, 306.7, 16.5] | On the SW yesod top (+17), which receives the western and southern yesod bloods (Middot 3:2). The sample puts the holes outside the footprint at pavement level. |
+| `heichal.otem` | `heichal.otem` | [79, 280.5, 16] → [179, 380.5, 22] | [79, 295.5, 16] → [179, 380.5, 22] | **Covers both Ulam wings** (Y 280½–380½ under the Ulam block, 295½–365½ under the body; `params.pieces` — the box is only their envelope). The sample's box covers the north wing only (Y 295½–380½). |
+| `heichal.chalifot.n` | `heichal.chalifot.n` | [163, 365.5, 22] → [174, 375.5, 62] | [163, 365.5, 22] → [179, 380.5, 62] | Interior only (X 163–174, Y 365½–375½); walls are separate elements. The sample’s box includes the front and end walls. |
+| `heichal.chalifot.s` | `heichal.chalifot.s` | [163, 285.5, 22] → [174, 295.5, 62] | [163, 280.5, 22] → [179, 295.5, 62] | As north. |
+| `azarah.underground.passage` | `underground.mesibah` | [201.25, 411, -12] → [205.25, 450, -4] | [198, 416, -8] → [228, 443, -2] | A winding stair from the NW chamber to −12, a vaulted passage north, and the Beit HaTevilah (mikveh, fire, privy). The sample has a single box. |
+
+**Sample objects matching this model (no material difference):** `hhb.floor`, `hhb.gate.kiponus`, `hhb.gate.tadi`, `hhb.gate.shushan`, `en.floor`, `en.gate.east`, `azarah.gate.nikanor`, `azarah.floor.ey`, `azarah.wall.south`, `azarah.wall.north`, `azarah.wall.west`, `azarah.gate.delek`, `azarah.gate.bechorot`, `azarah.gate.mayim`, `azarah.gate.nitzotz`, `azarah.gate.korban`, `altar.top`, `altar.revuvah`, `heichal.ulam.void`, `heichal.ulam.opening`, `heichal.gate.great`, `heichal.kodesh`, `heichal.khk`, `heichal.aliyah`, `heichal.aliyah.lul`.
+
+**Reconstruction values that coincide with the sample** (flagged by a reviewer): the lulin hatch centred over the KhK (X 105–107), the kiyor at X 188–192 and 4 × 3, the gezuztra floor at +16 and 4 deep, and the aliyah door from X 132. Each is re-derived from the research in `docs/decisions/site-model.md` ("Sample coincidences"): they are the centring or level choices the constraints point to, not values taken from the manifest.
+
+**In this model but absent from the sample:** the four double stoas, the 13 soreg breach stations and soreg passages; exterior flights for every N/S court door; Lishkat Pinchas HaMalbish and Osei Chavitin; the Water Gate house with Beit Avtinas and the KG's roof mikveh (En-Eitam check); the Nitzotz exedra and Beit HaNitzotz; the Moked corner chambers, doors and pishpash; the underground stair and Beit HaTevilah; sovev, walkway and ma'arachah area with three piles and the tapuach; the chut hasikra as a band; the libation cups; the machtah niche; the marble and silver tables west of the kevesh; the Tzafon and bein-haulam zones; the muchni and well; the Ulam lintel stack (5 beams + 4 courses), vine, chains, nivreshet and the two Ulam tables; the Ulam end walls; the beit hachalifot knife niches; the NE ta door and the mesibah stair; the ta'im cells (38) with story widths; the ta'im roofs; the F2 crown windows and the F1 band; the Ulam and Heichal-gate curtains; and the whole real-world context (terrain profiles, Kidron, Har HaMishchah, the Parah causeway and pyre, the Chuldah passages). Added in the verification pass: the Shushan HaBirah chamber with the two standard amot; Lishkat HaKelim, Chasha'im, HaKorban, HaParochet and Beit HaEven; the substructures under the Gazit's chol half and the north part of Beit HaMoked; the stair from the ta'im roofs to the aliyah door; the 24 night-watch posts and the kalpi station; the amah channel; the dawn inspection circuit; the flaying stations between the nanasin; the Mount-wall foot profiles.
+
+## 8. Known open points
+
+* **Ta'im roofs at +55 (changed in the verification pass).** The ta'im are now three stories of 11 ⚙, so the F1 windows (+56–61) open above the ta'im roofline as Part VII §22 says. Middot 4:5's walk (up the mesibah to the NW, along the W and S on the roofs, to the aliyah door) then ends with a 24-step flight on the south roof to the door at +67 (`heichal.taim.roof-stair`). Middot 4:5 does not say the walk was level; the earlier +67 reading is recorded as the alternative.
+* **For the orchestrator's sign-off:** (1) the Gazit straddles the Azarah's W wall at its north end, a reading of lock #7 forced by Yoma 25a's east/west halves (the N-wall straddle is recorded in `params.variants`); (2) the Ulam stair has four rovadim (3, 3, 3, 4 → run 21 + a 1-amah apron), while lock #25 lists "3/3/4" and the report says "run 22"; (3) the Shushan HaBirah chamber the report places over the gate takes the Gemara level-line model's 25–26 band (§4).
+* **N/S court flights.** The sources give no stair for the N and S gates, but the +16 court over a Mount at 0 forces 32 half-steps. They cross the 10-amah chel and the soreg line, as EK himself notes (I 202–215).
+* **Variants not built** (data notes only): Rambam's square Heichal (Register #1); printed-Middot chamber trios (#7); Parhedrin south (#20); 13 gates (#9); 4 × 6 rings (#18); a single parochet (#5); R' Yehudah's top rovad of 5; Rambam's mixed-amah altar schedule (#3); the corner-squares-only yesod reading; hollow ta'im walls (#38); the detached soreg (#44); EK's east-wall Gazit and his margin set I; the Gazit straddling the N wall; Middot 3:5's marble tables "between the pillars"; the ta'im roofs at +67.
+* **Not modeled**: the 13 shofar-chests (Shekalim 6:1, 6:5 say only "in the Mikdash"; the familiar "treasury in the Court of the Women" comes from Josephus and the New Testament, which ARCHITECTURE §0 excludes). The achsadra colonnade itself (only its route: no source places or sizes it). The scapegoat ramp. The Herodian esplanade beyond the halachic 500.
+
+## 9. Verification log
+
+Two adversarial reviewers checked this model; their 31 findings (several overlap) were each tested against the report and the Hebrew sources. **25 accepted, 6 accepted in part, none rejected outright.** The parts not adopted are explained in the last column. Details and alternatives: `docs/decisions/site-model-fix.md`. `runChecks()` gained a check for each class of defect (marked ✓ check).
+
+| # | Sev. | Element | Finding | Disposition | What changed / why |
+|---|---|---|---|---|---|
+| 1 | high | `azarah.floor` | No floor under Ezrat Kohanim X 233–242 | Accepted | `azarah.floor` runs to the duchan's foot (X 242); Middot 5:1 / BhB 5:12 pave the mekom drisat haKohanim. ✓ check: floor elements tile the Azarah, EN and Mount. |
+| 2 | med | (missing) | Kelim and Chasha'im required by lock §58; also Korban, Parochet, Beit HaEven | Accepted | Added `azarah.chamber.kelim` (NE of the court, in EY and the N wall), `en.chamber.chashaim` (EN, under the north gallery), `mount.chamber.korban`, `mount.chamber.parochet` (outside the soreg at the Korban gate), `mount.chamber.beit-haeven` (NE, facing north to the Birah, Parah 3:1). All `footprint_unsourced`, reconstruction. |
+| 3 | med | `azarah.chamber.etz` | Etz outside the N wall, against Middot 5:3 "in the Azarah"; notch | Accepted | Etz now inside the Azarah against and through the N wall, behind the Gazit and the Golah (Middot 5:4), its only door north to the chel, so it is chol (Rambam BhB 6:7); Yoma 11a ("inside Nikanor is Lishkat Parhedrin") agrees it is in the court. Gazit and Golah stand in front of it; the notch is gone. ✓ checks. |
+| 4 | med | many | ⚙ numbers labelled explicit/derived/locked | Accepted | Rule: an element carries its weakest defining number; `params.fieldConfidence` keeps the sourced parts. 41 elements relabelled (EN chambers, wickets, vessels, sotah slab, tables, nanasin, rings, beit hadeshen, roof mikveh, kevesh, chel and 15 steps, duchan, ta'im, mesibah, Ulam steps, east walls, Moked hall …). ✓ check: any ⚙ ⇒ reconstruction or a fieldConfidence 'reconstruction' entry. |
+| 5 | med | `heichal.windows.f1` / ta'im | F1 opens into the ta'im, against Part VII §22 "above the ta'im roofline" | Accepted (option a) | Ta'im stories 11 ⚙ → roofs +55; F1 (+56–61) opens to the air. Middot 4:5's walk ends with a 24-step flight on the south roof to the aliyah door (`heichal.taim.roof-stair`); Middot 4:5 never says the walk is level. ✓ checks. |
+| 6 | med | `mount.gate.shushan` | Report places the two standard amot in a chamber over the gate; Z 6 jamb spots unsourced | Accepted | `mount.gate.shushan.chamber` (reconstruction, +22 → +28) with the NE and SE amot inside (Kelim 17:9; §48; §65.4); jamb positions removed. In the sight-line test: no loss under real topography; the level-line model loses its 25–26 band (§4). |
+| 7 | low | `altar.ulam-steps` | 3/3/3/4 + apron vs lock #25 "3/3/4" and "run 22" | Accepted in part | Labels: apron and width reconstruction; the run-21-vs-22 gap noted. Geometry kept: twelve ½ rises in Middot 3:6's "amah, amah, rovad" groups need four groups, so four rovadim (Yoma 4:3's "fourth rovad"); "22" only follows from R. Yehudah's top 5. **Flagged for the orchestrator.** |
+| 8 | low | `altar.marble-tables` | Tables not "between the pillars" (Middot 3:5) | Accepted | Rambam's tables band kept (it is Middot 5:2's "rings → tables 4, tables → nanasin 4"); Middot 3:5 logged as a variant; `altar.nanasin.params.flayingStations` between the pillars (Rambam BhB 5:13 "there they hang and flay"). |
+| 9 | low | (missing) | Amah channel; shofar-chests; kalpi; 24 watch posts | Accepted in part | Added `azarah.amah-channel` (open from the SW corner past the kevesh foot, out under the Water Gate, covered to the Kidron ⚙), `azarah.stations` (kalpi: "east of the Azarah, north of the altar", Yoma 37a) and `mount.watch-posts` (24 = 3 + 21, Middot 1:1; Rambam BhB 8:4–9). **Not adopted:** the shofar-chests — Shekalim 6:1/6:5 say only "in the Mikdash", and the usual EN "treasury" placement comes from Josephus/NT, excluded by ARCHITECTURE §0. |
+| 10 | low | lulin, kiyor, gallery, aliyah door | Values identical to the sample | Accepted (docs) | Each re-derived in `docs/decisions/site-model.md` ("Sample coincidences"): centring or level choices the constraints point to; values kept. |
+| 11 | low | `azarah.chamber.gazit` | West-wall straddle is a reading of lock #7 | Accepted in part | Kept: it is the only straddle with kodesh east / chol west (Yoma 25a, Abaye) that is still in the north of the court. Now logged as a lock interpretation, the N-wall straddle in `params.variants`; **flagged for sign-off.** |
+| 12 | low | `azarah.moked.hall` | Kodesh line Y 402 vs the wall-thickness argument | Accepted | Justified by lock #43's half / half only; the Zevachim 56a argument is dropped (the hall replaces the wall). |
+| 13 | high | Beit HaMoked | Corner chambers narrow both doors to 8; pishpash opens into the bakery | Accepted | Corner chambers 5 (E–W) × 6, flanking a clear 10-amah passage at each door; the pishpash is a wicket in the gate's east leaf (Middot 1:7; Tamid 1:3; Rambam BhB 8:11 "the small gate"). The keys slab moved to the chol half (the officer slept on it). ✓ checks. |
+| 14 | high | `azarah.floor` | = #1 | Accepted | As #1. |
+| 15 | med | `altar.kevesh.ramp-yesod` | Level run touches the yesod at a point only | Accepted | Level run extended to X 201: it meets the S stub and the W yesod along 2 amot. ✓ check. |
+| 16 | med | `heichal.taim.roofs` | Roof slabs cover the mesibah and water-house voids | Accepted | Seven pieces leave both voids open (a 4-amah landing only at the mesibah's NW head). ✓ check. |
+| 17 | med | Etz, Gazit chol half, Moked north part | Floating at +16 over the Mount; slot | Accepted | `azarah.chamber.gazit.podium` and `azarah.moked.podium` (Z 0 → 16; the Moked's has the stair shaft as a void); Etz now inside; slot gone. ✓ check: nothing at +16 stands outside the court podium without a substructure. |
+| 18 | med | court walls | Rooms in walls not listed; Beit Avtinas buried | Accepted | `params.voids` / `cutouts` on every court wall; the S wall stops at the Water Gate house roof over its span (open terrace at +36, a spiral stair in the gatehouse ⚙); Mount walls list their gates. ✓ check. |
+| 19 | med | `azarah.chamber.gazit` | = #11 | Accepted in part | As #11. |
+| 20 | med | Shushan / `mount.wall.east` | Chamber; +22 misattributed to EK's minimum | Accepted | As #6; the E wall now cites "low (Middot 2:4; Rambam BhB 6:5); +22 chosen ⚙", confidence reconstruction (also EN and Azarah east walls). |
+| 21 | med | ta'im | = #5; 'locked' label | Accepted | As #5; ta'im are reconstruction with fieldConfidence (count locked, widths explicit). |
+| 22 | med | (missing) | = #2 + guard posts | Accepted | As #2 and #9. |
+| 23 | med | `mount.wall.*` | Corner columns open below the N/S feet | Accepted | `params.footProfile` on the N and S walls drops to the lower E/W grade at each corner (40 m blend ⚙). ✓ check. |
+| 24 | low | marble tables | = #8 | Accepted | As #8. |
+| 25 | low | zones | Gaps above the Azarah and in the Ulam block; roof floorZ | Accepted | Court and Mount zone tops raised to 140; new sub-zones `ulam-upper` and `taim-roofs` (floorZ 55); `roof` is only the main roof. ✓ zone tests. |
+| 26 | low | `heichal.chalifot.*.wicket` | 6 amot above the court, no stair | Accepted | Marked `walkThrough: false`: sanctity openings (Zevachim 55b), no stair attested. |
+| 27 | low | `mount.soreg.breaches` | Shekalim 6:3 ties the stations to the gates | Accepted in part | The tie is documented. Even spread kept: the stations "opposite the gates" fall inside the flights' soreg passages. Stations now also kept 2 clear of any passage (two moved). ✓ check. |
+| 28 | low | `altar.kevesh` | Box overlaps the altar body; flying span not given | Accepted | `params.groundPiece` (30) + `params.flying` (undersides +17 over the yesod line, +22 over the sovev). ✓ overlap checks on the pieces. |
+| 29 | low | `heichal.otem` | Bounding box hits the Gazit | Accepted | `boxNote` (build from pieces); overlap checks use the pieces; Gazit-vs-otem pair added. |
+| 30 | low | `en.chamber.wood/nazirites` | Inner walls (+31) above the EN east wall (+28) | Accepted | All four EN chambers' walls 22 high (top +28). ✓ check. |
+| 31 | low | (missing) | Dawn circuit along the achsadra | Accepted in part | `azarah.achsadra-route`: the two companies' polylines from the pishpash to the chavitin chamber (Tamid 1:3; Rambam BhB 8:11), ✓ checked clear of every structure. **Not adopted:** a built colonnade — no source places or sizes it (Rambam BhB 1:9 only permits stone exedras). |
+
+**Renames:** none. All 176 existing ids are kept; 13 elements were added: `mount.gate.shushan.chamber`, `en.chamber.chashaim`, `azarah.chamber.kelim`, `azarah.chamber.gazit.podium`, `azarah.moked.podium`, `mount.chamber.parochet`, `mount.chamber.korban`, `mount.chamber.beit-haeven`, `heichal.taim.roof-stair`, `mount.watch-posts`, `azarah.stations`, `azarah.amah-channel`, `azarah.achsadra-route`. 41 elements changed confidence (all to reconstruction); 82 now carry `params.fieldConfidence`. New sub-zones: `taim-roofs`, `ulam-upper`, `lishkat-hakelim`, `lishkat-chashaim`, `lishkat-hakorban`, `lishkat-haparochet`, `beit-haeven`, `shushan-habirah`.
