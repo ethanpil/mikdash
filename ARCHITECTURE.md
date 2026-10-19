@@ -195,6 +195,12 @@ export const EVENTS = [{
   layer: 'halachic'|'ritual'|'aggadah',             // §36.2
 }];
 ```
+Conventions used by the data: `view.at` may be `[X, Y, Z]` — Z picks the floor level on stacked spots;
+`dayTypes: ['occasional']` marks reference-only events that are never active on the clock (shown in the zone
+info as "also here, on its days"). Zone sanctity is numbered 0–10 per the Rambam's count (BhB 7:12–13):
+Eretz Yisrael 0 … Har HaBayit 3 … Heichal 9, Kodesh HaKodashim 10 (`SANCTITY_SCALE` in zones-content.js).
+Validate with `node tools/validate-schedule.mjs`.
+
 **Determinism:** everything the sim shows is a pure function of `(ctx.time.t, date)`; jumping the clock
 re-poses every actor instantly (no accumulated state). Sound cues fire only when time passes a cue moment
 during continuous play. Choreography modules: `src/sim/choreo/<id>.js` exporting

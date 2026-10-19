@@ -28,6 +28,9 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   steers A*. Half-amah stairs need sub-step probes (|Δh| up to 0.8 m per cell when each rise ≤ 0.35 m).
 - Audio is synthesised in module Workers (`src/audio/worker.js`); `?debug=audio` opens an audition panel.
 - Psalm melodies, choir size on low/medium, insect season: reconstruction (see docs/decisions/audio.md).
+- Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
+  give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
+  Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.
 
 ## Tools
 - `npm run dev` / `npm run build`
