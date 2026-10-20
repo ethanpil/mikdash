@@ -1,0 +1,14 @@
+const rt = ctx.schedule.runtime;
+const nw = rt.choreo('night-watch');
+const res = { initedAtLoad: nw.inited };
+const sample = async (label, n = 6) => { const v = []; for (let i = 0; i < n; i++) { await frames(1); v.push(+rt.stats.last.toFixed(2)); } res[label] = v; };
+await sample('day');
+ctx.time.set(ctx.time.parse('n2'));
+await sample('jump-to-night');
+ctx.time.set(ctx.time.parse('n5'));
+await sample('jump-within-night');
+ctx.time.set(ctx.time.parse('d3'));
+await sample('jump-to-day');
+ctx.time.set(ctx.time.parse('n2'));
+await sample('jump-to-night-again');
+return res;

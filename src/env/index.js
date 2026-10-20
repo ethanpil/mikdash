@@ -7,7 +7,7 @@
 // (candela, cd/m²) by ctx.env.preExposure. ctx.env.exposure is what the tone mapper applies on top (≈1).
 import {
   DirectionalLight, Mesh, BoxGeometry, Scene, CubeCamera, WebGLCubeRenderTarget, HalfFloatType, LinearFilter,
-  PMREMGenerator, FogExp2, Color, Vector2, Vector3, Matrix3, MathUtils,
+  PMREMGenerator, FogExp2, Color, Vector2, Vector3, Matrix3, MathUtils, ShaderChunk,
 } from 'three';
 import { PRIORITY } from '../core/engine.js';
 import { ATMO, mieCoefficients, transmittanceCPU, zenithOpticalDepth, luminance, nightFloorShape } from './atmosphere.js';
@@ -15,6 +15,9 @@ import { AtmosphereLUTs, LUT_SCALE } from './luts.js';
 import { createSkyUniforms, createSkyMaterial, setSkyFeatures } from './sky.js';
 import { createStarfield, EQ_TO_GAL } from './stars.js';
 import { installFogChunks, FogUniforms } from './fog.js';
+import { createInteriors } from './interiors.js';
+import { setInteriorProbes } from './interiors-glsl.js';
+import { createProbes } from './probes.js';
 
 const TIERS = {
   low: { skyW: 128, skyH: 64, steps: 18, envSize: 32, envInterval: 1.0, envAngle: 1.0, stars: 1200, magLimit: 5.6, milkyWay: false, clouds: false, twinkle: false },
@@ -42,6 +45,25 @@ const NIGHT_TINT = (() => { const t = SCOTOPIC_TINT.map((v) => 0.8 + (v - 1) * 0
 const DISC_OVER_SKY = [2, 5];
 const AUREOLE_TAU_MAX = 0.1; // slant coarse-dust depth cap: aureole(1°)/disc ≈ 1e-3 at the horizon (multiple scattering broadens beyond)
 const FOG_MATCH_DIST = 300; // m: stock exp2 fog (FX) equals the physical extinction at this distance
+// Interiors (lighting-polish): inside a roofed room the eye adapts to what it sees there — the room's mean
+// luminance measured by its reflection probe (the Kodesh), else the sky through its openings plus the fires
+// burning IN it (the Moked hearth), which env then meters itself (fx stops adapting to those). Toward a dimmer
+// room the eye adapts only this fraction of the way (in log luminance): a dim room stays dim but readable;
+// toward a brighter one (a lamp-lit room at night) it adapts fully.
+const INTERIOR_ADAPT = 0.9; // lighting-polish-fix: 0.7 kept the Kodesh by day murky brown looking away from the gate
+// a lamp-lit room's log-average luminance over its surfaces' mean (the Kodesh probe: 0.2 at night, 0.27 by day)
+const FIRE_LOG = 0.3;
+// …and a room lit by its own lamps reads as the dark-adapted eye sees firelight (warm, legible — not a mesopic
+// grey): the exposure key rises toward this value with the fires' share of the room's light
+const FIRE_KEY = 0.115;
+// the surroundings in the env probe's lower sky (low tier everywhere; medium+ outside the probes): walls,
+// colonnades and buildings of the Mount up to this elevation (deg) — the courts are enclosed by 40-amah walls
+const WALL_TOP = { court: 16, open: 6 };
+const WALL_ALBEDO = [0.55, 0.5, 0.43]; // dressed Jerusalem limestone / marble
+// interiors (lighting-polish-fix): albedo of a room's own surfaces seen in reflections (gold and limestone), and
+// the degree of chromatic adaptation toward firelight in a room the fires light (0 none … 1 full von Kries)
+const ROOM_ALBEDO = 0.6;
+const WB_FIRE = 0.6;
 
 const DEG = Math.PI / 180;
 const smooth = (a, b, x) => { const t = MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -83,6 +105,7 @@ export async function init(ctx) {
   // ---------------------------------------------------------------- atmosphere LUTs
   const luts = new AtmosphereLUTs(renderer, tier);
   luts.init();
+  luts.buildTable(); // per-source statistics: jumps and time-lapse need no GPU read-back (false → read back as before)
   const obsR = ATMO.groundRadius + ATMO.observerAltitude;
   const mie = mieCoefficients(ATMO);
   const tauZenith = zenithOpticalDepth(ATMO);
@@ -137,6 +160,49 @@ export async function init(ctx) {
   const pmrem = new PMREMGenerator(renderer);
   let pmremRT = null;
 
+  // ---------------------------------------------------------------- interiors + scene probes (lighting-polish)
+  let booted = false;
+  let interiors = null;
+  const off = (k) => ctx.params?.raw?.get?.(k) === '0';
+  if (!off('interiors')) {
+    try { interiors = createInteriors(ctx, { probes: qkey !== 'low' && !off('probes') }); } catch (e) { console.warn('[env] interior light unavailable', e); }
+  }
+  // a probe sees the sky dome, but not the Sun's or Moon's disc: the key light already brings their light (and
+  // the GGX highlight that mirrors the disc); a captured disc would double it in every indirect term
+  // Nor the stars and planets: point sprites a few texels wide on a 64² face, whose colours the PMREM blur smeared
+  // into green / magenta blotches on night gold once the outdoor probes stopped holding fire light; their light is
+  // already in the night-sky floor (NIGHT_SKY_L) of the dome (lighting-polish-fix)
+  // `gain`: the capture's output gain (probes.js), which the dome applies through its output scale
+  const withoutDiscs = (fn, gain = 1) => {
+    const sd = skyU.uSunDiscScale.value, mr = skyU.uMoonRadiance.value.clone(), es = skyU.uEarthshine.value.clone();
+    const sv = field.stars.visible, pv = field.planets.visible;
+    const ls = skyU.uLutScale.value, os = skyU.uOutScale.value;
+    skyU.uSunDiscScale.value = 0; skyU.uMoonRadiance.value.set(0, 0, 0); skyU.uEarthshine.value.set(0, 0, 0);
+    skyU.uLutScale.value = ls * gain; skyU.uOutScale.value = os * gain;
+    field.stars.visible = false; field.planets.visible = false;
+    try { return fn(); } finally {
+      skyU.uSunDiscScale.value = sd; skyU.uMoonRadiance.value.copy(mr); skyU.uEarthshine.value.copy(es);
+      skyU.uLutScale.value = ls; skyU.uOutScale.value = os;
+      field.stars.visible = sv; field.planets.visible = pv;
+    }
+  };
+  const makeProbes = (t, key) => {
+    if (!interiors || off('probes')) return null;
+    try { return createProbes(ctx, { pmrem, cubeSize: t.envSize, tierKey: key, interiors, ready: booted, withoutDiscs }); } catch (e) {
+      console.warn('[env] reflection probes unavailable', e);
+      return null;
+    }
+  };
+  let probes = makeProbes(tier, qkey);
+  // where the surroundings band of the sky probe sits (court: enclosed by the 40-amah walls)
+  const courtBoxes = [['azarah.wall.west', 'azarah.wall.east', 'azarah.wall.south', 'azarah.wall.north'], ['azarah.wall.east', 'en.wall.east', 'en.wall.south', 'en.wall.north']]
+    .map(([w, e, s, n]) => [ctx.elOpt(w)?.box, ctx.elOpt(e)?.box, ctx.elOpt(s)?.box, ctx.elOpt(n)?.box])
+    .filter((b) => b.every(Boolean)).map(([w, e, s, n]) => [w.min[0], e.max[0], s.min[1], n.max[1]]);
+  const inCourt = (p) => {
+    const X = p.x / ctx.units.AMAH, Y = -p.z / ctx.units.AMAH;
+    return courtBoxes.some((b) => X > b[0] && X < b[1] && Y > b[2] && Y < b[3]);
+  };
+
   // ---------------------------------------------------------------- stars & planets
   const field = createStarfield({ count: tier.stars, magLimit: tier.magLimit, seed: 5786 });
   field.uniforms.uTau.value.fromArray(tauZenith);
@@ -185,12 +251,19 @@ export async function init(ctx) {
     shadowsManaged: true,
     fourier: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], zenith: [0, 0, 0], horizonMean: [0, 0, 0],
     refDir: new Vector3(0, 1, 0),
+    snapFrames: 0,
+    lutGi: 0, relut: false, refine: false, checkGround: false, lastStats: null,
   };
   const celestial = new Matrix3();
   const worldToGal = new Matrix3();
   const ncp = new Vector3();
   const tmp = new Vector3();
   const lutSunE = new Vector3(), lutMoonE = new Vector3(), lutGround = new Vector3();
+  // statistics table (lighting-polish-fix): sources of the current sky for luts.estimate
+  const estSun = { alt: 0, az: 0, E: [0, 0, 0] }, estMoon = { alt: 0, az: 0, E: [0, 0, 0] };
+  const estSources = [estSun, estMoon], estBuf = new Float32Array(32);
+  const fireCol = new Color(1, 1, 1);  // the light colour of the fires in the camera's room
+  const intEnv = [0, 0, 0];            // what rooms' openings show, per unit sky irradiance
   // thin cirrus coverage: a property of the chosen date (deterministic), or forced via ctx.env.cirrus / ?cirrus=
   const urlCirrus = parseFloat(ctx.params.raw?.get?.('cirrus'));
   const cloudCoverage = () => {
@@ -245,7 +318,7 @@ export async function init(ctx) {
     }
     if (any) st.horizon = out;
   }
-  ctx.bus.on('ready', () => { if (!st.horizon) computeHorizonFromPhysics(); st.force = true; });
+  ctx.bus.on('ready', () => { booted = true; if (!st.horizon) computeHorizonFromPhysics(); st.force = true; });
   ctx.bus.on('time:jump', () => { st.force = true; });
   ctx.bus.on('time:date', () => { st.force = true; });
   ctx.bus.on('quality:change', () => {
@@ -261,7 +334,7 @@ export async function init(ctx) {
     if (nt === tier) return;
     const old = tier;
     tier = nt;
-    if (nt.skyW !== old.skyW || nt.skyH !== old.skyH || nt.steps !== old.steps) luts.resize(nt);
+    if (nt.skyW !== old.skyW || nt.skyH !== old.skyH || nt.steps !== old.steps) { luts.resize(nt); luts.buildTable(); }
     if (nt.envSize !== old.envSize) {
       cubeRT.dispose();
       cubeRT = new WebGLCubeRenderTarget(nt.envSize, CUBE_OPTS);
@@ -271,6 +344,14 @@ export async function init(ctx) {
     }
     setSkyFeatures(skyMat, domeFeatures(nt));
     setSkyFeatures(envMat, envFeatures(nt));
+    probes?.dispose();
+    probes = makeProbes(nt, ctx.quality?.key in TIERS ? ctx.quality.key : 'medium');
+    // the probe loop is compiled only where probes exist: recompile the lit materials when that changes
+    if (interiors && setInteriorProbes(ShaderChunk, !!probes)) {
+      scene.traverse((o) => {
+        for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) if (m.isMeshStandardMaterial) m.needsUpdate = true;
+      });
+    }
     if (nt.stars !== old.stars || nt.magLimit !== old.magLimit) field.rebuild({ count: nt.stars, magLimit: nt.magLimit });
     field.uniforms.uTwinkle.value = nt.twinkle ? 1 : 0;
     // refill the resized LUT and PMREM now, so no frame samples a disposed target
@@ -319,8 +400,11 @@ export async function init(ctx) {
     luts.withState(() => {
       cubeCam.update(renderer, envScene);
       pmremRT = pmrem.fromCubemap(cubeRT.texture, pmremRT);
+      probes?.copySky(pmremRT.texture);
     });
-    scene.environment = pmremRT.texture;
+    // medium+: the atlas of [sky | scene probes] (interiors-glsl.js picks the slice per fragment)
+    scene.environment = probes ? probes.texture : pmremRT.texture;
+    interiors?.setEnvWidth(scene.environment.image?.width || 0);
     api.envMap = pmremRT.texture;
   }
 
@@ -333,6 +417,8 @@ export async function init(ctx) {
     st.clock += dt;
     const sun = time.sun, moon = time.moon;
     const camY = camera.position.y;
+    interiors?.update((v) => (v.probe && probes ? probes.coverage(v.probe) : 0)); // rooms a probe captures need no fill
+    const ci = interiors?.camera;
 
     // --- light sources at the observer (physical)
     st.sunE0 = ATMO.sunIlluminanceTOA / (sun.distanceAU * sun.distanceAU);
@@ -345,22 +431,52 @@ export async function init(ctx) {
     // --- sky-view LUT + statistics when the lights moved
     const moved = st.lutSun.angleTo(sun.dir) > 0.01 * DEG || st.lutMoon.angleTo(moon.dir) > 0.05 * DEG
       || Math.abs(moonE0 - st.lutMoonE) > 0.02 * Math.max(moonE0, 1e-6);
-    if (force || moved) {
+    // fast-forward (time-lapse): the light changes by orders of magnitude between frames; the 1–2 frame latency
+    // of the async read would expose dawn with the night's meter (white frames at 600×)
+    const fast = !time.paused && Math.abs(time.speed) > 20;
+    if (force || moved || st.relut) {
       const s = st.sunE0 / LUT_SCALE;
       const m = moonE0 / LUT_SCALE;
-      const gi = (st.skyIrr + st.floorIrr) / LUT_SCALE;
+      const sunRules = sun.altitude > -14 || moon.altitude < 0;
+      st.refIsSun = sunRules;
+      st.refDir.copy(sunRules ? sun.dir : moon.dir);
+      const refAz = sunRules ? sun.azimuth : moon.azimuth;
+      // The LUT's ground term (below the horizon) is lit by the sky irradiance measured FROM this LUT. In continuous
+      // play the previous measurement is a frame stale, but after a clock jump it is the other end of the day (a
+      // day→night jump left daylight ground in a PMREM normalised by the night sky: a white-out). On a jump and in
+      // a time-lapse the statistics come from the per-source table (luts.buildTable) — no GPU read-back, which
+      // drained the frame (120–190 ms a jump) — and are refined by an async read once the clock runs normally.
+      const useTable = !!luts.table && (force || fast || !luts.stats);
+      let est = null;
+      if (useTable) {
+        const src = (d) => ({ alt: Math.asin(MathUtils.clamp(d.y, -1, 1)) / DEG, az: Math.atan2(d.x, -d.z) / DEG });
+        estSun.E[0] = estSun.E[1] = estSun.E[2] = st.sunE0;
+        Object.assign(estSun, src(sun.dir));
+        Object.assign(estMoon, src(moon.dir));
+        for (let c = 0; c < 3; c++) estMoon.E[c] = moonE0 * MOON_COLOR[c];
+        est = luts.estimate(estSources, Math.atan2(st.refDir.x, -st.refDir.z) / DEG, estBuf);
+      }
+      const gi = ((est ? luminance(est) : st.skyIrr) + st.floorIrr) / LUT_SCALE;
       luts.updateSky({
         sunDir: sun.dir, sunE: lutSunE.set(s, s, s), moonDir: moon.dir,
         moonE: lutMoonE.set(m * MOON_COLOR[0], m * MOON_COLOR[1], m * MOON_COLOR[2]),
         groundIrr: lutGround.set(gi, gi, gi),
       });
+      luts.runStats(refAz);
       st.lutSun.copy(sun.dir); st.lutMoon.copy(moon.dir); st.lutMoonE = moonE0;
-      const sunRules = sun.altitude > -14 || moon.altitude < 0;
-      st.refIsSun = sunRules;
-      st.refDir.copy(sunRules ? sun.dir : moon.dir);
-      luts.runStats(sunRules ? sun.azimuth : moon.azimuth);
-      if (force || !luts.stats) luts.readStatsSync();
-      else luts.readStatsAsync();
+      st.lutGi = gi * LUT_SCALE;
+      st.relut = false;
+      if (est) {
+        luts.stats = Float32Array.from(est);
+        luts.syncSerial = luts.statsSerial; // a read of an older pass still in flight is dropped
+        st.refine = true;                   // measure this pass once the clock runs at normal speed
+      } else if (!luts.stats || (fast && !luts.table)) {
+        luts.readStatsSync();               // no table (fallback): the previous behaviour
+      } else luts.readStatsAsync();
+    } else if (st.refine && !fast && !luts.reading) {
+      st.refine = false;
+      st.checkGround = true;
+      luts.readStatsAsync();
     }
     const S = luts.stats;
     if (S) {
@@ -387,6 +503,12 @@ export async function init(ctx) {
       }
     }
     const Esky = st.skyIrr + st.floorIrr;
+    // the measured sky differs from the one the LUT's ground term assumed (a table estimate, or a jump without the
+    // table): re-run the LUT and the env map once with the measurement
+    if (S && !fast && st.lutGi > 0 && Math.abs(Math.log(Esky / st.lutGi)) > 0.2 && (st.checkGround || !luts.table)) {
+      st.relut = true; st.envDirty = true;
+    }
+    if (S !== st.lastStats) { st.lastStats = S; if (!st.refine) st.checkGround = false; }
 
     // --- key light (sun by day, moon by night)
     const sunDuty = sun.altitude > -4;
@@ -408,13 +530,74 @@ export async function init(ctx) {
     // --- exposure (adaptation luminance from what the observer sees)
     const vis = sunDuty ? st.sunVis : st.moonVis;
     const Edir = st.keyE * Math.max(st.keyDir.y, 0) * (useTerrainVis ? 1 : vis);
-    const La = Math.max((0.6 * SCENE_ALBEDO * (Edir + Esky) + 0.4 * Esky) / Math.PI, 1e-7);
+    let La = Math.max((0.6 * SCENE_ALBEDO * (Edir + Esky) + 0.4 * Esky) / Math.PI, 1e-7);
+    let fireShare = 0;
+    if (ci && ci.s > 0) {
+      // the room's fires: its surfaces' mean luminance from them as rendered (interiors.fireLuminance: the fires'
+      // flux over the room's area, interreflected) × the log-average / mean ratio of a lamp-lit room — the same
+      // quantity the probe meters (Kodesh at night: 0.011 estimated, 0.011 measured; lighting-polish-fix). It was
+      // the illuminance at the camera, 3× the probe's value beside the Menorah and a pop when the probe's landed.
+      try { ctx.fx?.illuminanceAt?.(camera.position, { sameVolume: true, rendered: true, color: fireCol }); } catch { /* colour only */ }
+      const Lf = FIRE_LOG * (interiors.fireLuminance(ci.vol) || 0);
+      const Lopen = La * (ci.raw ?? 1);
+      const rp = probes?.roomProbe(ci.vol);
+      // a probe that went stale (time-lapse) is faded toward the room's fallback light (openings + fire fill) in the
+      // shader: meter the same blend (lighting-polish-fix)
+      // the estimate, metered like the probe: the room as a whole (sky visibility at the eye) and the part in view
+      // (at the walls the view ray meets: bright beside the great gate, dim at the far end), 0.6 / 0.4 in log
+      const cdir = camera.getWorldDirection(tmp);
+      const Vv = interiors.viewVisibility(ci.vol, camera.position, cdir);
+      const Lview = Vv == null ? Lopen : La * Vv;
+      const est = Math.exp(0.6 * Math.log(Math.max(Lopen + Lf, 1e-9)) + 0.4 * Math.log(Math.max(Lview + Lf, 1e-9)));
+      const w = rp ? probes.coverage(rp.id) : 0;
+      const Lroom = Math.max(w > 0 ? Math.exp(w * Math.log(Math.max(probes.roomLuminance(rp, camera.getWorldDirection(tmp)), 1e-9)) + (1 - w) * Math.log(est)) : est, 1e-9);
+      const lo = Math.log(La);
+      const leff = Lroom >= La ? Math.log(Lroom) : lo + INTERIOR_ADAPT * (Math.log(Lroom) - lo);
+      La = Math.max(Math.exp(lo + ci.s * (leff - lo)), 1e-7);
+      fireShare = (ci.s * Lf) / Math.max(Lopen + Lf, 1e-12);
+      // dev read-out (src/render/dev/room-jumps.mjs)
+      const m = st.meter || (st.meter = { Lopen: 0, Lf: 0, Lroom: 0, probe: false });
+      m.Lopen = Lopen; m.Lf = Lf; m.Lroom = Lroom; m.probe = !!rp;
+      api._meter = m;
+    } else api._meter = null;
     st.La = La;
     const lg = Math.log10(La);
-    const target = Math.log(keyFor(lg) / La);
-    if (force || !Number.isFinite(st.logP)) st.logP = target;
-    else st.logP += (target - st.logP) * (1 - Math.exp(-dt / 0.7));
+    let keyV = keyFor(lg);
+    keyV += (Math.max(keyV, FIRE_KEY) - keyV) * fireShare;
+    const target = Math.log(keyV / La);
+    // adaptation runs in real time (τ 0.7 s) AND sim time (τ 0.5 sim-min): at 1× the sim term is negligible; in a
+    // 600× time-lapse twilight brightens ~1000× in 2.5 s and a real-time-only eye would overexpose dawn / crush dusk
+    const simDt = Math.abs(time.frameDelta || 0);
+    // a forced refresh (clock jump, boot) snaps for three frames: on the first, fx has not yet re-scheduled its
+    // fires (lamps lit at night), which env meters inside rooms; fx snaps its fire adaptation alongside (adaptSnap).
+    // In a room with a probe the snap holds until the post-jump capture's luminance has landed (≤ 0.6 s): the room
+    // is metered from its openings and fires meanwhile (lighting-polish-fix: the eye otherwise adapted for seconds
+    // from the previous time of day's measurement)
+    if (force) st.snapFrames = 3;
+    if (ci && ci.s > 0.5 && probes?.meterPending(ci.vol)) st.snapFrames = Math.max(st.snapFrames, 2);
+    api.adaptSnap = st.snapFrames > 0; // fx snaps its fire adaptation with us
+    const snapNow = st.snapFrames > 0 || !Number.isFinite(st.logP);
+    const ease = snapNow ? 1 : 1 - Math.exp(-(dt / 0.7 + simDt / 0.5));
+    if (snapNow) { st.logP = target; st.snapFrames--; }
+    else st.logP += (target - st.logP) * ease;
     st.P = Math.exp(st.logP);
+    // Partial chromatic (von Kries) adaptation toward the fires' colour when they light the room the eye is in: a
+    // gilded room under 1900 K lamplight is warm gold to the eye, not the deep red its RGB product (gold × fire,
+    // squared by interreflection) is — gain_c = ill_c^−k / lum(ill^(1−k)), luminance-preserving for the fires'
+    // light (lighting-polish-fix). Applied in the tone-mapping step (render/: grade effect, direct-path chunk).
+    {
+      const k = WB_FIRE * fireShare;
+      const l = luminance([fireCol.r, fireCol.g, fireCol.b]);
+      let g0 = 1, g1 = 1, g2 = 1;
+      if (k > 1e-3 && l > 1e-6) {
+        const ill = [fireCol.r / l, fireCol.g / l, fireCol.b / l].map((v) => Math.max(v, 0.02));
+        const n = luminance(ill.map((v) => v ** (1 - k)));
+        [g0, g1, g2] = ill.map((v) => MathUtils.clamp(v ** -k / n, 0.25, 4));
+      }
+      const wb = api.whiteBalance;
+      wb.set(wb.x + (g0 - wb.x) * ease, wb.y + (g1 - wb.y) * ease, wb.z + (g2 - wb.z) * ease);
+      fogU.set('mkWBd', [wb.x - 1, wb.y - 1, wb.z - 1]);
+    }
     const P = st.P;
     st.scotopic = smooth(-1.0, -3.0, lg);
 
@@ -488,6 +671,30 @@ export async function init(ctx) {
     const Eg = st.keyE * Math.max(st.keyDir.y, 0) * vis + Esky;
     const gt = SCOTOPIC_TINT.map((v) => 1 + (v - 1) * st.scotopic);
     skyU.uLocalGround.value.set(LOCAL_ALBEDO[0] * gt[0] * Eg / Math.PI, LOCAL_ALBEDO[1] * gt[1] * Eg / Math.PI, LOCAL_ALBEDO[2] * gt[2] * Eg / Math.PI);
+    // the surroundings band (walls / colonnades): a vertical face sees ~45 % of the sky and half the lit ground;
+    // the key light reaches the faces turned toward it (× cos of its altitude); its height by where the viewer is
+    const wallTop = WALL_TOP[inCourt(camera.position) ? 'court' : 'open'];
+    if (Math.abs(Math.asin(skyU.uWallShade.value.w || 0) / DEG - wallTop) > 0.5) st.envDirty = true;
+    const Ev = 0.45 * Esky + 0.5 * luminance(LOCAL_ALBEDO) * Eg;
+    const Ek = st.keyE * Math.sqrt(Math.max(0, 1 - st.keyDir.y * st.keyDir.y)) * vis * (st.keyDir.y > -0.02 ? 1 : 0);
+    skyU.uWallShade.value.set(WALL_ALBEDO[0] * gt[0] * Ev / Math.PI, WALL_ALBEDO[1] * gt[1] * Ev / Math.PI, WALL_ALBEDO[2] * gt[2] * Ev / Math.PI, Math.sin(wallTop * DEG));
+    const kc = key.color;
+    skyU.uWallLit.value.set(WALL_ALBEDO[0] * kc.r * Ek / Math.PI, WALL_ALBEDO[1] * kc.g * Ek / Math.PI, WALL_ALBEDO[2] * kc.b * Ek / Math.PI);
+    skyU.uWallKey.value.copy(st.keyDir);
+    // interiors: what a room's openings show — the court's pavement under the global light, its walls (shaded, half
+    // of them sunlit) and a little horizon sky — per unit sky irradiance (the shader scales by envMapIntensity)
+    if (interiors) {
+      const Edir = st.keyE * Math.max(st.keyDir.y, 0) * vis;
+      const kcc = [kc.r, kc.g, kc.b];
+      for (let c = 0; c < 3; c++) {
+        const skyC = st.skyIrrRGB[c] + st.floorIrr * NIGHT_TINT[c];
+        const ground = Edir * kcc[c] + skyC;
+        const wall = 0.45 * skyC + 0.5 * LOCAL_ALBEDO[c] * ground + 0.5 * Ek * kcc[c];
+        const stone = (WALL_ALBEDO[c] * gt[c] * (0.5 * ground + 0.5 * wall)) / Math.PI;
+        intEnv[c] = (0.85 * stone + 0.15 * st.horizonMean[c]) / Math.max(Esky, 1e-12);
+      }
+      interiors.setIntEnv(intEnv, ROOM_ALBEDO);
+    }
 
     // stars & planets
     field.uniforms.uOut.value = P;
@@ -535,14 +742,19 @@ export async function init(ctx) {
     api.sunIlluminance = st.sunE0 * luminance(st.Tsun) * st.sunVis;
     api.moonIlluminance = moonE0 * luminance(st.Tmoon) * st.moonVis;
     api.skyIrradiance = Esky;
+    api.globalIlluminance = Eg; // lx on open horizontal ground: sun / moon beam + sky (probes normalise by it)
     api.sunTerrainVisibility = st.sunVis;
     api.keyIsMoon = st.keyIsMoon;
     api.sunDir.copy(sun.dir);
     api.moonDir.copy(moon.dir);
     api.keyDir.copy(st.keyDir);
     const fl = st.floorIrr;
-    api.ambient.sky.setRGB((st.skyIrrRGB[0] + fl * NIGHT_TINT[0]) * P, (st.skyIrrRGB[1] + fl * NIGHT_TINT[1]) * P, (st.skyIrrRGB[2] + fl * NIGHT_TINT[2]) * P);
-    api.ambient.ground.setRGB(Eg * LOCAL_ALBEDO[0] * P, Eg * LOCAL_ALBEDO[1] * P, Eg * LOCAL_ALBEDO[2] * P);
+    // inside a room the ambient (smoke, custom shaders near the viewer) is what comes through its openings
+    const av = P * (ci ? ci.V : 1);
+    api.ambient.sky.setRGB((st.skyIrrRGB[0] + fl * NIGHT_TINT[0]) * av, (st.skyIrrRGB[1] + fl * NIGHT_TINT[1]) * av, (st.skyIrrRGB[2] + fl * NIGHT_TINT[2]) * av);
+    api.ambient.ground.setRGB(Eg * LOCAL_ALBEDO[0] * av, Eg * LOCAL_ALBEDO[1] * av, Eg * LOCAL_ALBEDO[2] * av);
+    // sun / moon inside rooms: the shadow maps (medium+) or, without them, the rooms' sky visibility
+    interiors?.setDirectAttenuation(key.castShadow || ctx.post?.shadows ? 0 : 1);
   }
 
   const api = {
@@ -559,6 +771,8 @@ export async function init(ctx) {
     keyDir: new Vector3(0, 1, 0),
     /** tone-mapper exposure (apply as renderer.toneMappingExposure or in the post ToneMapping effect) */
     exposure: TONE_EXPOSURE,
+    /** white-balance gains (rgb) the tone-mapping step applies: partial adaptation to firelight in rooms */
+    whiteBalance: new Vector3(1, 1, 1),
     /** factor already applied to all env light; multiply physical fire/lamp/emissive values by it */
     preExposure: 1,
     physicalExposure: 1,
@@ -567,6 +781,7 @@ export async function init(ctx) {
     sunIlluminance: 0,
     moonIlluminance: 0,
     skyIrradiance: 0,
+    globalIlluminance: 0,
     sunTerrainVisibility: 1,
     /** irradiance in SCENE units (lx × preExposure): sky from above, bounce from the ground — for custom shaders */
     ambient: { sky: new Color(), ground: new Color() },
@@ -596,6 +811,8 @@ export async function init(ctx) {
     horizonElevation: (az, y = camera.position.y) => horizonAngle(az, y),
     /** force a full refresh (LUT, stats, PMREM) on the next frame; pass true to do it now */
     update(now = false) { st.force = true; st.envDirty = true; if (now) update(0); },
+    /** internal (dev scripts): the atmosphere LUTs and the statistics table */
+    get _luts() { return luts; },
     /** internal: time one update (ms); for profiling */
     _profile(force = false) {
       const gl = renderer.getContext();
@@ -612,7 +829,12 @@ export async function init(ctx) {
       const ch = (i) => (Math.max(F[0][i] + F[1][i] * c + F[2][i] * c2, 0) * (1 - w) + st.zenith[i] * w) * st.P;
       return target.setRGB(ch(0), ch(1), ch(2));
     },
+    /** interior light: volumes, sky visibility, light occlusion (interiors.js); null if unavailable */
+    get interiors() { return interiors; },
+    /** scene reflection probes (probes.js, medium+); null on low */
+    get probes() { return probes; },
     dispose() {
+      probes?.dispose();
       luts.dispose(); pmrem.dispose(); cubeRT.dispose(); pmremRT?.dispose();
       skyMat.dispose(); envMat.dispose();
     },

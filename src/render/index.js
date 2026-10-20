@@ -72,6 +72,7 @@ export async function init(ctx) {
 
   let last = performance.now();
   let errored = false;
+  let probeErrored = false;
   engine.setRenderFn((dt) => {
     const now = performance.now();
     adaptive.sample((now - last) / 1000);
@@ -80,6 +81,15 @@ export async function init(ctx) {
     pipeline.updateFrame();
     shadows?.beforeRender();
     ensureShadowMaps(ctx, shadows); // after beforeRender: it decides this frame's shadow autoUpdate
+    try {
+      // scene reflection probes (env, medium+): rare captures, lit exactly like this frame
+      ctx.env?.probes?.render(dt);
+    } catch (e) {
+      if (!probeErrored) console.error('[render] probe capture failed', e);
+      probeErrored = true;
+    }
+    // interior light uniforms: fx placed its lights after env's update, assign them to their rooms now
+    ctx.env?.interiors?.beforeRender(fx.pointLights());
     try {
       pipeline.render(dt);
     } catch (e) {

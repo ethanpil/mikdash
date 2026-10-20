@@ -225,6 +225,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     };
     if (f.follow) updateFollow(f, 0);
     f.cur = f.target * scheduleFactor(f);
+    // where its light sits, now: env meters fires before fx's first update (boot, interiors)
+    f.lightPos.set(f.pos.x, f.pos.y + f.size * (preset.light?.height ?? 0.5), f.pos.z);
     buildFire(f);
     fires.set(id, f);
     lights.structureDirty = true;
@@ -365,11 +367,18 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     }
     const La = env.luminance;
     let target = 0;
+    lights.visibility = env.interiors ? env.interiors.at : null;
     if (adaptOn && Number.isFinite(La) && La > 0) {
-      const Laf = (0.6 * ADAPT_ALBEDO * illuminanceAt(ctx.camera.position)) / Math.PI;
+      // fires in the viewer's own room are metered by env (interiors); the rest adapt locally, through the walls
+      const E = illuminanceAt(ctx.camera.position, { split: true });
+      const Laf = (0.6 * ADAPT_ALBEDO * Math.max(0, E.all - E.sameS)) / Math.PI;
       target = ADAPT_SLOPE * Math.log(La / (La + Laf));
     }
-    logAdapt += (target - logAdapt) * (snap ? 1 : 1 - Math.exp(-dt / ADAPT_TAU));
+    // real time (τ ADAPT_TAU) plus sim time (τ 0.5 sim-min, as env's meter): keeps up in a 600× time-lapse
+    const simDt = Math.abs(ctx.time?.frameDelta || 0);
+    // snaps with env's exposure (boot, clock jumps), else eases
+    const hard = snap || !!env.adaptSnap;
+    logAdapt += (target - logAdapt) * (hard ? 1 : 1 - Math.exp(-(dt / ADAPT_TAU + simDt / 0.5)));
     const P = (Number.isFinite(env.preExposure) && env.preExposure > 0 ? env.preExposure : FALLBACK_P) * fireScale * Math.exp(logAdapt);
     sh.uP.value = P;
     sh.uFireGain.value = Math.min(1, (FIRE_CORE_HEADROOM * sh.uCap.value) / (FIRE_REF_CORE * P));
@@ -394,15 +403,41 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     snap = false;
   }
 
-  /** Physical illuminance (lux) from all burning fires at a world point (no occlusion) — for eye adaptation. */
-  function illuminanceAt(pos) {
-    let E = 0;
+  /**
+   * Physical illuminance (lux) from the burning fires at a world point — for eye adaptation. With env's interiors
+   * a fire in another room counts only through both rooms' openings. opts.sameVolume: only fires in the point's
+   * own room (0 outdoors); opts.split: returns { all, same, sameS } (sameS = same × how far the point is inside).
+   * opts.rendered: each fire weighted by the luminance of its light colour, i.e. what its point light renders
+   * (three scales intensity × colour: a lamp's (1, 0.46, 0.16) renders 55 % of its candela). opts.color: a Color
+   * that receives the counted fires' light colour, weighted by their contribution (lighting-polish-fix).
+   */
+  const _ins = { V: 1, vol: null, s: 0 };
+  function illuminanceAt(pos, opts = {}) {
+    if (fires.size < ctx.fires.length) consumeCtxFires(); // env meters before fx's first update (boot)
+    const at = ctx.env?.interiors?.at;
+    const ins = at ? at(pos, _ins) : null;
+    let E = 0, Es = 0, cr = 0, cg = 0, cb = 0;
     for (const f of fires.values()) {
       if (!f.lightCandela || f.cur <= 0) continue;
       const d2 = Math.max(f.lightPos.distanceToSquared(pos), 1);
-      E += (f.lightCandela * f.cur) / d2;
+      let k = 1, same = !ins || !ins.vol;
+      if (ins) {
+        if (!f.ins || f.follow || f.insAt !== f.lightPos.x + f.lightPos.y + f.lightPos.z) {
+          f.ins = at(f.lightPos, f.ins || { V: 1, vol: null, s: 0 });
+          f.insAt = f.lightPos.x + f.lightPos.y + f.lightPos.z;
+        }
+        same = f.ins.vol === ins.vol;
+        if (!same) k = f.ins.V * ins.V;
+      }
+      const lc = f.lightColor;
+      const e = ((f.lightCandela * f.cur) / d2) * (opts.rendered ? 0.2126 * lc.r + 0.7152 * lc.g + 0.0722 * lc.b : 1);
+      E += e * k;
+      if (same && ins?.vol) Es += e;
+      if (opts.color && (!opts.sameVolume || (same && ins?.vol))) { const w = opts.sameVolume ? e : e * k; cr += lc.r * w; cg += lc.g * w; cb += lc.b * w; }
     }
-    return E;
+    if (opts.color) { const w = cr + cg + cb; if (w > 0) opts.color.setRGB(cr / w * 3, cg / w * 3, cb / w * 3); else opts.color.setRGB(1, 1, 1); }
+    if (opts.split) return { all: E, same: Es, sameS: Es * (ins?.s || 0) };
+    return opts.sameVolume ? Es : E;
   }
 
   /** Soft-depth inputs for the post tiers (FXPass calls this before drawing). */
@@ -455,6 +490,17 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       lights.structureDirty = true;
     },
     list() { return [...fires.values()].map((f) => ({ id: f.id, kind: f.kind, intensity: f.cur, pos: f.pos.clone() })); },
+    /** the fire point lights in three's shader order (env/interiors assigns each to its room) */
+    pointLights() { return lights.shaderOrder(); },
+    /**
+     * temporarily assign the plain light slots as seen from a world point (probe captures), at env's exposure
+     * without the viewer's local adaptation to firelight (the probe is normalised by env's exposure); returns restore()
+     */
+    lightsFor(pos) {
+      const env = ctx.env || {};
+      const fireScale = Number.isFinite(env.fireScale) ? env.fireScale : 1;
+      return lights.assignFor(pos, (Number.isFinite(env.preExposure) && env.preExposure > 0 ? env.preExposure : FALLBACK_P) * fireScale);
+    },
     update,
     illuminanceAt,
     setDepth,

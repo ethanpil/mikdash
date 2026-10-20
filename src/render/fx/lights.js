@@ -32,6 +32,9 @@ export const FIRE_SHADOWS = {
 };
 const _pos = new Vector3();
 const _col = new Color();
+// occlusion-aware ranking (lighting-polish): a fire in another room than the viewer counts with the light that
+// can pass both rooms' openings, but never below this share (a great fire still lights what is seen through a door)
+const OCC_FLOOR = 0.05;
 
 class Pool {
   constructor(lights, shadow) {
@@ -50,12 +53,17 @@ export class FireLights {
     this.pools = [];
     this.structureDirty = true;
     this.refreshClock = 0;
+    this.gain = 0;
+    /** optional (worldPos, out) -> { V, vol }: sky visibility / room at a point (env.interiors.at) */
+    this.visibility = null;
+    this.camIns = { V: 1, vol: null, s: 0 };
     this.setMax(max, shadowCfg);
   }
 
   setMax(max, shadowCfg = this.shadowCfg || FIRE_SHADOWS.low) {
     for (const l of this.lights) { this.scene.remove(l); l.dispose(); }
     this.lights = [];
+    this.order = null;
     this.max = Math.max(0, max | 0);
     this.shadowCfg = shadowCfg;
     const nShadow = Math.min(this.max, shadowCfg.slots || 0);
@@ -117,11 +125,20 @@ export class FireLights {
     for (const l of this.pools[0]?.lights || []) l.shadow.needsUpdate = true;
   }
 
+  /** light transport factor from cluster c to a viewer whose room is `ins` */
+  occ(c, ins) {
+    if (!this.visibility || !ins) return 1;
+    if (!c.ins || c.mobile) c.ins = this.visibility(c.pos, c.ins || { V: 1, vol: null, s: 0 });
+    return c.ins.vol === ins.vol ? 1 : Math.max(c.ins.V * ins.V, OCC_FLOOR);
+  }
+
   /** gain = scene units per candela (env.preExposure × fireScale) */
   update(dt, camPos, time, gain) {
     const cs = this.clusters;
     const pos = _pos;
     const col = _col;
+    this.gain = gain;
+    const ins = this.visibility ? this.visibility(camPos, this.camIns) : null;
     // aggregate each cluster
     for (const c of cs) {
       let I = 0;
@@ -143,7 +160,7 @@ export class FireLights {
       const d2 = Math.max(c.pos.distanceToSquared(camPos), 4);
       let lit = false;
       for (const p of this.pools) { const st = p.weights.get(c.key); if (st && st.w > 0) lit = true; }
-      c.score = (I / d2) * (lit ? KEEP_BONUS : 1);
+      c.score = (I / d2) * (lit ? KEEP_BONUS : 1) * this.occ(c, ins);
       // a light far beyond its reach cannot matter
       if (d2 > (c.distance * 1.4) ** 2 || I <= 1e-4) c.score = 0;
     }
@@ -188,7 +205,13 @@ export class FireLights {
         0.5 * Math.sin(time * 7.3 + f0.seed * 13.0) + 0.3 * Math.sin(time * 12.9 + f0.seed * 7.0)
         + 0.2 * Math.sin(time * 21.7 + f0.seed * 3.0));
       const sw = st.w * st.w * (3 - 2 * st.w); // smoothstep easing
-      l.intensity = c.I * sw * flick * gain;
+      // × the sky visibility at the fire (env interiors): a fragment outside every room takes the light as it comes
+      // — through the openings of the fire's room — without reading the light's room from the uniform block (a
+      // memory load per light per fragment on Intel iGPUs); fragments in rooms undo it (interiors-glsl.js mkPtOcc)
+      if (this.visibility) c.ins = this.visibility(c.pos, c.ins || { V: 1, vol: null, s: 0 }); // doors move
+      const V = c.ins && this.visibility ? c.ins.V : 1;
+      l.intensity = c.I * sw * flick * gain * V;
+      l.userData.mkV = V;
       l.color.copy(c.color);
       if (p.shadow) {
         // shadow slots stay put (no positional jitter): the cube map is rendered only now and then
@@ -208,6 +231,49 @@ export class FireLights {
         );
       }
     }
+  }
+
+  /** the point lights in the order three's shaders see them (shadow casters first, then the rest; stable) */
+  shaderOrder() {
+    if (!this.order || this.order.length !== this.lights.length) {
+      this.order = [...this.lights].sort((a, b) => (b.castShadow ? 1 : 0) - (a.castShadow ? 1 : 0));
+    }
+    return this.order;
+  }
+
+  /**
+   * Temporarily light the scene as a viewer at `pos` would see it (probe captures): the plain slots go to the
+   * clusters ranking highest from there (no fading); shadow slots keep their fires (their cube maps stay valid).
+   * Returns a function that restores the frame's assignment.
+   */
+  assignFor(pos, gain = this.gain) {
+    const saved = this.lights.map((l) => ({ l, i: l.intensity, p: l.position.clone(), c: l.color.clone(), d: l.distance }));
+    const ins = this.visibility ? this.visibility(pos, { V: 1, vol: null, s: 0 }) : null;
+    const owners = new Set();
+    // `gain` without the viewer's local adaptation to firelight (fx/index.js lightsFor): the capture is normalised
+    // by env's exposure alone — beside the altar the viewer's factor is ≈ 1e-4 and the Kodesh was captured black
+    // (lighting-polish-fix). The shadow slots keep their fires; rescale them the same way.
+    const k = this.gain > 0 ? gain / this.gain : 1;
+    for (const l of this.pools[0]?.lights || []) if (l.intensity > 0) { owners.add(l.userData.shadowOwner); l.intensity *= k; }
+    const ranked = this.clusters
+      .filter((c) => c.pos && c.I > 1e-4 && !owners.has(c.key))
+      .map((c) => ({ c, s: (c.I / Math.max(c.pos.distanceToSquared(pos), 4)) * this.occ(c, ins) }))
+      .filter((e) => e.c.pos.distanceToSquared(pos) < (e.c.distance * 1.4) ** 2)
+      .sort((a, b) => b.s - a.s);
+    const plain = this.pools[1]?.lights || [];
+    const saved2 = this.lights.map((l) => l.userData.mkV);
+    plain.forEach((l, k) => {
+      const e = ranked[k];
+      if (!e) { l.intensity = 0; return; }
+      if (this.visibility && !e.c.ins) e.c.ins = this.visibility(e.c.pos, { V: 1, vol: null, s: 0 });
+      const V = e.c.ins && this.visibility ? e.c.ins.V : 1; // as updatePool
+      l.intensity = e.c.I * gain * V;
+      l.userData.mkV = V;
+      l.color.copy(e.c.color);
+      l.position.copy(e.c.pos);
+      l.distance = e.c.distance;
+    });
+    return () => { saved.forEach((s, k) => { s.l.intensity = s.i; s.l.position.copy(s.p); s.l.color.copy(s.c); s.l.distance = s.d; s.l.userData.mkV = saved2[k]; }); };
   }
 
   /** slow, staggered refresh of the shadow cube maps (people and other moving casters) */

@@ -3,7 +3,7 @@
 //   medium : RenderPass -> FX -> [bloom + grade] -> SMAA
 //   high   : RenderPass -> N8AO (half-res) -> FX -> [bloom + grade] -> SMAA
 //   ultra  : RenderPass -> N8AO (full-res) -> FX -> sun shafts -> [bloom + grade + vignette] -> SMAA
-import { HalfFloatType, Vector2, Vector3, Color, MathUtils } from 'three';
+import { HalfFloatType, Vector2, Vector3, Color, MathUtils, Uniform } from 'three';
 import {
   EffectComposer, RenderPass, EffectPass, ToneMappingEffect, ToneMappingMode, SMAAEffect,
   SMAAPreset, VignetteEffect, BlendFunction, Effect,
@@ -39,14 +39,18 @@ const _col = new Vector3();
 const _white = new Vector3();
 const _shaft = { color: _col, narrow: SHAFT_NARROW * Math.PI / 180, broad: SHAFT_BROAD * Math.PI / 180, broadWeight: SHAFT_BROAD_W, sunView: _sunView, upView: _upView, camera: null };
 
-/** Same curve as the direct path's CustomToneMapping (see tonemap.js); exposure = renderer.toneMappingExposure. */
+/**
+ * Same curve as the direct path's CustomToneMapping (see tonemap.js); exposure = renderer.toneMappingExposure;
+ * `wb` = env's white-balance gains (partial adaptation to firelight in rooms), as the direct path's mkWBd.
+ */
 class MikdashGradeEffect extends Effect {
   constructor() {
     super('MikdashGradeEffect', /* glsl */`
 #include <tonemapping_pars_fragment>
+uniform vec3 wb;
 void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  outputColor = vec4(mikdashAgX(inputColor.rgb), inputColor.a);
-}`, { blendFunction: BlendFunction.SRC });
+  outputColor = vec4(mikdashAgX(inputColor.rgb * wb), inputColor.a);
+}`, { blendFunction: BlendFunction.SRC, uniforms: new Map([['wb', new Uniform(new Vector3(1, 1, 1))]]) });
   }
 }
 
@@ -92,7 +96,8 @@ export function buildPost(ctx, fx, quality, toneMapper) {
     out.bloom.setDepthTexture(depth);
     effects.push(out.bloom);
   }
-  effects.push(toneMapper === 'grade' ? new MikdashGradeEffect() : new ToneMappingEffect({ mode: ToneMappingMode[toneMapper] }));
+  if (toneMapper === 'grade') out.grade = new MikdashGradeEffect();
+  effects.push(out.grade || new ToneMappingEffect({ mode: ToneMappingMode[toneMapper] }));
   if (quality.key === 'ultra') effects.push(new VignetteEffect({ offset: 0.3, darkness: 0.38 }));
   const grade = new EffectPass(camera, ...effects);
   composer.addPass(grade);
@@ -122,6 +127,8 @@ export function buildPost(ctx, fx, quality, toneMapper) {
         out.bloom.setPrefilter(t, bp.knee * t, bp.clamp * t, _disc, Math.tan(DISC_DEG * DEG) / (2 * tanHalf), aspect);
       }
       if (out.shafts) updateShafts(ctx, out, ex);
+      const wb = ctx.env?.whiteBalance;
+      if (out.grade && wb?.isVector3) out.grade.uniforms.get('wb').value.copy(wb);
     },
     render(dt) { composer.render(dt); },
     setSize(w, h) { composer.setSize(w, h, false); },

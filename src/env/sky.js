@@ -1,7 +1,7 @@
 // Sky dome: per pixel only a sky-view-LUT lookup plus analytic sun/moon discs, aureoles, the night-sky
 // floor (airglow + unresolved starlight), and on high+ a procedural Milky Way and thin cirrus.
 // The same shader (ENV_PASS) renders the sky-only cube that is prefiltered into the PMREM environment.
-import { ShaderMaterial, BackSide, Matrix3, Vector2, Vector3 } from 'three';
+import { ShaderMaterial, BackSide, Matrix3, Vector2, Vector3, Vector4 } from 'three';
 import { ATMO_GLSL, NIGHT_FLOOR_GLSL } from './atmosphere.js';
 
 const SKY_VERT = /* glsl */`
@@ -60,6 +60,9 @@ uniform vec2 uWind;
 uniform vec3 uCloudSky;       // ambient (sky) irradiance at cloud level / PI (pre-exposed)
 uniform vec3 uCloudSun;       // TOA sun illuminance
 uniform vec3 uLocalGround;    // radiance of the sunlit local pavement (env pass lower hemisphere)
+uniform vec4 uWallShade;      // env pass: surroundings (walls, colonnades) radiance in shade, w = sin(top elevation)
+uniform vec3 uWallLit;        // env pass: extra radiance of a wall face turned fully to the key light
+uniform vec3 uWallKey;        // key light direction (sun by day, moon by night)
 varying vec3 vDir;
 
 #include <dithering_pars_fragment>
@@ -198,6 +201,16 @@ void main() {
 #ifdef ENV_PASS
   // below the horizon the probe sees the bright stone of the courts, not the distant hills
   L = mix( L, uLocalGround * uOutScale, smoothstep( -0.02, -0.25, dir.y ) );
+  // just above it, the courts' walls and colonnades: sunlit where they face the key light (lighting-polish:
+  // gold reflecting the bare horizon sky read olive; stone surroundings keep it golden)
+  if ( uWallShade.w > 0.0 ) {
+    vec2 h = dir.xz;
+    float hl = length( h ), kl = length( uWallKey.xz );
+    float facing = ( hl > 1e-4 && kl > 1e-4 ) ? max( - dot( h / hl, uWallKey.xz / kl ), 0.0 ) : 0.0;
+    vec3 Lw = ( uWallShade.rgb + uWallLit * facing ) * uOutScale;
+    float band = smoothstep( uWallShade.w + 0.03, uWallShade.w - 0.03, dir.y ) * smoothstep( -0.04, -0.005, dir.y );
+    L = mix( L, Lw, band );
+  }
 #else
   // Sun disc with limb darkening (u = 0.6), flattened vertically by refraction near the horizon
   vec3 upS = vec3( 0.0, 1.0, 0.0 ) - uSunDir * uSunDir.y;
@@ -287,6 +300,9 @@ export function createSkyUniforms() {
     uCloudSky: { value: new Vector3() },
     uCloudSun: { value: new Vector3() },
     uLocalGround: { value: new Vector3() },
+    uWallShade: { value: new Vector4() },
+    uWallLit: { value: new Vector3() },
+    uWallKey: { value: new Vector3(0, 1, 0) },
   };
 }
 

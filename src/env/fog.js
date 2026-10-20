@@ -55,6 +55,11 @@ const PARS_FRAGMENT = /* glsl */`
     float cphi = ( hl > 1e-4 && rl > 1e-4 ) ? dot( h / hl, r / rl ) : 0.0;
     vec3 Linf = max( mkFogA0 + mkFogA1 * cphi + mkFogA2 * ( 2.0 * cphi * cphi - 1.0 ), vec3( 0.0 ) );
     Linf *= mix( 1.0, mkFogParams.z, clamp( dir.y, 0.0, 1.0 ) ); // looking up: thinner, darker air light
+    #ifdef MK_INT
+      // camera and surface in the same roofed room (interiors-glsl.js): the air between them sees the sky only
+      // through the room's openings (a view out of the door keeps the full outdoor air light)
+      if ( mkVol > 0.5 && abs( mkVol - mkP.y ) < 0.5 ) Linf *= mkV;
+    #endif
     return col * T + Linf * ( 1.0 - T );
   }
 #endif
@@ -86,11 +91,20 @@ export function installFogChunks() {
   gl_FragColor.rgb = mkApplyFog( gl_FragColor.rgb );
   #define MK_FOG_DONE
 #endif
+#ifdef MK_INT
+  // probe capture gain (env/probes.js): keeps a dark capture (the moonless court captured at a lamp-lit room's
+  // exposure) out of the half-float denormals, whose per-channel rounding the PMREM smeared into colour noise
+  if ( ( mkFlags & MK_F_CAPTURE ) != 0 ) gl_FragColor.rgb *= mkIntQ.z;
+#endif
 gl_FragColor.rgb = min( gl_FragColor.rgb, vec3( 6.0e4 ) );
+#ifdef MK_INT
+  if ( ( mkFlags & MK_F_DEBUG ) != 0 ) gl_FragColor.rgb = mkDebugColor(); // interiors debug view (lighting-polish)
+#endif
 ${ORIGINAL_TONEMAP}`;
 }
 
-const NAMES = ['mkFogA0', 'mkFogA1', 'mkFogA2', 'mkFogRefDir', 'mkFogExtR', 'mkFogParams'];
+// mkWBd: white-balance gain − 1 (render/tonemap.js applies it in the direct path's tone mapping; zero = neutral)
+const NAMES = ['mkFogA0', 'mkFogA1', 'mkFogA2', 'mkFogRefDir', 'mkFogExtR', 'mkFogParams', 'mkWBd'];
 
 /** Uploads the aerial-perspective uniforms into every program that uses them. */
 export class FogUniforms {
@@ -98,7 +112,7 @@ export class FogUniforms {
     this.renderer = renderer;
     this.values = {
       mkFogA0: [0, 0, 0], mkFogA1: [0, 0, 0], mkFogA2: [0, 0, 0], mkFogRefDir: [0, 1, 0],
-      mkFogExtR: [0, 0, 0], mkFogParams: [0, 0, 1, 0],
+      mkFogExtR: [0, 0, 0], mkFogParams: [0, 0, 1, 0], mkWBd: [0, 0, 0],
     };
     this.version = 1;
     this.entries = new WeakMap(); // WebGLProgram -> [uniform|null] | null

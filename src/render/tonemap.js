@@ -54,7 +54,9 @@ export function installGradeChunk() {
     console.warn('[render] tonemapping chunk changed; custom grade unavailable');
     return false;
   }
-  ShaderChunk.tonemapping_pars_fragment = chunk.replace(HOOK, `${GLSL}\nvec3 CustomToneMapping( vec3 color ) { return mikdashAgX( color ); }`);
+  // mkWBd: env's white-balance gain − 1 (partial adaptation to firelight in rooms; zero until env uploads it =
+  // neutral), applied before the curve — the post path's grade effect applies the same gain (post.js)
+  ShaderChunk.tonemapping_pars_fragment = chunk.replace(HOOK, `${GLSL}\nuniform vec3 mkWBd;\nvec3 CustomToneMapping( vec3 color ) { return mikdashAgX( color * ( 1.0 + mkWBd ) ); }`);
   return true;
 }
 

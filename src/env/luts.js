@@ -13,6 +13,21 @@ import {
 /** The sky-view LUT stores radiance / LUT_SCALE (keeps the brightest aureole inside half-float range). */
 export const LUT_SCALE = 16;
 
+const DEG = Math.PI / 180;
+/**
+ * Source altitudes (deg) of the statistics table (lighting-polish-fix): dense through twilight, where the sky
+ * changes by a decade every couple of degrees, sparse high up.
+ */
+export const TABLE_ALTS = (() => {
+  const a = [];
+  for (let x = -24; x < 12; x += 0.5) a.push(x);
+  for (let x = 12; x < 30; x += 2) a.push(x);
+  for (let x = 30; x <= 90; x += 5) a.push(x);
+  return a;
+})();
+// a twilight source is boosted so the table's LUT values stay in half-float range (≈ a decade per 2.5° below −2°)
+const tableBoost = (alt) => 10 ** (Math.max(0, -alt - 2) / 2.5);
+
 function makeRT(w, h, { type = HalfFloatType, filter = LinearFilter, wrapS = ClampToEdgeWrapping } = {}) {
   const rt = new WebGLRenderTarget(w, h, {
     type, format: RGBAFormat, minFilter: filter, magFilter: filter, generateMipmaps: false,
@@ -38,8 +53,10 @@ export class AtmosphereLUTs {
     this.skyRT = makeRT(skyW, skyH, { wrapS: RepeatWrapping });
     this.statsRT = makeRT(8, 1, { type: this.floatStats ? FloatType : HalfFloatType, filter: NearestFilter });
     this.statsBuf = this.floatStats ? new Float32Array(32) : new Uint16Array(32);
+    this.asyncBuf = this.floatStats ? new Float32Array(32) : new Uint16Array(32); // the PBO read lands later
     this.stats = null; // decoded Float32Array(32), physical units
     this.statsSerial = 0;
+    this.syncSerial = 0;
     this.reading = false;
 
     const mk = (frag, extra = {}) => new ShaderMaterial({
@@ -136,11 +153,109 @@ export class AtmosphereLUTs {
     this.statsSerial++;
   }
 
-  decode() {
+  decode(buf = this.statsBuf) {
     const out = new Float32Array(32);
     for (let i = 0; i < 32; i++) {
-      const v = this.floatStats ? this.statsBuf[i] : DataUtils.fromHalfFloat(this.statsBuf[i]);
+      const v = this.floatStats ? buf[i] : DataUtils.fromHalfFloat(buf[i]);
       out[i] = (Number.isFinite(v) ? v : 0) * LUT_SCALE;
+    }
+    return out;
+  }
+
+  /**
+   * Statistics per unit source (lighting-polish-fix). The sky above the horizon is linear in its two sources
+   * (the LUT's ground term only shows below it), so the 8 statistics of any sky are Σ E_source × T(altitude of
+   * the source), the horizon terms rotated by the source's azimuth from the reference light. T is measured once
+   * (one LUT + stats pass per altitude, ONE synchronous read): afterwards a clock jump or a time-lapse frame gets
+   * its statistics without waiting for the GPU (a sync read there drained the whole frame: 120–190 ms a jump on
+   * the HD 4600, ≈10 fps at 600×). Returns false (and the caller keeps reading back) when it cannot be built.
+   */
+  buildTable(alts = TABLE_ALTS, sunTOA = ATMO.sunIlluminanceTOA) {
+    const n = alts.length;
+    const rt = makeRT(8, n, { type: this.floatStats ? FloatType : HalfFloatType, filter: NearestFilter });
+    const u = this.skyMat.uniforms;
+    const keep = ['uSunDir', 'uSunE', 'uMoonDir', 'uMoonE', 'uGroundIrr'].map((k) => [k, u[k].value.clone()]);
+    const refAz = this.statsMat.uniforms.uRefAz.value;
+    const buf = this.floatStats ? new Float32Array(n * 32) : new Uint16Array(n * 32);
+    try {
+      this.withState(() => {
+        u.uMoonE.value.set(0, 0, 0);
+        u.uGroundIrr.value.set(0, 0, 0);
+        this.statsMat.uniforms.uRefAz.value = 0;
+        rt.scissorTest = true;
+        for (let k = 0; k < n; k++) {
+          const a = alts[k] * DEG;
+          const e = (sunTOA * tableBoost(alts[k])) / LUT_SCALE;
+          u.uSunDir.value.set(0, Math.sin(a), -Math.cos(a)); // azimuth 0 (north) = the reference
+          u.uSunE.value.set(e, e, e);
+          this.pass(this.skyMat, this.skyRT);
+          rt.viewport.set(0, k, 8, 1);
+          rt.scissor.set(0, k, 8, 1);
+          this.pass(this.statsMat, rt);
+        }
+      });
+      this.renderer.readRenderTargetPixels(rt, 0, 0, 8, n, buf);
+    } catch (e) {
+      console.warn('[env] sky statistics table unavailable', e);
+      return false;
+    } finally {
+      for (const [k, v] of keep) u[k].value.copy(v);
+      this.statsMat.uniforms.uRefAz.value = refAz;
+      rt.dispose();
+    }
+    // per lux of source at the top of the atmosphere, log for interpolation
+    const T = new Float64Array(n * 32);
+    let ok = true;
+    for (let k = 0; k < n; k++) {
+      const s = LUT_SCALE / (sunTOA * tableBoost(alts[k]));
+      for (let i = 0; i < 32; i++) {
+        const raw = this.floatStats ? buf[k * 32 + i] : DataUtils.fromHalfFloat(buf[k * 32 + i]);
+        const v = Number.isFinite(raw) ? raw * s : 0;
+        T[k * 32 + i] = Math.log(Math.max(v, 1e-30));
+      }
+      if (alts[k] >= 0 && !(T[k * 32] > -60)) ok = false; // a daylight sky must have irradiance
+    }
+    if (!ok) { console.warn('[env] sky statistics table empty'); return false; }
+    this.table = { alts: Float64Array.from(alts), T };
+    return true;
+  }
+
+  /**
+   * Statistics (physical, the same layout as `stats`) of a sky lit by `sources` [{ alt, az (deg), E: [r,g,b] lx at
+   * the top of the atmosphere }] with the horizon terms measured from azimuth `refAz`, from the table.
+   */
+  estimate(sources, refAz, out = new Float32Array(32)) {
+    out.fill(0);
+    const tb = this.table;
+    if (!tb) return null;
+    const { alts, T } = tb;
+    const n = alts.length;
+    const row = new Float64Array(32);
+    for (const s of sources) {
+      if (!s || !(Math.max(s.E[0], s.E[1], s.E[2]) > 0) || s.alt < alts[0] - 0.25) continue;
+      // interpolate the row in log space
+      let k = 0;
+      while (k < n - 2 && alts[k + 1] <= s.alt) k++;
+      const f = Math.min(Math.max((s.alt - alts[k]) / (alts[k + 1] - alts[k]), 0), 1);
+      for (let i = 0; i < 32; i++) row[i] = Math.exp(T[k * 32 + i] + (T[(k + 1) * 32 + i] - T[k * 32 + i]) * f);
+      // the source's own horizon profile H(x) (x = azimuth from the source, 0..180°, at 45° steps), symmetrised
+      // about the reference like the stats pass: 0.5 (H(r − Δ) + H(r + Δ))
+      let d = (((s.az - refAz) % 360) + 540) % 360 - 180;
+      const H = (x, c) => {
+        const a = Math.min(Math.abs(((x % 360) + 540) % 360 - 180), 180) / 45;
+        const i0 = Math.min(Math.floor(a), 3), t = a - i0;
+        return row[(2 + i0) * 4 + c] * (1 - t) + row[(3 + i0) * 4 + c] * t;
+      };
+      for (let c = 0; c < 3; c++) {
+        const e = s.E[c];
+        out[c] += e * row[c];
+        out[4 + c] += e * row[4 + c];
+        out[28 + c] += e * row[28 + c];
+        for (let j = 0; j < 5; j++) {
+          const r = 45 * j;
+          out[(2 + j) * 4 + c] += e * 0.5 * (H(r - d, c) + H(r + d, c));
+        }
+      }
     }
     return out;
   }
@@ -150,19 +265,27 @@ export class AtmosphereLUTs {
     try {
       this.renderer.readRenderTargetPixels(this.statsRT, 0, 0, 8, 1, this.statsBuf);
       this.stats = this.decode();
+      this.syncSerial = this.statsSerial;
     } catch (e) {
       console.warn('[env] sky stats read failed', e);
     }
     return this.stats;
   }
 
-  /** Non-blocking read (fence + PBO); resolves a frame or two later. */
+  /**
+   * Non-blocking read (fence + PBO); resolves a frame or two later. A result is dropped when a newer stats pass
+   * was read synchronously meanwhile (a clock jump): it would put the previous sky back for seconds.
+   */
   readStatsAsync(onDone) {
     if (this.reading) return;
     this.reading = true;
     const serial = this.statsSerial;
-    this.renderer.readRenderTargetPixelsAsync(this.statsRT, 0, 0, 8, 1, this.statsBuf)
-      .then(() => { this.stats = this.decode(); onDone?.(serial); })
+    this.renderer.readRenderTargetPixelsAsync(this.statsRT, 0, 0, 8, 1, this.asyncBuf)
+      .then(() => {
+        if (serial < this.syncSerial) return;
+        this.stats = this.decode(this.asyncBuf);
+        onDone?.(serial);
+      })
       .catch(() => this.readStatsSync())
       .finally(() => { this.reading = false; });
   }

@@ -8,7 +8,7 @@
 //                    radially blurred toward the sun and ADDED (scene-linear HDR light).
 // Both read the composer's stable scene-depth texture (setDepthTexture).
 import { ShaderMaterial, NoBlending, Uniform, Vector2, Vector3, WebGLRenderTarget, HalfFloatType } from 'three';
-import { BloomEffect, Effect, BlendFunction, ShaderPass, Resolution } from 'postprocessing';
+import { BloomEffect, Effect, EffectAttribute, BlendFunction, ShaderPass, Resolution } from 'postprocessing';
 
 const FULLSCREEN_VS = /* glsl */`
 varying vec2 vUv;
@@ -164,17 +164,23 @@ void main() {
   gl_FragColor = vec4(color * (phase * v), 1.0);
 }`;
 
+// In-scattered light grows with the length of the air path in front of the pixel (optical depth): the sky gets
+// the full shaft, a wall 100 m away about a fifth, the pavement at one's feet almost nothing. Without this the
+// shafts added a key-light-coloured (sunset: pink) veil over the near pavement on ultra (lighting-polish).
 const SHAFTS_FS = /* glsl */`
 uniform mediump sampler2D map;
-void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
-  outputColor = vec4(texture2D(map, uv).rgb, inputColor.a);
+uniform float range;
+void mainImage(const in vec4 inputColor, const in vec2 uv, const in float depth, out vec4 outputColor) {
+  float k = depth >= 0.99999994 ? 1.0 : 1.0 - exp(getViewZ(depth) / range);
+  outputColor = vec4(texture2D(map, uv).rgb * k, inputColor.a);
 }`;
 
 export class SunShaftsEffect extends Effect {
-  constructor({ samples = 64, resolutionScale = 0.5, density = 0.97, decay = 0.985 } = {}) {
+  constructor({ samples = 64, resolutionScale = 0.5, density = 0.97, decay = 0.985, range = 400 } = {}) {
     super('SunShaftsEffect', SHAFTS_FS, {
       blendFunction: BlendFunction.ADD, // in-scattered light, scene-linear
-      uniforms: new Map([['map', new Uniform(null)]]),
+      attributes: EffectAttribute.DEPTH,
+      uniforms: new Map([['map', new Uniform(null)], ['range', new Uniform(range)]]),
     });
     this.rtMask = new WebGLRenderTarget(1, 1, { depthBuffer: false });
     this.rtMask.texture.name = 'SunShafts.Mask';
@@ -209,7 +215,10 @@ export class SunShaftsEffect extends Effect {
 
   get sunUv() { return this.radialMaterial.uniforms.sunUv.value; }
 
-  setDepthTexture(depthTexture) { this.maskMaterial.uniforms.depthBuffer.value = depthTexture; }
+  setDepthTexture(depthTexture, depthPacking) {
+    this.maskMaterial.uniforms.depthBuffer.value = depthTexture;
+    super.setDepthTexture?.(depthTexture, depthPacking);
+  }
 
   /**
    * @param {object} p
