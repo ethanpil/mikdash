@@ -57,6 +57,55 @@ export function packLanes(items, nLanes = LANES.length, gap = 0.06) {
   return items;
 }
 
+/**
+ * A parent event's dynamic sub-events (each individual's offering in progress at that stage of the stream) as one
+ * expandable entry: a header with the count, and a row per offering — what it is, its current step, where, and a
+ * Go / Watch button at the chosen speed. opts: { title, he, open, onToggle(open), verb, speed() }.
+ * Returns { el, update(t), ev: null }.
+ */
+export function dynGroup(app, items, opts = {}) {
+  const { data } = app;
+  const count = h('span.mk-badge.mk-badge--gold');
+  const moreId = `mk-dyn-${String(opts.key || opts.title || 'g').replace(/[^\w-]/g, '')}`;
+  const hit = h('button.mk-mev__hit', { type: 'button', 'aria-expanded': opts.open ? 'true' : 'false', 'aria-controls': moreId },
+    h('span.mk-mev__title', { style: { fontSize: '15px' } }, opts.title || 'Offerings in progress'),
+    opts.he ? he(opts.he, 'mk-mev__he') : null,
+    h('span.mk-mev__time', count, ' ', h('span.mk-muted', opts.hint || "individuals' offerings at this stage — expand to watch one")));
+  const list = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } });
+  const more = h('div.mk-mev__more', { id: moreId }, list);
+  const el = h('article.mk-mev.is-now.mk-dyn', { 'data-dyn': opts.key || '', style: { marginLeft: opts.indent === false ? '0' : '14px' } }, hit, more);
+  el.classList.toggle('is-open', !!opts.open);
+  hit.addEventListener('click', () => {
+    const on = !el.classList.contains('is-open');
+    el.classList.toggle('is-open', on);
+    hit.setAttribute('aria-expanded', on ? 'true' : 'false');
+    opts.onToggle?.(on);
+  });
+  const rows = items.map((ev) => {
+    const title = h('span', { style: { font: '600 14.5px/1.25 var(--mk-display)', color: 'var(--mk-ink)' } });
+    const step = h('span', { style: { fontSize: '13.5px', lineHeight: '1.35', color: 'var(--mk-ink-2)' } });
+    const place = h('span.mk-muted', { style: { fontSize: '12.5px' } });
+    const go = h('button.mk-btn.mk-btn--sm', { type: 'button', title: 'Go to a good spot to watch this offering at its current step',
+      on: { click: () => app.goToEvent(ev, opts.speed?.() || app.settings?.get('travelSpeed') || 'walk') } }, icon('walk'), opts.verb || 'Go');
+    const row = h('div.mk-dyn__row', { 'data-ev': ev.id, style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderTop: '1px solid var(--mk-line-2)' } },
+      h('div', { style: { flex: '1', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '2px' } }, title, step, place), go);
+    list.append(row);
+    return { ev, title, step, place };
+  });
+  function update() {
+    setText(count, `${items.length} now`);
+    for (const r of rows) {
+      const ev = r.ev;
+      setText(r.title, ev.typeName?.en || ev.title?.en || ev.id);
+      setText(r.step, ev.summary || '');
+      const z = data.zone(ev.zone)?.name?.en || '';
+      setText(r.place, `${ev.where ? `${ev.where} · ` : ''}${z}${Number.isFinite(ev.t1) ? ` · until ≈ ${clock(ev.t1)}` : ''}`);
+    }
+  }
+  update();
+  return { el, update, ev: null };
+}
+
 export function createTimePanel(app) {
   const { ctx, data } = app;
   const panel = createPanel(app, { name: 'time', title: 'The hour', heTitle: 'השעה', side: 'right' });
@@ -395,20 +444,31 @@ export function createTimePanel(app) {
 
   // ---------------- lists ----------------
   let rows = [], listKey = '';
-  const expanded = new Set();
+  const expanded = new Set(), openGroups = new Set();
   function rebuildLists(force) {
     const t = T().t;
-    const active = data.active(t);
+    // the day's events, and each individual's offering in progress grouped under the event of its current stage
+    const { stat: active, groups } = data.group(data.active(t));
     const next = data.upcoming(t, 5);
-    const key = `${active.map((e) => e.id).join(',')}|${next.map((e) => e.id).join(',')}`;
+    const key = `${active.map((e) => e.id).join(',')}|${[...groups].map(([p, l]) => `${p}:${l.map((e) => e.id).join('+')}`).join(';')}|${next.map((e) => e.id).join(',')}`;
     if (!force && key === listKey) return false;
     listKey = key;
     const mk = (ev) => eventRow(app, ev, { expanded: expanded.has(ev.id), onToggle: (e, open) => (open ? expanded.add(e.id) : expanded.delete(e.id)) });
+    const grp = (pid, list, parent) => dynGroup(app, list, {
+      key: pid, open: openGroups.has(pid), onToggle: (on) => (on ? openGroups.add(pid) : openGroups.delete(pid)),
+      title: parent ? `Offerings at this stage` : (list[0]?.parentTitle?.en || "Individuals' offerings in progress"), indent: !!parent,
+    });
     rows = [];
     clear(nowList);
     clear(nextList);
-    if (active.length) for (const ev of active) { const r = mk(ev); rows.push(r); nowList.append(r.el); }
-    else nowList.append(h('div.mk-empty', 'Nothing in the order of the day at this hour. The fires on the altar burn on.'));
+    if (active.length || groups.size) {
+      for (const ev of active) {
+        const r = mk(ev); rows.push(r); nowList.append(r.el);
+        const g = groups.get(ev.id);
+        if (g) { const gr = grp(ev.id, g, ev); rows.push(gr); nowList.append(gr.el); groups.delete(ev.id); }
+      }
+      for (const [pid, g] of groups) { const gr = grp(pid, g, null); rows.push(gr); nowList.append(gr.el); }
+    } else nowList.append(h('div.mk-empty', 'Nothing in the order of the day at this hour. The fires on the altar burn on.'));
     for (const ev of next) { const r = mk(ev); rows.push(r); nextList.append(r.el); }
     if (!next.length) nextList.append(h('div.mk-empty', 'Nothing further scheduled for this date.'));
     sample.hidden = !data.fixtureEvents;

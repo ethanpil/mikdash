@@ -73,7 +73,19 @@ export function createSchedule(ctx, mod, zones) {
   }
 
   const isActive = (ev, t) => Number.isFinite(ev.t0) && within(t, ev.t0, ev.t1);
-  const byImportance = (a, b) => (b.importance || 1) - (a.importance || 1) || (a.t0 - b.t0);
+  // dynamic sub-events (e.g. each individual's offering in progress) sort after the day's events of equal importance
+  const byImportance = (a, b) => (b.importance || 1) - (a.importance || 1) || ((a.dynamic ? 1 : 0) - (b.dynamic ? 1 : 0)) || (a.t0 - b.t0);
+
+  /**
+   * Dynamic sources (additive): src = fn(t) -> events | { active(t) -> events, upcoming?(t, n) -> events, byId?(id) }.
+   * Their events are event-like objects { id, parent, dynamic: true, title, summary, description, sources, zone, pos,
+   * view, t0, t1, importance, layer } that are not in `events` (the day's order and the dial stay as they were);
+   * active() and at() include them unless opts.dynamic === false, upcoming() only when opts.dynamic === true.
+   */
+  const sources = [];
+  const srcActive = (s, t) => { try { return (typeof s === 'function' ? s(t) : s.active?.(t)) || []; } catch (e) { warnSrc(e); return []; } };
+  let srcWarned = false;
+  const warnSrc = (e) => { if (!srcWarned) { srcWarned = true; console.warn('[sim] schedule source failed', e); } };
 
   const schedule = {
     events,
@@ -82,25 +94,45 @@ export function createSchedule(ctx, mod, zones) {
     select,
     resolveTimes,
     resolveEvent,
-    /** events in progress at t (cyclic windows), most important first */
-    active(t = time?.t) {
+    /** events in progress at t (cyclic windows), most important first; dynamic sub-events too unless opts.dynamic === false */
+    active(t = time?.t, opts) {
       const out = [];
       for (const ev of events) if (isActive(ev, t)) out.push(ev);
+      if (opts?.dynamic !== false) for (const s of sources) for (const ev of srcActive(s, t)) if (ev) out.push(ev);
       return out.sort(byImportance);
     },
-    /** the next n events that start after t (not active now), soonest first */
-    upcoming(t = time?.t, n = 5) {
+    /** the next n events that start after t (not active now), soonest first; dynamic ones only with opts.dynamic === true */
+    upcoming(t = time?.t, n = 5, opts) {
       const out = [];
       for (const ev of events) if (Number.isFinite(ev.t0) && !isActive(ev, t)) out.push(ev);
+      if (opts?.dynamic === true) for (const s of sources) { try { for (const ev of s.upcoming?.(t, n) || []) if (ev && !isActive(ev, t)) out.push(ev); } catch (e) { warnSrc(e); } }
       out.sort((a, b) => since(a.t0, t) - since(b.t0, t));
       return out.slice(0, n);
     },
-    /** events active at t in a zone */
-    at(zoneId, t = time?.t) {
+    /** events active at t in a zone (dynamic ones too unless opts.dynamic === false) */
+    at(zoneId, t = time?.t, opts) {
       if (!zoneId) return [];
-      return schedule.active(t).filter((ev) => ev.zone === zoneId || (Array.isArray(ev.zones) && ev.zones.includes(zoneId)));
+      return schedule.active(t, opts).filter((ev) => ev.zone === zoneId || (Array.isArray(ev.zones) && ev.zones.includes(zoneId)));
     },
-    byId(id) { return index.get(id) || null; },
+    byId(id) {
+      const ev = index.get(id);
+      if (ev || id == null) return ev || null;
+      for (const s of sources) { try { const d = s.byId?.(id); if (d) return d; } catch (e) { warnSrc(e); } }
+      return null;
+    },
+    /** only the dynamic sub-events in progress at t */
+    dynamic(t = time?.t) {
+      const out = [];
+      for (const s of sources) for (const ev of srcActive(s, t)) if (ev) out.push(ev);
+      return out;
+    },
+    /** register a dynamic source (see above); returns a function that removes it */
+    addSource(src) {
+      if (!src || sources.includes(src)) return () => {};
+      sources.push(src);
+      return () => { const i = sources.indexOf(src); if (i >= 0) sources.splice(i, 1); };
+    },
+    get sources() { return sources.slice(); },
     /** 0..1 progress through an event at t (NaN when not active) */
     progress(ev, t = time?.t) {
       if (!ev || !isActive(ev, t)) return NaN;

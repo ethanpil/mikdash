@@ -6,6 +6,7 @@ import { sourcesEl, SPEEDS } from '../events.js';
 import { LADDER } from '../data.js';
 import { clock, seasonal, quarters, wrap, accessLead } from '../format.js';
 import { shortName } from './model.js';
+import { dynGroup } from '../timepanel.js';
 
 const GO_VERB = { instant: 'Go there', slow: 'Stroll there', walk: 'Walk there', fast: 'Hurry there', run: 'Run there' };
 
@@ -178,18 +179,27 @@ export function createCard(app, opts) {
     update(true);
   }
 
+  let dynOpen = false;
   function update(force = false) {
     if (!cur) return;
     const t = ctx.time?.t;
-    const now = data.at(cur, t);
+    // the day's events here, and the individuals' offerings now at this place (one expandable entry)
+    const all = data.at(cur, t, { dynamic: true });
+    const now = all.filter((e) => !e.dynamic), dyn = all.filter((e) => e.dynamic);
     const next = data.upcoming(t, 80).filter((ev) => ev.zone === cur || (Array.isArray(ev.zones) && ev.zones.includes(cur))).slice(0, 3);
-    const key = `${now.map((e) => e.id).join()}|${next.map((e) => e.id).join()}`;
+    const key = `${now.map((e) => e.id).join()}|${dyn.map((e) => e.id).join()}|${next.map((e) => e.id).join()}`;
     if (force || key !== listKey) {
       listKey = key;
       rows = [];
-      setText(nowH, now.length ? `Happening here now · ${now.length}` : 'Happening here now');
-      nowBox.replaceChildren(...(now.length ? now.map((ev) => { const r = row(ev, 'now'); rows.push(r); return r.el; })
-        : [h('div.mk-empty', 'Nothing in the order of the day here at this hour.')]));
+      setText(nowH, all.length ? `Happening here now · ${all.length}` : 'Happening here now');
+      const els = now.map((ev) => { const r = row(ev, 'now'); rows.push(r); return r.el; });
+      if (dyn.length) {
+        const g = dynGroup(app, dyn, { key: `card-${cur}`, title: "Individuals' offerings here", open: dynOpen, onToggle: (on) => { dynOpen = on; },
+          verb: 'Watch', speed: () => speed, indent: false, hint: 'each at its current step — expand to watch one' });
+        rows.push({ update: () => g.update() });
+        els.push(g.el);
+      }
+      nowBox.replaceChildren(...(els.length ? els : [h('div.mk-empty', 'Nothing in the order of the day here at this hour.')]));
       nextBox.replaceChildren(...(next.length ? next.map((ev) => { const r = row(ev, 'next'); rows.push(r); return r.el; })
         : [h('div.mk-empty', 'Nothing more here today.')]));
     }

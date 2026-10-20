@@ -81,10 +81,11 @@ export function createData(ctx) {
       return Math.min(1, wrap(t - r.t0) / len);
     },
 
-    active(t = ctx.time?.t) {
+    /** events in progress; with the schedule's dynamic sub-events (offerings in progress) unless opts.dynamic === false */
+    active(t = ctx.time?.t, opts) {
       let list;
       if (ctx.schedule?.events?.length && typeof ctx.schedule.active === 'function') {
-        try { list = (ctx.schedule.active(t) || []).map(unwrap); } catch { list = null; }
+        try { list = (ctx.schedule.active(t, opts) || []).map(unwrap); } catch { list = null; }
       }
       if (!list) list = data.events().filter((ev) => data.dayOk(ev) && data.isActive(ev, t));
       return list.filter((ev) => ev && data.layerOk(ev)).sort((a, b) => (b.importance || 1) - (a.importance || 1));
@@ -102,13 +103,30 @@ export function createData(ctx) {
       return list.filter((ev) => ev && data.layerOk(ev)).slice(0, n);
     },
 
-    /** events happening in a zone now */
-    at(zoneId, t = ctx.time?.t) {
+    /** events happening in a zone now (the dynamic sub-events only with opts.dynamic === true) */
+    at(zoneId, t = ctx.time?.t, opts) {
       if (!zoneId) return [];
+      const o = { dynamic: opts?.dynamic === true };
       if (ctx.schedule?.events?.length && typeof ctx.schedule.at === 'function') {
-        try { return (ctx.schedule.at(zoneId, t) || []).map(unwrap).filter((e) => e && data.layerOk(e)); } catch { /* fall through */ }
+        try { return (ctx.schedule.at(zoneId, t, o) || []).map(unwrap).filter((e) => e && data.layerOk(e)); } catch { /* fall through */ }
       }
-      return data.active(t).filter((ev) => ev.zone === zoneId);
+      return data.active(t, o).filter((ev) => ev.zone === zoneId);
+    },
+
+    /**
+     * Split a list into the day's events and the dynamic sub-events (each individual's offering in progress), the
+     * latter grouped by their parent event id: { stat: [...], groups: Map(parentId -> [...]) }.
+     */
+    group(list) {
+      const stat = [], groups = new Map();
+      for (const ev of list || []) {
+        if (!ev) continue;
+        if (!ev.dynamic) { stat.push(ev); continue; }
+        const p = ev.parent || '';
+        if (!groups.has(p)) groups.set(p, []);
+        groups.get(p).push(ev);
+      }
+      return { stat, groups };
     },
 
     nextAt(zoneId, t = ctx.time?.t) {
