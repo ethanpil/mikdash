@@ -25,7 +25,7 @@ export function buildAzarah(C) {
     const curtainY = key === 'nitzotz' ? outer + 0.45 : inner + into[1] * 0.45;
     C.curtain(`azarah.gate.${key}`, [b.min[0] - 1, curtainY, b.min[2]], [1, 0], e.name.en);
     const f = C.el(`azarah.gate.${key}.flight`), fb = f.box;
-    flight(C, { axis: 'y', head: outer, dir: south ? -1 : 1, c0: fb.min[0], c1: fb.max[0], steps: f.params.steps, zTop: fb.max[2] });
+    flight(C, { axis: 'y', head: outer, dir: south ? -1 : 1, c0: fb.min[0], c1: fb.max[0], steps: f.params.steps, zTop: fb.max[2], underpass: f.params.underpass });
     const cx = (b.min[0] + b.max[0]) / 2;
     C.anchor(`courts.gate.${key}`, [cx, inner + into[1] * (key === 'nitzotz' ? 12 : 6), Z_AZ], south ? 180 : 0, e.name.en);
     C.anchor(`courts.gate.${key}.outside`, [cx, outer - into[1] * (f.params.steps * f.params.tread + 3), 0], south ? 0 : 180, `${e.name.en} — foot of its steps`);
@@ -50,11 +50,19 @@ function waterGate(C) {
   const dE = B(g.max[0] - 0.01, cy - 1, Z_AZ, g.max[0] + t + 0.01, cy + 1, Z_AZ + 7, { mat: 'marble_white' });
   // the spiral fills the east room's depth (r 1.95 — the site box's 3-amah width cannot pass a person) ⚙
   const sr = (hb.max[1] - hb.min[1]) / 2 - t - 0.05, sc = [hb.max[0] - t - sr - 0.05, (hb.min[1] + hb.max[1]) / 2];
-  const hole = B(sc[0] - sr, sc[1] - sr, zr - t - 0.01, sc[0] + sr, sc[1] + sr, zr + 0.01, { mat: 'marble_white' });
-  C.kit.solid(gridSolid([{ ...B(...hb.min, ...hb.max), top: 'paving_azarah', under: 'marble_white' }], [pass, wRoom, eRoom, dW, dE, hole], classify), true, true);
-  // the spiral from the east room up through the roof: its top step faces the terrace walk ⚙ (unsourced access)
-  // its last step points west onto the terrace walk
-  spiral(C, { c: sc, r1: sr - 0.05, z0: Z_AZ, z1: zr, perTurn: 14, a0: Math.PI * (160 / 180) - (Math.round((zr - Z_AZ) / 0.5) - 0.5) * (2 * Math.PI / 14), mat: 'marble_white', newelMat: 'marble_white' });
+  // the well in the roof: the stair's square less its north-west quarter, which stays roofed as the landing. The top
+  // step ends due north of the newel, so the walker steps off it westward onto the landing and the terrace walk (no
+  // crack, no wedge); under the landing the turn below has ≥ 5 amot of head room ⚙
+  const zh0 = zr - t - 0.01, zh1 = zr + 0.01;
+  const hole = [B(sc[0] - sr, sc[1] - sr, zh0, sc[0] + sr, sc[1], zh1, { mat: 'marble_white' }), B(sc[0], sc[1] - 0.01, zh0, sc[0] + sr, sc[1] + sr, zh1, { mat: 'marble_white' })];
+  C.kit.solid(gridSolid([{ ...B(...hb.min, ...hb.max), top: 'paving_azarah', under: 'marble_white' }], [pass, wRoom, eRoom, dW, dE, ...hole], classify), true, true);
+  // the spiral from the east room up through the roof (unsourced access ⚙): 15 to the turn, its first step at the
+  // south-west, entered from the room's west part; it ends at the north (90°), heading west onto the landing
+  const perTurn = 15, nSteps = Math.round((zr - Z_AZ) / 0.5);
+  spiral(C, { c: sc, r1: sr - 0.05, z0: Z_AZ, z1: zr, perTurn, a0: Math.PI / 2 - nSteps * (2 * Math.PI / perTurn), mat: 'marble_white', newelMat: 'marble_white',
+    topRect: [sc[0] - sr, sc[1] - sr, sc[0] + sr, sc[1] + sr] });
+  // a parapet (10 tefachim ⚙) on the landing's open south edge, from the mikveh's corner to the newel
+  C.kit.m('ashlar_plain', true, true).box([sc[0] - sr, sc[1], zr], [sc[0] - 0.45, sc[1] + 0.3, zr + 10 / 6]);
   // ---- the roof terrace: Beit Avtinas (aliyah on the gate: Tamid 1:1; Rambam BhB 8:5) and the mikveh (Yoma 31a)
   const av = C.el('azarah.beit-avtinas').box;
   const walk = [hb.max[1] - 2.0, hb.max[1] - 0.4];              // the walkway along the court edge ⚙
@@ -146,7 +154,7 @@ function nitzotz(C) {
   for (const x of cols) C.column([x, yF + 0.75, Z_AZ], zr - 2.2 - Z_AZ, 0.88);
   // the first step rises just inside the turret's doorway (south-west), the stair turning anticlockwise; three full
   // turns bring the top step back over it, opening south onto the floor of Beit HaNitzotz
-  spiral(C, { c: sc, r1: sr - 0.05, z0: Z_AZ, z1: zr, perTurn: 13, a0: (255 * Math.PI) / 180, mat: 'steps_stone' });
+  spiral(C, { c: sc, r1: sr - 0.05, z0: Z_AZ, z1: zr, perTurn: 13, a0: (255 * Math.PI) / 180, mat: 'steps_stone', topRect: [sc[0] - sr, sc[1] - sr, sc[0] + sr, sc[1] + sr] });
   C.doorCase({ axis: 'y', at: qy0 - tt, out: -1, lo: td[0], hi: td[1], z0: Z_AZ, z1: Z_AZ + 6 }, 0.45, 0.12);
   // Beit HaNitzotz: back wall in the N wall, open bays over the court with a 2-amah parapet ⚙
   const bays = [];

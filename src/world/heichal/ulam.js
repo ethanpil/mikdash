@@ -42,35 +42,63 @@ function tieBeams(H) {
   }
 }
 
-/** four gold chains fixed in the Ulam ceiling (Middot 3:8; site box) */
+/**
+ * four gold chains fixed in the Ulam ceiling and hanging to 4 amot over the floor — "by which the young kohanim climb
+ * and see the crowns" (Middot 3:8; site params.topZ → params.bottomZ). A chain that is climbed is a heavy one: links
+ * about 10 × 7 cm outside, of ≈ 2-cm wire (radius 0.022 amah) ⚙, one draw call of instanced links; the lowest link a
+ * larger ring to take hold of ⚙.
+ * Anchors 'heichal.ulam.chain-<i>' (south → north) mark the foot of each, for the sim's climbers.
+ */
 function chains(H) {
   const { kit, el, d } = H;
-  const b = el('heichal.ulam.chains').box;
-  const n = el('heichal.ulam.chains').params.count;
+  const e = el('heichal.ulam.chains');
+  const b = e.box, n = e.params.count;
   const x = (b.min[0] + b.max[0]) / 2;
   const ys = Array.from({ length: n }, (_, i) => b.min[1] + ((b.max[1] - b.min[1]) * i) / (n - 1));
-  const top = b.max[2], bot = b.min[2];
+  const top = e.params.topZ, bot = e.params.bottomZ;
+  H.chainFeet = ys.map((y) => [x, y, bot]);
   for (const y of ys) kit.geo(lathe([[0, 0], [0.18, 0], [0.18, 0.06], [0.06, 0.1], [0, 0.1]], [x, y, top - 0.1], 12), 'gold_vessel', { collide: false });
   if (d < 1) {
-    for (const y of ys) kit.geo(tube([x, y, bot], [x, y, top - 0.1], 0.035, 5), 'gold_vessel', { collide: false, castShadow: false });
+    for (const y of ys) kit.geo(tube([x, y, bot], [x, y, top - 0.1], 0.05, 5), 'gold_vessel', { collide: false, castShadow: false });
     return;
   }
-  const r = 0.055, wire = 0.014, pitch = 0.135;
+  // link: a stadium of wire radius w — two half-rings of centre radius r joined by straight sides, r·k from the centre
+  // to each bend's centreline — so the wire keeps its thickness round the bends (a torus stretched ×k thickened it
+  // ×k there, and the crossing links cut into each other). Interlocked links are pitched by the inner length
+  // 2(r·k − w): each rests on the one above, and the two that cross inside a link clear each other (pitch ≥ r·k + w).
+  const r = 0.05, k = 1.6, wire = 0.022, pitch = 2 * (r * k - wire);
   const A = AMAH;
   kit.set('chain-link', () => {
-    const g = new TorusGeometry(r * A, wire * A, d >= 2 ? 4 : 3, d >= 2 ? 10 : 7);
-    g.scale(1, 1.55, 1);
+    const h = r * (k - 1), pts = [], arc = 8;
+    for (const s of [1, -1]) {
+      for (let i = 0; i <= arc; i++) {
+        const a = (s > 0 ? 0 : Math.PI) + (Math.PI * i) / arc;
+        pts.push(new Vector3(r * Math.cos(a) * A, (s * h + r * Math.sin(a)) * A, 0));
+      }
+    }
+    // start at the top bend's crown so the tube's (even) segment count puts a ring at both crowns, where links bear
+    const crown = arc / 2;
+    const loop = [...pts.slice(crown), ...pts.slice(0, crown)];
+    const g = new TubeGeometry(new CatmullRomCurve3(loop, true, 'centripetal'), d >= 3 ? 10 : d >= 2 ? 8 : 6, wire * A, d >= 3 ? 5 : d >= 2 ? 4 : 3, true);
     applyWorldUV(g);
     return g;
   }, 'gold_vessel', { cast: false });
   const q = new Quaternion(), s = new Vector3(1, 1, 1), up = new Vector3(0, 1, 0);
-  for (const y of ys) {
-    const cnt = Math.floor((top - 0.15 - bot) / pitch);
+  const z0 = top - 0.15 - r * k;                      // the first link's centre, hung from the ceiling boss
+  const ringR = 0.12, ringW = wire * 1.15;            // the end ring a hand closes on ⚙
+  for (const [ci, y] of ys.entries()) {
+    const turn = 0.3 + ci * 0.4;                      // each chain hangs a little differently turned
+    const cnt = Math.floor((z0 - (bot + 2 * ringR)) / pitch) + 1;
     for (let i = 0; i < cnt; i++) {
-      const z = top - 0.15 - i * pitch - r * 1.5;
-      q.setFromAxisAngle(up, (i % 2) * Math.PI / 2 + 0.3);
-      kit.inst('chain-link', new Matrix4().compose(m2w(x, y, z), q, s));
+      q.setFromAxisAngle(up, (i % 2) * Math.PI / 2 + turn);
+      kit.inst('chain-link', new Matrix4().compose(m2w(x, y, z0 - i * pitch), q, s));
     }
+    // the end ring, threaded through the last link (crossed with it), its foot at ≈ params.bottomZ
+    const zLast = z0 - (cnt - 1) * pitch;
+    const g = new TorusGeometry(ringR * A, ringW * A, d >= 2 ? 6 : 4, d >= 2 ? 18 : 12);
+    g.rotateY(((cnt % 2) * Math.PI) / 2 + turn);
+    const zc = zLast - r * k + wire + ringW - ringR;
+    kit.geo(applyWorldUV(g.translate(...m2w(x, y, zc).toArray())), 'gold_vessel', { collide: false, castShadow: false });
   }
 }
 
@@ -403,14 +431,20 @@ function curtains(H) {
   const du = new Drape(kit, { id: 'heichal.ulam-curtain', a: [xU, uc.min[1]], b: [xU, uc.max[1]], z0: uc.min[2], z1: uc.max[2] - 0.15, t: T, fold: 1.5, amp: 0.13, gather: 0.17, seed: 3 });
   du.register('heichal.ulam-curtain', { open: 1, label: 'Curtain of the Ulam opening' });
   kit.geo(tube([xU, uc.min[1] - 0.3, uc.max[2] - 0.12], [xU, uc.max[1] + 0.3, uc.max[2] - 0.12], 0.07, 8, true), 'gold_vessel', { collide: false });
-  const gc = el('heichal.gate-curtain').box;
-  const xG = gc.max[0] + 0.05;                  // hung just clear of the wall face so the folds never enter it
-  const dg = new Drape(kit, { id: 'heichal.gate-curtain', a: [xG, gc.min[1]], b: [xG, gc.max[1]], z0: gc.min[2], z1: gc.max[2] - 0.1, t: T, fold: 1.3, amp: 0.1, gather: 0.2, seed: 5 });
+  // the gate curtain hangs before the outer doors with params.wallClearance (0.1 amah) of air between the wall face
+  // and the deepest fold of its back face, at any open(f): the rod line is set back from the face by that clearance,
+  // half the cloth's thickness and the drape's largest fold excursion toward the wall (site-model-2)
+  const gce = el('heichal.gate-curtain'), gc = gce.box;
+  const wallX = gce.params.wallFaceX, clear = gce.params.wallClearance;
+  const gSpec = { fold: 1.3, amp: 0.1, gather: 0.2 };
+  const xG = wallX + clear + Drape.backReach({ t: T, ...gSpec });
+  const dg = new Drape(kit, { id: 'heichal.gate-curtain', a: [xG, gc.min[1]], b: [xG, gc.max[1]], z0: gc.min[2], z1: gc.max[2] - 0.1, t: T, ...gSpec, seed: 5 });
   dg.register('heichal.gate-curtain', { open: 1, label: 'Curtain of the Heichal gate' });
   kit.geo(tube([xG, gc.min[1] - 0.2, gc.max[2] - 0.08], [xG, gc.max[1] + 0.2, gc.max[2] - 0.08], 0.05, 8, true), 'gold_vessel', { collide: false });
   for (const y of [gc.min[1] - 0.1, gc.max[1] + 0.1]) {
+    // the rod's brackets, fixed in the wall face
     const m = new Mesher();
-    m.beam([gc.max[0], y, gc.max[2] - 0.08], [xG + 0.05, y, gc.max[2] - 0.08], 0.08, 0.08);
+    m.beam([wallX, y, gc.max[2] - 0.08], [xG + 0.05, y, gc.max[2] - 0.08], 0.08, 0.08);
     kit.geo(m.geometry(), 'gold_vessel', { collide: false });
   }
 }

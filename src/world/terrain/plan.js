@@ -49,6 +49,14 @@ export function landPlan(ctx) {
   ];
   // the path from the end of the causeway up Har HaMishchah to the burning place (Middot 1:3; Parah 3:6–7)
   const parahPath = { id: 'parah-path', pts: [[cw.max[0] + 2, axisY], [pyre.box.min[0] - 10, axisY]], half: 4 };
+  // the burning place (terrain/context.js): a stone floor round the arrangement's place, its top the crest ground of
+  // site.js, and the beit tevilah's tank against its east edge (Parah 3:7) ⚙. The ground is cut out under both and
+  // graded to their edges (grid lines on every edge, so on every tier — terrain/index.js)
+  const pb = pyre.box;
+  const floor = [pb.min[0] - 2.5, pb.min[1] - 3, pb.max[0] + 2.5, pb.max[1] + 3];
+  const tankWall = 0.75, tankIn = [floor[2] + tankWall, axisY + 5, floor[2] + tankWall + 4, axisY + 9];
+  const tank = [tankIn[0] - tankWall, tankIn[1] - tankWall, tankIn[2] + tankWall, tankIn[3] + tankWall];
+  const burning = { floor, top: pb.min[2], tankIn, tank, tankWall, cut: [floor, tank] };
 
   // graded level areas: { rect [x0,y0,x1,y1] amot, z (amot, the walking surface), margin (m), drop (m) = how far the
   // graded ground lies under z: 0.32 under the plazas paved here, LIFT where only a street's paving is draped on it
@@ -57,7 +65,8 @@ export function landPlan(ctx) {
     { id: 'ophel-plaza', rect: [plaza.x0, plaza.y0, plaza.x1, plaza.y1], z: chW.min[2], margin: 26, drop: 0.32 },
     { id: 'kiponus-landing', rect: [kipEndX - m(18), kipY - 9, kipEndX + 4, kipY + 9], z: 0, margin: 14, drop: LIFT },
     { id: 'causeway-landing', rect: [cw.max[0] - 4, axisY - 9, cw.max[0] + m(16), axisY + 9], z: 0, margin: 14, drop: LIFT },
-    { id: 'burning-place', rect: [pyre.box.min[0] - 14, axisY - 16, pyre.box.max[0] + 16, axisY + 16], z: pyre.box.min[2], margin: 22, drop: 0.32 },
+    // the stone floor stands LIFT proud of this ground: the Parah path's paving (draped at ground + LIFT) meets its top
+    { id: 'burning-place', rect: [pyre.box.min[0] - 14, axisY - 16, pyre.box.max[0] + 16, axisY + 16], z: pyre.box.min[2], margin: 22, drop: LIFT },
     { id: 'tadi-apron', rect: [tadi.min[0] - 4, fp.y1, tadi.max[0] + 4, fp.y1 + 10], z: ctx.el('mount.wall.north').params.outerFootZ, margin: 6, drop: 0 },
   ];
 
@@ -72,8 +81,9 @@ export function landPlan(ctx) {
     // north of the Mount (sparser)
     { id: 'north', rect: [fp.x0 + m(10), N(70), fp.x1 - m(30), N(420)], density: 0.42, block: [m(46), m(38)], rot: 0.0 },
   ];
-  // viewpoints (anchors in mount/posts.js) whose view cone is kept clear of trees and rocks: [X, Y], heading
-  const eye = pyre.params.kohenEye;
+  // viewpoints (anchors in mount/posts.js) whose view cone is kept clear of trees and rocks: [X, Y], heading. The
+  // ground viewpoint is site.js groundEye (a viewer on the crest, no pyre built); kohenEye stands on the pyre (Parah 3:9)
+  const eye = pyre.params.groundEye;
   const slopeLookout = [eye[0] - 260, axisY - 40];
   const viewpoints = [
     { p: slopeLookout, heading: 280 },
@@ -102,7 +112,7 @@ export function landPlan(ctx) {
   };
   // terraced slopes (dry-stone walls along the contours, olives on the benches) and the Kidron garden plots ⚙
   const terraces = { u0: 215, u1: 790, uw0: 70, uw1: 175, yPad: 420 };   // m east of the E wall face; Y padding (m)
-  const plan = { fp, axisY, kipY, kipEndX, kipEndM, plaza, streets, parahPath, flats, districts, keepOut, slopeLookout, viewpoints, inViewCone, terraces, m };
+  const plan = { fp, axisY, kipY, kipEndX, kipEndM, plaza, streets, parahPath, burning, flats, districts, keepOut, slopeLookout, viewpoints, inViewCone, terraces, m };
   memo.set(ctx, plan);
   return plan;
 }

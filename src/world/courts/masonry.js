@@ -114,8 +114,7 @@ export function buildMasonry(C) {
       // [axis of the face normal, sign, plane coordinate, along-range, z-top]
       ['y', -1, walls.azS.min[1], [walls.azS.min[0], walls.azS.max[0]], walls.azS.max[2]],
       ['y', -1, walls.enS.min[1], [walls.enS.min[0], walls.enS.max[0]], walls.enS.max[2]],
-      ['y', -1, walls.azE.min[1], [walls.azE.min[0], walls.azE.max[0]], walls.azE.max[2]],
-      ['y', 1, walls.azE.max[1], [walls.azE.min[0], walls.azE.max[0]], walls.azE.max[2]],
+      // (the low E wall's ends are buried in the N/S walls, which run through the corner squares to X 260)
       ['x', 1, walls.enS.max[0], [walls.enS.min[1], walls.enS.max[1]], walls.enS.max[2]],
       ['x', 1, walls.enN.max[0], [walls.enN.min[1], walls.enN.max[1]], walls.enN.max[2]],
       ['y', 1, walls.azN.max[1], [walls.azN.min[0], walls.azN.max[0]], walls.azN.max[2]],
@@ -172,19 +171,21 @@ export const CORNICE = (() => {
 })();
 const scaleProf = (prof, s) => prof.map(([u, v]) => [u * s, v * s]);
 
-/** cornice around a wall-top rectangle [x0,y0,x1,y1] at height z, every face, corners overlapped */
-export function corniceRect(m, x0, y0, x1, y1, z, prof = CORNICE) {
+/** cornice around a wall-top rectangle [x0,y0,x1,y1] at height z, every face, corners overlapped. abut: ends ('w'/'e')
+ *  that butt against a higher wall's end: no return there, and the long runs stop flush at it (a stop end) */
+export function corniceRect(m, x0, y0, x1, y1, z, prof = CORNICE, abut = '') {
   const e = Math.max(...prof.map((p) => p[0]));
-  sweep(m, prof, [x0 - e, y0], [x1 + e, y0], z, [0, -1]);
-  sweep(m, prof, [x1 + e, y1], [x0 - e, y1], z, [0, 1]);
-  sweep(m, prof, [x0, y1 + e], [x0, y0 - e], z, [-1, 0]);
-  sweep(m, prof, [x1, y0 - e], [x1, y1 + e], z, [1, 0]);
+  const ew = abut.includes('w') ? 0 : e, ee = abut.includes('e') ? 0 : e;
+  sweep(m, prof, [x0 - ew, y0], [x1 + ee, y0], z, [0, -1]);
+  sweep(m, prof, [x1 + ee, y1], [x0 - ew, y1], z, [0, 1]);
+  if (!abut.includes('w')) sweep(m, prof, [x0, y1 + e], [x0, y0 - e], z, [-1, 0]);
+  if (!abut.includes('e')) sweep(m, prof, [x1, y0 - e], [x1, y1 + e], z, [1, 0]);
 }
 
 function buildCornices(C, w) {
   const { el, kit } = C;
   const m = kit.m('marble_white', false, true);
-  const rect = (x0, y0, x1, y1, z) => corniceRect(m, x0, y0, x1, y1, z);
+  const rect = (x0, y0, x1, y1, z, abut) => corniceRect(m, x0, y0, x1, y1, z, CORNICE, abut);
   const moked = el('azarah.moked.hall').box, gazit = el('azarah.chamber.gazit').box;
   const terrace = el('azarah.wall.south').params.cutouts[0].box;
   // Azarah N wall, split by Beit HaMoked
@@ -196,8 +197,13 @@ function buildCornices(C, w) {
   // W wall, split by the Gazit
   rect(w.azW.min[0], w.azW.min[1], w.azW.max[0], gazit.min[1], w.azW.max[2]);
   rect(w.azW.min[0], gazit.max[1], w.azW.max[0], w.azW.max[1], w.azW.max[2]);
-  // the low east walls and the EN walls
-  for (const k of ['azE', 'enN', 'enS', 'enE']) rect(w[k].min[0], w[k].min[1], w[k].max[0], w[k].max[1], w[k].max[2]);
+  // the low east walls and the EN walls. The Azarah's N and S walls run through the corner squares to X 260 (site.js),
+  // so the EN N/S walls (+46) butt against their 56-amah ends there: their cornices stop flush at X 260 instead of
+  // returning round an end that is buried in the higher wall (the return's overhang stuck out of its faces)
+  for (const k of ['azE', 'enN', 'enS', 'enE']) {
+    const abut = (k === 'enN' || k === 'enS') && Math.abs(w[k].min[0] - w.azN.max[0]) < 1e-6 && w.azN.max[2] > w[k].max[2] ? 'w' : '';
+    rect(w[k].min[0], w[k].min[1], w[k].max[0], w[k].max[1], w[k].max[2], abut);
+  }
   // EN corner chambers' inner walls (smaller profile)
   const small = scaleProf(CORNICE, 0.7);
   for (const k of ['nazirites', 'wood', 'lepers', 'oil']) {
@@ -297,13 +303,10 @@ export function buildFloors(C) {
   adds.push(B(mk.min[0], mk.min[1], Z_AZ - 1, mk.max[0], mk.max[1], Z_AZ, { top: 'marble_white', side: 'herodian_wall', under: 'ashlar_plain' }));
   // cellars of the instruments (Middot 2:6)
   for (const r of el('en.music-chambers').params.rooms) subs.push({ ...r.box, room: 'ashlar_plain', floor: 'paving_mount', ceil: 'ashlar_plain' });
-  // the winding stair shaft from the Moked's NW chamber (Middot 1:6, 1:9); its top amah leaves a floor bridge from the
-  // chamber's door (east end of its south wall) to the stair's landing step
-  const st = el('azarah.underground.stair').box, sc = el('azarah.underground.stair').params.center;
-  const bridge = [sc[0], st.min[1], st.max[0], st.min[1] + 0.9];
-  subs.push(B(st.min[0], st.min[1], -2, st.max[0], st.max[1], Z_AZ - 1, { room: 'ashlar_plain' }));
-  subs.push(B(st.min[0], bridge[3], Z_AZ - 1 - 0.01, st.max[0], st.max[1], Z_AZ + 0.01, { room: 'ashlar_plain' }));
-  subs.push(B(st.min[0], st.min[1], Z_AZ - 1 - 0.01, bridge[0], bridge[3], Z_AZ + 0.01, { room: 'ashlar_plain' }));
+  // the winding stair shaft from the Moked's NW chamber (Middot 1:6, 1:9), open to the hall floor: its marble landing
+  // step is carried out to the shaft walls and meets the chamber's door on the south wall (moked.js)
+  const st = el('azarah.underground.stair').box;
+  subs.push(B(st.min[0], st.min[1], -2, st.max[0], st.max[1], Z_AZ + 0.01, { room: 'ashlar_plain' }));
   // the keys slab's seat (Middot 1:9)
   const ks = el('azarah.moked.keys-slab').box;
   subs.push(B(ks.min[0], ks.min[1], ks.min[2], ks.max[0], ks.max[1], Z_AZ + 0.01, { mat: 'ashlar_plain' }));
@@ -313,5 +316,16 @@ export function buildFloors(C) {
   // segments from site.js, cut here; the running water surface in it is build-altar's (altar/water.js)
   const amah = el('azarah.amah-channel').params;
   for (const seg of amah.openSegments) subs.push({ ...seg, max: [seg.max[0], seg.max[1], seg.max[2] + 0.01], room: 'ashlar_plain', floor: 'ashlar_plain' });
+  // the shafts site.js lists in the court fill (azarah.floor params.shafts): the kiyor's well (Yoma 37a–b), a plastered
+  // shaft open at the pavement (build-altar sets its curb, platform and laver in the mouth). The muchni SINKS the laver
+  // into the well's water overnight (Abaye: "a wheel that sank it", Yoma 37a; "a kiyor he did not sink", Zevachim 20a),
+  // so the water stands above the sunk laver's rim (≈ +14.1 as build-altar lowers it): its surface 1½ amot under the
+  // pavement ⚙ level
+  for (const sh of el('azarah.floor').params.shafts || []) {
+    const w = sh.box;
+    subs.push(B(w.min[0], w.min[1], w.min[2], w.max[0], w.max[1], w.max[2] + 0.01, { room: 'plaster', floor: 'plaster' }));
+    const wz = Math.max(w.min[2] + 0.5, w.max[2] - 1.5);
+    kit.m('water', false, false).box([w.min[0], w.min[1], wz], [w.max[0], w.max[1], wz], 'Z');
+  }
   kit.solid(gridSolid(adds, subs, classify), true, true);
 }

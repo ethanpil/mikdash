@@ -111,9 +111,15 @@ export function registerAnchors(ctx, app) {
   const thalX = ctx.el('context.kidron').params.thalwegX;
   add('mount.kidron', [thalX, axis - 60, T.heightZ(thalX, axis - 60)], 300, 'Nachal Kidron, below the east wall', { zone: 'kidron', pitch: 14 });
   const pyre = ctx.el('context.parah.pyre');
-  const eye = pyre.params.kohenEye;
-  // the burning-place floor is flush with the crest ground (terrain/context.js), so the standing eye here is kohenEye
+  // the daily viewpoint: site.js groundEye, a viewer on the crest with no pyre built. The burning-place floor is flush
+  // with the crest ground (terrain/context.js), so the standing eye here is groundEye. (kohenEye now stands ON the
+  // arrangement — Parah 3:9 — inside the pyre's footprint, so it is not a ground point.)
+  const eye = pyre.params.groundEye;
   add('mount.har-hamishchah', [eye[0], eye[1], pyre.box.min[2]], 270, 'Har HaMishchah — where the kohen burning the Parah sees the Heichal entrance', { zone: 'har-hamishchah', pitch: -2.5 });
+  // the kohen's stand at the sprinkling: on the arrangement, east of the heifer, facing west (Parah 3:9). Only stood on
+  // when the pyre is built (movable 'parah.pyre'); for the sim and the people, not a walking target
+  const ks = pyre.params.kohenStand;
+  add('mount.har-hamishchah.kohen-stand', [ks[0], ks[1], ks[2]], 270, 'On the arrangement — the kohen sprinkles toward the Heichal (Parah 3:9)', { zone: 'har-hamishchah', pitch: -2.5 });
   const [browX, browY] = T.plan.slopeLookout;                     // down the west slope, where the Kidron opens below
   add('mount.har-hamishchah.slope', [browX, browY, T.heightZ(browX, browY)], 280, 'The west slope of Har HaMishchah, above the Kidron', { zone: 'har-hamishchah', pitch: -6 });
   add('mount.ophel', [(T.plan.plaza.x0 + T.plan.plaza.x1) / 2, T.plan.plaza.y0 + 4, ctx.el('mount.gate.chuldah-w').box.min[2]], 0, 'The Ophel plaza before the Chuldah gates', { zone: 'outside', pitch: 10 });

@@ -1,5 +1,5 @@
 // Reusable architectural parts for the courts: chamber shells, straight flights, newel stairs, round logs, lamps.
-import { gridSolid, B, lathe, latheLocal, arc } from './geo.js';
+import { gridSolid, B, lathe, latheLocal } from './geo.js';
 import { CylinderGeometry, CircleGeometry, Matrix4, Quaternion, Vector3 } from 'three';
 import { masonryLayout } from '../../materials/gen/layout.js';
 import { classify } from '../masonry.js';
@@ -36,8 +36,10 @@ export function doorBox(box, face, c, w, h, t, z0 = box.min[2], extra = {}) {
  *  axis 'x'|'y': run direction; head: coordinate of the wall face; dir: ±1 = direction of DESCENT along the axis;
  *  c0, c1: cross extent; cheek: thickness of the cheek walls inside the width (0 = none), their coping cheekH above
  *  the nosings — a continuous sloped coping at the stair's pitch with short level caps at the head and the foot
+ *  underpass: { fromHead: [s0, s1], springZ } (site.js flight params.underpass) — the flight carried on a semicircular
+ *  barrel vault spanning s0..s1, its axis across the flight, so a walkway passes under it at the foot's level ⚙
  */
-export function flight(C, { axis, head, dir, c0, c1, steps, rise = 0.5, tread = 0.5, zTop, cheek = 0.75, cheekH = 2, base = null, collide = true, mat = 'steps_stone', sideMat = 'herodian_wall' }) {
+export function flight(C, { axis, head, dir, c0, c1, steps, rise = 0.5, tread = 0.5, zTop, cheek = 0.75, cheekH = 2, base = null, collide = true, mat = 'steps_stone', sideMat = 'herodian_wall', underpass = null }) {
   const adds = [];
   const zFoot = base ?? zTop - steps * rise;
   const P = (s0, s1, a, b, z0, z1, tags) => (axis === 'y'
@@ -45,20 +47,47 @@ export function flight(C, { axis, head, dir, c0, c1, steps, rise = 0.5, tread = 
   const t0 = cheek > 0 ? c0 + cheek : c0, t1 = cheek > 0 ? c1 - cheek : c1;
   for (let j = 1; j <= steps; j++) adds.push(P(0, (steps - j + 1) * tread, t0, t1, zFoot, zFoot + j * rise, { step: true }));
   const ai = axis === 'y' ? 1 : 0;
-  const map = gridSolid(adds, [], (f) => {
+  // the vault: a box void up to the crown under the treads, its upper corners filled back by two spandrels whose
+  // undersides are the arch; the cheeks take the same arch as a notch in their profile
+  const subs = [];
+  let vault = null;
+  if (underpass) {
+    const [s0, s1] = underpass.fromHead, zs = underpass.springZ, R = (s1 - s0) / 2, sm = (s0 + s1) / 2;
+    const nA = [8, 12, 16, 24][C.d] ?? 12;
+    const arcPts = [];
+    for (let i = 0; i <= nA; i++) { const th = Math.PI * (1 - i / nA); arcPts.push([sm + R * Math.cos(th), zs + R * Math.sin(th)]); }
+    vault = { s0, s1, zs, zc: zs + R, arcPts, half: nA / 2 };
+    subs.push(P(s0, s1, t0 - 0.01, t1 + 0.01, zFoot - 0.01, vault.zc, { vault: true }));
+  }
+  const map = gridSolid(adds, subs, (f) => {
+    if (f.sub) return 'ashlar_plain';         // the vault's walls
     if (f.axis === 2) return f.dir > 0 ? mat : 'ashlar_plain';
     if (f.axis === ai) return mat;           // risers
     return sideMat;
   });
   C.kit.solid(map, collide, true);
+  const ms = C.kit.m('ashlar_plain', collide, true);
+  if (vault) {
+    const { s0, s1, zc, arcPts, half } = vault;
+    // spandrels over the void's corners (profiles counter-clockwise in s → right, z ↑): their arcs are the intrados
+    prism(ms, axis, head, dir, t0, t1, [...arcPts.slice(0, half + 1), [s0, zc]]);
+    prism(ms, axis, head, dir, t0, t1, [...arcPts.slice(half), [s1, zc]]);
+  }
   if (cheek > 0) {
     // the coping runs cheekH above the nosing line (z = zFoot + (steps + 1 − s/tread)·rise), level for capT at the head
     // and capB at the foot ⚙
     const L = steps * tread, k = rise / tread, capT = 0.75, capB = 0.5;
     const zHigh = zTop + cheekH, zLow = zHigh - (L - capT - capB) * k;
-    const prof = [[0, zFoot], [L, zFoot], [L, zLow], [L - capB, zLow], [capT, zHigh], [0, zHigh]];
-    const m = C.kit.m('ashlar_plain', collide, true);
-    for (const [a, b] of [[c0, c0 + cheek], [c1 - cheek, c1]]) prism(m, axis, head, dir, a, b, prof);
+    const cop = [[0, zHigh], [capT, zHigh], [L - capB, zLow], [L, zLow]];
+    const copAt = (s) => { for (let i = 1; i < cop.length; i++) if (s <= cop[i][0]) { const [a, za] = cop[i - 1], [b, zb] = cop[i]; return za + (zb - za) * ((s - a) / (b - a)); } return zLow; };
+    // a piece of the cheek over [a, b]: its underside `under` (points from a to b), its coping above, counter-clockwise
+    const piece = (under, a, b) => [...under, [b, copAt(b)], ...cop.filter(([s]) => s > a + 1e-9 && s < b - 1e-9).reverse(), [a, copAt(a)]];
+    // with a vault the cheek is three prisms (pier, over the arch, foot): a cap triangle spanning the whole profile
+    // would reach from the ground across the passage, and the nav bounds a wall triangle by its full height
+    const pieces = vault
+      ? [piece([[0, zFoot], [vault.s0, zFoot]], 0, vault.s0), piece(vault.arcPts, vault.s0, vault.s1), piece([[vault.s1, zFoot], [L, zFoot]], vault.s1, L)]
+      : [piece([[0, zFoot], [L, zFoot]], 0, L)];
+    for (const [a, b] of [[c0, c0 + cheek], [c1 - cheek, c1]]) for (const prof of pieces) prism(ms, axis, head, dir, a, b, prof);
   }
 }
 
@@ -83,23 +112,50 @@ export function prism(m, axis, head, dir, ca, cb, prof) {
  *   c: [X, Y]; r0 newel radius; r1 outer radius; z0 → z1; rise; perTurn steps per turn; a0 start angle (rad, 0 = +X);
  *   cw: clockwise ascent when true. landing: the top step widened to this many steps' angle (a landing toward a
  *   door), in landingMat, with a parapet on its open edge.
+ *   topRect [x0, y0, x1, y1]: the well's opening at the head (the hole cut in the floor the stair arrives on). The top
+ *   step's outer edge is carried out to it (never drawn in), so no crack (r1 stops 0.05 short of the shaft) and no
+ *   corner wedge stays open between the last tread and the floor.
  */
-export function spiral(C, { c, r0 = 0.5, r1, z0, z1, rise = 0.5, perTurn = 14, a0 = 0, cw = false, mat = 'steps_stone', newelMat = 'ashlar_plain', soffit = 0.5, landing = 1, landingMat = null }) {
+/** distance from c along angle a to the edge of the rectangle R = [x0, y0, x1, y1] (c inside R) */
+function rayRect(c, a, R) {
+  const dx = Math.cos(a), dy = Math.sin(a);
+  let t = Infinity;
+  if (dx > 1e-9) t = Math.min(t, (R[2] - c[0]) / dx); else if (dx < -1e-9) t = Math.min(t, (R[0] - c[0]) / dx);
+  if (dy > 1e-9) t = Math.min(t, (R[3] - c[1]) / dy); else if (dy < -1e-9) t = Math.min(t, (R[1] - c[1]) / dy);
+  return t;
+}
+export function spiral(C, { c, r0 = 0.5, r1, z0, z1, rise = 0.5, perTurn = 14, a0 = 0, cw = false, mat = 'steps_stone', newelMat = 'ashlar_plain', soffit = 0.5, landing = 1, landingMat = null, topRect = null }) {
   const n = Math.round((z1 - z0) / rise);
   const da = (2 * Math.PI / perTurn) * (cw ? -1 : 1);
   const segs = C.d >= 2 ? 4 : 2;
+  const TAU = 2 * Math.PI;
   for (let k = 0; k < n; k++) {
     const top = k === n - 1, wide = top && landing > 1;
     const m = C.kit.m(wide && landingMat ? landingMat : mat, true, true);
     const zt = z0 + (k + 1) * rise;
     const aS = a0 + k * da, aE = aS + da * (wide ? landing : 1);
     const ns = wide ? Math.max(segs, Math.ceil(segs * landing)) : segs;
+    // sample angles; a top step carried out to a rectangular well edge also takes the rectangle's corners
+    const angs = [];
+    for (let i = 0; i <= ns; i++) angs.push(aS + (aE - aS) * (i / ns));
+    const reach = top && topRect;
+    if (reach) {
+      const lo = Math.min(aS, aE), hi = Math.max(aS, aE), R = topRect;
+      for (const [x, y] of [[R[0], R[1]], [R[2], R[1]], [R[2], R[3]], [R[0], R[3]]]) {
+        let a = Math.atan2(y - c[1], x - c[0]);
+        a += Math.ceil((lo - a) / TAU) * TAU;
+        if (a > lo + 1e-6 && a < hi - 1e-6) angs.push(a);
+      }
+      angs.sort((p, q) => (aE > aS ? p - q : q - p));
+    }
+    const rOut = (a) => (reach ? Math.max(r1, rayRect(c, a, topRect)) : r1);
     // underside: from (zt − rise − soffit) under the riser to (zt − soffit) under the back edge; the landing thins toward
     // its far end, where the turn below has climbed under it (head room for a 1.75 m walker)
     const zbS = Math.max(z0, zt - rise - soffit), zbE = wide ? zt - 0.25 : Math.max(z0, zt - soffit);
-    const zb = (i) => zbS + (zbE - zbS) * (i / ns);
-    const outer = arc(c[0], c[1], r1, aS, aE, ns), inner = arc(c[0], c[1], r0, aS, aE, ns);
-    for (let i = 0; i < ns; i++) {
+    const zb = (i) => zbS + (zbE - zbS) * ((angs[i] - aS) / (aE - aS));
+    const outer = angs.map((a) => [c[0] + Math.cos(a) * rOut(a), c[1] + Math.sin(a) * rOut(a)]);
+    const inner = angs.map((a) => [c[0] + Math.cos(a) * r0, c[1] + Math.sin(a) * r0]);
+    for (let i = 0; i + 1 < angs.length; i++) {
       const o0 = outer[i], o1 = outer[i + 1], i0 = inner[i], i1 = inner[i + 1];
       m.quadH([i0[0], i0[1], zt], [o0[0], o0[1], zt], [o1[0], o1[1], zt], [i1[0], i1[1], zt], [0, 0, 1]);
       m.quadH([i0[0], i0[1], zb(i)], [o0[0], o0[1], zb(i)], [o1[0], o1[1], zb(i + 1)], [i1[0], i1[1], zb(i + 1)], [0, 0, -1]);
@@ -111,12 +167,16 @@ export function spiral(C, { c, r0 = 0.5, r1, z0, z1, rise = 0.5, perTurn = 14, a
     const tS = cw ? [fS[1], -fS[0], 0] : [-fS[1], fS[0], 0];   // ascent tangent at aS
     const zr0 = k === 0 ? zbS : zt - rise;
     m.quadH([c[0] + fS[0] * r0, c[1] + fS[1] * r0, zr0], [c[0] + fS[0] * r1, c[1] + fS[1] * r1, zr0], [c[0] + fS[0] * r1, c[1] + fS[1] * r1, zt], [c[0] + fS[0] * r0, c[1] + fS[1] * r0, zt], [-tS[0], -tS[1], 0]);
+    // a top step carried out past r1: its riser beyond the step below runs down to its own underside
+    const rS = rOut(aS);
+    if (rS > r1 + 1e-6) m.quadH([c[0] + fS[0] * r1, c[1] + fS[1] * r1, zbS], [c[0] + fS[0] * rS, c[1] + fS[1] * rS, zbS], [c[0] + fS[0] * rS, c[1] + fS[1] * rS, zt], [c[0] + fS[0] * r1, c[1] + fS[1] * r1, zt], [-tS[0], -tS[1], 0]);
     if (top) {
       const tE = cw ? [fE[1], -fE[0], 0] : [-fE[1], fE[0], 0];
-      m.quadH([c[0] + fE[0] * r0, c[1] + fE[1] * r0, zbE], [c[0] + fE[0] * r1, c[1] + fE[1] * r1, zbE], [c[0] + fE[0] * r1, c[1] + fE[1] * r1, zt], [c[0] + fE[0] * r0, c[1] + fE[1] * r0, zt], tE);
+      const rE = rOut(aE);
+      m.quadH([c[0] + fE[0] * r0, c[1] + fE[1] * r0, zbE], [c[0] + fE[0] * rE, c[1] + fE[1] * rE, zbE], [c[0] + fE[0] * rE, c[1] + fE[1] * rE, zt], [c[0] + fE[0] * r0, c[1] + fE[1] * r0, zt], tE);
       if (wide) {
         // a parapet on the landing's open edge (the shaft falls away beyond it)
-        C.kit.m('ashlar_plain', true, true).beam([c[0] + fE[0] * (r0 + 0.05), c[1] + fE[1] * (r0 + 0.05), zt + 1], [c[0] + fE[0] * r1, c[1] + fE[1] * r1, zt + 1], 0.25, 2);
+        C.kit.m('ashlar_plain', true, true).beam([c[0] + fE[0] * (r0 + 0.05), c[1] + fE[1] * (r0 + 0.05), zt + 1], [c[0] + fE[0] * rE, c[1] + fE[1] * rE, zt + 1], 0.25, 2);
       }
     }
   }

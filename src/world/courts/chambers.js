@@ -26,7 +26,7 @@ function gazit(C) {
   // a height given in site.js (doors[].z) wins
   const hDoor = dE.z ? dE.z[1] - dE.z[0] : 16;
   const doors = [
-    B(dE.x - t - 0.01, dE.y[0] + 1, Z - 0.01, dE.x + 0.01, dE.y[1], Z + hDoor, { mat: 'marble_white' }),
+    B(dE.x - t - 0.01, dE.y[0], Z - 0.01, dE.x + 0.01, dE.y[1], Z + hDoor, { mat: 'marble_white' }),
     B(dW.x - 0.01, dW.y[0], Z - 0.01, dW.x + t + 0.01, dW.y[1], Z + hDoor, { mat: 'marble_white' }),
   ];
   // clerestory-height windows in the free south wall and the chol north wall ⚙ (chambers' windows unattested)
@@ -82,14 +82,14 @@ function gazit(C) {
   [[split + 1.8, rows[0] + 1.5], [b.max[0] - 3, rows[0] + 1.5], [split + 1.8, rows[1] - 1.5], [b.max[0] - 3, rows[1] - 1.5]]
     .forEach(([x, y], i) => lampStand(C, `courts.gazit.lamp-${lid[i]}`, x, y, Z, { schedule: 'night' }));
   // doors: cedar leaves (chamber doors ⚙)
-  C.doorPair('azarah.chamber.gazit.east', 'cedarLeaf16', dE.y[0] + 1, dE.y[1], 'y', dE.x - 0.25, Z, [-1, 0], { open: 1, h: hDoor });
+  C.doorPair('azarah.chamber.gazit.east', 'cedarLeaf16', dE.y[0], dE.y[1], 'y', dE.x - 0.25, Z, [-1, 0], { open: 1, h: hDoor });
   C.doorPair('azarah.chamber.gazit.west', 'cedarLeaf16', dW.y[0], dW.y[1], 'y', dW.x + 0.25, Z, [1, 0], { open: 1, h: hDoor });
   // marble door-cases on the court (kodesh) and chel faces
-  C.doorCase({ axis: 'x', at: b.max[0], out: 1, lo: dE.y[0] + 1, hi: dE.y[1], z0: Z, z1: Z + hDoor }, 0.8, 0.18);
+  C.doorCase({ axis: 'x', at: b.max[0], out: 1, lo: dE.y[0], hi: dE.y[1], z0: Z, z1: Z + hDoor }, 0.8, 0.18);
   C.doorCase({ axis: 'x', at: b.min[0], out: -1, lo: dW.y[0], hi: dW.y[1], z0: Z, z1: Z + hDoor }, 0.8, 0.18);
   // the flight to the chel from the chol door (32 half-steps — EK I 202–215)
   const fl = C.el('azarah.chamber.gazit.flight');
-  flight(C, { axis: 'x', head: b.min[0], dir: -1, c0: fl.box.min[1], c1: fl.box.max[1], steps: fl.params.steps, zTop: Z });
+  flight(C, { axis: 'x', head: b.min[0], dir: -1, c0: fl.box.min[1], c1: fl.box.max[1], steps: fl.params.steps, zTop: Z, underpass: fl.params.underpass });
   const [lx, ly] = p.stations.lottery;
   C.anchor('courts.gazit.lottery', [lx, ly, Z], 270, 'Lishkat HaGazit — the lottery (kodesh half)');
   C.anchor('courts.gazit.sanhedrin', [sx + rIn[0] + 0.35, cy, Z + tz[0] + 0.35], 270, 'Lishkat HaGazit — seat of the Sanhedrin (chol half)');
@@ -130,11 +130,11 @@ function amphitheatre(C, c, Z, rIn, rOut, tz) {
 function golah(C) {
   const e = C.el('azarah.chamber.golah'), b = e.box, p = e.params;
   const Z = b.min[2], t = 1;
-  const dr = p.door;
+  const dr = p.door, zD = dr.z ? dr.z[1] : Z + 8;                // height from site.js (door.z) when given
   shell(C, B(...b.min, ...b.max), { t, room: 'ashlar_plain', floor: 'paving_azarah', top: 'roof_plaster',
-    doors: [B(dr.x[0], b.min[1] - 0.01, Z - 0.01, dr.x[1], b.min[1] + t + 0.01, Z + 8, { mat: 'marble_white' })] });
-  C.doorSingle('azarah.chamber.golah', 'cedarSmall4x8', [dr.x[0], b.min[1] + 0.2, Z], [1, 0], [0, 1], dr.x[1] - dr.x[0], 8, { open: 0.8 });
-  C.doorCase({ axis: 'y', at: b.min[1], out: -1, lo: dr.x[0], hi: dr.x[1], z0: Z, z1: Z + 8 }, 0.6, 0.16);
+    doors: [B(dr.x[0], b.min[1] - 0.01, Z - 0.01, dr.x[1], b.min[1] + t + 0.01, zD, { mat: 'marble_white' })] });
+  C.doorSingle('azarah.chamber.golah', 'cedarSmall4x8', [dr.x[0], b.min[1] + 0.2, Z], [1, 0], [0, 1], dr.x[1] - dr.x[0], zD - Z, { open: 0.8 });
+  C.doorCase({ axis: 'y', at: b.min[1], out: -1, lo: dr.x[0], hi: dr.x[1], z0: Z, z1: zD }, 0.6, 0.16);
   // the cistern: plastered pit under the floor, mouth 3 × 3 with a stone curb
   const cb = p.cistern.box, cx = (cb.min[0] + cb.max[0]) / 2, cyy = (cb.min[1] + cb.max[1]) / 2;
   const mouth = 1.5;
@@ -192,7 +192,7 @@ function etz(C) {
   C.doorPair('azarah.chamber.etz', 'cedarLeaf16', dr.x[0], dr.x[1], 'x', b.max[1] - 0.5, Z, [0, -1], { open: 0, h: hDoor });
   C.doorCase({ axis: 'y', at: b.max[1], out: 1, lo: dr.x[0], hi: dr.x[1], z0: Z, z1: Z + hDoor }, 0.8, 0.18);
   const fl = C.el('azarah.chamber.etz.flight');
-  flight(C, { axis: 'y', head: b.max[1], dir: 1, c0: fl.box.min[0], c1: fl.box.max[0], steps: fl.params.steps, zTop: Z });
+  flight(C, { axis: 'y', head: b.max[1], dir: 1, c0: fl.box.min[0], c1: fl.box.max[0], steps: fl.params.steps, zTop: Z, underpass: fl.params.underpass });
   // the only chamber with a mezuzah (Yoma 10a): on the right doorpost of one entering from the chel (the west jamb), in
   // the doorway's outer tefach (Menachot 33b), from the start of the upper third (Menachot 33a); a slim case proud of
   // the jamb face
@@ -228,8 +228,10 @@ function southTrio(C) {
   const sr = 1.9, sc = [mes.min[0] + 1 + sr + 0.05, mes.min[1] + 1 + sr + 0.05];
   for (const k of ['melach', 'parvah', 'medichin']) {
     const e = C.el(`azarah.chamber.${k}`), b = e.box;
-    const w = Math.min(10, b.max[0] - b.min[0] - 6);
-    const dx = k === 'medichin' ? b.max[0] - t - 1 - w / 2 : (b.min[0] + b.max[0]) / 2;
+    // the door as site.js records it (params.door.x / .z), else the as-built rule (10 wide where the chamber allows)
+    const dr = e.params.door;
+    const w = dr?.x ? dr.x[1] - dr.x[0] : Math.min(10, b.max[0] - b.min[0] - 6);
+    const dx = dr?.x ? (dr.x[0] + dr.x[1]) / 2 : k === 'medichin' ? b.max[0] - t - 1 - w / 2 : (b.min[0] + b.max[0]) / 2;
     const holes = k === 'medichin' ? [B(sc[0] - sr, sc[1] - sr, b.max[2] - 1.01, sc[0] + sr, sc[1] + sr, b.max[2] + 0.01, { mat: 'ashlar_plain' })] : [];
     const hDoor = e.params.door?.z ? e.params.door.z[1] - e.params.door.z[0] : 16;   // 16 unless site.js gives it
     shell(C, B(...b.min, ...b.max), { t, room: 'ashlar_plain', floor: 'paving_azarah', top: 'paving_azarah',
@@ -243,7 +245,7 @@ function southTrio(C) {
     if (k === 'medichin') rinsers(C, r, { max: [sc[0] + sr + 0.2] });
   }
   // Middot 5:3: "from it a winding stair goes up to the roof of the Parvah"
-  spiral(C, { c: sc, r1: sr - 0.05, z0: Z, z1: med.box.max[2], perTurn: 13, a0: 0, mat: 'steps_stone' });
+  spiral(C, { c: sc, r1: sr - 0.05, z0: Z, z1: med.box.max[2], perTurn: 13, a0: 0, mat: 'steps_stone', topRect: [sc[0] - sr, sc[1] - sr, sc[0] + sr, sc[1] + sr] });
   // ---- the Parvah roof: the KG's Yom Kippur Beit HaTevilah, in kodesh (Yoma 31a; Middot 5:3); parapets round the roofs
   const pv = C.el('azarah.chamber.parvah'), pb = pv.box, wz = pv.params.roofMikveh.waterSurfaceZ, zr = pb.max[2];
   const mx0 = pb.min[0] + 5, mx1 = pb.max[0] - 5, my0 = pb.min[1] + 3, my1 = pb.max[1] - 3.5;

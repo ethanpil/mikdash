@@ -16,7 +16,10 @@ export function buildNikanor(C) {
     const b = C.el(ch).box, w = C.el(wk).box;
     const cy = (b.min[1] + b.max[1]) / 2;
     const t = 1;
-    const west = B(b.min[0] - 0.01, cy - 2, b.min[2] - 0.01, b.min[0] + t + 0.01, cy + 2, b.min[2] + 8, { mat: 'ashlar_plain' });
+    // the door to Ezrat Yisrael as site.js gives it (params.door: west face, y and z ranges; 4 × 8 when absent)
+    const dr = C.el(ch).params.door || { y: [cy - 2, cy + 2], z: [b.min[2], b.min[2] + 8] };
+    const dy0 = dr.y[0], dy1 = dr.y[1], dz0 = dr.z[0], dz1 = dr.z[1];
+    const west = B(b.min[0] - 0.01, dy0, dz0 - 0.01, b.min[0] + t + 0.01, dy1, dz1, { mat: 'ashlar_plain' });
     shell(C, B(...b.min, ...b.max), { t, room: 'ashlar_plain', floor: 'paving_azarah', top: 'roof_plaster',
       doors: [B(w.max[0] - t - 0.01, w.min[1], w.min[2] - 0.01, w.max[0] + 0.01, w.max[1], w.max[2], { mat: 'marble_white' }), west] });
     // the wicket's leaf (bronze, as its gate ⚙) hinged at the EN face, folding into the chamber
@@ -24,8 +27,8 @@ export function buildNikanor(C) {
     C.doorSingle(wk, 'bronzeWicket', [w.max[0] - 0.2, north ? w.max[1] : w.min[1], w.min[2]], [0, north ? -1 : 1], [-1, 0], w.max[1] - w.min[1], w.max[2] - w.min[2], { open: 0 });
     C.doorCase({ axis: 'x', at: w.max[0], out: 1, lo: w.min[1], hi: w.max[1], z0: w.min[2], z1: w.max[2] }, 0.6, 0.16);
     // the door to Ezrat Yisrael (cedar)
-    C.doorSingle(`${ch}.door`, 'cedarSmall4x8', [b.min[0] + 0.2, cy - 2, b.min[2]], [0, 1], [1, 0], 4, 8, { open: 0.75 });
-    C.doorCase({ axis: 'x', at: b.min[0], out: -1, lo: cy - 2, hi: cy + 2, z0: b.min[2], z1: b.min[2] + 8 }, 0.6, 0.16);
+    C.doorSingle(`${ch}.door`, 'cedarSmall4x8', [b.min[0] + 0.2, dy0, dz0], [0, 1], [1, 0], dy1 - dy0, dz1 - dz0, { open: 0.75 });
+    C.doorCase({ axis: 'x', at: b.min[0], out: -1, lo: dy0, hi: dy1, z0: dz0, z1: dz1 }, 0.6, 0.16);
     const inner = { min: [b.min[0] + t, b.min[1] + t, b.min[2]], max: [b.max[0] - t, b.max[1] - t, b.max[2] - t] };
     if (label === 'Pinchas') vestments(C, inner, north);
     else chavitinBakery(C, inner, north);

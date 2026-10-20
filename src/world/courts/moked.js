@@ -285,7 +285,7 @@ function gates(C) {
   const dc = C.el('azarah.moked.door-chel').box;
   C.doorPair('azarah.moked.door-chel', 'goldLeaf', dc.min[0], dc.max[0], 'x', dc.max[1] - 0.25, Z, [0, -1], { open: 0, label: 'Beit HaMoked — door to the chel' });
   const fl = C.el('azarah.moked.flight');
-  flight(C, { axis: 'y', head: dc.max[1], dir: 1, c0: fl.box.min[0], c1: fl.box.max[0], steps: fl.params.steps, zTop: Z });
+  flight(C, { axis: 'y', head: dc.max[1], dir: 1, c0: fl.box.min[0], c1: fl.box.max[0], steps: fl.params.steps, zTop: Z, underpass: fl.params.underpass });
   C.anchor('courts.gate.moked', [cx, gb.min[1] - 6, Z], 0, "Sha'ar Beit HaMoked");
   C.anchor('courts.gate.moked.chel', [cx, fl.box.max[1] + 3, 0], 180, 'Beit HaMoked — the door to the chel');
 }
@@ -296,15 +296,19 @@ function underground(C) {
   const pa = C.el('azarah.underground.passage').box, tv = C.el('azarah.underground.beit-hatevilah'), tb = tv.box, tp = tv.params;
   const zF = tp.floorZ, Zaz = C.datums.azarah;
   // the winding stair (Middot 1:6, 1:9): from the NW chamber down through the podium to the passage. Four full turns;
-  // its head is a landing step widened round the south of the shaft to the chamber's door (the floor bridges the last
-  // half amah — masonry.buildFloors), the descent turning anticlockwise from it ⚙
+  // its head is a landing step widened round the south of the shaft to the chamber's door, carried out to the shaft's
+  // walls (no crack; it reaches the door's threshold on the south wall), the descent turning anticlockwise from it ⚙
   spiral(C, { c: sp.center, r1: Math.min(st.box.max[0] - sp.center[0], st.box.max[1] - sp.center[1]) - 0.05, z0: st.box.min[2], z1: Zaz,
-    perTurn: 14, a0: (-40 * Math.PI) / 180, cw: true, mat: 'steps_stone', landing: 3.5, landingMat: 'marble_white' });
+    perTurn: 14, a0: (-40 * Math.PI) / 180, cw: true, mat: 'steps_stone', landing: 3.5, landingMat: 'marble_white',
+    topRect: [st.box.min[0], st.box.min[1], st.box.max[0], st.box.max[1]] });
   // rock and masonry round the shaft, the passage and the immersion house (top kept under the Mount pavement)
   const vSpring = pa.max[2] - (pa.max[0] - pa.min[0]) / 2;
   const adds = [
     { ...B(pa.min[0] - 2, st.box.min[1] - 2, zF - 2, pa.max[0] + 2, pa.max[1] + 2, -1.2), top: 'ashlar_plain', side: 'ashlar_plain' },
     { ...B(tb.min[0] - 2, tb.min[1] - 1, tb.min[2] - 2, tb.max[0] + 2, tb.max[1] + 2, -1.2), top: 'ashlar_plain', side: 'ashlar_plain' },
+    // round the shaft, under the Moked's podium (no Mount pavement there: the court fill starts at Z 0), the masonry
+    // rises to meet the fill, so the shaft is walled all the way up
+    { ...B(pa.min[0] - 2, st.box.min[1] - 2, -1.3, pa.max[0] + 2, C.el('azarah.moked.podium').box.max[1], 0), top: 'ashlar_plain', side: 'ashlar_plain' },
   ];
   const subs = [
     B(st.box.min[0], st.box.min[1], st.box.min[2], st.box.max[0], st.box.max[1], 0.5, { room: 'ashlar_plain', floor: 'paving_mount' }),

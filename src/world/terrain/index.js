@@ -38,11 +38,17 @@ export async function build(ctx) {
   const seg = q.terrainSegments || 192;
   const footS = ctx.el('mount.wall.south').params.footProfile.points.map((p) => p[0]);
   const footN = ctx.el('mount.wall.north').params.footProfile.points.map((p) => p[0]);
+  // the burning place on Har HaMishchah: grid lines on the edges of its graded flat, its stone floor and its tank, so
+  // on every tier the ground is level across the flat and meets the floor's edge (no coarse cell sags under it); the
+  // ground is cut out under the floor and the tank
+  const bp = T.plan.burning, bf = T.plan.flats.find((f) => f.id === 'burning-place').rect;
+  const bpX = [bf[0], bf[2], ...bp.cut.flatMap((r) => [r[0], r[2]])], bpY = [bf[1], bf[3], ...bp.cut.flatMap((r) => [r[1], r[3]])];
   const lineSets = (s) => ({
-    xs: solveLines({ lo: cx - R, hi: cx + R, f0: fp.x0, f1: fp.x1, Llo: 260, Lhi: 520, A, specials: [...footS, ...footN, fp.x0, fp.x1] }, Math.round(1.12 * s)),
-    ys: solveLines({ lo: cy - R, hi: cy + R, f0: fp.y0, f1: fp.y1, Llo: 300, Lhi: 300, A, specials: [fp.y0, fp.y1, 0, 500] }, Math.round(0.9 * s)),
+    xs: solveLines({ lo: cx - R, hi: cx + R, f0: fp.x0, f1: fp.x1, Llo: 260, Lhi: 520, A, specials: [...footS, ...footN, fp.x0, fp.x1, ...bpX] }, Math.round(1.12 * s)),
+    ys: solveLines({ lo: cy - R, hi: cy + R, f0: fp.y0, f1: fp.y1, Llo: 300, Lhi: 300, A, specials: [fp.y0, fp.y1, 0, 500, ...bpY] }, Math.round(0.9 * s)),
   });
-  const inside = (X0, Y0, X1, Y1) => X0 >= fp.x0 - 1e-6 && X1 <= fp.x1 + 1e-6 && Y0 >= fp.y0 - 1e-6 && Y1 <= fp.y1 + 1e-6;
+  const within = (r, X0, Y0, X1, Y1) => X0 >= r[0] - 1e-6 && X1 <= r[2] + 1e-6 && Y0 >= r[1] - 1e-6 && Y1 <= r[3] + 1e-6;
+  const inside = (X0, Y0, X1, Y1) => within([fp.x0, fp.y0, fp.x1, fp.y1], X0, Y0, X1, Y1) || bp.cut.some((r) => within(r, X0, Y0, X1, Y1));
   const { xs, ys } = lineSets(seg);
   const sampleZ = (X, Y) => { const s = T.sample(X, Y); return { z: (s.h - T.DATUM) / A, g: s.g }; };
   const grid = buildGrid(xs, ys, sampleZ, inside);

@@ -519,4 +519,22 @@ export function logBetween(a, b) {
   return { matrix: m, len };
 }
 
+/**
+ * A half-burnt brand from site point a (the end that lay in the fire) to b, as world geometries: the burnt part
+ * (fraction `burnt` of the length) tapering to the tip and a little thinner than the bark it burnt back from (charred
+ * wood shrinks), then the bark. r = the bark's radius (m). Returns { burnt: [side, caps], bark: [side], ends: [caps] }.
+ */
+export function brandGeometry(a, b, r, R, burnt = 0.4) {
+  const m = a.map((v, i) => v + (b[i] - v) * burnt);
+  const out = { burnt: [], bark: [], ends: [] };
+  for (const [p, q, r0, r1, part] of [[a, m, r * 0.55, r * 0.82, 'burnt'], [m, b, r * 0.95, r, 'bark']]) {
+    const { matrix, len } = logBetween(p, q);
+    const g = logGeometry(len, r0, r1, 6, R, 0.07, 2, 0.85, R() * 3);
+    g.side.applyMatrix4(matrix); g.caps.applyMatrix4(matrix);
+    if (part === 'burnt') out.burnt.push(g.side, g.caps);
+    else { out.bark.push(g.side); out.ends.push(g.caps); }
+  }
+  return out;
+}
+
 export { AMAH };

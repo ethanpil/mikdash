@@ -718,7 +718,12 @@ for (const [key, side, i, en, he, use] of azGates) {
     p: { roofZ: zr, roofTerrace: true, wallT: GATEHOUSE_WALL_T,
       roofStair: { form: 'newel spiral', center: [r6(stairC[0]), r6(stairC[1])], radius: STAIR_R, box: bx(stairC[0] - STAIR_R, stairC[1] - STAIR_R, Z_AZ, stairC[0] + STAIR_R, stairC[1] + STAIR_R, zr),
         steps: (zr - Z_AZ) / STEP_RISE, headOpening: 'its head is an open well in the roof (the box at +36): not walkable',
-        note: 'access to the roof, Beit Avtinas and the mikveh — unsourced ⚙: a newel stair filling the depth of the gatehouse\'s east room (r 1.95 inside ½-amah marble walls, Yoma 31b — as built by build-courts; a 3-amah stair cannot pass a person), its last step turned west onto the terrace walk' },
+        note: 'access to the roof, Beit Avtinas and the mikveh — unsourced ⚙: a newel stair filling the depth of the gatehouse\'s east room (r 1.95 inside ½-amah marble walls, Yoma 31b — as built by build-courts; a 3-amah stair cannot pass a person), its last step turned west onto the terrace walk',
+        // annotation (builders-2-outer): the head as built; headOpening and terraceWalk's east end await site-model
+        asBuilt: { perTurn: 15, topStepEnds: 'due north of the newel; the walker steps off westward onto the landing', well: 'the stair\'s square less its north-west quarter',
+          landing: { box: bx(stairC[0] - STAIR_R, stairC[1], zr, stairC[0], stairC[1] + STAIR_R, zr), parapet: bx(stairC[0] - STAIR_R, stairC[1], zr, stairC[0] - 0.45, stairC[1] + 0.3, r6(zr + ROOF_PARAPET_H)) },
+          walkEndX: stairC[0],
+          note: 'the well\'s north-west quarter stays roofed as a walkable landing (10-tefach parapet on its open south edge), and the terrace walk runs on over it to the newel (X 223.25), so headOpening\'s "not walkable" and terraceWalk.box\'s east end (X 221.3) describe the earlier head ⚙' } },
       terraceWalk: { box: bx(x0 + 20, WALK[0], zr, stairC[0] - STAIR_R, WALK[1], zr),
         note: 'the walk along the court-side edge from the stair head past the mikveh to Beit Avtinas\'s east door, behind a 0.4-amah parapet (to Y 263) ⚙. East of the mikveh is the stair\'s open well, and the court\'s S wall rises 20 amot just beyond it (X ≥ 225.75): no further walkable roof there' } } });
   add('azarah.beit-avtinas', { en: 'Beit Avtinas (upper chamber over the Water Gate)', he: 'בית אבטינס', kind: 'chamber',
@@ -904,6 +909,24 @@ flights.push({ id: 'azarah.chamber.etz.flight', side: 'N', along: 'X', from: ETZ
 
 // ----- soreg, its passages and the 13 breach stations (now that the flights are known) -----
 for (const f of flights) soregPassages.push({ at: f.id, side: f.side, along: f.along, from: f.from, to: f.to });
+// underpasses (build-courts, annotation): every flight crosses the whole 10-amah chel, 6–16 amot above it, and its soreg
+// passage is the flight itself — without a way under it, the chel between two flights is a closed pocket. Each flight
+// is carried on a barrel vault over the chel walkway (axis along the chel; ⚙ span, springing). Vaulting is the precinct's
+// attested construction: the hollows under the Mount and the courts (Parah 3:3) and the causeway's arches (Parah 3:6).
+{
+  const UP = { s0: 0.75, s1: 8.25, springZ: 4 };   // ⚙ distances from the flight's head (the wall face); springing above a walker's head (≈ 1.9 m), amot
+  for (const f of flights) {
+    const e = elements[f.id], b = e.box, h = e.params.ascentHeading;
+    const crownZ = r6(UP.springZ + (UP.s1 - UP.s0) / 2);
+    const box = h === 0 ? bx(b.min[0], b.max[1] - UP.s1, Z_MOUNT, b.max[0], b.max[1] - UP.s0, crownZ)      // south flights
+      : h === 180 ? bx(b.min[0], b.min[1] + UP.s0, Z_MOUNT, b.max[0], b.min[1] + UP.s1, crownZ)            // north flights
+        : bx(b.max[0] - UP.s1, b.min[1], Z_MOUNT, b.max[0] - UP.s0, b.max[1], crownZ);                     // the Gazit's (west)
+    e.params.underpass = { box, walkway: f.along, fromHead: [UP.s0, UP.s1], springZ: UP.springZ, crownZ, span: UP.s1 - UP.s0,
+      form: 'semicircular barrel vault under the flight, its axis along the chel', confidence: 'reconstruction',
+      sources: ['Parah 3:3 (kippin under the Mount and the courts)', 'Parah 3:6 (the causeway\'s arches)', 'Middot 2:3 (the chel, 10 amot)'],
+      note: 'keeps the chel continuous at ground level under the flight (the soreg passage is the flight itself) ⚙ form, span and springing; zone boxes still give the space under the flight to the gate\'s zone' };
+  }
+}
 // stations: counts per side borrowed from the gates view of the prostrations (Shekalim 6:3: 4N 4S 3E 2W "opposite the 13 gates") —
 // Middot 2:3's breaches view gives no distribution; positions evenly spread, then moved ≥ 2 amot clear of any passage ⚙
 // (on this soreg line the gates' flights occupy exactly the spots "opposite the gates")

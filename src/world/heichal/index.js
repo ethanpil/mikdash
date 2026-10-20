@@ -107,8 +107,8 @@ export async function build(ctx) {
 function anchors(H) {
   const { ctx, el } = H;
   const AY = H.axisY, zF = H.zF;
-  const add = (name, pos, heading, label) => {
-    ctx.addAnchor(name, { pos, heading, label, zone: zoneAtSite(pos[0], pos[1], pos[2] + 0.5) || undefined });
+  const add = (name, pos, heading, label, extra = {}) => {
+    ctx.addAnchor(name, { pos, heading, label, zone: zoneAtSite(pos[0], pos[1], pos[2] + 0.5) || undefined, ...extra });
     H.anchors.push(name);
   };
   const alt = ctx.elOpt('altar.top');
@@ -118,6 +118,11 @@ function anchors(H) {
   add('heichal.ulam', [171, AY, zF], 270, 'The Ulam');
   add('heichal.great-gate', [166.5, AY, zF], 270, 'The great gate of the Heichal');
   add('heichal.chalifot', [168.5, (el('heichal.chalifot.n').box.min[1] + el('heichal.chalifot.n').box.max[1]) / 2, zF], 0, 'Beit HaChalifot (north)');
+  // the foot of each gold chain (south → north), on the Ulam floor below it: the young kohanim take hold here and climb
+  // to see the crowns in the windows over the gate (Middot 3:8); `foot` = the chain's lowest point (site amot)
+  (H.chainFeet || []).forEach((f, i) => {
+    add(`heichal.ulam.chain-${i}`, [f[0], f[1], zF], 270, `Gold chain ${i} from the south — the young kohanim climb it to see the crowns (Middot 3:8)`, { foot: f });
+  });
   add('heichal.kodesh', [154, AY, zF], 270, 'The Kodesh, from the entrance');
   const mb = el('heichal.menorah').box, sb = el('heichal.shulchan').box, ab = el('heichal.mizbach-hazahav').box;
   const head = (from, to) => ((Math.atan2(to[0] - from[0], to[1] - from[1]) * 180) / Math.PI + 360) % 360;

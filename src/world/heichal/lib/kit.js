@@ -418,6 +418,17 @@ export class Drape {
     this.geometry.setIndex(idx);
   }
 
+  /**
+   * How far the cloth's back face can reach behind the rod line (toward the rod's +normal side), in amot, over every
+   * open(f): the fold law of update() at its deepest — the most-gathered compression (c = gather, depth × 1/√c, capped
+   * at 3.2), the hem-to-head factor at the head (0.92 + 0.35 − 0.17 = 1.1) — plus half the thickness. Keep in step
+   * with col() in update().
+   */
+  static backReach(spec) {
+    const s = { t: 1 / 6, amp: 0.12, gather: 0.16, ...spec };
+    return s.amp * Math.min(3.2, 1 / Math.sqrt(Math.max(0.12, s.gather))) * 1.1 + s.t / 2;
+  }
+
   /** layout for open amount f */
   update(f) {
     this.f = Math.min(1, Math.max(0, f));

@@ -311,10 +311,3 @@ export function wedge(m, axis, from, to, c0, c1, z0, z1, zBase = z0) {
   return m;
 }
 function uniqueZ(p, i, arr) { return !arr.slice(0, i).some((q) => Math.abs(q[0] - p[0]) < EPS && Math.abs(q[1] - p[1]) < EPS && Math.abs(q[2] - p[2]) < EPS); }
-
-/** Circle points helper: n points on an arc (site plane), angles in radians (0 = +X, CCW). */
-export function arc(cx, cy, r, a0, a1, n) {
-  const pts = [];
-  for (let i = 0; i <= n; i++) { const t = a0 + (a1 - a0) * i / n; pts.push([cx + r * Math.cos(t), cy + r * Math.sin(t)]); }
-  return pts;
-}

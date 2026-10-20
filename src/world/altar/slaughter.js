@@ -3,8 +3,9 @@
 //   rings      altar.rings params.positions — 6 rows of 4 iron rings set in the pavement on hinge-staples (the animal's
 //              neck was locked in them); lying folded flat ⚙ form
 //   tables     altar.marble-tables params.tables — 8 marble tables (rinsing: a shallow dished top with a lip ⚙)
-//   nanasin    altar.nanasin params.pillars — 8 dwarf pillars (material unstated: marble ⚙) with squared cedar blocks on
-//              their heads and iron hooks fixed in them, three rows on each (Middot 3:5) — three working heights ⚙
+//   nanasin    altar.nanasin params.pillars — 8 dwarf pillars (material unstated: marble ⚙): shaft params.shaftH with a
+//              squared cedar block params.capH on its head (top params.topZ), the iron hooks fixed in the block in three
+//              rows one above another (Middot 3:5; params.hookRowsZ) — low for a lamb, middle for a ram, high for a bull
 //   flaying    altar.nanasin params.flayingStations — the 7 gaps between the pillars (anchors only; the carcass hangs on
 //              the hooks beside the pillar)
 import { TorusGeometry, CatmullRomCurve3, TubeGeometry, Vector3, Matrix4, BoxGeometry } from 'three';
@@ -14,6 +15,8 @@ import { applyWorldUV, mergeGeometries } from '../geom.js';
 import { AMAH } from '../../core/units.js';
 
 const DEG = Math.PI / 180;
+/** a hook's crook (where a pierced hock rests): [out of the block's face, above the hook's root], amot */
+const HOOK_CROOK = [0.2, 0.02];
 
 export function buildSlaughter(A) {
   const { el, d, B } = A;
@@ -56,9 +59,11 @@ export function buildSlaughter(A) {
   }
 
   // ---------------------------------------------------------------- the eight nanasin
+  // "dwarf" pillars: shaft params.shaftH + squared cedar block params.capH = params.topZ (site-model-2: 3 + 1 = 4 amot),
+  // the three rows of hooks at params.hookRowsZ, all in the cedar ("in stone the hooks cannot be fixed", EK II 51)
   const nn = el('altar.nanasin').params;
-  const shaftH = nn.shaftH, sec = nn.section;
-  const capW = sec * 1.3, capH = el('altar.nanasin').box.max[2] - nn.pillars[0][2] - shaftH;
+  const shaftH = nn.shaftH, capH = nn.capH, sec = nn.section;
+  const capW = sec * 1.3;
   const segs = [10, 16, 24, 32][d];
   const plinthH = 0.25;
   const rB = sec / 2;
@@ -66,16 +71,10 @@ export function buildSlaughter(A) {
     ? [[rB + 0.1, plinthH], [rB + 0.12, plinthH + 0.04], [rB + 0.1, plinthH + 0.1], [rB + 0.03, plinthH + 0.14], [rB, plinthH + 0.2],
       [rB * 0.94, shaftH - 0.22], [rB * 0.98, shaftH - 0.17], [rB * 1.06, shaftH - 0.1], [rB * 1.06, shaftH], [0, shaftH]]
     : [[rB + 0.08, plinthH], [rB, plinthH + 0.12], [rB * 0.94, shaftH], [0, shaftH]];
-  /** shaft radius at height h above its foot (the lathe profile, interpolated) */
-  const shaftR = (h) => {
-    for (let i = 1; i < shaftProf.length; i++) {
-      const [ra, za] = shaftProf[i - 1], [rb, zb] = shaftProf[i];
-      if (h <= zb && zb > za) return ra + ((rb - ra) * (h - za)) / (zb - za);
-    }
-    return rB;
-  };
-  const REACH = 4.2;                                     // amot over the pavement a standing kohen hangs at (≈ 2 m) ⚙
   const shafts = [];
+  /** where a carcass hangs from each pillar's south-face hook, per row (the side facing the tables — Rash, Bartenura on
+   *  Middot 3:5): read by the anchors (index.js 'altar.hook.<pillar>.<row>') */
+  A.hookPoints = [];
   const hooks = [];
   // one hook (local meters): out of the face along +x, turned up to a point
   const hookGeo = (() => {
@@ -85,7 +84,7 @@ export function buildSlaughter(A) {
       const b = new BoxGeometry(0.03 * s, 0.12 * s, 0.03 * s).translate(0.2 * s, 0.06 * s, 0);
       return mergeGeometries([a.toNonIndexed(), b.toNonIndexed()], false);
     }
-    const c = new CatmullRomCurve3([new Vector3(-0.02 * s, 0, 0), new Vector3(0.12 * s, 0, 0), new Vector3(0.2 * s, 0.02 * s, 0),
+    const c = new CatmullRomCurve3([new Vector3(-0.02 * s, 0, 0), new Vector3(0.12 * s, 0, 0), new Vector3(HOOK_CROOK[0] * s, HOOK_CROOK[1] * s, 0),
       new Vector3(0.23 * s, 0.08 * s, 0), new Vector3(0.22 * s, 0.15 * s, 0)]);
     return new TubeGeometry(c, d >= 2 ? 10 : 7, 0.018 * s, d >= 2 ? 6 : 4, false).toNonIndexed();
   })();
@@ -96,17 +95,13 @@ export function buildSlaughter(A) {
       [[0, Z], [0, Z + plinthH - 0.04], [-0.04, Z + plinthH]], { mat: MAR, cap: true });
     shafts.push(lathe(shaftProf, [X, Y, Z], segs).toNonIndexed());
     // the squared cedar block (revi'in shel erez), closed underneath by its own ring (no slit of sky along its foot)
-    const z0 = Z + shaftH, z1 = z0 + capH;
+    const z0 = Z + shaftH, z1 = nn.topZ;
     const CP = [[0, z0], [0, z1 - 0.05], [-0.05, z1]];
     sweepRing(mm, roundedRectFn(X - capW / 2, Y - capW / 2, X + capW / 2, Y + capW / 2, (o) => 0.05 + o, fs ? 1 : 0), CP, { mat: CEDAR, cap: true, capBottom: true });
-    // iron hooks, three rows on each (Middot 3:5; Tamid 3:5), each row two toward the flaying gaps (E, W) and one on N
-    // and S ⚙. The rows are three working heights: the lamb is hung by a hind leg pierced at the hock and flayed
-    // downward (Tamid 4:2), so its hook must be within a standing kohen's reach (≈ 2 m). While the cedar block is
-    // within reach all three rows are in it; with site.js's tall shafts (NANAS_H ⚙) only the top row (the heavy
-    // carcasses) is in the block and the other two are leaded into the shaft below it.
-    const blockMid = z0 + capH * 0.5 - Z <= REACH;
-    const rowsBlock = blockMid ? [z0 + capH * 0.2, z0 + capH * 0.5, z0 + capH * 0.8] : [z0 + capH * 0.45];
-    const rowsShaft = blockMid ? [] : [Z + REACH - 0.2, Z + REACH - 0.9];
+    // iron hooks, three rows in the block (Middot 3:5; Tamid 3:5) at site.js's hookRowsZ, one above another — low for a
+    // lamb, middle for a ram, high for a bull (Rash, Bartenura; EK II 58) — each row two toward the flaying gaps (E, W)
+    // and one on N and S ⚙. All three rows are within a standing kohen's reach (+3.2 … +3.8 ≈ 1.5–1.8 m), where the
+    // lamb is hung by a hind leg pierced at the hock (Tamid 4:2).
     const place = (px, py, z, yaw) => {        // makeRotationY(θ)·(1,0,0) = (cos θ, 0, −sin θ) = world of site (cos θ, sin θ)
       rot.makeRotationY(yaw);
       mtx.makeTranslation(px * AMAH, z * AMAH, -py * AMAH).multiply(rot);
@@ -114,15 +109,13 @@ export function buildSlaughter(A) {
     };
     for (const [nx, ny, per] of [[1, 0, 2], [-1, 0, 2], [0, 1, 1], [0, -1, 1]]) {
       const yaw = Math.atan2(ny, nx);
-      for (const z of rowsBlock) for (let k = 0; k < per; k++) {
+      for (const z of nn.hookRowsZ) for (let k = 0; k < per; k++) {
         const off = per === 1 ? 0 : (k === 0 ? -0.3 : 0.3);
         place(X + nx * capW / 2 + (ny !== 0 ? off : 0), Y + ny * capW / 2 + (nx !== 0 ? off : 0), z, yaw);
       }
     }
-    for (const z of rowsShaft) {
-      const rr = shaftR(z - Z);
-      for (const az of [-30, 30, 150, 210, 90, 270]) { const a = az * DEG; place(X + Math.cos(a) * rr, Y + Math.sin(a) * rr, z, a); }
-    }
+    // the crook of the south hook (0.2 out of the face, 0.02 above its root) — where the pierced hock rests
+    A.hookPoints.push(nn.hookRowsZ.map((z) => [X, Y - capW / 2 - HOOK_CROOK[0], z + HOOK_CROOK[1]]));
   }
   B.geo(mergeGeometries(shafts, false), MAR, { collide: true, cast: true });
   B.geo(applyWorldUV(mergeGeometries(hooks, false)), IRON, { collide: false, cast: d >= 2 });

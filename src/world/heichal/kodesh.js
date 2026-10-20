@@ -123,13 +123,18 @@ function parochot(H) {
     kit.geo(dr.geometry.toNonIndexed(), 'parochet', { collide: false, castShadow: true });
     kit.geo(tube([x, c.min[1], c.max[2] - 0.06], [x, c.max[1], c.max[2] - 0.06], 0.05, 6, true), 'gold_vessel', { collide: false });
   }
-  // the lul's small curtain at the KhK face (Zevachim 55b; site params.smallCurtain)
-  const lul = el('heichal.lul-west').box;
-  // hung close to the wall and lapping the jambs and head well, so no daylight shows round its edges
-  const xl = lul.max[0] + 0.09;
-  const dl = new Drape(kit, { id: 'lul', a: [xl, lul.min[1] - 0.45], b: [xl, lul.max[1] + 0.45], z0: lul.min[2], z1: lul.max[2] + 0.35, t: 0.08, fold: 0.4, amp: 0.035, mode: 'pinned', seed: 31 });
-  dl.update(0);
-  kit.geo(dl.geometry.toNonIndexed(), 'parochet', { collide: false, castShadow: false });
+  // the lul behind the Kaporet (Zevachim 55b; EK II 178–179): a slot 4 tefachim wide through the KhK's own wall, closed
+  // by a small curtain at the KhK face (site params.smallCurtain), so the KhK stays dark. It is not a passage
+  // (params.walkThrough false): at 4 tefachim (0.32–0.38 m under every amah standard) it is narrower than the
+  // observer's body (0.6 m), so the masonry alone keeps it closed — no extra collider.
+  const le = el('heichal.lul-west'), lul = le.box;
+  if (le.params.smallCurtain) {
+    // hung close to the wall and lapping the jambs and head well, so no daylight shows round its edges
+    const xl = lul.max[0] + 0.09;
+    const dl = new Drape(kit, { id: 'lul', a: [xl, lul.min[1] - 0.45], b: [xl, lul.max[1] + 0.45], z0: lul.min[2], z1: lul.max[2] + 0.35, t: 0.08, fold: 0.4, amp: 0.035, mode: 'pinned', seed: 31 });
+    dl.update(0);
+    kit.geo(dl.geometry.toNonIndexed(), 'parochet', { collide: false, castShadow: false });
+  }
 }
 
 /** the Even Shetiyah: bare bedrock rising three etzba'ot above the floor, in the west of the KhK (Yoma 5:2) */
@@ -208,9 +213,11 @@ function aliyah(H) {
 function lamps(H, men) {
   const { ctx, kit } = H;
   // Lamps run east–west (lock #11, Raavad from Tamid 3:9 / 6:1): "he found the two eastern lamps burning, cleaned
-  // the eastern and left the western burning" — so the ner ma'aravi is the second lamp from the east ⚙ (site.js notes
-  // the Rambam's centre lamp; see the decisions log). It stays lit by day; the others burn from evening to morning.
-  const nerMaaravi = 1;
+  // the eastern and left the western burning" — so the ner ma'aravi is the second lamp from the east. Which lamp it is
+  // comes from site.js heichal.menorah params.nerMaaravi ({ lamp, countFrom }; readings.northSouth keeps the Rambam's
+  // middle lamp). It stays lit by day; the others burn from evening to morning. men.flames run east → west.
+  const nm = H.el('heichal.menorah').params.nerMaaravi;
+  const nerMaaravi = nm.countFrom === 'west' ? men.flames.length - 1 - nm.lamp : nm.lamp;
   const size = 0.075;
   men.flames.forEach((p, i) => {
     const id = `heichal.menorah.lamp-${i}`;

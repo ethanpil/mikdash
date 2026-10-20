@@ -24,7 +24,7 @@ export async function build(ctx) {
 
   const chamber = ctx.el('mount.gate.shushan.chamber').box;
   const app = buildApproaches(ctx, kit, group, detail);          // first: it knows the floor openings (Chuldah stairwells)
-  buildFloor(ctx, kit, app.floorHoles);
+  buildFloor(ctx, kit, [...app.floorHoles, ...courtFootprint(ctx)]);
   buildWalls(ctx, kit, detail, { copingGaps: [[chamber.min[1], chamber.max[1]]] });
   buildGates(ctx, kit, group, detail);
   buildShushanChamber(ctx, kit, detail);
@@ -43,6 +43,18 @@ export async function build(ctx) {
   };
   group.userData.causewayRegions = app.cw.regions;
   return group;
+}
+
+/**
+ * Plan rectangles [x0, y0, x1, y1] the court complex fills solid from the Mount (Z 0) up (build-courts: the courts are
+ * raised platforms; the Gazit and Moked podiums): no pavement under them — it would only lie hidden inside the fill,
+ * and over the Moked's winding stair it capped the shaft down to the passage under the Birah.
+ */
+function courtFootprint(ctx) {
+  const r = (b) => [b.min[0], b.min[1], b.max[0], b.max[1]];
+  const wW = ctx.el('azarah.wall.west').box, wE = ctx.el('en.wall.east').box;
+  const wS = ctx.el('azarah.wall.south').box, wN = ctx.el('azarah.wall.north').box;
+  return [[wW.min[0], wS.min[1], wE.max[0], wN.max[1]], r(ctx.el('azarah.chamber.gazit.podium').box), r(ctx.el('azarah.moked.podium').box)];
 }
 
 /** The pavement of the 500 x 500 (mount.floor), with the Chuldah stairwells left open. Tiled so no triangle spans the Mount. */

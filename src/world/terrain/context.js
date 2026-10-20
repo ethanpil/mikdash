@@ -47,16 +47,18 @@ export function buildDraped(ctx, T, kit, detail) {
 /** The burning place on the crest (paved, with its mikveh) and the pyre tower as a hidden movable. */
 export function buildBurningPlace(ctx, T, kit, group, detail) {
   const b = ctx.el('context.parah.pyre').box;
-  const axisY = ctx.site.axisY;
-  const top = b.min[2];                                   // the crest ground at the pyre (site.js)
-  const x0 = b.min[0] - 2.5, x1 = b.max[0] + 2.5, y0 = b.min[1] - 3, y1 = b.max[1] + 3;
-  // the beit tevilah (Parah 3:7): a stone tank (40 se'ah needs 1 x 1 x 3 amot — Yoma 31a; here 4 x 4 x 3 ⚙), NE of the pyre
-  const mx0 = b.max[0] + 3, mx1 = mx0 + 4, my0 = axisY + 5, my1 = my0 + 4, rim = top + 0.75, wt = 0.75;
+  const bp = T.plan.burning;                              // floor and tank rects (terrain/plan.js; the ground is cut under them)
+  const top = bp.top;                                     // the crest ground at the pyre (site.js)
+  const [x0, y0, x1, y1] = bp.floor;
+  // the beit tevilah (Parah 3:7): a stone tank (40 se'ah needs 1 x 1 x 3 amot — Yoma 31a; here 4 x 4 x 3 ⚙), NE of the
+  // pyre, its west wall against the floor's east edge
+  const [mx0, my0, mx1, my1] = bp.tankIn, wt = bp.tankWall, rim = top + 0.75;
   const bottom = top - 3.2;
-  const hx0 = mx0 - wt, hx1 = mx1 + wt, hy0 = my0 - wt, hy1 = my1 + wt;
+  const [hx0, hy0, hx1, hy1] = bp.tank;
   // a plain stone floor for the pyre (its place is fixed by Middot 2:4 / Parah 3:9; the floor itself is a reconstruction),
-  // its top flush with the crest ground of site.js so a standing eye on it is exactly kohenEye
-  kit.faces([x0, y0, top - 1.2], [x1, y1, top], { t: 'steps_stone', e: 'ashlar_plain', w: 'ashlar_plain', n: 'ashlar_plain', s: 'ashlar_plain' });
+  // its top flush with the crest ground of site.js so a standing eye on it is exactly groundEye; the ground round it lies
+  // LIFT (0.17 m) lower, the Parah path's paving meets its top. Closed underneath (the ground is cut out under it).
+  kit.faces([x0, y0, top - 1.2], [x1, y1, top], { t: 'steps_stone', b: 'ashlar_plain', e: 'ashlar_plain', w: 'ashlar_plain', n: 'ashlar_plain', s: 'ashlar_plain' });
   for (const [a0, a1, c0, c1] of [[hx0, hx1, hy0, my0], [hx0, hx1, my1, hy1], [hx0, mx0, my0, my1], [mx1, hx1, my0, my1]]) {
     kit.box([a0, c0, top - 0.6], [a1, c1, rim], 'ashlar_plain');
   }
@@ -65,7 +67,7 @@ export function buildBurningPlace(ctx, T, kit, group, detail) {
   kit.quad([[mx1, my0, bottom], [mx1, my1, bottom], [mx1, my1, top], [mx1, my0, top]], [-1, 0, 0], 'ashlar_plain', { collide: false });
   kit.quad([[mx0, my0, bottom], [mx1, my0, bottom], [mx1, my0, top], [mx0, my0, top]], [0, 1, 0], 'ashlar_plain', { collide: false });
   kit.quad([[mx0, my1, bottom], [mx1, my1, bottom], [mx1, my1, top], [mx0, my1, top]], [0, -1, 0], 'ashlar_plain', { collide: false });
-  kit.quad([[mx0, my0, bottom], [mx1, my0, bottom], [mx1, my1, bottom], [mx0, my1, bottom]], [0, 0, 1], 'ashlar_plain', { collide: false });
+  kit.quad([[mx0, my0, bottom], [mx1, my0, bottom], [mx1, my1, bottom], [mx0, my1, bottom]], [0, 0, 1], 'ashlar_plain');   // a floor to stand on (no ground under the tank)
   kit.quad([[mx0, my0, top - 0.55], [mx1, my0, top - 0.55], [mx1, my1, top - 0.55], [mx0, my1, top - 0.55]], [0, 0, 1], 'water', { collide: false, castShadow: false });
 
   // the pyre: "like a tower, with windows; its facade westward" (Parah 3:8) — cedar, pine, cypress and smooth fig

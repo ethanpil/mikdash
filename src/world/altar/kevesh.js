@@ -3,13 +3,15 @@
 //   kevesh        altar.kevesh: params.groundPiece (30 on the ground) + params.flying (1 over the yesod line at underside +17,
 //                 1 over the sovev a hair above it) — the flying span is NOT extruded to the floor; a hair's breadth of air
 //                 is left before the altar (Zevachim 62b). Same cast, whitewashed stone as the altar (Middot 3:4).
-//   small ramps   altar.kevesh.ramp-sovev (east) and altar.kevesh.ramp-yesod (west: a 1:3 branch + a level run to the SW corner)
+//   small ramps   altar.kevesh.ramp-sovev (east: a slab carried on the kevesh's east face, underside params.undersideZ,
+//                 open below) and altar.kevesh.ramp-yesod (west: a 1:3 branch + a level run to the SW corner, solid)
 //   revuvah       altar.kevesh.revuvah — a 1 × 1 window in the west face into a cavity (depth ⚙)
 //   tables        altar.table.marble ("of the fats") and altar.table.silver, west of the ramp (Shekalim 6:4)
 //   machtah       the silver fire-pan resting in the angle between ramp and altar (altar.machtah-niche) — movable
-//   beit hadeshen the ash heap east of the ramp (altar.beit-hadeshen)
+//   beit hadeshen the ash heap east of the ramp (altar.beit-hadeshen) and the notar fire on it ('altar.beit-hadeshen.fire',
+//                 kind 'pyre', small, schedule 'service': the sim lights it by day)
 import { Group, Mesh } from 'three';
-import { Mesher, sweepRing, polyRing, lathe, polarField, noise2, rng } from './lib.js';
+import { Mesher, sweepRing, polyRing, lathe, polarField, noise2, rng, brandGeometry } from './lib.js';
 import { roundedRectFn } from './mizbeach.js';
 import { mergeGeometries } from '../geom.js';
 
@@ -136,12 +138,16 @@ export function buildKevesh(A) {
   rampSweep(M, { ...base, y0: fl1.y[0], y1: fl1.y[1] - HAIR, bot: flat(fl1.undersideZ), faces: 'wenu' });
   rampSweep(M, { ...base, y0: fl2.y[0] - HAIR, y1: fl2.y[1] - HAIR, bot: flat(fl2.undersideZ + HAIR), faces: 'wenu' });
 
-  // the small ramp to the sovev (east): descends 1:3 north from the junction, a hair short of the altar
+  // the small ramp to the sovev (east): descends 1:3 north from the junction, a hair short of the altar. A slab "going
+  // out from the kevesh" (Zevachim 62b), carried on its east face with a flat underside at params.undersideZ and open
+  // below (site-model-2); the box runs to the pavement only as the overall extent. No west face: it is bonded to the
+  // kevesh's east face.
   {
     const rs = el('altar.kevesh.ramp-sovev'), p = rs.params;
     const ya = p.from[1], yb = p.to[1] - HAIR, za = p.from[2], zb = p.to[2];
     const top = (y) => za + ((zb - za) * (y - ya)) / (p.to[1] - ya);
-    rampSweep(M, { x0: rs.box.min[0], x1: rs.box.max[0], y0: ya, y1: yb, top, bot: flat(rs.box.min[2]), f, fs, faces: 'esn', round: 'e', mTop: MT });
+    const carried = p.solidToFloor === false && Number.isFinite(p.undersideZ);
+    rampSweep(M, { x0: rs.box.min[0], x1: rs.box.max[0], y0: ya, y1: yb, top, bot: flat(carried ? p.undersideZ : rs.box.min[2]), f, fs, faces: carried ? 'esnu' : 'esn', round: 'e', mTop: MT });
   }
   // the small ramp to the yesod (west): the 1:3 branch, then the level run along the S face to the SW corner
   {
@@ -246,8 +252,29 @@ export function buildKevesh(A) {
     const cx = (bd.min[0] + bd.max[0]) / 2, cy = (bd.min[1] + bd.max[1]) / 2;
     const rr = (bd.max[0] - bd.min[0]) / 2 * 0.95, hh = (bd.max[2] - bd.min[2]) * 0.8;
     const ph = R() * 6;
+    const heapZ = (r01, t) => bd.min[2] - 0.02 + hh * Math.pow(Math.max(0, 1 - r01 * r01), 0.9) * (1 + (d >= 1 ? 0.2 * nz(Math.cos(t) * 2 * r01, Math.sin(t) * 2 * r01) : 0));
     B.geo(polarField(cx, cy, [3, 6, 9, 12][d], [12, 22, 32, 40][d], (t) => rr * (1 + 0.1 * Math.sin(3 * t + ph) + 0.06 * Math.sin(7 * t)),
-      (r01, t) => bd.min[2] - 0.02 + hh * Math.pow(Math.max(0, 1 - r01 * r01), 0.9) * (1 + (d >= 1 ? 0.2 * nz(Math.cos(t) * 2 * r01, Math.sin(t) * 2 * r01) : 0))),
-    'ash', { collide: true, cast: true });
+      heapZ), 'ash', { collide: true, cast: true });
+    // the notar fire (disqualified and left-over most-holy meat is burned "in the court, east of the ramp" — Rambam
+    // MK 7:3; Zevachim 104b; offerings.js beit-hadeshen): a small open wood fire on the heap that the sim lights by day
+    // ('service', intensity 0 until then); a few charred brands of the last burning lie on the crown (detail ≥ 1) ⚙
+    const crown = heapZ(0, 0);
+    if (d >= 1) {
+      // half-burnt brands, their burnt ends toward the crown: timber_charred once the materials task adds it, until then
+      // grey with ash (never glass_dark, whose gloss drew them as black pipes — review); the rest bark
+      const CHAR = A.mat('timber_charred', 'ash'), BARK = 'timber_rough', END = A.mat('timber_pile_end', BARK);
+      const burnt = [], bark = [], ends = [];
+      for (let i = 0; i < 4; i++) {
+        const a = ph + i * 1.7 + R() * 0.4, L = 0.55 + 0.25 * R(), r0 = 0.12 + 0.1 * R();
+        const p0 = [cx + Math.cos(a) * r0, cy + Math.sin(a) * r0], p1 = [p0[0] - Math.cos(a + 0.5) * L, p0[1] - Math.sin(a + 0.5) * L];
+        const z0 = heapZ(Math.min(0.95, r0 / rr), a) + 0.02, z1 = heapZ(Math.min(0.95, Math.hypot(p1[0] - cx, p1[1] - cy) / rr), a) + 0.02;
+        const g = brandGeometry([p0[0], p0[1], z0], [p1[0], p1[1], z1], 0.03, R, 0.5);
+        burnt.push(...g.burnt); bark.push(...g.bark); ends.push(...g.ends);
+      }
+      B.geo(mergeGeometries(burnt, false), CHAR, { collide: false, cast: false });
+      B.geo(mergeGeometries(bark, false), BARK, { collide: false, cast: true });
+      B.geo(mergeGeometries(ends, false), END, { collide: false, cast: true });
+    }
+    A.fires.push(ctx.addFire({ id: 'altar.beit-hadeshen.fire', kind: 'pyre', pos: [cx, cy, crown], size: 0.6, intensity: 0, schedule: 'service', smoke: true }));
   }
 }
