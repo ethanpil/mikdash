@@ -51,7 +51,9 @@ uniform sampler2D tN;         // periodic fbm basis: 4 signed channels, 4 base c
 uniform sampler2D tV;          // periodic Voronoi basis, 16 cells per period: F1, border dist, cell hash, F2
 uniform sampler2D tW;          // same with 5 cells per period (large cells)
 uniform highp sampler2D tL;    // masonry lookup: texel (half-quantum, row) = (start m, length m, index, code)
+uniform highp sampler2D tC;    // course table (uCourses > 0): texel (cm, 0) = (row, row start m, row height m, code)
 uniform int uRows;
+uniform int uCourses;
 uniform float uRowH;
 uniform float uDMax;
 uniform float uQ;
@@ -94,20 +96,30 @@ vec4 vT(vec2 p, vec2 c, vec2 o) {
 vec4 vL(vec2 lp, vec2 c, vec2 o) { return texture(tV, lp / (c * 16.0) + o); }
 
 // ---------- masonry blocks ----------
-struct Blk { float x0; float len; float lx; float ly; int row; int k; float code; };
+// h = the course height (uRowH, or the course table's row height)
+struct Blk { float x0; float len; float lx; float ly; int row; int k; float code; float h; };
 Blk blk(vec2 p) {
   Blk b;
   int r = clamp(int(floor(p.y / uRowH)), 0, uRows - 1);
+  float y0 = float(r) * uRowH;
+  float rh = uRowH;
+  if (uCourses > 0) {
+    vec4 c = texelFetch(tC, ivec2(clamp(int(floor(p.y * 100.0)), 0, uCourses - 1), 0), 0);
+    r = int(c.x + 0.5);
+    y0 = c.y;
+    rh = c.z;
+  }
   int w = textureSize(tL, 0).x;
   int i = clamp(int(floor(p.x / (uQ * 0.5))), 0, w - 1);
   vec4 t = texelFetch(tL, ivec2(i, r), 0);
   b.x0 = t.x;
   b.len = t.y;
   b.lx = p.x - t.x;
-  b.ly = p.y - float(r) * uRowH;
+  b.ly = p.y - y0;
   b.row = r;
   b.k = int(t.z + 0.5);
   b.code = t.w;
+  b.h = rh;
   return b;
 }
 vec3 blkHash(Blk b, int salt) { return h3(ivec2(b.row * 64 + b.k, salt)); }
@@ -115,6 +127,7 @@ vec3 blkHash(Blk b, int salt) { return h3(ivec2(b.row * 64 + b.k, salt)); }
 // ---------- shared looks ----------
 float lum(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 float smax(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(a, b, h) + k * h * (1.0 - h); }
+float smin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
 vec2 rot2(vec2 p, float a) { float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
 
 // Marble in meters. local = block-local domain (one stone); otherwise tile-periodic.
@@ -124,44 +137,58 @@ vec4 nM(vec2 q, vec2 f, vec2 o, bool local) { return local ? nL(q, f, o) : nT(q,
 float fM(float f, bool local) { return local ? f : max(1.0, floor(gT.y * f + 0.5)) / gT.y; }
 vec3 marble(vec2 q, bool local, int type, vec3 base, vec3 vein, vec3 alt, out float vm) {
   // all fetches first (type may vary per stone: no texture reads in divergent branches)
+  // domain warp from the SMOOTH channel (3 octaves): a warp with the rough 6-octave channels crinkled every vein
+  // into centimetre squiggles that read as cracks or doodles
   vec4 w = nM(q, vec2(0.5), vec2(0.13, 0.71), local);
-  vec2 wq = q + w.xy * 0.6;
+  float w2 = nM(q, vec2(0.5), vec2(0.57, 0.19), local).z;
+  vec2 wq = q + vec2(w.z, w2) * (local ? vec2(0.8, 0.4) : vec2(0.5, 0.22));
   vec4 c = nM(wq, vec2(1.2), vec2(0.37, 0.11), local);
-  float gate = nM(q, vec2(0.35), vec2(0.71, 0.43), local).z;
-  float n1 = nM(wq, vec2(0.6), vec2(0.61, 0.29), local).z;
-  float n2 = nM(wq + w.zw * 0.15, vec2(1.7), vec2(0.17, 0.53), local).y;
-  float wv = nM(wq, vec2(2.2), vec2(0.27, 0.05), local).x;
+  vec4 cl = nM(q, vec2(0.45), vec2(0.83, 0.27), local);      // large soft clouds of tone
+  float gate = nM(q, vec2(0.3, 0.5), vec2(0.71, 0.43), local).z;
+  // veins: zero sets of noise sampled ANISOTROPICALLY (elongated along u, then warped): long, gently curving veins
+  // that run roughly together, fade in and out, and branch into a finer family — not closed squiggles
+  // (a periodic tile keeps whole cells per axis: ask for more cells across than along so it stays elongated)
+  float n1 = nM(wq, local ? vec2(0.3, 1.25) : vec2(0.3, 2.1), vec2(0.61, 0.29), local).z;
+  float n2 = nM(wq + vec2(w2, w.z) * 0.12, local ? vec2(0.8, 3.2) : vec2(0.7, 5.4), vec2(0.17, 0.53), local).z;   // smooth channel: wavy, not jagged
+  float wv = nM(wq, vec2(1.4, 2.2), vec2(0.27, 0.05), local).z;
   vec4 kb = nM(q, vec2(0.7, 2.0), vec2(0.5, 0.3), local);
   float sn = nM(wq, vec2(0.6, 3.0), vec2(0.21, 0.83), local).z;
   vec4 gr = nM(q, vec2(26.0), vec2(0.43, 0.19), local);     // crystalline grain (all three marbles)
-  float on = smoothstep(-0.2, 0.45, gate);
+  float on = smoothstep(-0.25, 0.35, gate);
   // texel size (m): features narrower than a texel would alias into dashes on the low tiers — widen or fade them
   float tex = max(uTile.x / uRes.x, uTile.y / uRes.y);
-  float grain = 0.035 * gr.w + 0.015 * gr.y;
-  vec3 col = base * (1.0 + 0.04 * c.x + grain)
+  float grain = 0.022 * gr.w + 0.01 * gr.y;
+  // soft clouds of tone (and, here and there, a faint grey veil) — the stone is never a flat plane of colour
+  vec3 col = base * (1.0 + 0.035 * c.x + 0.04 * cl.y + grain - 0.035 * smoothstep(0.2, 0.8, cl.w))
            * mix(vec3(1.0), vec3(1.012, 1.0, 0.982), smoothstep(-0.3, 0.4, c.w));
-  // veins: zero-crossings of warped smooth noise whose width swells and thins along the vein (0.3x..1.7x),
-  // a darker core inside a soft low-contrast halo; shayish faint, marmara with crisp dark hairlines
-  float wmul = 0.3 + 1.4 * smoothstep(-0.6, 0.6, wv);
-  float vw = max((type == 2 ? 0.03 : 0.02) * wmul, tex * 2.0);
+  // a vein: a soft grey core inside a faint halo of FIXED width; the core thins and thickens a little along it
+  // (0.75x..1.15x — a swelling core with a halo scaled with it left dark blobs where veins faded out: "a crack with a
+  // stain"); core and halo fade out together, so a vein ends by dissolving, not in a smudge.
+  // Contrast stays low (natural marble, not ink): the core blends at most ~40 % toward the vein tone (marmara).
+  float wmul = 0.75 + 0.4 * smoothstep(-0.5, 0.5, wv);
+  float vw0 = type == 2 ? 0.03 : 0.022;
+  float vw = max(vw0 * wmul, tex * 2.5);
   float a1 = abs(n1);
   float core = 1.0 - smoothstep(0.0, vw, a1);
-  float halo = 1.0 - smoothstep(0.0, vw * 4.5, a1);
-  float hair = (1.0 - smoothstep(0.0, 0.009, abs(n2))) * smoothstep(0.25, 0.6, 0.0045 / tex);   // ~4.5 mm lines
+  core *= core;
+  float halo = 1.0 - smoothstep(0.0, max(vw0 * 3.2, tex * 6.0), a1);
+  halo *= halo;
+  float fade = smoothstep(-0.45, 0.45, wv + 0.6 * cl.x);       // veins come and go along their length
+  float hair = (1.0 - smoothstep(0.0, max(0.012, tex * 2.0), abs(n2))) * smoothstep(0.2, 0.7, gate) * smoothstep(0.25, 0.6, 0.0045 / tex);
   float vv = type == 2
-    ? clamp((core * 0.75 + halo * 0.22) * (0.45 + 0.55 * on) + hair * 0.4 * on, 0.0, 1.0)
-    : clamp((core * 0.28 + halo * 0.1) * on + hair * 0.04 * on, 0.0, 1.0);
-  // kochla: layered bedding along a warped coordinate, elongated along u (the course): broad soft tonal zones
-  // plus thin, sharper layers that fade in and out along their length; modest contrast; fine dark grains and
-  // sparse pale streaks; the same crystalline grain as the white
-  float ky = q.y + 0.18 * w.x + 0.05 * c.y;
+    ? clamp((core * 0.4 + halo * 0.1) * (0.3 + 0.7 * on) * fade + hair * 0.08, 0.0, 1.0)
+    : clamp((core * 0.13 + halo * 0.04) * on * fade + hair * 0.02, 0.0, 1.0);
+  // kochla: layered bedding along a wavy coordinate, elongated along u (the course): broad soft tonal zones plus
+  // thinner layers that fade in and out along their length, at LOW contrast (a pale blue-green-grey stone whose
+  // layers read like the ripples of water); fine grains and sparse pale layers; the same crystalline grain
+  float ky = q.y + 0.13 * w.z + 0.03 * w.x + 0.04 * c.y;
   float broad = smoothstep(-0.9, 0.9, sin(TAU * ky * fM(1.7, local) + 1.3 * kb.x) + 0.5 * kb.z);
-  float tl = fract(ky * fM(7.3, local) + 0.35 * kb.y);
-  float thin = 0.8 * smoothstep(0.6, 0.88, tl) * (1.0 - smoothstep(0.88, 0.99, tl)) * smoothstep(-0.25, 0.45, kb.z + 0.3 * c.x) * smoothstep(0.5, 1.5, 0.03 / tex);
-  float band = clamp(0.55 * broad + 0.55 * thin, 0.0, 1.0);
-  float speck = smoothstep(0.55, 0.85, gr.y * 0.8 + n2 * 0.35);
-  vec3 kcol = mix(col, alt * (1.0 + grain), band) * (1.0 - 0.1 * speck);
-  float st = smoothstep(0.28, 0.4, tl) * (1.0 - smoothstep(0.4, 0.5, tl)) * smoothstep(0.0, 0.6, kb.w + 0.4 * sn) * 0.25 * smoothstep(0.6, 1.6, 0.016 / tex);   // pale layers along the bedding
+  float tl = fract(ky * fM(6.1, local) + 0.35 * kb.y);
+  float thin = smoothstep(0.55, 0.85, tl) * (1.0 - smoothstep(0.85, 0.99, tl)) * smoothstep(-0.25, 0.45, kb.z + 0.3 * c.x) * smoothstep(0.5, 1.5, 0.03 / tex);
+  float band = clamp(0.5 * broad + 0.35 * thin, 0.0, 1.0);
+  float speck = smoothstep(0.6, 0.9, gr.y * 0.8 + n2 * 0.35);
+  vec3 kcol = mix(col, alt * (1.0 + 0.03 * c.x + grain), band) * (1.0 - 0.05 * speck);
+  float st = smoothstep(0.25, 0.37, tl) * (1.0 - smoothstep(0.37, 0.48, tl)) * smoothstep(0.0, 0.6, kb.w + 0.4 * sn) * 0.3 * smoothstep(0.6, 1.6, 0.016 / tex);   // pale layers along the bedding
   kcol = mix(kcol, vein, st);
   vm = type == 1 ? st : vv;
   return type == 1 ? kcol : mix(col, vein, vv);
@@ -192,6 +219,8 @@ void main() {
 
 // Finish pass: height -> tangent-space normal (Sobel), cavity AO; copies albedo / roughness / metalness.
 // DETAIL variant packs a detail map: (normal.xy, albedo modulation, roughness modulation).
+// PACK2 variant (terrain_blend layers): two maps — (albedo, height 0..1) and (normal.xy, roughness, AO): the blend
+// shader needs each layer's height and fetches only two textures per layer.
 export const FINISH = /* glsl */`
 precision highp float;
 precision highp int;
@@ -199,7 +228,9 @@ in vec2 vUv;
 layout(location = 0) out vec4 o0;
 #ifndef DETAIL
 layout(location = 1) out vec4 o1;
+#ifndef PACK2
 layout(location = 2) out vec4 o2;
+#endif
 #endif
 uniform highp usampler2D tP;
 uniform ivec2 uSize;
@@ -240,6 +271,9 @@ void main() {
   float cav = 1.0 - clamp((avg - mc) / max(uAO.y, 1e-5), 0.0, 1.0) * uAO.z;
 #ifdef DETAIL
   o0 = vec4(n.xy * 0.5 + 0.5, A.r, R.g);
+#elif defined(PACK2)
+  o0 = vec4(A.rgb, clamp(mc / uHRange * 0.5 + 0.5, 0.0, 1.0));
+  o1 = vec4(n.xy * 0.5 + 0.5, R.g, R.r * cav);
 #else
   o0 = A;
   o1 = vec4(n.xy * 0.5 + 0.5, 0.0, 1.0);

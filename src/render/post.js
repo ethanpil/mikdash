@@ -15,10 +15,11 @@ import { sunDir, sunAltitude, envDirLights } from './env-link.js';
 
 // Thresholds are DISPLAY-relative (divided by the tone-mapping exposure each frame); the prefilter keeps only
 // the energy above the threshold (soft knee), clamped to `clamp` × threshold.
+// spark: the clamp of an isolated sub-3-px highlight (render-env-2), × threshold
 const BLOOM = {
-  medium: { intensity: 0.75, radius: 0.62, levels: 6, threshold: 1.3, knee: 0.6, clamp: 4 },
-  high: { intensity: 0.8, radius: 0.7, levels: 7, threshold: 1.3, knee: 0.6, clamp: 4 },
-  ultra: { intensity: 0.85, radius: 0.75, levels: 8, threshold: 1.3, knee: 0.6, clamp: 4 },
+  medium: { intensity: 0.75, radius: 0.62, levels: 6, threshold: 1.3, knee: 0.6, clamp: 4, spark: 120 },
+  high: { intensity: 0.8, radius: 0.7, levels: 7, threshold: 1.3, knee: 0.6, clamp: 4, spark: 120 },
+  ultra: { intensity: 0.85, radius: 0.75, levels: 8, threshold: 1.3, knee: 0.6, clamp: 4, spark: 120 },
 };
 const DISC_DEG = 0.6;    // key-light glint radius fed to bloom (the solar disc is 0.27°)
 // sun shafts: added in-scatter at the sun direction (display-relative, × key-light colour), two phase lobes
@@ -124,7 +125,7 @@ export function buildPost(ctx, fx, quality, toneMapper) {
         if (env.keyDir?.isVector3) _sun.copy(env.keyDir); else sunDir(ctx, _sun); // sun by day, moon by night
         screenUv(camera, _sun, _disc);
         const t = bp.threshold / ex;
-        out.bloom.setPrefilter(t, bp.knee * t, bp.clamp * t, _disc, Math.tan(DISC_DEG * DEG) / (2 * tanHalf), aspect);
+        out.bloom.setPrefilter(t, bp.knee * t, bp.clamp * t, _disc, Math.tan(DISC_DEG * DEG) / (2 * tanHalf), aspect, bp.spark * t);
       }
       if (out.shafts) updateShafts(ctx, out, ex);
       const wb = ctx.env?.whiteBalance;

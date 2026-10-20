@@ -21,7 +21,7 @@
 import {
   WebGLRenderTarget, WebGLCubeRenderTarget, CubeCamera, HalfFloatType, FloatType, LinearFilter, RGBAFormat,
   LinearSRGBColorSpace, CubeUVReflectionMapping, ShaderMaterial, Mesh, PlaneGeometry, Scene, OrthographicCamera,
-  Vector2, Vector3, NoBlending,
+  Vector2, Vector3, NoBlending, DataUtils,
 } from 'three';
 import { m2w } from '../core/units.js';
 import { MK_LIMITS } from './interiors-glsl.js';
@@ -40,12 +40,14 @@ const MIN_REFRESH_FAST = 0.3; // … in a time-lapse (|speed| > 20), where 1.5 s
 const INTERIOR_PASSES = { medium: 2, high: 3, ultra: 3 }; // sync capture bounces of an interior (gold) probe
 const LOG_EPS = 1e-4;      // cd/m²: the darkest luminance the log-average meter counts
 const GAIN_TARGET = 0.5;   // scene units: a capture's mean is brought up to about this (captureGain)
+const CLAMP_MEAN = 24;     // a skylit probe's texels are clamped to this × its capture's expected mean (captureClamp)
 
 const COPY_VS = 'void main() { gl_Position = vec4( position.xy, 0.0, 1.0 ); }';
 // luminance of a captured cube (what the eye sees from the probe point): a 72 × 12 target, one fragment per
 // cell of a 12 × 12 grid on each face, 4 × 4 samples each, weighted by texel solid angle; summed on the CPU.
 // r = Σ w·ln(L + ε) (the log-average the eye adapts to: a sunlit doorway behind the viewer must not set the
-// exposure of a dim room — lighting-polish-fix), g = Σ w·L (the arithmetic mean), a = Σ w
+// exposure of a dim room — lighting-polish-fix), g, b, a = Σ w·(R, G, B) (the mean colour: the room's light, to which
+// the eye adapts chromatically — render-env-2); Σ w is a constant of the grid (sampleWeights)
 const MEAN_W = 72, MEAN_H = 12;
 const MEAN_FS = /* glsl */`
 uniform samplerCube cube;
@@ -53,22 +55,34 @@ uniform float eps;
 void main() {
   int f = int( gl_FragCoord.x ) / 12;
   vec2 cell = vec2( float( int( gl_FragCoord.x ) - f * 12 ), floor( gl_FragCoord.y ) );
-  float slog = 0.0, slin = 0.0;
-  float wsum = 0.0;
+  float slog = 0.0;
+  vec3 slin = vec3( 0.0 );
   for ( int j = 0; j < 4; j ++ ) {
     for ( int i = 0; i < 4; i ++ ) {
       vec2 q = ( cell + ( vec2( float( i ), float( j ) ) + 0.5 ) / 4.0 ) / 12.0 * 2.0 - 1.0;
       vec3 d = f == 0 ? vec3( 1.0, q.y, - q.x ) : f == 1 ? vec3( - 1.0, q.y, q.x ) : f == 2 ? vec3( q.x, 1.0, - q.y )
         : f == 3 ? vec3( q.x, - 1.0, q.y ) : f == 4 ? vec3( q.x, q.y, 1.0 ) : vec3( - q.x, q.y, - 1.0 );
       float w = pow( 1.0 + dot( q, q ), - 1.5 ); // texel solid angle ∝ (1 + u² + v²)^-3/2
-      float l = max( dot( textureLod( cube, d, 0.0 ).rgb, vec3( 0.2126, 0.7152, 0.0722 ) ), 0.0 );
-      slog += log( l + eps ) * w;
-      slin += l * w;
-      wsum += w;
+      vec3 c = max( textureLod( cube, d, 0.0 ).rgb, vec3( 0.0 ) );
+      slog += log( dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) + eps ) * w;
+      slin += c * w;
     }
   }
-  gl_FragColor = vec4( slog, slin, 0.0, wsum );
+  gl_FragColor = vec4( slog, slin );
 }`;
+/** Σ w of MEAN_FS per output cell (the same solid-angle weights, a constant of the grid) */
+const sampleWeights = (() => {
+  const W = new Float64Array(12 * 12);
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) {
+    let s = 0;
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) {
+      const u = ((x + (i + 0.5) / 4) / 12) * 2 - 1, v = ((y + (j + 0.5) / 4) / 12) * 2 - 1;
+      s += (1 + u * u + v * v) ** -1.5;
+    }
+    W[y * 12 + x] = s;
+  }
+  return W;
+})();
 const COPY_FS = /* glsl */`
 uniform sampler2D src;
 uniform vec2 offset;
@@ -136,10 +150,12 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
         if (serial !== p.measureSerial) return;
         const v = (i) => (floatRead ? meanBuf[i] : half(meanBuf[i]));
         // per world direction (faces ±X ±Y ±Z of the sampling in MEAN_FS) and over the whole sphere
-        const fLog = [0, 0, 0, 0, 0, 0], fLin = [0, 0, 0, 0, 0, 0], fW = [0, 0, 0, 0, 0, 0];
+        const fLog = [0, 0, 0, 0, 0, 0], fLin = [0, 0, 0, 0, 0, 0], fW = [0, 0, 0, 0, 0, 0], rgb = [0, 0, 0];
         for (let y = 0; y < MEAN_H; y++) for (let x = 0; x < MEAN_W; x++) {
           const i = y * MEAN_W + x, f = Math.floor(x / 12);
-          fLog[f] += v(i * 4); fLin[f] += v(i * 4 + 1); fW[f] += v(i * 4 + 3);
+          const r = v(i * 4 + 1), g = v(i * 4 + 2), b = v(i * 4 + 3);
+          fLog[f] += v(i * 4); fLin[f] += 0.2126 * r + 0.7152 * g + 0.0722 * b; fW[f] += sampleWeights[y * 12 + (x % 12)];
+          rgb[0] += r; rgb[1] += g; rgb[2] += b;
         }
         const sum = (a) => a.reduce((s, x) => s + x, 0);
         const ws = sum(fW), lnP = Math.log(Pm);
@@ -149,6 +165,9 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
           p.meanLog = G - lnP;
           p.meanFace = fLin.map((l, f) => Math.max(fW[f] > 0 ? l / fW[f] : L, 0) / Pm);
           p.faceLog = fLog.map((l, f) => (fW[f] > 0 ? l / fW[f] : G) - lnP);
+          // the mean colour, normalised to luminance 1 (the light the eye adapts to in the room)
+          const lum = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+          p.meanColor = lum > 0 ? rgb.map((c) => c / lum) : [1, 1, 1];
           onLand?.();
         }
       })
@@ -189,14 +208,21 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     const a = m2w(...d.min), b = m2w(...d.max), pa = m2w(...d.proxyMin), pb = m2w(...d.proxyMax);
     const box = (u, v) => ({ min: new Vector3(Math.min(u.x, v.x), Math.min(u.y, v.y), Math.min(u.z, v.z)), max: new Vector3(Math.max(u.x, v.x), Math.max(u.y, v.y), Math.max(u.z, v.z)) });
     return {
-      ...d, slice: i + 1, rt, cam, world: cam.position.clone(), infl: box(a, b), proxy: box(pa, pb),
+      ...d, slice: i + 1, rt, cam, world: cam.position.clone(), infl: box(a, b), proxy: box(pa, pb), metered: !d.outdoor && !d.skylit,
       Pcap: 0, Ecap: 1, Egcap: 0, valid: false, face: -1, mode: null, pass: 0, meanL: 0, measureSerial: 0, doneAt: -1e9,
       sunAt: new Vector3(0, -2, 0), keyMoon: null, fireSig: -1, doorSig: -1,
     };
   });
 
-  const A = new Float32Array(MK_LIMITS.probe * 4), B = new Float32Array(MK_LIMITS.probe * 4), C = new Float32Array(MK_LIMITS.probe * 4);
-  const D = new Float32Array(MK_LIMITS.probe * 4), E = new Float32Array(MK_LIMITS.probe * 4), F = new Float32Array(MK_LIMITS.probe * 4);
+  // packed for the shader (render-env-2): H = the influence box grown by its margin in centimetres from the interior
+  // patch's origin + half2( shell, margin ); C = capture position + intensity; D = proxy min + weight; E = proxy max +
+  // atlas slice (+ 8 for an outdoor probe). A fragment outside a probe's box reads one uvec4 for it.
+  const PH = new Uint32Array(MK_LIMITS.probe * 4), C = new Float32Array(MK_LIMITS.probe * 4);
+  const D = new Float32Array(MK_LIMITS.probe * 4), E = new Float32Array(MK_LIMITS.probe * 4);
+  const O = interiors.origin || { x: 0, y: 0, z: 0 };
+  const cmDown = (v) => Math.max(0, Math.min(65535, Math.floor(v * 100)));
+  const cmUp = (v) => Math.max(0, Math.min(65535, Math.ceil(v * 100)));
+  const halfBits = (v) => DataUtils.toHalfFloat(v);
   /**
    * Light reaching a probe's point (physical lux): the outdoor global illuminance through its room's openings, plus
    * (interior probes) the fires that see it. A probe is replayed × P_now/P_cap × E_now/E_cap, like env's sky map
@@ -205,15 +231,24 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
    * light is the same anywhere in their influence box, and a fire's is not (lighting-polish-fix).
    */
   const _ins = { V: 1, vol: null, s: 0 };
-  function lightLevel(p) {
+  const fireAdapt = () => { const a = Number(ctx.fx?.fireAdaptation); return Number.isFinite(a) && a > 0 ? Math.min(a, 1) : 1; };
+  /**
+   * opts.split: { sky, fire } instead of the sum. A skylit probe's fires (open-air fires lighting a porch, render-env-2-fix)
+   * count as the viewer sees them: × fx's local adaptation to firelight (env's exposure leaves fires out)
+   */
+  function lightLevel(p, adapted = true) {
     const env = ctx.env;
     const Eg = env?.globalIlluminance || 0;
     const V = interiors.at(p.world, _ins).V;
     let Ef = 0;
     if (!p.outdoor) { try { Ef = ctx.fx?.illuminanceAt?.(p.world) || 0; } catch { Ef = 0; } }
+    if (p.skylit && adapted) Ef *= fireAdapt();
     return Math.max(V * Eg + Ef, 1e-9);
   }
-  /** the probe's light now / at its capture (its replay gain) */
+  /**
+   * the probe's light now / at its capture (its replay gain). A skylit probe's fire share follows fx's adaptation
+   * (already in lightLevel), its sky share env's exposure (the P ratio in writeUniforms)
+   */
   const lightRatio = (p) => Math.min(Math.max(lightLevel(p) / p.Ecap, 1e-3), 1e3);
 
   /** outdoor light now vs at capture, as |ln| of the ratio (a probe's sky content follows this) */
@@ -223,7 +258,8 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
    * probes by the sky, interior ones by their whole light (sky through the openings and the room's fires)
    */
   const staleness = (p) => {
-    const d = p.outdoor ? skyDrift(p) : Math.abs(Math.log(lightRatio(p)));
+    // a skylit probe: the light's physical change (the viewer's adaptation to its fires only rescales it)
+    const d = p.outdoor ? skyDrift(p) : p.skylit ? Math.abs(Math.log(Math.max(lightLevel(p, false), 1e-9) / Math.max(p.EcapPhys || 1e-9, 1e-9))) : Math.abs(Math.log(lightRatio(p)));
     const t = (d - Math.log(3)) / (Math.log(10) - Math.log(3));
     return 1 - Math.min(Math.max(t, 0), 1);
   };
@@ -235,27 +271,30 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     const P = ctx.env?.preExposure || 1;
     // interior probes first: their weight is taken before the outdoor probes and the sky
     const order = [...probes].sort((p, q) => Number(p.outdoor) - Number(q.outdoor));
-    A.fill(0); B.fill(0); C.fill(0); D.fill(0); E.fill(0); F.fill(0);
+    PH.fill(0); C.fill(0); D.fill(0); E.fill(0);
     order.forEach((p, k) => {
       let sc = p.valid && p.Pcap > 0 && !wantSync ? (P / p.Pcap) * lightRatio(p) : 0;
       if (p === self) sc *= selfScale;
-      F[k * 4] = p === self ? 1 : staleness(p);
-      // influence box grown by its margin (the shader's rejection test reads these two only)
       const m = p.margin;
-      A.set([p.infl.min.x - m, p.infl.min.y - m, p.infl.min.z - m, p.slice], k * 4);
-      B.set([p.infl.max.x + m, p.infl.max.y + m, p.infl.max.z + m, p.shell], k * 4);
+      const lo = [p.infl.min.x - m - O.x, p.infl.min.y - m - O.y, p.infl.min.z - m - O.z].map(cmDown);
+      const hi = [p.infl.max.x + m - O.x, p.infl.max.y + m - O.y, p.infl.max.z + m - O.z].map(cmUp);
+      PH.set([(lo[0] | (lo[1] << 16)) >>> 0, (lo[2] | (hi[0] << 16)) >>> 0, (hi[1] | (hi[2] << 16)) >>> 0, (halfBits(p.shell) | (halfBits(m) << 16)) >>> 0], k * 4);
       C.set([p.world.x, p.world.y, p.world.z, sc], k * 4);
-      D.set([p.proxy.min.x, p.proxy.min.y, p.proxy.min.z, p.outdoor ? 1 : 0], k * 4);
-      E.set([p.proxy.max.x, p.proxy.max.y, p.proxy.max.z, p.margin], k * 4);
+      D.set([p.proxy.min.x, p.proxy.min.y, p.proxy.min.z, p === self ? 1 : staleness(p)], k * 4);
+      // fraction: the sky visibility at a skylit interior probe (its irradiance is scaled by V here / V there)
+      const vRef = p.skylit ? Math.min(Math.max(interiors.at(p.world, _ins).V, 0.01), 0.99) : 0;
+      E.set([p.proxy.max.x, p.proxy.max.y, p.proxy.max.z, p.slice + (p.outdoor ? 8 : 0) + vRef], k * 4);
     });
-    interiors.setProbes(A, B, C, D, E, F, order.length);
+    interiors.setProbes(PH, C, D, E, order.length, order.filter((p) => !p.outdoor).length);
   }
 
   // ------------------------------------------------------------------ change detection
   const _v = new Vector3();
   function fireSignature(p) {
     const fx = ctx.fx;
-    if (!fx?.fires || p.outdoor) return 0; // outdoor probes are captured without fire light
+    // outdoor probes are captured without fire light; a skylit porch's fires are the court's (outside its box), whose
+    // changes its replay gain follows (lightLevel)
+    if (!fx?.fires || p.outdoor || p.skylit) return 0;
     let s = 0;
     for (const f of fx.fires.values()) {
       const q = f.pos;
@@ -294,8 +333,8 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
   function invalidate() {
     for (const p of probes) {
       p.mode = null;
-      if (p.outdoor) continue;
-      p.meanL = 0; p.meanLog = null; p.faceLog = null; p.meanFace = null; p.measureSerial++;
+      if (!p.metered) continue;
+      p.meanL = 0; p.meanLog = null; p.faceLog = null; p.meanFace = null; p.meanColor = null; p.measureSerial++;
       p.meterUntil = clock + 5; // until the capture (then METER_WAIT); a safety cap if it never comes
     }
     queue.length = 0;
@@ -375,11 +414,13 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
       // and a fire's light is not the same everywhere — the court probe beside the altar lit every surface of the
       // night court (and every chamber through its door) like the faces next to the pyres (lighting-polish-fix).
       // The fires light the court through their real point lights (and their GGX highlights).
+      // render-env-2-fix: a skylit porch (the Ulam) is captured WITH the fires' light (its gold gate leaves must mirror
+      // the firelit altar and court at night, not the moonlit sky), its hot texels clamped (captureClamp)
       const saved = (lights || []).map((l) => l.intensity);
       for (const l of lights || []) l.intensity = 0;
       restoreLights = () => lights.forEach((l, i) => { l.intensity = saved[i]; });
-    } else if (fx?.lightsFor) restoreLights = fx.lightsFor(p.world);
-    const prev = interiors.beginCapture(p.world, lights, { fires: !p.outdoor, gain: p.capGain });
+    } else if (fx?.lightsFor) restoreLights = fx.lightsFor(p.world, { adapted: !!p.skylit });
+    const prev = interiors.beginCapture(p.world, lights, { fires: !p.outdoor && !p.skylit, gain: p.capGain, clamp: p.skylit ? captureClamp(p) : 0 });
     writeUniforms(p, selfScale);
     interiors.apply();
     const people = ctx.people?.root;
@@ -446,11 +487,23 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     return Math.min(Math.max(GAIN_TARGET / Math.max(lightLevel(p) * 0.15 * P, 1e-12), 1), 1e4);
   }
 
+  /**
+   * The brightest a skylit probe's texel may be (scene units after the capture gain): CLAMP_MEAN × the capture's expected
+   * mean (its light level × a mean reflectance × P × gain). The altar top lit from a metre by the great pile (a point
+   * light, far brighter than a 2 m fire is that close) and the flames' highlights on gold were 10–700 × a face's mean;
+   * the probe's irradiance spread them over the porch, which went white (render-env-2). By day nothing in the porch's
+   * view (the sun disc is never captured) reaches the clamp.
+   */
+  function captureClamp(p) {
+    const P = ctx.env?.preExposure || 1;
+    return CLAMP_MEAN * lightLevel(p) * 0.15 * P * (p.capGain || 1);
+  }
+
   function finish(p, measureMode = 'async', defer = false) {
     const t0 = performance.now();
-    const Ecap = lightLevel(p), Egcap = ctx.env?.globalIlluminance || 0, Pcap = (ctx.env?.preExposure || 1) * (p.capGain || 1);
-    const apply = (tex) => { copyInto(p.slice, tex); p.Ecap = Ecap; p.Egcap = Egcap; p.Pcap = Pcap; p.valid = true; };
-    if (defer && measureMode && !p.outdoor && p.valid) {
+    const Ecap = lightLevel(p), EcapPhys = lightLevel(p, false), Egcap = ctx.env?.globalIlluminance || 0, Pcap = (ctx.env?.preExposure || 1) * (p.capGain || 1);
+    const apply = (tex) => { copyInto(p.slice, tex); p.Ecap = Ecap; p.EcapPhys = EcapPhys; p.Egcap = Egcap; p.Pcap = Pcap; p.valid = true; };
+    if (defer && measureMode && p.metered && p.valid) {
       // amortised refresh of a metered room: the previous capture stays in the atlas until this one's measurement
       // lands, so the room's light and the eye's adaptation to it change in the same frame — swapping the light
       // first flashed the room for the frames the read-back took (600× time-lapse, lighting-polish-fix)
@@ -462,20 +515,20 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     }
     prof('pmrem', () => { scratch = pmrem.fromCubemap(p.rt.texture, scratch); });
     prof('copy', () => apply(scratch.texture));
-    if (!p.outdoor && measureMode) prof('measure', () => measure(p, null, Pcap));
+    if (p.metered && measureMode) prof('measure', () => measure(p, null, Pcap));
     stats.pmremMs = performance.now() - t0;
   }
 
   function captureSync(p) {
     // pass 1 without the probe's previous self (it may be from another time of day), passes 2–3 see the pass
     // before: the gold room's first interreflections (later amortised refreshes keep converging)
-    const passes = p.outdoor ? 1 : INTERIOR_PASSES[tierKey] || 2;
+    const passes = p.outdoor || p.skylit ? 1 : INTERIOR_PASSES[tierKey] || 2; // a skylit porch: its own bounce is minor
     p.capGain = captureGain(p);
     for (let k = 0; k < passes; k++) {
       prof('faces', () => renderFaces(p, 0, 6, k === 0 ? 0 : SELF_FEEDBACK));
       finish(p, k === passes - 1 ? 'last' : null);
     }
-    if (!p.outdoor) p.meterUntil = clock + METER_WAIT;
+    if (p.metered) p.meterUntil = clock + METER_WAIT;
     stamp(p);
   }
 
@@ -497,14 +550,16 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
         // interiors (the Kodesh sees the court through its door)
         for (const p of probes) { p.valid = false; p.mode = null; }
         const order = [...probes].sort((p, q) => Number(q.outdoor) - Number(p.outdoor));
-        for (const p of order) { captureSync(p); stats.captures++; stats.faces += p.outdoor ? 6 : 18; }
+        for (const p of order) { captureSync(p); stats.captures++; stats.faces += p.outdoor || p.skylit ? 6 : 18; }
       }
     } else {
       schedule(dt);
       const p = queue[0];
       if (p) {
         if (p.face === 0) p.capGain = captureGain(p); // one gain for all six faces of the refresh
-        if (p.face < 6) { renderFaces(p, p.face, p.face + 1, SELF_FEEDBACK); p.face++; stats.faces++; } else {
+        // a skylit porch never sees its previous self (as in its one-pass sync capture): its irradiance is scaled up
+        // toward the opening (V / V at the probe, ≤ 1.5), so 0.9 × that × a pale wall's albedo can pass 1 (render-env-2)
+        if (p.face < 6) { renderFaces(p, p.face, p.face + 1, p.skylit ? 0 : SELF_FEEDBACK); p.face++; stats.faces++; } else {
           finish(p, 'async', true); stamp(p); p.mode = null; queue.shift(); stats.captures++;
         }
       }
@@ -520,7 +575,7 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     probes,
     stats,
     /** the valid interior probe of a room (interiors volume) with a measured luminance (env's meter), or null */
-    roomProbe(vol) { return (vol && probes.find((p) => p.valid && !p.outdoor && p.id === vol.probe && p.meanL > 0 && !wantSync)) || null; },
+    roomProbe(vol) { return (vol && probes.find((p) => p.valid && p.metered && p.id === vol.probe && p.meanL > 0 && !wantSync)) || null; },
     /**
      * What the eye adapts to in probe p's room looking along world direction `dir` (cd/m²): log-averages — the
      * whole sphere's and a view-weighted one (centre-weighted metering) — averaged in log, × the room's light now /
@@ -540,7 +595,7 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     /** true while a room's post-jump capture or its measurement is outstanding (env holds its exposure snap) */
     meterPending(vol) {
       if (!vol?.probe) return false;
-      return probes.some((p) => !p.outdoor && p.id === vol.probe && !(p.meanL > 0) && clock < (p.meterUntil || 0));
+      return probes.some((p) => p.metered && p.id === vol.probe && !(p.meanL > 0) && clock < (p.meterUntil || 0));
     },
     /** how much the probe `id` stands for its room now (0 none … 1): rooms fall back to their fire fill below 1 */
     coverage(id) { const p = probes.find((q) => q.id === id); return p ? coverage(p) : 0; },
@@ -553,8 +608,8 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     capture() { requestSync(); },
     dispose() {
       // no probe slots in the shader any more (a switch to low: scene.environment is the plain sky PMREM again)
-      A.fill(0); B.fill(0); C.fill(0); D.fill(0); E.fill(0); F.fill(0);
-      interiors.setProbes(A, B, C, D, E, F, 0);
+      PH.fill(0); C.fill(0); D.fill(0); E.fill(0);
+      interiors.setProbes(PH, C, D, E, 0);
       atlas.dispose(); scratch?.dispose(); copyMat.dispose(); quad.geometry.dispose();
       meanMat.dispose(); meanRT.dispose();
       for (const p of probes) { p.rt.dispose(); p.pend?.dispose(); }

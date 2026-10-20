@@ -32,7 +32,7 @@ export function defineVolumes(ctx) {
     // courses: without this the Kodesh coffers sat outside the room and mirrored daylight into the gold
     if (o.ceilingTop != null) max[2] = Math.max(max[2], o.ceilingTop);
     else if ((o.shell ?? SHELL_WALLS) <= SHELL_ZONE) max[2] += 1;
-    const v = { id, min: [...b.min], max, base: o.base ?? CLOSED_ROOM, margin: o.margin ?? 0.3, shell: o.shell ?? SHELL_WALLS, apertures: o.apertures || [], probe: o.probe || null };
+    const v = { id, min: [...b.min], max, base: o.base ?? CLOSED_ROOM, margin: o.margin ?? 0.3, shell: o.shell ?? SHELL_WALLS, apertures: o.apertures || [], probe: o.probe || null, gold: !!o.gold };
     vols.push(v);
     return v;
   };
@@ -74,7 +74,7 @@ export function defineVolumes(ctx) {
     // curtain in the gate (Middot 4:1, Yoma 54a) gate the light
     const gateOpen = () => door('heichal.gate.great')() * curtain('heichal.gate-curtain')();
     add('heichal.kodesh', kod, {
-      base: 0.004, margin: 0.3, shell: SHELL_ZONE, probe: 'kodesh', ceilingTop: kiyurTop,
+      base: 0.004, margin: 0.3, shell: SHELL_ZONE, probe: 'kodesh', ceilingTop: kiyurTop, gold: true,
       apertures: ap([
         face(kod, 0, +1, gate, gateOpen, 0.45),
         // F1: narrow inside, splayed outward, high in the N and S walls above the ta'im roofs (Part VII §22)
@@ -90,13 +90,24 @@ export function defineVolumes(ctx) {
   }
   const khk = box('heichal.khk'), trk = box('heichal.amah-traksin');
   if (khk) {
-    const b = trk ? { min: [Math.min(khk.min[0], trk.min[0]), khk.min[1], khk.min[2]], max: [Math.max(khk.max[0], trk.max[0]), khk.max[1], khk.max[2]] } : khk;
-    add('heichal.khk', b, { base: 0.0015, shell: SHELL_ZONE, ceilingTop: kiyurTop }); // "a dark chamber" behind the two parochot
+    let b = trk ? { min: [Math.min(khk.min[0], trk.min[0]), khk.min[1], khk.min[2]], max: [Math.max(khk.max[0], trk.max[0]), khk.max[1], khk.max[2]] } : khk;
+    // render-env-2: grown through its west wall to the wall's outer face, where the lul (a 4-tefach slot behind the
+    // Kaporet, closed by a small curtain hung just inside the KhK face) passes: the curtain's back faces and the slot's
+    // jambs sat within the shell of the old west face and lit as open sky — the bright dotted edge of the lul curtain.
+    // The slot itself is no aperture: it runs 17 amot to the open air and is curtained (it shows no sky).
+    const wW = box('heichal.wall.west');
+    if (wW && box('heichal.lul-west')) b = grow(b, 0, -1, wW.min[0]);
+    // "a dark chamber" behind the two parochot; gold-plated like the Kodesh (interreflection fill, interiors-glsl.js)
+    add('heichal.khk', b, { base: 0.0015, shell: SHELL_ZONE, ceilingTop: kiyurTop, gold: true });
   }
   const ulam = box('heichal.ulam');
   if (ulam) {
-    // the Ulam had no doors (Middot 3:7): a deep porch open 20 × 40 to the east
-    add('heichal.ulam', ulam, { base: 0.02, shell: SHELL_ZONE, apertures: ap([face(ulam, 0, +1, box('heichal.ulam.opening'), curtain('heichal.ulam-curtain', 0.25), 1)]) });
+    // the Ulam had no doors (Middot 3:7): a deep porch open 20 × 40 to the east. render-env-2: its box is grown
+    // into the end walls of the two wings by the depth of the knife niches of the beit hachalifot (¾ amah, the
+    // builder's ⚙ depth, more than the 0.3 m margin), so the niches count as inside — they glowed as open sky
+    const NICHE_DEPTH = 0.75 + 0.05;
+    const ub = grow(grow(ulam, 1, -1, ulam.min[1] - NICHE_DEPTH), 1, +1, ulam.max[1] + NICHE_DEPTH);
+    add('heichal.ulam', ub, { base: 0.02, shell: SHELL_ZONE, probe: 'ulam', apertures: ap([face(ulam, 0, +1, box('heichal.ulam.opening'), curtain('heichal.ulam-curtain', 0.25), 1)]) });
   }
   const ali = box('heichal.aliyah');
   if (ali) add('heichal.aliyah', ali, { base: 0.004, shell: SHELL_ZONE, apertures: ap([face(ali, 1, -1, box('heichal.aliyah.door'), door('heichal.aliyah.door'), 0.7)]) });
@@ -217,6 +228,36 @@ export function defineVolumes(ctx) {
   return vols;
 }
 
+/**
+ * Fire occluders (render-env-2): the big open-air fires' light must not pass through masonry where no shadow map
+ * stops it (low, medium, and the plain light slots of high / ultra). Two cheap analytic shapes, site-derived:
+ *   enclosure — a court open to the sky, its walls rising to `tops` (Z per face: [X min, X max, Y min, Y max]): a fire
+ *               inside lights nothing outside it below the wall tops (the Azarah, Ezrat Nashim);
+ *   plate     — the top of the solid the fire stands on (the altar's upper body): a fire on it lights nothing whose
+ *               ray from the flames passes down through that top (the yesod, the pavement close round the altar).
+ * Gate openings are ignored: at night, when firelight matters, the gates are shut (Tamid 1:1–2, Middot 1:1).
+ * Returns site-frame rects { id, rect: [X0, Y0, X1, Y1], tops | top }.
+ * render-env-2-fix: an enclosure's rect is the walls' OUTER faces. With the inner faces every court-facing wall
+ * fragment lay exactly on the boundary, where sub-millimetre position noise flipped the inside test and the ray's
+ * crossing parameter t → 1 made the over-the-top term explode: black-dot noise and vertical stripes on the firelit
+ * walls. Outer faces put the inner faces, the coping and the jambs inside; the outer faces face away from the fire.
+ */
+export function defineFireOccluders(ctx) {
+  const box = (id) => ctx.elOpt(id)?.box || null;
+  const enclosures = [];
+  const court = (id, w, e, s, n) => {
+    const W = box(w), E = box(e), S = box(s), N = box(n);
+    if (!W || !E || !S || !N) return;
+    enclosures.push({ id, rect: [W.min[0], S.min[1], E.max[0], N.max[1]], tops: [W.max[2], E.max[2], S.max[2], N.max[2]] });
+  };
+  court('azarah', 'azarah.wall.west', 'azarah.wall.east', 'azarah.wall.south', 'azarah.wall.north');
+  court('ezrat-nashim', 'azarah.wall.east', 'en.wall.east', 'en.wall.south', 'en.wall.north');
+  const plates = [];
+  const top = box('altar.top');
+  if (top) plates.push({ id: 'altar.top', rect: [top.min[0], top.min[1], top.max[0], top.max[1]], top: top.max[2] });
+  return { enclosures, plates };
+}
+
 // world groups a probe skips: from eye level inside the 40-amah court walls (or the Kodesh) the terrain and the
 // Mount's own walls / stoas show only through gate openings — ⅔ of the world's triangles, and every cube face
 // redraws whatever it does not skip
@@ -256,6 +297,22 @@ export function defineProbes(ctx) {
       pos: [(kod.min[0] + kod.max[0]) / 2, (kod.min[1] + kod.max[1]) / 2, kod.min[2] + eye],
       min: [...kod.min], max: [kod.max[0], kod.max[1], Math.max(kod.max[2], box('heichal.ceiling.kiyur')?.max[2] ?? kod.max[2] + 1)], margin: 0.3, shell: SHELL_ZONE,
       proxyMin: [...kod.min], proxyMax: [...kod.max],
+    });
+  }
+  // render-env-2: the Ulam, a deep porch open to the court: its gold gate leaves, the vine and the nivreshet on the
+  // back wall mirrored the open sky (teal cast) where they should mirror the porch itself — its whitewashed marble
+  // walls and floor, the court through the 20 × 40 opening. An interior probe (it sees the porch as lit), on the axis
+  // at mid-depth, level with the gate's head (the vine and the nivreshet hang above it); proxy = the porch's box.
+  const ul = box('heichal.ulam'), gate = box('heichal.gate.great');
+  if (ul) {
+    const z = gate ? Math.min(gate.max[2] - 2, ul.max[2] - 4) : ul.min[2] + eye;
+    out.push({
+      // skylit: lit through its opening, not by its own lamps — its irradiance follows the sky visibility (the wings are
+      // dim), and env meters the porch from its openings (interiors-glsl.js, env/index.js)
+      id: 'ulam', tiers: ['medium', 'high', 'ultra'], outdoor: false, skylit: true, far: 400, hide: HIDE_BEYOND_WALLS,
+      pos: [(ul.min[0] + ul.max[0]) / 2, ctx.site?.axisY ?? (ul.min[1] + ul.max[1]) / 2, z],
+      min: [ul.min[0], ul.min[1] - 0.8, ul.min[2]], max: [ul.max[0], ul.max[1] + 0.8, ul.max[2] + 1], margin: 0.3, shell: SHELL_ZONE,
+      proxyMin: [ul.min[0], ul.min[1], ul.min[2]], proxyMax: [ul.max[0], ul.max[1], ul.max[2]],
     });
   }
   const en = box('en.floor'), eW = box('azarah.wall.east'), eE = box('en.wall.east'), eS = box('en.wall.south'), eN = box('en.wall.north');

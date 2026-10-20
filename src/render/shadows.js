@@ -4,7 +4,7 @@
 // for the duration of the draw ("borrow"), then restore its visibility. env's own shadow (castShadow) is switched
 // off while we own the shadows and restored on dispose (tier change).
 // See docs/decisions/render.md for why this replaces examples/jsm/csm/CSM.js.
-import { Matrix4, Vector3, WebGPUCoordinateSystem } from 'three';
+import { Matrix4, Vector3, WebGPUCoordinateSystem, ShaderChunk, Object3D, BackSide, DoubleSide } from 'three';
 import { SunLight } from 'three/addons/lights/SunLight.js';
 import { SunLightShadow } from 'three/addons/lights/SunLightShadow.js';
 import { envDirLights, lightDir } from './env-link.js';
@@ -20,17 +20,76 @@ const _corners = Array.from({ length: 8 }, () => new Vector3());
 const _dir = new Vector3();
 
 /**
+ * render-env-2: sun / moon shadows with the casters' FRONT faces as well (double-sided depth), a slope-scaled normal
+ * offset, and a normal bias per cascade.
+ *
+ * three draws a FrontSide material into the shadow map by its back faces. That avoids self-shadowing acne, but where a
+ * caster meets a receiver (the sovev slab's underside on the kevesh's face, the ⅙-amah proud milah lintels, a curtain
+ * against its jamb, two walls in a corner) the caster's back face lies ON the receiver, and the PCF taps that fall just
+ * beyond the contact read the receiver's own far side as "lit": a saw-toothed lit band under every contact edge (it
+ * did not change with the depth or normal bias). With front faces drawn too, the contact compares against the
+ * caster's far side and the band is gone; the lit surfaces now compare against their own depth, so the receiver is
+ * offset along its normal by the bias × (1 + tan θ, ≤ 4) (θ = the light's angle of incidence; the depth error across a
+ * texel grows with tan θ) — no acne at grazing sun. Only orthographic shadow cameras (env's key light on medium,
+ * render's cascades on high / ultra) — the fires' cube maps keep three's back faces (their large, near texels would
+ * need metres of offset) — and not the people (their own depth material).
+ *
+ * The per-cascade normal bias: three applies one world-space offset to both cascades, too small for the far
+ * cascade's texels or too large for the near one; the cascade's spare w (sunShadowCascade[i].w, set by
+ * CascadedSunShadow) adds a share of that cascade's texel size. Installed once, before programs compile.
+ */
+let chunkPatched = false;
+const SLOPE = '( 1.0 + min( sqrt( max( 1.0 - mkSc * mkSc, 0.0 ) ) / mkSc, 3.0 ) )'; // 1 + tan θ, ≤ 4 (mkSc = cos θ)
+export function installCascadeBiasChunk() {
+  if (chunkPatched) return true;
+  const c = ShaderChunk.shadowmap_pars_fragment;
+  const A = 'vec4 shadowWorldPosition = vec4( vSunShadowWorldPosition.xyz + vSunShadowWorldNormal * sunLightShadow.shadowNormalBias, 1.0 );';
+  const B = 'sunShadowMatrix[ cascadeOffset + i ] * shadowWorldPosition';
+  const v = ShaderChunk.shadowmap_vertex;
+  const D = 'shadowWorldPosition = worldPosition + vec4( shadowWorldNormal * directionalLightShadows[ i ].shadowNormalBias, 0 );';
+  if (!c.includes(A) || !c.includes(B) || !v.includes(D)) { console.warn('[render] shadow chunks changed; slope-scaled / per-cascade normal bias unavailable'); return false; }
+  // the light's direction from the shadow matrix: its depth row grows away from the light
+  ShaderChunk.shadowmap_pars_fragment = c.replace(A, `// per-cascade, slope-scaled normal bias: render/shadows.js (render-env-2)
+			vec3 mkSn = normalize( vSunShadowWorldNormal );`)
+    .replace(B, `sunShadowMatrix[ cascadeOffset + i ] * vec4( vSunShadowWorldPosition.xyz + mkSn * ( ( sunLightShadow.shadowNormalBias + cascade.w ) * mkSlopeK( mkSn, sunShadowMatrix[ cascadeOffset + i ] ) ), 1.0 )`)
+    .replace('#if NUM_SUN_LIGHT_SHADOWS > 0', `#if NUM_SUN_LIGHT_SHADOWS > 0
+		// 1 + tan θ (≤ 4): θ the light's angle of incidence, from the shadow matrix's depth row (render-env-2)
+		float mkSlopeK( vec3 n, mat4 M ) {
+			float mkSc = clamp( - dot( n, normalize( vec3( M[ 0 ][ 2 ], M[ 1 ][ 2 ], M[ 2 ][ 2 ] ) ) ), 0.2, 1.0 );
+			return ${SLOPE};
+		}
+	#endif
+	#if NUM_SUN_LIGHT_SHADOWS > 0`);
+  ShaderChunk.shadowmap_vertex = v.replace(D, `{
+				// slope-scaled normal offset (render-env-2): sun / moon casters draw their front faces too
+				vec3 mkLd = normalize( vec3( directionalShadowMatrix[ i ][ 0 ][ 2 ], directionalShadowMatrix[ i ][ 1 ][ 2 ], directionalShadowMatrix[ i ][ 2 ][ 2 ] ) );
+				float mkSc = clamp( - dot( shadowWorldNormal, mkLd ), 0.2, 1.0 );
+				shadowWorldPosition = worldPosition + vec4( shadowWorldNormal * ( directionalLightShadows[ i ].shadowNormalBias * ${SLOPE} ), 0 );
+			}`);
+  chunkPatched = true;
+  // front faces into the sun / moon shadow maps (orthographic shadow cameras only; not the people's own depth material)
+  const proto = Object3D.prototype, prev = proto.onBeforeShadow;
+  proto.onBeforeShadow = function (renderer, object, camera, shadowCamera, geometry, depthMaterial, group) {
+    if (shadowCamera?.isOrthographicCamera && depthMaterial?.side === BackSide && !object.customDepthMaterial) depthMaterial.side = DoubleSide;
+    return prev.call(this, renderer, object, camera, shadowCamera, geometry, depthMaterial, group);
+  };
+  return true;
+}
+
+/**
  * SunLightShadow with an explicit split distance. three's stock "practical" split puts the cascade-0/1
  * boundary at ~F/4 (≈100 m for a 400 m range), wasting cascade 0's texels; architecture needs the near
  * cascade tight (people, steps, columns) and the far one long (56 m walls, the Heichal).
  * Logic otherwise mirrors three r186 SunLightShadow.updateMatrices (texel snapping, caster ceiling).
  */
 export class CascadedSunShadow extends SunLightShadow {
-  constructor({ split = 36, far = 400, fade = 0.15 } = {}) {
+  constructor({ split = 36, far = 400, fade = 0.15, normalTexels = 0.6 } = {}) {
     super();
     this.split = split;
     this.far = far;
     this.fade = fade;
+    /** share of each cascade's texel size added to the normal bias (installCascadeBiasChunk) */
+    this.normalTexels = normalTexels;
   }
 
   updateMatrices(light, viewCamera) {
@@ -82,7 +141,7 @@ export class CascadedSunShadow extends SunLightShadow {
       const cascadeNear = i === 0 ? splits[0] : this._cascadeData[i - 1].z;
       const cascadeFar = splits[i + 1];
       const fadeStart = cascadeFar - this.fade * (cascadeFar - splits[i]);
-      this._cascadeData[i].set(i === 0 ? -1e10 : cascadeNear, cascadeFar, fadeStart, 0);
+      this._cascadeData[i].set(i === 0 ? -1e10 : cascadeNear, cascadeFar, fadeStart, 0); // w: the normal bias below
       const nearAlpha = (cascadeNear - cameraNear) / (cameraFar - cameraNear);
       const farAlpha = (cascadeFar - cameraNear) / (cameraFar - cameraNear);
       _center.set(0, 0, 0);
@@ -99,6 +158,8 @@ export class CascadedSunShadow extends SunLightShadow {
         minZ = Math.min(minZ, _corners[j].z);
       }
       let radius = Math.sqrt(radiusSq);
+      // this cascade's texel (world m) → its share of the normal bias (sunShadowCascade[i].w)
+      this._cascadeData[i].w = chunkPatched ? this.normalTexels * (2 * radius) / Math.max(resolution, 1) : 0;
       if (resolution > 1) {
         radius /= 1 - 1 / resolution;
         const tx = 2 * radius / resolutionX;
@@ -125,15 +186,20 @@ export class CascadedSunShadow extends SunLightShadow {
 
 /**
  * Per-tier cascade settings (r186 SunLight = exactly 2 cascades; quality.cascades is not used).
- * Texel sizes (bounding-sphere fit, 16:9, 62° vertical fov) — see docs/decisions/render.md:
- *   high : cascade 0 ≈ 3.1 cm to 24 m, cascade 1 ≈ 27 cm to 210 m (2048² per cascade)
- *   ultra: cascade 0 ≈ 1.9 cm to 30 m, cascade 1 ≈ 19 cm to 300 m (4096² per cascade)
+ * Texel sizes (bounding-sphere fit, 16:9, 62° vertical fov) — see docs/decisions/render.md, render-env-2.md:
+ *   high : cascade 0 ≈ 3.4 cm to 40 m, cascade 1 ≈ 15 cm to 180 m (3072² per cascade)
+ *   ultra: cascade 0 ≈ 2.6 cm to 40 m, cascade 1 ≈ 16 cm to 300 m (4096² per cascade)
  * The Azarah (≈ 65 × 90 m) and everything seen across it sits in cascade 1; beyond `far` env's terrain
  * visibility dims the sun. In fly mode the range grows with height (`farPerMetre` above `flyFrom`).
  */
 export const SHADOW_PRESETS = {
-  high: { mapSize: 2048, split: 24, far: 210, radius: 2.2, bias: -0.00025, normalBias: 0.035, flyFrom: 12, farPerMetre: 3, farMax: 700 },
-  ultra: { mapSize: 4096, split: 30, far: 300, radius: 2.6, bias: -0.0002, normalBias: 0.03, flyFrom: 12, farPerMetre: 3, farMax: 900 },
+  // render-env-2: high 2048 → 3072 per cascade, split 24 → 40 m, far 210 → 180 m: from the court the Heichal's facade
+  // (25–60 m) stood in the far cascade's 27 cm texels — the ⅙-amah proud lintels (8 cm) cast saw-tooth shadows; now
+  // ≈ 3.4 cm to 40 m, 15 cm beyond. Depth bias −2.5e-4 (≈ 10 cm over the cascade's depth range) → −4e-5 (≈ 1.5 cm):
+  // with back faces drawn into the map, contact edges (under the sovev slab) leaked a lit sawtooth band as deep as
+  // the bias; the normal bias is now a base plus 0.6 texel per cascade (installCascadeBiasChunk)
+  high: { mapSize: 3072, split: 40, far: 180, radius: 2.2, bias: -0.00004, normalBias: 0.012, normalTexels: 0.6, flyFrom: 12, farPerMetre: 3, farMax: 700 },
+  ultra: { mapSize: 4096, split: 40, far: 300, radius: 2.6, bias: -0.00004, normalBias: 0.01, normalTexels: 0.6, flyFrom: 12, farPerMetre: 3, farMax: 900 },
 };
 
 export class SunShadows {
@@ -144,7 +210,8 @@ export class SunShadows {
     this.light = new SunLight(0xffffff, 0);
     this.light.name = 'render:sun-csm';
     this.light.castShadow = true;
-    const sh = new CascadedSunShadow({ split: p.split, far: p.far });
+    installCascadeBiasChunk();
+    const sh = new CascadedSunShadow({ split: p.split, far: p.far, normalTexels: p.normalTexels });
     sh.mapSize.set(p.mapSize, p.mapSize);
     sh.radius = p.radius;
     sh.bias = p.bias;

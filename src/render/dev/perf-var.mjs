@@ -5,6 +5,16 @@ const VIEWS = { court: [[238, 385], [200, 0]], facade: [[200, 300], [300, 15]], 
 const VARIANTS = {
   full: [],
   stock: null,
+  // render-env-2 pieces
+  // the room path compiled out for every material (as the materials' opt-out flag does per material)
+  noRoomCode: [[/#define MK_INT\n/, '#define MK_INT\n#define MK_NO_ROOMS\n']],
+  // the room path compiled in but never taken
+  neverRoom: [[/  if \( any\( lessThan\( mkWorldPos, UA\.xyz \) \) \|\| any\( greaterThan\( mkWorldPos, UB\.xyz \) \) \) return;/, '  if ( mkInvW > - 1.0 ) return;']],
+  noOcc: [[/  if \( \( \( mkFlags >> 8 \) & 1 \) != 0 \) \{/, '  if ( false ) {']],
+  noSun: [[/    sun = max\( sun, mkApHit\( d, K\.xyz, K\.w, 0\.01, he, F \) \* open \);/, '']],
+  noHit2: [[/    sun = max\( sun, mkApHit\( d, K\.xyz, K\.w, 0\.01, he, F \) \* open \);/, ''], [/    hit = max\( hit, mkApHit\( d, Rw, 0\.05, rough, he, F \) \* w \);/, '']],
+  noRoom: [[/  if \( any\( lessThan\( mkWorldPos, UA\.xyz \) \) \|\| any\( greaterThan\( mkWorldPos, UB\.xyz \) \) \) return;/, '  if ( mkInvW > - 1.0 ) return;']],
+  noProbe: [[/  int np = min\( mkFlags & MK_F_PROBES, 4 \);/, '  const int np = 0;']],
   noPt: [[/mkPtOcc\( mkPtVol\[ i \]\.xy \)/, '1.0']],
   noSetup: [[/void mkSetup\( vec3 viewPos, vec3 viewN \) \{/, 'void mkSetup( vec3 viewPos, vec3 viewN ) { return;']],
   afterUnion: [[/  mkP = mkIntP;\n  int n = int\( mkP\.x \+ 0\.5 \);/, '  return;\n  mkP = mkIntP;\n  int n = int( mkP.x + 0.5 );']],

@@ -5,7 +5,7 @@ import { PCFShadowMap } from 'three';
 import { PRIORITY } from '../core/engine.js';
 import { createFx } from './fx/index.js';
 import { Pipeline, TONE_MAPPERS } from './pipeline.js';
-import { SunShadows } from './shadows.js';
+import { SunShadows, installCascadeBiasChunk } from './shadows.js';
 import { AdaptiveResolution } from './adaptive.js';
 import { detectDevice, isMobile } from './detect.js';
 import { installShaderLogFilter } from './log-filter.js';
@@ -14,6 +14,8 @@ export async function init(ctx) {
   const { engine, renderer } = ctx;
   // r186 removed PCFSoftShadowMap (it warns and falls back); PCF now does 5 Vogel-disk hardware-PCF taps.
   renderer.shadowMap.type = PCFShadowMap;
+  // sun / moon shadow casters' front faces + slope-scaled normal offset (medium's env key light, high / ultra cascades)
+  installCascadeBiasChunk();
   // count the whole frame (composer passes + FX), not just the last render() call
   renderer.info.autoReset = false;
 

@@ -29,7 +29,9 @@ uniform lowp sampler2D inputBuffer;
 uniform highp sampler2D depthBuffer;
 uniform float threshold;  // scene-linear
 uniform float knee;       // soft-knee half width (scene-linear)
-uniform float maxLum;     // clamp of the bloom source luminance (scene-linear)
+uniform float maxLum;     // clamp of the bloom source luminance (scene-linear) for broad bright areas
+uniform float sparkLum;   // … and for an isolated spark (render-env-2)
+uniform vec2 texel;       // 1 / input size
 uniform vec3 disc;        // key-light disc: uv.xy, z = 1 when in front of the camera
 uniform float discR;      // disc radius, uv-height units
 uniform float aspect;
@@ -47,7 +49,16 @@ void main() {
   s = s * s / (4.0 * knee + 1e-6);
   float w = m * max(s, l - threshold) / max(l, 1e-6);
   float lo = l * w;
-  gl_FragColor = vec4(c * w * min(1.0, maxLum / max(lo, 1e-6)), 1.0);
+  // render-env-2: an isolated highlight under 3 px (a sun glint on polished gold seen across the court — Helena's
+  // nivreshet at sunrise) is clamped far less than a broad bright area: the clamp was per pixel, so a spark with the
+  // flux of a sunlit gold panel kept 1/100 of it and never bloomed. Coverage = how many of four taps 2 px out on the
+  // diagonals are above the threshold too.
+  float cover = 0.25 * (step(threshold, luminance(texture2D(inputBuffer, vUv + texel * vec2(2.0, 2.0)).rgb))
+    + step(threshold, luminance(texture2D(inputBuffer, vUv + texel * vec2(-2.0, 2.0)).rgb))
+    + step(threshold, luminance(texture2D(inputBuffer, vUv + texel * vec2(2.0, -2.0)).rgb))
+    + step(threshold, luminance(texture2D(inputBuffer, vUv + texel * vec2(-2.0, -2.0)).rgb)));
+  float cap = mix(sparkLum, maxLum, cover);
+  gl_FragColor = vec4(c * w * min(1.0, cap / max(lo, 1e-6)), 1.0);
 }`;
 
 class SkyMaskedLuminanceMaterial extends ShaderMaterial {
@@ -60,6 +71,8 @@ class SkyMaskedLuminanceMaterial extends ShaderMaterial {
         threshold: new Uniform(1),
         knee: new Uniform(0.5),
         maxLum: new Uniform(4),
+        sparkLum: new Uniform(4),
+        texel: new Uniform(new Vector2(1 / 1280, 1 / 720)),
         disc: new Uniform(new Vector3(0.5, 0.5, 0)),
         discR: new Uniform(0.01),
         aspect: new Uniform(1),
@@ -89,6 +102,11 @@ export class SkyMaskedBloom extends BloomEffect {
 
   setDepthTexture(depthTexture) { this.prefilter.uniforms.depthBuffer.value = depthTexture; }
 
+  setSize(width, height) {
+    super.setSize(width, height);
+    this.prefilter.uniforms.texel.value.set(1 / Math.max(width, 1), 1 / Math.max(height, 1));
+  }
+
   /**
    * @param {number} threshold scene-linear
    * @param {number} knee scene-linear half width
@@ -96,12 +114,14 @@ export class SkyMaskedBloom extends BloomEffect {
    * @param {Vector3} disc uv.xy of the key light, z = 1 if in front
    * @param {number} discR uv-height radius
    * @param {number} aspect
+   * @param {number} [sparkLum] scene-linear clamp for isolated sub-3-px highlights (default maxLum)
    */
-  setPrefilter(threshold, knee, maxLum, disc, discR, aspect) {
+  setPrefilter(threshold, knee, maxLum, disc, discR, aspect, sparkLum = maxLum) {
     const u = this.prefilter.uniforms;
     u.threshold.value = threshold;
     u.knee.value = Math.max(knee, 1e-6);
     u.maxLum.value = maxLum;
+    u.sparkLum.value = Math.max(sparkLum, maxLum);
     u.disc.value.copy(disc);
     u.discR.value = discR;
     u.aspect.value = aspect;

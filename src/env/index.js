@@ -50,20 +50,44 @@ const FOG_MATCH_DIST = 300; // m: stock exp2 fog (FX) equals the physical extinc
 // burning IN it (the Moked hearth), which env then meters itself (fx stops adapting to those). Toward a dimmer
 // room the eye adapts only this fraction of the way (in log luminance): a dim room stays dim but readable;
 // toward a brighter one (a lamp-lit room at night) it adapts fully.
-const INTERIOR_ADAPT = 0.9; // lighting-polish-fix: 0.7 kept the Kodesh by day murky brown looking away from the gate
+// render-env-2: 1 (was 0.9 — lighting-polish-fix; 0.7 before that): within the fast-adaptation range below the eye
+// adapts to a dim room; the daylit Kodesh looking west read murky and darker than the lamp-lit Kodesh at night
+const INTERIOR_ADAPT = 1.0;
+// …but within seconds of stepping out of daylight the eye's cone (and neural) adaptation covers about this many
+// decades below the outdoor level; deeper darkness takes minutes of dark adaptation (rods). The KhK behind its two
+// closed parochot (≈ 2.5 decades below the court) therefore stays "a dark chamber", darker than the Kodesh lit
+// through its gate (≈ 1.7 decades) — render-env-2; before, both adapted to the same display level
+const FAST_ADAPT_DECADES = 2.0;
 // a lamp-lit room's log-average luminance over its surfaces' mean (the Kodesh probe: 0.2 at night, 0.27 by day)
 const FIRE_LOG = 0.3;
-// …and a room lit by its own lamps reads as the dark-adapted eye sees firelight (warm, legible — not a mesopic
-// grey): the exposure key rises toward this value with the fires' share of the room's light
-const FIRE_KEY = 0.115;
+// …and a room lit by its own lamps: lighting-polish raised the exposure key toward 0.115 with the fires' share of the
+// room's light ("firelight read by a dark-adapted eye"), which put the lamp-lit Kodesh at night above its daylight
+// level (seven oil lamps, ≈ 21 cd, in a 19 × 10 × 19 m room: ≈ 0.01 cd/m², a hundredth of the daylit room).
+// render-env-2: the room follows the eye's own key curve, lowered by the glare of the flames in view (they hold the
+// eye's sensitivity down: a lamp-lit room reads dimmer than a uniformly lit one of the same mean luminance)
+// render-env-2-fix: 0.4 → 0.75 — at 0.4 the lamp-lit Kodesh still measured 0.8–1.0 × its daylit display level on
+// medium / high: a lamp-lit room is a few bright pools in the dark, its log-average (what the eye adapts to) far below
+// the pools, which then dominate what is seen; daylight through the gate fills the room evenly. The hearth-lit Moked
+// read like a daylit room. (0.65: the night Kodesh 0.70–0.79 × day on medium)
+const FIRE_GLARE = 0.75;
 // the surroundings in the env probe's lower sky (low tier everywhere; medium+ outside the probes): walls,
 // colonnades and buildings of the Mount up to this elevation (deg) — the courts are enclosed by 40-amah walls
 const WALL_TOP = { court: 16, open: 6 };
 const WALL_ALBEDO = [0.55, 0.5, 0.43]; // dressed Jerusalem limestone / marble
+const KEY_PCF_RADIUS = 1.5; // texels, the key light's shadow filter (medium; high / ultra use render/'s cascades)
 // interiors (lighting-polish-fix): albedo of a room's own surfaces seen in reflections (gold and limestone), and
 // the degree of chromatic adaptation toward firelight in a room the fires light (0 none … 1 full von Kries)
 const ROOM_ALBEDO = 0.6;
-const WB_FIRE = 0.6;
+const WB_FIRE = 0.55; // render-env-2-fix: low-CCT, mesopic firelight is adapted to incompletely — a hearth-lit room stays warm
+const WB_FIRE_GOLD = 0.75; // render-env-2: in a gilded room (the eye adapts to the gold-tinted light that fills it)
+// render-env-2: the eye adapts chromatically to the light that fills the room — in a gilded room that is the lamps'
+// (or the doorway's) light after the gold walls have coloured it, not the bare flame colour (gold × 1900 K, squared by
+// interreflection, read as deep orange-red under AgX at night). Daylit rooms: a smaller degree where daylight is in
+// view through an opening (it anchors the white point), up to WB_CLOSED in a closed room (the KhK behind its parochot:
+// its gold-tinted light is all the eye sees, so the Even Shetiyah's bare rock reads pale against the gold)
+const WB_ROOM = 0.45;
+const WB_CLOSED = 0.9;
+const lum3 = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 
 const DEG = Math.PI / 180;
 const smooth = (a, b, x) => { const t = MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -194,6 +218,22 @@ export async function init(ctx) {
     }
   };
   let probes = makeProbes(tier, qkey);
+  // render-env-2: a material marked userData.mkInterior = false (one that never appears inside a room) compiles the
+  // room path of the interior patch out (MK_NO_ROOMS; the outdoor IBL, probes and fire occluders stay): set before the
+  // first compile and once more on 'ready' for materials made later.
+  const optedOut = new WeakSet();
+  const optOut = (m, recompile) => {
+    if (optedOut.has(m)) return;
+    optedOut.add(m);
+    m.defines = { ...(m.defines || {}), MK_NO_ROOMS: '' };
+    if (recompile) m.needsUpdate = true;
+  };
+  const matsOf = (o) => (Array.isArray(o.material) ? o.material : o.material ? [o.material] : []).filter((m) => m?.isMeshStandardMaterial);
+  const applyInteriorOptOut = (recompile) => {
+    if (!interiors) return;
+    scene.traverse((o) => { for (const m of matsOf(o)) if (m.userData?.mkInterior === false) optOut(m, recompile); });
+  };
+  applyInteriorOptOut(false);
   // where the surroundings band of the sky probe sits (court: enclosed by the 40-amah walls)
   const courtBoxes = [['azarah.wall.west', 'azarah.wall.east', 'azarah.wall.south', 'azarah.wall.north'], ['azarah.wall.east', 'en.wall.east', 'en.wall.south', 'en.wall.north']]
     .map(([w, e, s, n]) => [ctx.elOpt(w)?.box, ctx.elOpt(e)?.box, ctx.elOpt(s)?.box, ctx.elOpt(n)?.box])
@@ -231,6 +271,10 @@ export async function init(ctx) {
   key.shadow.mapSize.set(mapSize, mapSize);
   key.shadow.camera.near = 1;
   key.shadow.camera.far = 1000;
+  // render-env-2-fix: PCF over 1.5 texels (three's 5 Vogel taps × radius): at 1 the 7.8 cm texels of the ±80 m map
+  // showed as scallops along the shadows of the proud lintels and courses; at 2–3 the taps sampled the lit faces' own
+  // depth and grained them (shadow-ab.mjs mr1 / mr2 / mr3, lintel-close-d1). A tighter map (±64 m) only moved them.
+  key.shadow.radius = KEY_PCF_RADIUS;
   scene.add(key, key.target);
 
   // ---------------------------------------------------------------- fog
@@ -251,6 +295,7 @@ export async function init(ctx) {
     shadowsManaged: true,
     fourier: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], zenith: [0, 0, 0], horizonMean: [0, 0, 0],
     refDir: new Vector3(0, 1, 0),
+    skyline: [1, 1, 1, 1, 1, 1, 1],
     snapFrames: 0,
     lutGi: 0, relut: false, refine: false, checkGround: false, lastStats: null,
   };
@@ -263,6 +308,10 @@ export async function init(ctx) {
   const estSun = { alt: 0, az: 0, E: [0, 0, 0] }, estMoon = { alt: 0, az: 0, E: [0, 0, 0] };
   const estSources = [estSun, estMoon], estBuf = new Float32Array(32);
   const fireCol = new Color(1, 1, 1);  // the light colour of the fires in the camera's room
+  // the world's extent (terrain built for the boot tier's draw distance): the haze is total there (HAZE_FROM)
+  const drawDistance = ctx.quality?.drawDistance || 4000;
+  const hazeFar = ctx.params?.raw?.get?.('farhaze') === '0' ? 0 : drawDistance;
+  const roomCol = [1, 1, 1];          // the light the eye adapts to in the camera's room (luminance 1)
   const intEnv = [0, 0, 0];            // what rooms' openings show, per unit sky irradiance
   // thin cirrus coverage: a property of the chosen date (deterministic), or forced via ctx.env.cirrus / ?cirrus=
   const urlCirrus = parseFloat(ctx.params.raw?.get?.('cirrus'));
@@ -318,7 +367,7 @@ export async function init(ctx) {
     }
     if (any) st.horizon = out;
   }
-  ctx.bus.on('ready', () => { booted = true; if (!st.horizon) computeHorizonFromPhysics(); st.force = true; });
+  ctx.bus.on('ready', () => { booted = true; applyInteriorOptOut(true); if (!st.horizon) computeHorizonFromPhysics(); st.force = true; });
   ctx.bus.on('time:jump', () => { st.force = true; });
   ctx.bus.on('time:date', () => { st.force = true; });
   ctx.bus.on('quality:change', () => {
@@ -361,9 +410,12 @@ export async function init(ctx) {
 
   // ---------------------------------------------------------------- shadows (one function the render task can disable)
   const sBasisX = new Vector3(), sBasisY = new Vector3(), sCenter = new Vector3(), UP = new Vector3(0, 1, 0);
+  // m, texels; the half-extent (m) with the Sun above 14° and the share of it the map reaches ahead of the viewer
+  // (api._shadowTune: dev A/B)
+  const shadowTune = { depth: 0.015, normal: 0.7, extent: 80, ahead: 0.35 };
   function updateShadowCamera(sunAltDeg) {
     if (!st.shadowsManaged || !key.castShadow) return;
-    const R = MathUtils.lerp(80, 220, smooth(14, 3, sunAltDeg)); // whole Mount when shadows are long
+    const R = MathUtils.lerp(shadowTune.extent, 220, smooth(14, 3, sunAltDeg)); // whole Mount when shadows are long
     const D = sunAltDeg < 14 ? 2600 : 700; // reach far enough toward a low Sun to catch the eastern ridge
     const size = key.shadow.mapSize.x;
     const texel = (2 * R) / size;
@@ -374,7 +426,7 @@ export async function init(ctx) {
     sBasisX.normalize();
     sBasisY.crossVectors(dir, sBasisX).normalize();
     const fwd = tmp.set(0, 0, -1).applyQuaternion(camera.quaternion).setY(0);
-    if (fwd.lengthSq() > 1e-6) fwd.normalize().multiplyScalar(R * 0.35);
+    if (fwd.lengthSq() > 1e-6) fwd.normalize().multiplyScalar(R * shadowTune.ahead);
     sCenter.copy(camera.position).add(fwd);
     // snap the centre to whole texels in light space (no shimmering when walking)
     const x = Math.round(sCenter.dot(sBasisX) / texel) * texel;
@@ -387,8 +439,11 @@ export async function init(ctx) {
     cam.left = -R; cam.right = R; cam.top = R; cam.bottom = -R;
     cam.near = 1; cam.far = D + R * 1.5;
     cam.updateProjectionMatrix();
-    key.shadow.bias = -0.04 / (cam.far - cam.near);
-    key.shadow.normalBias = texel * 1.2;
+    // render-env-2: depth bias 4 → 1.5 cm and normal bias 1.2 → 0.7 texel (× 1 + tan θ in render/'s shadow chunk patch,
+    // which also draws the casters' front faces into this map): an offset of more than a proud course's 8 cm lifted
+    // the sample out from under it
+    key.shadow.bias = -shadowTune.depth / (cam.far - cam.near);
+    key.shadow.normalBias = texel * shadowTune.normal;
     key.target.updateMatrixWorld();
   }
 
@@ -501,6 +556,10 @@ export async function init(ctx) {
         st.horizonMean[c] += nf * nightFloor.horizon;
         st.zenith[c] += nf * nightFloor.zenith;
       }
+      // render-env-2-fix: the skyline profile — the dome's luminance at SKYLINE_ELS (azimuth-averaged, alpha of the stats)
+      // over the horizon band's, floor included: what the far haze converges to (fog.js)
+      const B = luminance(st.horizonMean), F = NIGHT_SKY_L * nightFloor.horizon;
+      for (let i = 0; i < 7; i++) st.skyline[i] = MathUtils.clamp((S[i * 4 + 3] + F) / Math.max(B, 1e-12), 0.05, 2);
     }
     const Esky = st.skyIrr + st.floorIrr;
     // the measured sky differs from the one the LUT's ground term assumed (a table estimate, or a jump without the
@@ -539,7 +598,9 @@ export async function init(ctx) {
       // the illuminance at the camera, 3× the probe's value beside the Menorah and a pop when the probe's landed.
       try { ctx.fx?.illuminanceAt?.(camera.position, { sameVolume: true, rendered: true, color: fireCol }); } catch { /* colour only */ }
       const Lf = FIRE_LOG * (interiors.fireLuminance(ci.vol) || 0);
-      const Lopen = La * (ci.raw ?? 1);
+      // a gilded room passes the daylight from its openings on, bounce after bounce (the shader's gold gain)
+      const gain = interiors.roomGain(ci.vol);
+      const Lopen = La * (ci.raw ?? 1) * lum3(gain);
       const rp = probes?.roomProbe(ci.vol);
       // a probe that went stale (time-lapse) is faded toward the room's fallback light (openings + fire fill) in the
       // shader: meter the same blend (lighting-polish-fix)
@@ -552,9 +613,18 @@ export async function init(ctx) {
       const w = rp ? probes.coverage(rp.id) : 0;
       const Lroom = Math.max(w > 0 ? Math.exp(w * Math.log(Math.max(probes.roomLuminance(rp, camera.getWorldDirection(tmp)), 1e-9)) + (1 - w) * Math.log(est)) : est, 1e-9);
       const lo = Math.log(La);
-      const leff = Lroom >= La ? Math.log(Lroom) : lo + INTERIOR_ADAPT * (Math.log(Lroom) - lo);
+      const leff = Lroom >= La ? Math.log(Lroom) : lo - Math.min(INTERIOR_ADAPT * (lo - Math.log(Lroom)), FAST_ADAPT_DECADES * Math.LN10);
       La = Math.max(Math.exp(lo + ci.s * (leff - lo)), 1e-7);
       fireShare = (ci.s * Lf) / Math.max(Lopen + Lf, 1e-12);
+      // the room's light colour: measured by its probe (the mean colour of the capture), else the fires' and the
+      // daylight's mix as the room's walls colour it
+      const pc = rp && w > 0.5 ? rp.meanColor : null;
+      if (pc) for (let c = 0; c < 3; c++) roomCol[c] = pc[c];
+      else {
+        const gl = lum3(gain), fc = [fireCol.r, fireCol.g, fireCol.b], fl = lum3(fc) || 1;
+        const fs = Lf / Math.max(Lopen + Lf, 1e-12);
+        for (let c = 0; c < 3; c++) roomCol[c] = (fs * fc[c] / fl + (1 - fs)) * gain[c] / gl;
+      }
       // dev read-out (src/render/dev/room-jumps.mjs)
       const m = st.meter || (st.meter = { Lopen: 0, Lf: 0, Lroom: 0, probe: false });
       m.Lopen = Lopen; m.Lf = Lf; m.Lroom = Lroom; m.probe = !!rp;
@@ -563,7 +633,7 @@ export async function init(ctx) {
     st.La = La;
     const lg = Math.log10(La);
     let keyV = keyFor(lg);
-    keyV += (Math.max(keyV, FIRE_KEY) - keyV) * fireShare;
+    keyV *= 1 - FIRE_GLARE * fireShare;
     const target = Math.log(keyV / La);
     // adaptation runs in real time (τ 0.7 s) AND sim time (τ 0.5 sim-min): at 1× the sim term is negligible; in a
     // 600× time-lapse twilight brightens ~1000× in 2.5 s and a real-time-only eye would overexpose dawn / crush dusk
@@ -586,11 +656,16 @@ export async function init(ctx) {
     // squared by interreflection) is — gain_c = ill_c^−k / lum(ill^(1−k)), luminance-preserving for the fires'
     // light (lighting-polish-fix). Applied in the tone-mapping step (render/: grade effect, direct-path chunk).
     {
-      const k = WB_FIRE * fireShare;
-      const l = luminance([fireCol.r, fireCol.g, fireCol.b]);
+      // degree: firelight in the room (WB_FIRE × its share) and the room's own colouring of daylight (WB_ROOM, up to
+      // WB_CLOSED as its openings close)
+      const inRoom = ci && ci.s > 0 ? ci.s : 0;
+      const kDay = inRoom > 0 ? WB_ROOM + (WB_CLOSED - WB_ROOM) * (1 - interiors.openness(ci.vol)) : WB_ROOM;
+      const kFire = ci?.vol?.gold ? WB_FIRE_GOLD : WB_FIRE;
+      const k = inRoom * (kFire * Math.min(1, fireShare / Math.max(inRoom, 1e-6)) + kDay * (1 - Math.min(1, fireShare / Math.max(inRoom, 1e-6))));
+      const l = luminance(roomCol);
       let g0 = 1, g1 = 1, g2 = 1;
       if (k > 1e-3 && l > 1e-6) {
-        const ill = [fireCol.r / l, fireCol.g / l, fireCol.b / l].map((v) => Math.max(v, 0.02));
+        const ill = [roomCol[0] / l, roomCol[1] / l, roomCol[2] / l].map((v) => Math.max(v, 0.02));
         const n = luminance(ill.map((v) => v ** (1 - k)));
         [g0, g1, g2] = ill.map((v) => MathUtils.clamp(v ** -k / n, 0.25, 4));
       }
@@ -720,7 +795,10 @@ export async function init(ctx) {
     fogU.set('mkFogExtR', ATMO.rayleighScattering.map((v) => v * rho / 1000));
     const mieY0 = mie.ext[1] * Math.exp(-ATMO.observerAltitude / ATMO.mieHeight) / 1000;
     const zr = luminance(st.zenith) / Math.max(luminance(st.horizonMean), 1e-12);
-    fogU.set('mkFogParams', [mieY0 * api.haze, 1 / (ATMO.mieHeight * 1000), MathUtils.clamp(zr, 0.15, 1), 1]);
+    fogU.set('mkFogParams', [mieY0 * api.haze, 1 / (ATMO.mieHeight * 1000), MathUtils.clamp(zr, 0.15, 1), hazeFar]);
+    const sk = st.skyline;
+    fogU.set('mkFogSky0', [sk[0], sk[1], sk[2], sk[3]]);
+    fogU.set('mkFogSky1', [sk[4], sk[5], sk[6], 1]);
     fogU.apply();
     scene.fog.color.setRGB(F[0][0] * P, F[0][1] * P, F[0][2] * P);
     // stock exp2 consumers (FX flames/smoke, custom shaders): 1 - exp(-(ρd)²) equals the physical
@@ -740,6 +818,11 @@ export async function init(ctx) {
     api.luminance = La;
     api.scotopic = st.scotopic;
     api.sunIlluminance = st.sunE0 * luminance(st.Tsun) * st.sunVis;
+    // the Sun's beam at normal incidence (lx, physical) and its colour (luminance 1), without the terrain horizon:
+    // render/fx lights the nivreshet's glint with it, taking the horizon at the globe's own height (render-env-2-fix)
+    const tl = luminance(st.Tsun);
+    api.sunBeam = st.sunE0 * tl;
+    if (tl > 1e-12) api.sunBeamColor.setRGB(st.Tsun[0] / tl, st.Tsun[1] / tl, st.Tsun[2] / tl);
     api.moonIlluminance = moonE0 * luminance(st.Tmoon) * st.moonVis;
     api.skyIrradiance = Esky;
     api.globalIlluminance = Eg; // lx on open horizontal ground: sun / moon beam + sky (probes normalise by it)
@@ -755,6 +838,9 @@ export async function init(ctx) {
     api.ambient.ground.setRGB(Eg * LOCAL_ALBEDO[0] * av, Eg * LOCAL_ALBEDO[1] * av, Eg * LOCAL_ALBEDO[2] * av);
     // sun / moon inside rooms: the shadow maps (medium+) or, without them, the rooms' sky visibility
     interiors?.setDirectAttenuation(key.castShadow || ctx.post?.shadows ? 0 : 1);
+    // the key light reaches into a room only through its openings (interiors-glsl.js): where shadow maps draw the true
+    // edge the mask keeps a slack round the opening; without them (low) it is the edge
+    interiors?.setKey(st.keyDir, key.castShadow || ctx.post?.shadows ? 0.35 : 0.06);
   }
 
   const api = {
@@ -779,6 +865,9 @@ export async function init(ctx) {
     luminance: 1,
     scotopic: 0,
     sunIlluminance: 0,
+    /** the Sun's beam at normal incidence (lx, physical, no terrain horizon) and its colour (linear, luminance 1) */
+    sunBeam: 0,
+    sunBeamColor: new Color(1, 1, 1),
     moonIlluminance: 0,
     skyIrradiance: 0,
     globalIlluminance: 0,
@@ -811,6 +900,8 @@ export async function init(ctx) {
     horizonElevation: (az, y = camera.position.y) => horizonAngle(az, y),
     /** force a full refresh (LUT, stats, PMREM) on the next frame; pass true to do it now */
     update(now = false) { st.force = true; st.envDirty = true; if (now) update(0); },
+    /** internal (dev scripts): the key light's shadow biases { depth (m), normal (texels) } */
+    get _shadowTune() { return shadowTune; },
     /** internal (dev scripts): the atmosphere LUTs and the statistics table */
     get _luts() { return luts; },
     /** internal: time one update (ms); for profiling */

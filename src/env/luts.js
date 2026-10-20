@@ -246,6 +246,9 @@ export class AtmosphereLUTs {
         const i0 = Math.min(Math.floor(a), 3), t = a - i0;
         return row[(2 + i0) * 4 + c] * (1 - t) + row[(3 + i0) * 4 + c] * t;
       };
+      // the skyline profile (alpha of pixels 0..6, luminance per unit source): × the source's luminance
+      const eL = 0.2126 * s.E[0] + 0.7152 * s.E[1] + 0.0722 * s.E[2];
+      for (let i = 0; i < 7; i++) out[i * 4 + 3] += eL * row[i * 4 + 3];
       for (let c = 0; c < 3; c++) {
         const e = s.E[c];
         out[c] += e * row[c];

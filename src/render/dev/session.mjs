@@ -39,7 +39,7 @@ try {
   if (!opt.ui && !qs.has('shot')) qs.set('shot', '1');
   if (!qs.has('q')) qs.set('q', opt.q);
   await page.goto(`${base}?${qs}`, { waitUntil: 'load', timeout: 180000 });
-  await page.waitForFunction(() => globalThis.__mikdashReady === true, null, { timeout: 180000, polling: 250 });
+  await page.waitForFunction(() => globalThis.__mikdashReady === true, null, { timeout: +(process.env.BOOT_TIMEOUT || 480000), polling: 250 });
   const h = {
     page, q: opt.q, out: opt.out,
     wait: (ms) => page.waitForTimeout(ms),

@@ -5,6 +5,9 @@
 // least `gap` apart — "breaking joints" as in real coursed masonry. Starts are therefore never within q/2 of
 // a tile edge or of each other, which lets the shader patch recover each block's absolute start from the
 // texture's alpha channel (block-local distance) robustly (see patch.js).
+//
+// Rows are uniform (H / round(H / rowH)) unless `heights` (a course table, metres, whole centimetres) is given:
+// then the rows follow it and the tile height is their sum; `courseLut` maps every centimetre of the tile to its row.
 
 export function mulberry32(seed) {
   let a = seed >>> 0;
@@ -22,16 +25,25 @@ const cyc = (d, W) => {
   return Math.min(m, W - m);
 };
 
+/** course table helpers: row starts (m) and the row at height y inside the tile */
+export function courseStarts(heights) {
+  const y0 = [0];
+  for (const h of heights) y0.push(+(y0[y0.length - 1] + h).toFixed(4));
+  return y0;
+}
+
 /**
- * @returns {{ rows:number, rowH:number, dMax:number, rowInfo:Float32Array, starts:Float32Array, list:number[][] }}
+ * @returns {{ rows:number, rowH:number, dMax:number, q:number, lut:Float32Array, lutW:number, list:number[][],
+ *            heights:number[]|null, courseLut:Float32Array|null, courseN:number }}
  */
-export function masonryLayout({ W, H, rowH, q, minL, maxL, gap, seed = 1, rowType = () => [0, 0] }) {
-  const rows = Math.round(H / rowH);
+export function masonryLayout({ W, H, rowH, q, minL, maxL, gap, seed = 1, rowType = () => [0, 0], heights = null }) {
+  const rows = heights ? heights.length : Math.round(H / rowH);
   const Wq = Math.round(W / q);
   const lo = Math.round(minL / q);
   const hi = Math.round(maxL / q);
   if (rows > 16) throw new Error(`layout: ${rows} rows > 16`);
   if (Math.abs(Wq * q - W) > 1e-6) throw new Error(`layout: tile width ${W} is not a multiple of q ${q}`);
+  if (heights && Math.abs(heights.reduce((a, b) => a + b, 0) - H) > 1e-6) throw new Error('layout: course heights do not sum to the tile height');
   const rng = mulberry32(seed * 7919 + 17);
   const list = [];
   for (let r = 0; r < rows; r++) {
@@ -88,5 +100,20 @@ export function masonryLayout({ W, H, rowH, q, minL, maxL, gap, seed = 1, rowTyp
       lut.set([x0, x1 - x0, k, code], (r * lutW + i) * 4);
     }
   });
-  return { rows, rowH: H / rows, dMax: maxL, q, lut, lutW, list };
+  // course table: one texel per centimetre of the tile height = (row, row start m, row height m, row code)
+  let courseLut = null;
+  let courseN = 0;
+  if (heights) {
+    const y0 = courseStarts(heights);
+    courseN = Math.round(H * 100);
+    courseLut = new Float32Array(courseN * 4);
+    let r = 0;
+    for (let i = 0; i < courseN; i++) {
+      const y = (i + 0.5) / 100;
+      while (r < rows - 1 && y >= y0[r + 1]) r++;
+      const [type, flag] = rowType(r);
+      courseLut.set([r, y0[r], heights[r], type * 2 + flag], i * 4);
+    }
+  }
+  return { rows, rowH: H / rows, dMax: maxL, q, lut, lutW, list, heights: heights ? [...heights] : null, courseLut, courseN };
 }

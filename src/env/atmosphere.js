@@ -372,8 +372,10 @@ void main() {
 /**
  * Sky statistics (8x1): 0 sky irradiance on an upward horizontal surface; 1 mean horizon radiance;
  * 2..6 horizon radiance at 0/45/90/135/180 deg of azimuth from the reference light; 7 zenith radiance.
- * Values in LUT units (multiply by LUT_SCALE).
+ * Alpha of pixels 0..6 (render-env-2-fix): the dome's luminance averaged over azimuth at the elevations SKYLINE_ELS
+ * (the skyline profile the far haze converges to). Values in LUT units (multiply by LUT_SCALE).
  */
+export const SKYLINE_ELS = [-8, -4, -2, -1, -0.5, 0, 0.25];
 export const STATS_FRAG = /* glsl */`
 #define PI 3.141592653589793
 uniform sampler2D uSky;
@@ -392,9 +394,17 @@ vec3 horizonBand( float az ) {
   for ( int k = 0; k < 4; k ++ ) s += skyAt( az, radians( 0.5 + float( k ) * 1.0 ) );
   return s * 0.25;
 }
+// the dome's luminance at elevation el (deg), averaged over 16 azimuths
+float skyline( float el ) {
+  float s = 0.0;
+  for ( int i = 0; i < 16; i ++ ) s += dot( skyAt( 2.0 * PI * ( float( i ) + 0.5 ) / 16.0, radians( el ) ), vec3( 0.2126, 0.7152, 0.0722 ) );
+  return s / 16.0;
+}
 void main() {
   int px = int( gl_FragCoord.x );
   vec3 c = vec3( 0.0 );
+  float els[ 7 ] = float[ 7 ]( ${SKYLINE_ELS.map((e) => e.toFixed(2)).join(', ')} );
+  float a = px < 7 ? skyline( els[ min( px, 6 ) ] ) : 1.0;
   if ( px == 0 ) {
     // cosine-weighted hemisphere: E = PI * mean(L)
     for ( int i = 0; i < 24; i ++ ) for ( int j = 0; j < 8; j ++ ) {
@@ -414,6 +424,6 @@ void main() {
     for ( int i = 0; i < 8; i ++ ) c += skyAt( 2.0 * PI * float( i ) / 8.0, radians( 85.0 ) );
     c /= 8.0;
   }
-  gl_FragColor = vec4( c, 1.0 );
+  gl_FragColor = vec4( c, a );
 }
 `;

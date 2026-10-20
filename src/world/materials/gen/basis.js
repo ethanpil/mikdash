@@ -1,4 +1,4 @@
-// CPU-generated basis textures for the GPU generators (pure JS: runs in a worker or on the main thread).
+// CPU-generated basis textures for the GPU generators (pure JS).
 //
 // Why on the CPU: on ANGLE/Direct3D every generator program pays an HLSL + driver compile proportional to its
 // instruction count; inlined ALU noise made each program cost 0.3–3 s on an HD 4600. Generators therefore sample
@@ -8,6 +8,14 @@
 //            R: 6 octaves gain 0.5 · G: 6 oct gain 0.55 · B: 3 oct (smooth) · A: 6 oct gain 0.65 (rough)
 //   voronoi: periodic jittered-grid Voronoi, C cells per period:
 //            R: F1 (cell units) · G: distance to the nearest cell border · B: cell hash [0,1) · A: F2
+// (Each lookup therefore repeats every 4 noise cells / C Voronoi cells: generators that threshold a field into
+// distinct marks warp or mix it with longer periods.)
+//
+// materials-2-fix: built on the main thread BEFORE the generator programs start compiling (cold on the HD 4600:
+// 0.23–0.26 s for the low tier's maps uncontended, but 0.7–1.9 s while the GPU process compiled; Workers were slower
+// still — 0.4–1.9 s of thread start and three cold JITs). Returned as Float32 and uploaded into RGBA16F storage (the
+// driver converts: no float -> half pass in JS). The feature points depend only on the seed and the cell count, so a
+// smaller map (the low tier's 384 px Voronoi) samples the same functions.
 
 function rng(seed) {
   let a = seed >>> 0;
@@ -138,7 +146,7 @@ export function voronoiBasis(size, cells, seed = 1, jitter = 0.9) {
           if (d < d1) { d2 = d1; d1 = d; mi = r + i; mx = rx; my = ry; } else if (d < d2) d2 = d;
         }
       }
-      // exact distance to the nearest border (two-pass)
+      // exact distance to the nearest border (two-pass; a 3x3 second pass misses 0.3 % of texels by up to 0.15 cell)
       const mcx = mi % E;
       const mcy = (mi - mcx) / E;
       let md = 9;
@@ -167,37 +175,13 @@ export function voronoiBasis(size, cells, seed = 1, jitter = 0.9) {
   return out;
 }
 
-// float32 -> float16 bits (round to nearest; values here are small and finite)
-const f32 = new Float32Array(1);
-const u32 = new Uint32Array(f32.buffer);
-export function toHalf(src) {
-  const out = new Uint16Array(src.length);
-  for (let i = 0; i < src.length; i++) {
-    f32[0] = src[i];
-    const x = u32[0];
-    const sign = (x >>> 16) & 0x8000;
-    let e = ((x >>> 23) & 0xff) - 127 + 15;
-    let m = x & 0x7fffff;
-    if (e <= 0) {
-      if (e < -10) { out[i] = sign; continue; }
-      m = (m | 0x800000) >> (1 - e);
-      out[i] = sign | ((m + 0x1000) >> 13);
-      continue;
-    }
-    if (e >= 31) { out[i] = sign | 0x7bff; continue; }
-    const r = m + 0x1000;
-    if (r & 0x800000) { m = 0; e++; } else m = r;
-    out[i] = e >= 31 ? (sign | 0x7bff) : (sign | (e << 10) | (m >> 13));
-  }
-  return out;
-}
-
-/** All basis maps for a tier, as half-float RGBA arrays. */
+/** All basis maps for a tier, as RGBA Float32 arrays. */
 export function makeBasis({ noiseSize = 512, vorSize = 512, seed = 1 } = {}) {
   const t0 = (globalThis.performance || Date).now();
-  const noise = toHalf(noiseBasis(noiseSize, seed));
-  const vor16 = toHalf(voronoiBasis(vorSize, 16, seed));
-  const vor5 = toHalf(voronoiBasis(Math.max(128, vorSize >> 1), 5, seed + 3));
+  const vor5Size = Math.max(128, vorSize >> 1);
+  const noise = noiseBasis(noiseSize, seed);
+  const vor16 = voronoiBasis(vorSize, 16, seed);
+  const vor5 = voronoiBasis(vor5Size, 5, seed + 3);
   const ms = (globalThis.performance || Date).now() - t0;
-  return { noiseSize, vorSize, vor5Size: Math.max(128, vorSize >> 1), noise, vor16, vor5, ms };
+  return { noiseSize, vorSize, vor5Size, noise, vor16, vor5, ms };
 }

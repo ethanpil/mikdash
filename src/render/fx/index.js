@@ -1,7 +1,8 @@
 // ctx.fx — fires, carried torches, smoke columns and their budgeted lights.
 //
 //   ctx.fx.add(spec) -> handle            spec as ctx.addFire: { id, kind, pos: Vector3|[X,Y,Z] amot, size,
-//                                         intensity, color, schedule: 'always'|'night'|'service', smoke }
+//                                         intensity, color, schedule: 'always'|'night'|'day'|'service', smoke,
+//                                         light (false: flames, glow and smoke only — no point light; small piles) }
 //                                         size: flame size in metres — pass it explicitly (lamp 0.08, torch 0.35,
 //                                         brazier 0.6, hearth 0.8, pyre 1.5–2.5); omitted => the kind's preset.
 //                                         ctx.addFire's default size 1 is ignored for lamps and torches.
@@ -19,6 +20,7 @@ import { createFxMaterials, setFxMaterialMode } from './materials.js';
 import { getNoiseTexture } from './noise.js';
 import { kindPreset } from './presets.js';
 import { FireLights, FIRE_SHADOWS } from './lights.js';
+import { createGlint } from './glint.js';
 import { sunAltitude, sunDir, envDirLights, lightIrradiance, ambientRadiance, exposure } from '../env-link.js';
 
 /** scene units per physical unit when env does not define preExposure (three's legacy 'noon sun ≈ 3') */
@@ -40,6 +42,12 @@ const ADAPT_TAU = 0.8;    // s
 // flattens core, body and tips into one cream mass.
 const FIRE_REF_CORE = 1.25 * 2.0e4;
 const FIRE_CORE_HEADROOM = 1.8;
+// render-env-2: local adaptation also to the firelit surfaces in view (rays in screen-fraction units of the half fov)
+// [x, y, weight]: the centre (what one looks at) counts most
+const VIEW_RAYS = [[0, 0, 0.4], [0.4, 0.1, 0.15], [-0.4, 0.1, 0.15], [0, 0.45, 0.15], [0, -0.35, 0.15]];
+const VIEW_PERIOD = 0.2; // s between samplings
+const VIEW_FAR = 600;    // m
+const VIEW_WEIGHT = 0.6; // share of the view the sampled surfaces stand for (as the camera term's 0.6)
 
 const TIER_INDEX = { low: 0, medium: 1, high: 2, ultra: 3 };
 // low: more, smaller puffs (less stretching along the column => no torn strips), each a little thinner
@@ -86,6 +94,10 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   scene.add(flames.makeMesh(mats.flame));
   scene.add(embers.makeMesh(mats.ember));
   smoke.mesh.renderOrder = 1; beds.mesh.renderOrder = 2; halos.mesh.renderOrder = 2; flames.mesh.renderOrder = 3; embers.mesh.renderOrder = 4;
+  // render-env-2-fix: the nivreshet's sun glint (fx/glint.js)
+  const glint = createGlint(ctx, mats.glint);
+  scene.add(glint.mesh);
+  const _sz = new Vector2();
 
   const shadowCfg = () => (ctx.quality?.shadows && FIRE_SHADOWS[ctx.quality.key]) || FIRE_SHADOWS.low;
   const lights = new FireLights(ctx.scene, ctx.quality?.maxFireLights ?? 4, shadowCfg());
@@ -97,6 +109,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   let haloScale = low ? 0.3 : 0.15;
   let adaptOn = true;
   let logAdapt = 0;
+  let viewClock = 1e9, viewLaf = 0;
   let snap = true;             // first frame / time jump: no easing
 
   // ------------------------------------------------------------------ fires
@@ -108,6 +121,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
 
   function scheduleFactor(f) {
     if (f.schedule === 'night') return smooth(3, -3, sunAltitude(ctx)); // lit around sunset, out after sunrise
+    if (f.schedule === 'day') return smooth(-3, 3, sunAltitude(ctx));   // render-env-2: 1 − the night factor (a day hearth)
     return 1;
   }
 
@@ -141,9 +155,13 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const wantSmoke = f.spec.smoke ?? !!P.smoke;
     const sp = P.smoke;
     if (wantSmoke && sp && ti >= (sp.minTier ?? 0)) {
+      // render-env-2: a big pile makes more smoke than a small one, not only a wider column: the smoke flux grows with
+      // the burning area (∝ size²) while the column's width and rise speed grow ≈ ∝ size, so its optical depth ∝ size
+      // (softened): the great pile's column is denser as well as wider than the small piles' thin ones
+      const k = f.kind === 'pyre' ? size / P.refSize : 1;
       f.smoke = addColumn({
-        pos: f.pos, height: sp.height * (f.kind === 'pyre' ? Math.sqrt(size / P.refSize) : 1),
-        width: Math.max(sp.width * size, 0.05), density: sp.density, rise: sp.rise, spread: sp.spread,
+        pos: f.pos, height: sp.height * (f.kind === 'pyre' ? Math.sqrt(k) : 1),
+        width: Math.max(sp.width * size, 0.05), density: sp.density * Math.min(1.5, Math.max(0.3, k ** 0.8)), rise: sp.rise, spread: sp.spread,
         kind: sp.kind, fire: f, seed: f.seedInt,
       });
     }
@@ -220,7 +238,10 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       lightPos: new Vector3(),
       lightColor: color.clone(),
       L: Number.isFinite(spec.luminance) ? spec.luminance : preset.L,
-      lightCandela: (preset.light?.candela ?? 0) * (size / preset.refSize) ** 2,
+      // light:false — the flames, coal bed, glow and smoke stay, but no point light (and no room fill, no
+      // adaptation): small piles beside a great one (render-env-2)
+      lightCandela: spec.light === false ? 0 : (preset.light?.candela ?? 0) * (size / preset.refSize) ** 2,
+      glowCandela: (preset.light?.candela ?? 0) * (size / preset.refSize) ** 2, // what lights its own smoke from below
       lightDistance: (preset.light?.distance ?? 10) * Math.max(0.6, size / preset.refSize),
     };
     if (f.follow) updateFollow(f, 0);
@@ -368,10 +389,16 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const La = env.luminance;
     let target = 0;
     lights.visibility = env.interiors ? env.interiors.at : null;
+    lights.interiors = env.interiors || null;
     if (adaptOn && Number.isFinite(La) && La > 0) {
       // fires in the viewer's own room are metered by env (interiors); the rest adapt locally, through the walls
       const E = illuminanceAt(ctx.camera.position, { split: true });
-      const Laf = (0.6 * ADAPT_ALBEDO * Math.max(0, E.all - E.sameS)) / Math.PI;
+      let Laf = (0.6 * ADAPT_ALBEDO * Math.max(0, E.all - E.sameS)) / Math.PI;
+      // render-env-2: …and to the firelit surfaces in view — the Heichal's facade lit by the altar seen over the courts'
+      // walls from the dark Mount, where the camera itself (behind the walls) receives no firelight at all
+      viewClock += dt;
+      if (snap || env.adaptSnap || viewClock > VIEW_PERIOD) { viewClock = 0; viewLaf = viewFireLuminance(); }
+      Laf = Math.max(Laf, VIEW_WEIGHT * viewLaf);
       target = ADAPT_SLOPE * Math.log(La / (La + Laf));
     }
     // real time (τ ADAPT_TAU) plus sim time (τ 0.5 sim-min, as env's meter): keeps up in a 600× time-lapse
@@ -382,11 +409,12 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const P = (Number.isFinite(env.preExposure) && env.preExposure > 0 ? env.preExposure : FALLBACK_P) * fireScale * Math.exp(logAdapt);
     sh.uP.value = P;
     sh.uFireGain.value = Math.min(1, (FIRE_CORE_HEADROOM * sh.uCap.value) / (FIRE_REF_CORE * P));
+    if (env.whiteBalance?.isVector3) sh.uWB.value.copy(env.whiteBalance);
     // smoke: the fire beneath lights it (physical cd; the shader applies inverse square × uP)
     for (const col of columns) {
       const f = col.fire;
       if (f) {
-        col.glow.copy(f.color).multiplyScalar(f.lightCandela * f.cur);
+        col.glow.copy(f.color).multiplyScalar(f.glowCandela * f.cur);
         writeColumn(col);
       }
     }
@@ -399,8 +427,35 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     // lights
     if (lights.structureDirty) { lights.cluster([...fires.values()]); lights.structureDirty = false; }
     lights.update(dt, ctx.camera.position, time, P);
+    // the glint is lit by the Sun at env's exposure (not the fires' local adaptation); its size in the target's pixels
+    const size = low ? ctx.renderer.getDrawingBufferSize(_sz) : sh.uResolution.value;
+    if (size.y >= 16 && Number.isFinite(env.preExposure)) glint.update(dt, env.preExposure, low, size);
+    else glint.mesh.visible = false;
     flames.flush(); halos.flush(); embers.flush(); smoke.flush(); beds.flush();
     snap = false;
+  }
+
+  /**
+   * Mean luminance (cd/m², physical) that the fires give the surfaces in view, along a few rays from the camera
+   * (centre-weighted, ctx.physics BVH): ADAPT_ALBEDO × E / π at each hit, misses count 0. Fires in the hit point's own
+   * room are left out (env meters a room's own fires).
+   */
+  const _vd = new Vector3(), _vp = new Vector3();
+  function viewFireLuminance() {
+    const ph = ctx.physics, cam = ctx.camera;
+    if (typeof ph?.raycast !== 'function' || !fires.size) return 0;
+    const th = Math.tan(((cam.fov || 60) * Math.PI) / 360);
+    let sum = 0;
+    for (const [x, y, w] of VIEW_RAYS) {
+      _vd.set(x * th * (cam.aspect || 1), y * th, -1).normalize().applyQuaternion(cam.quaternion);
+      let hit = null;
+      try { hit = ph.raycast(cam.position, _vd, VIEW_FAR); } catch { hit = null; }
+      if (!hit?.point) continue;
+      _vp.copy(hit.point).addScaledVector(_vd, -0.08);
+      const E = illuminanceAt(_vp, { split: true });
+      sum += w * Math.max(0, E.all - E.same);
+    }
+    return (ADAPT_ALBEDO * sum) / Math.PI;
   }
 
   /**
@@ -414,7 +469,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   const _ins = { V: 1, vol: null, s: 0 };
   function illuminanceAt(pos, opts = {}) {
     if (fires.size < ctx.fires.length) consumeCtxFires(); // env meters before fx's first update (boot)
-    const at = ctx.env?.interiors?.at;
+    const I = ctx.env?.interiors;
+    const at = I?.at;
     const ins = at ? at(pos, _ins) : null;
     let E = 0, Es = 0, cr = 0, cg = 0, cb = 0;
     for (const f of fires.values()) {
@@ -425,9 +481,13 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
         if (!f.ins || f.follow || f.insAt !== f.lightPos.x + f.lightPos.y + f.lightPos.z) {
           f.ins = at(f.lightPos, f.ins || { V: 1, vol: null, s: 0 });
           f.insAt = f.lightPos.x + f.lightPos.y + f.lightPos.z;
+          // a static open-air fire's occluder record: the court's walls, the altar's top (render-env-2)
+          f.rec = !f.follow && I?.fireRecord ? I.fireRecord(f.lightPos) : -1;
+          f.recR = I?.fireRadius ? I.fireRadius(f.size) : 0.3;
         }
         same = f.ins.vol === ins.vol;
-        if (!same) k = f.ins.V * ins.V;
+        if (!same) k = f.ins.V * (ins.Vap ?? ins.V); // the receiver's room lets a light in through its apertures only
+        else if (!ins.vol && f.rec >= 0) k = I.fireVisibility(f.rec, f.lightPos, pos, f.recR);
       }
       const lc = f.lightColor;
       const e = ((f.lightCandela * f.cur) / d2) * (opts.rendered ? 0.2126 * lc.r + 0.7152 * lc.g + 0.0722 * lc.b : 1);
@@ -496,10 +556,19 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
      * temporarily assign the plain light slots as seen from a world point (probe captures), at env's exposure
      * without the viewer's local adaptation to firelight (the probe is normalised by env's exposure); returns restore()
      */
-    lightsFor(pos) {
+    lightsFor(pos, { adapted = false } = {}) {
       const env = ctx.env || {};
       const fireScale = Number.isFinite(env.fireScale) ? env.fireScale : 1;
+      // adapted (render-env-2-fix): at fx's own gain, the viewer's local adaptation to firelight included — a porch lit by
+      // open-air fires (the Ulam) is seen in the same light as their point lights render it in the frame
+      if (adapted) return lights.assignFor(pos, mats.shared.uP.value);
       return lights.assignFor(pos, (Number.isFinite(env.preExposure) && env.preExposure > 0 ? env.preExposure : FALLBACK_P) * fireScale);
+    },
+    /** fx's gain over env's exposure: the viewer's local adaptation to firelight (≤ 1) */
+    get fireAdaptation() {
+      const env = ctx.env || {};
+      const P0 = (Number.isFinite(env.preExposure) && env.preExposure > 0 ? env.preExposure : FALLBACK_P) * (Number.isFinite(env.fireScale) ? env.fireScale : 1);
+      return mats.shared.uP.value / P0;
     },
     update,
     illuminanceAt,
@@ -507,17 +576,26 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     setMode,
     snap() { snap = true; },
     setAdaptation(on) { adaptOn = !!on; },
+    /**
+     * scene units per cd/m² of fire emission, as fx's own flames, embers and coal beds use it: env.preExposure ×
+     * fireScale × the local adaptation to firelight × the flame-core gain (materials' glowing embers; materials-2 request)
+     */
+    get emissionScale() { return mats.shared.uP.value * mats.shared.uFireGain.value; },
+    /** internal (dev scripts): the light pool */
+    get _lights() { return lights; },
     get stats() {
       return {
         fires: fires.size, columns: columns.size, lights: lights.active ?? 0, maxLights: lights.max,
         shadowLights: lights.pools[0]?.lights.length ?? 0,
         flames: flames.count, embers: embers.count, puffs: smoke.count, P: +mats.shared.uP.value.toPrecision(3),
-        adaptation: +Math.exp(logAdapt).toPrecision(3),
+        adaptation: +Math.exp(logAdapt).toPrecision(3), viewLaf: +viewLaf.toPrecision(3),
+        glint: glint.mesh.visible ? { I: +glint.stats.I.toPrecision(3), sparks: glint.stats.n, vis: +glint.stats.vis.toFixed(2), L0: +glint.stats.L0.toPrecision(3) } : null,
       };
     },
     dispose() {
       for (const b of [flames, halos, embers, smoke, beds]) b.dispose();
-      for (const m of [mats.flame, mats.halo, mats.ember, mats.smoke, mats.bed]) m.dispose();
+      for (const m of [mats.flame, mats.halo, mats.ember, mats.smoke, mats.bed, mats.glint]) m.dispose();
+      glint.dispose();
       lights.dispose();
     },
   };

@@ -21,6 +21,7 @@ uniform float uTime;
 uniform float uP;
 uniform float uCap;
 uniform float uFireGain; // ≤ 1: eye adapted to the flames themselves (night), keeps core/body/tip contrast
+uniform vec3 uWB;        // env's white-balance gains (chromatic adaptation to a room's light), undone for emitters
 uniform vec4 uFog;       // x mode (0 none, 1 linear, 2 exp2), y density, z near, w far
 uniform vec3 uFogColor;
 varying float vFxFog;
@@ -41,8 +42,12 @@ float fogAmount() {
   if (uFog.x > 0.5) return smoothstep(uFog.z, uFog.w, vFxFog);
   return 0.0;
 }
-// luminance-preserving soft cap of emission (keeps hue)
+// luminance-preserving soft cap of emission (keeps hue). render-env-2: the room's chromatic adaptation (env
+// whiteBalance, applied to the whole frame at tone mapping) is mostly undone for the flames, embers and coal beds —
+// the eye adapts locally to a bright source and sees it in its own colour; the flame ramp is paler than the fires'
+// light colour, so a correction toward that light turned the hearth's flames blue-white
 vec3 capEmission(vec3 c) {
+  c /= mix(vec3(1.0), max(uWB, vec3(0.05)), 0.85);
   float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
   if (y <= 1e-6) return c;
   return c * (uCap * (1.0 - exp(-y / uCap)) / y);
@@ -225,6 +230,51 @@ void main() {
   g = 0.4 * g + 0.6 * exp(-r2 * 30.0) * (1.0 - r2);
   vec3 col = capEmission(vColor * vInten * uP * uFireGain) * g;
   col *= softFade(vViewZ, 2.0) * (1.0 - fogAmount());
+  gl_FragColor = vec4(col, 1.0);
+  ${OUTPUT}
+}
+`;
+
+// ---------------------------------------------------------------- glints (render-env-2-fix)
+// A mirror-polished convex body (Helena's nivreshet) returns the Sun as point sources of intensity E·F·R1R2/4 from tiny
+// spots (the Sun's image on a lobe is ~1 mm: far below a pixel, so the surface shader cannot show it). Each spark is that
+// flux, deposited into a Gaussian of uGlint.y px at its mirror point (fx/glint.js computes the peak in scene units),
+// with the eye's own near glare round it (the bloom's kernel is too wide for a point at this scale).
+const GLINT_VS = /* glsl */`
+attribute vec3 iPos;      // world: the mirror point, pulled toward the viewer past the body's own surface
+attribute vec3 iCol;      // the core's peak radiance (scene units, rgb)
+uniform vec4 uGlint;      // x sprite half-size (px), y core sigma (px), zw the target's size (px)
+varying vec2 vPx;
+varying vec3 vCol;
+varying float vViewZ;
+${VCOMMON}
+void main() {
+  vCol = iCol;
+  vec4 mv = viewMatrix * vec4(iPos, 1.0);
+  vViewZ = mv.z;
+  vFxFog = -mv.z;
+  vec4 clip = projectionMatrix * mv;
+  vPx = position.xy * uGlint.x;
+  clip.xy += position.xy * uGlint.x * 2.0 / max(uGlint.zw, vec2(1.0)) * clip.w;
+  gl_Position = clip;
+}
+`;
+
+const GLINT_FS = /* glsl */`
+uniform vec4 uGlint;
+uniform vec4 uGlint2;     // x the core's footprint 2πσ²·Ω_px (sr): peak × x = the spark's illuminance at the eye; y deg per px
+varying vec2 vPx;
+varying vec3 vCol;
+varying float vViewZ;
+${COMMON}
+void main() {
+  float r = length(vPx);
+  float r2 = r * r / (uGlint.y * uGlint.y);
+  // the eye's own glare round a point source (CIE 2002 disability glare, young eye: L / E = 10 / θ³ + 5 / θ², θ in degrees),
+  // 0.1–1.5°; the bloom's kernel is far wider than these few pixels. Its ≈ 17 % of the flux is taken from the core.
+  float th = max(r * uGlint2.y, 0.1);
+  float glare = (10.0 / (th * th * th) + 5.0 / (th * th)) * uGlint2.x * (1.0 - smoothstep(1.0, 1.5, th));
+  vec3 col = vCol * (0.83 * exp(-0.5 * r2) + glare) * softFade(vViewZ, 0.05) * (1.0 - fogAmount());
   gl_FragColor = vec4(col, 1.0);
   ${OUTPUT}
 }
@@ -486,6 +536,7 @@ export function createFxMaterials({ soft, low, noise }) {
     uP: { value: 3e-5 },
     uCap: { value: 24 },
     uFireGain: { value: 1 },
+    uWB: { value: new Vector3(1, 1, 1) },
     uFog: { value: new Vector4(0, 0, 0, 1) },
     uFogColor: { value: new Color(0, 0, 0) },
   };
@@ -501,18 +552,19 @@ export function createFxMaterials({ soft, low, noise }) {
   const halo = make('fx.halo', 'halo', HALO_VS, HALO_FS);
   const ember = make('fx.ember', 'ember', EMBER_VS, EMBER_FS);
   const bed = make('fx.bed', 'bed', BED_VS, BED_FS);
+  const glint = make('fx.glint', 'glint', GLINT_VS, GLINT_FS, { uGlint: { value: new Vector4(4, 0.7, 1, 1) }, uGlint2: { value: new Vector4(0, 0.1, 0, 0) } });
   const smoke = make('fx.smoke', 'smoke', SMOKE_VS, SMOKE_FS, {
     uSunDir: { value: new Vector3(0, 1, 0) },
     uSunColor: { value: new Color(0, 0, 0) },
     uSky: { value: new Color(0.1, 0.12, 0.15) },
     uGround: { value: new Color(0.04, 0.04, 0.04) },
   });
-  return { shared, flame, halo, ember, smoke, bed };
+  return { shared, flame, halo, ember, smoke, bed, glint };
 }
 
 /** Switch soft-depth / quality defines (tier change) and recompile. */
 export function setFxMaterialMode(mats, { soft, low }) {
-  for (const m of [mats.flame, mats.halo, mats.ember, mats.smoke, mats.bed]) {
+  for (const m of [mats.flame, mats.halo, mats.ember, mats.smoke, mats.bed, mats.glint]) {
     m.defines = defines(soft, low);
     m.depthTest = !soft;
     setBlend(m, m.userData.fxKind, low);

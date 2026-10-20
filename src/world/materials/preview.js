@@ -1,10 +1,11 @@
 // Material swatch preview (?debug=mats): every library material as a sphere, a box and a small wall patch,
-// in three labelled rows of 15 at site X 251..300, Y 100 / 104 / 108 (just north of the 'start' anchor).
+// in labelled rows of 15 at site X 251..300, Y 100 / 104 / … / 116 (just north of the 'start' anchor).
+// Vertex-colour materials (terrain_blend) get a rock -> soil -> vegetation weight gradient across the swatch.
 // Shots: overview "debug=mats&t=d4&pos=274,88,9&look=0,-24"; one row r (Y_r = 100 + 4r), swatch columns
 // X = 251 + 3.5 i: "debug=mats&t=d4&at=<X>,<Y_r - 2.6>&look=0,-28".
 import {
   Group, Mesh, SphereGeometry, BoxGeometry, PlaneGeometry, MeshBasicMaterial,
-  CanvasTexture, SRGBColorSpace,
+  CanvasTexture, SRGBColorSpace, Float32BufferAttribute,
 } from 'three';
 import { m2w, a } from '../../core/units.js';
 import { applyWorldUV } from '../geom.js';
@@ -12,7 +13,7 @@ import { applyWorldUV } from '../geom.js';
 const PER_ROW = 15;
 const X0 = 251;
 const DX = 3.5;            // amot between swatches
-const ROWS_Y = [100, 104, 108];
+const ROWS_Y = [100, 104, 108, 112, 116];
 
 function label(text, sub) {
   const c = document.createElement('canvas');
@@ -34,6 +35,19 @@ function label(text, sub) {
   t.colorSpace = SRGBColorSpace;
   t.anisotropy = 4;
   return t;
+}
+
+/** rock -> soil -> vegetation weights (vertex colour) across a geometry's x extent, for terrain_blend */
+function weightGradient(g) {
+  g.computeBoundingBox();
+  const { min, max } = g.boundingBox;
+  const p = g.attributes.position;
+  const c = new Float32Array(p.count * 3);
+  for (let i = 0; i < p.count; i++) {
+    const t = (p.getX(i) - min.x) / Math.max(1e-6, max.x - min.x);
+    c.set([Math.max(0, 1 - 2 * t), 1 - Math.abs(2 * t - 1), Math.max(0, 2 * t - 1)], i * 3);
+  }
+  g.setAttribute('color', new Float32BufferAttribute(c, 3));
 }
 
 /** Sphere with physically scaled UVs (u around = circumference, v pole-to-pole = half circumference). */
@@ -68,6 +82,7 @@ export async function buildPreview(ctx) {
     bx.translate(c.x + 0.33, base + 0.2, c.z);
     applyWorldUV(bx);
     for (const g of [wall, sph, bx]) {
+      if (mat.vertexColors) weightGradient(g);
       const m = new Mesh(g, mat);
       m.castShadow = true;
       m.receiveShadow = true;

@@ -30,11 +30,20 @@ export const FIRE_SHADOWS = {
   high: { slots: 1, mapSize: 128, refresh: 0.25, radius: 3, normalBias: 0.12, bias: -1.5e-4 },
   ultra: { slots: 2, mapSize: 160, refresh: 0.125, radius: 4, normalBias: 0.1, bias: -1.5e-4 },
 };
+// fire-shadow cameras (render-env-2-fix): near plane = this × the fire's size, within [min, max] m (also the cap of the
+// normal offset)
+const NEAR_PER_SIZE = 0.25, NEAR_MIN = 0.05, NEAR_MAX = 0.3;
 const _pos = new Vector3();
 const _col = new Color();
 // occlusion-aware ranking (lighting-polish): a fire in another room than the viewer counts with the light that
-// can pass both rooms' openings, but never below this share (a great fire still lights what is seen through a door)
+// can pass both rooms' openings, but never below this share × how open both rooms are (a great fire still lights
+// what is seen through an open door; a closed room neither lets its lamps out nor the court's fires in — render-env-2)
 const OCC_FLOOR = 0.05;
+// render-env-2: a fire in the viewer's own room is what the viewer sees lit (the Menorah from inside the Kodesh)
+const SAME_ROOM = 3;
+// …and an open-air fire behind a court's walls (fire occluder records, env/interiors.js) counts at most this share:
+// what it lights over the walls (the tops of the walls, the Heichal) is still in view
+const WALL_FLOOR = 0.03;
 
 class Pool {
   constructor(lights, shadow) {
@@ -56,6 +65,8 @@ export class FireLights {
     this.gain = 0;
     /** optional (worldPos, out) -> { V, vol }: sky visibility / room at a point (env.interiors.at) */
     this.visibility = null;
+    /** optional env.interiors: room openness, fire occluder records (render-env-2) */
+    this.interiors = null;
     this.camIns = { V: 1, vol: null, s: 0 };
     this.setMax(max, shadowCfg);
   }
@@ -99,7 +110,7 @@ export class FireLights {
   cluster(fires) {
     const out = [];
     for (const f of fires) {
-      if (!f.preset.light) continue;
+      if (!f.preset.light || f.spec?.light === false) continue; // light:false — flames and glow only
       let c = null;
       if (!f.follow) {
         for (const k of out) {
@@ -112,7 +123,11 @@ export class FireLights {
       }
       c.fires.push(f);
     }
-    for (const c of out) c.shadowable = !c.mobile && SHADOW_KINDS.has(c.kind);
+    for (const c of out) {
+      c.shadowable = !c.mobile && SHADOW_KINDS.has(c.kind);
+      c.size = Math.max(...c.fires.map((f) => f.size || 0));
+      c.rec = undefined; // fire occluder record: resolved once the cluster's light position is known
+    }
     this.clusters = out;
     const live = new Set(out.map((c) => c.key));
     for (const p of this.pools) {
@@ -125,11 +140,26 @@ export class FireLights {
     for (const l of this.pools[0]?.lights || []) l.shadow.needsUpdate = true;
   }
 
-  /** light transport factor from cluster c to a viewer whose room is `ins` */
-  occ(c, ins) {
+  /** the fire occluder record of a static cluster (env/interiors.js fireRecord), -1 none */
+  record(c) {
+    if (c.mobile || !c.pos || !this.interiors?.fireRecord) return -1;
+    if (c.rec === undefined) { c.rec = this.interiors.fireRecord(c.pos); c.recR = this.interiors.fireRadius?.(c.size) ?? 0.3; }
+    return c.rec;
+  }
+
+  /** light transport factor from cluster c to a viewer at `at` whose room is `ins` */
+  occ(c, ins, at = null) {
     if (!this.visibility || !ins) return 1;
     if (!c.ins || c.mobile) c.ins = this.visibility(c.pos, c.ins || { V: 1, vol: null, s: 0 });
-    return c.ins.vol === ins.vol ? 1 : Math.max(c.ins.V * ins.V, OCC_FLOOR);
+    const I = this.interiors;
+    if (c.ins.vol === ins.vol) {
+      if (ins.vol) return SAME_ROOM;
+      // both in the open: the court's walls and the altar's top (no shadow map on most tiers and slots)
+      const r = this.record(c);
+      return r >= 0 && at && I?.fireVisibility ? Math.max(I.fireVisibility(r, c.pos, at, c.recR, false), WALL_FLOOR) : 1;
+    }
+    const open = I?.openness ? I.openness(c.ins.vol) * I.openness(ins.vol) : 1;
+    return Math.max(c.ins.V * (ins.Vap ?? ins.V), OCC_FLOOR * open); // into the viewer's room through its apertures only
   }
 
   /** gain = scene units per candela (env.preExposure × fireScale) */
@@ -160,7 +190,7 @@ export class FireLights {
       const d2 = Math.max(c.pos.distanceToSquared(camPos), 4);
       let lit = false;
       for (const p of this.pools) { const st = p.weights.get(c.key); if (st && st.w > 0) lit = true; }
-      c.score = (I / d2) * (lit ? KEEP_BONUS : 1) * this.occ(c, ins);
+      c.score = (I / d2) * (lit ? KEEP_BONUS : 1) * this.occ(c, ins, camPos);
       // a light far beyond its reach cannot matter
       if (d2 > (c.distance * 1.4) ** 2 || I <= 1e-4) c.score = 0;
     }
@@ -195,6 +225,7 @@ export class FireLights {
       const l = p.lights[st.slot];
       if (st.w <= 0 && target === 0) {
         l.intensity = 0;
+        l.userData.mkRec = -1;
         if (p.shadow) l.userData.shadowOwner = null;
         used.delete(st.slot);
         st.slot = -1;
@@ -212,12 +243,22 @@ export class FireLights {
       const V = c.ins && this.visibility ? c.ins.V : 1;
       l.intensity = c.I * sw * flick * gain * V;
       l.userData.mkV = V;
+      // the court walls / altar top occluding a plain slot's fire (a shadow slot's cube map does it there)
+      l.userData.mkRec = p.shadow ? -1 : this.record(c);
+      l.userData.mkRecPos = c.pos; // unjittered (the occluder test needs no flicker)
+      l.userData.mkRecR = c.recR;
       l.color.copy(c.color);
       if (p.shadow) {
         // shadow slots stay put (no positional jitter): the cube map is rendered only now and then
         if (l.userData.shadowOwner !== c.key || l.position.distanceToSquared(c.pos) > 1e-4 || l.distance !== c.distance) {
           l.userData.shadowOwner = c.key;
           l.shadow.needsUpdate = true;
+          // render-env-2-fix: near plane and normal offset scale with the fire (builders-2-inner-fix): at 0.3 m the
+          // kitchen hearth's stones and pot, a hand's breadth from its flames, cast nothing and its light reached the
+          // pavement behind them; a 12 cm normal offset lifted the lookup over stones that size
+          const near = Math.min(NEAR_MAX, Math.max(NEAR_MIN, NEAR_PER_SIZE * c.size));
+          if (l.shadow.camera.near !== near) { l.shadow.camera.near = near; l.shadow.camera.updateProjectionMatrix(); }
+          l.shadow.normalBias = Math.min(this.shadowCfg.normalBias ?? 0.1, Math.max(NEAR_MIN, NEAR_PER_SIZE * c.size));
         }
         l.distance = c.distance; // = the shadow camera's far plane
         l.position.copy(c.pos);
@@ -257,23 +298,26 @@ export class FireLights {
     for (const l of this.pools[0]?.lights || []) if (l.intensity > 0) { owners.add(l.userData.shadowOwner); l.intensity *= k; }
     const ranked = this.clusters
       .filter((c) => c.pos && c.I > 1e-4 && !owners.has(c.key))
-      .map((c) => ({ c, s: (c.I / Math.max(c.pos.distanceToSquared(pos), 4)) * this.occ(c, ins) }))
+      .map((c) => ({ c, s: (c.I / Math.max(c.pos.distanceToSquared(pos), 4)) * this.occ(c, ins, pos) }))
       .filter((e) => e.c.pos.distanceToSquared(pos) < (e.c.distance * 1.4) ** 2)
       .sort((a, b) => b.s - a.s);
     const plain = this.pools[1]?.lights || [];
-    const saved2 = this.lights.map((l) => l.userData.mkV);
+    const saved2 = this.lights.map((l) => [l.userData.mkV, l.userData.mkRec, l.userData.mkRecPos, l.userData.mkRecR]);
     plain.forEach((l, k) => {
       const e = ranked[k];
-      if (!e) { l.intensity = 0; return; }
+      if (!e) { l.intensity = 0; l.userData.mkRec = -1; return; }
       if (this.visibility && !e.c.ins) e.c.ins = this.visibility(e.c.pos, { V: 1, vol: null, s: 0 });
       const V = e.c.ins && this.visibility ? e.c.ins.V : 1; // as updatePool
       l.intensity = e.c.I * gain * V;
       l.userData.mkV = V;
+      l.userData.mkRec = this.record(e.c);
+      l.userData.mkRecPos = e.c.pos;
+      l.userData.mkRecR = e.c.recR;
       l.color.copy(e.c.color);
       l.position.copy(e.c.pos);
       l.distance = e.c.distance;
     });
-    return () => { saved.forEach((s, k) => { s.l.intensity = s.i; s.l.position.copy(s.p); s.l.color.copy(s.c); s.l.distance = s.d; s.l.userData.mkV = saved2[k]; }); };
+    return () => { saved.forEach((s, k) => { s.l.intensity = s.i; s.l.position.copy(s.p); s.l.color.copy(s.c); s.l.distance = s.d; [s.l.userData.mkV, s.l.userData.mkRec, s.l.userData.mkRecPos, s.l.userData.mkRecR] = saved2[k]; }); };
   }
 
   /** slow, staggered refresh of the shadow cube maps (people and other moving casters) */
