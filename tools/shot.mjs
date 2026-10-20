@@ -12,18 +12,21 @@
 //   --timeout S      seconds to wait for window.__mikdashReady (default 120)
 //   --keep-ui        do not add shot=1 (renders the UI too; clock keeps running)
 //   --eval "JS"      evaluate JS in the page after ready (result printed), e.g. "__mikdash.renderer.info.render"
+//   --prod           measure the PRODUCTION bundle: vite build into a temp dir, served by vite preview
+//                    (slower to start, but timings match what visitors get)
 //
 // Prints: saved paths, console errors/warnings, GPU string, draw calls/triangles, build times.
 // Then Read the PNGs to look at them.
-import { createServer } from 'vite';
+import { createServer, build as viteBuild, preview as vitePreview } from 'vite';
 import { chromium } from 'playwright-core';
-import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const args = process.argv.slice(2);
-const opt = { out: 'shots', q: 'medium', w: 1280, h: 720, timeout: 120, keepUi: false, evals: [] };
+const opt = { out: 'shots', q: 'medium', w: 1280, h: 720, timeout: 120, keepUi: false, evals: [], prod: false };
 const queries = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -35,6 +38,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--timeout') opt.timeout = +args[++i];
   else if (a === '--keep-ui') opt.keepUi = true;
   else if (a === '--eval') opt.evals.push(args[++i]);
+  else if (a === '--prod') opt.prod = true;
   else if (a === '--batch') {
     const list = JSON.parse(readFileSync(args[++i], 'utf8'));
     for (const it of list) queries.push({ name: it.name, query: it.query });
@@ -51,11 +55,19 @@ function slug(s) {
   return (s || 'default').replace(/[^a-z0-9.,=-]+/gi, '_').replace(/[=,]/g, '-').slice(0, 80) || 'default';
 }
 
-const server = await createServer({
-  root, logLevel: 'error', configFile: join(root, 'vite.config.js'),
-  server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null },
-});
-await server.listen();
+let server, prodDir = null;
+if (opt.prod) {
+  prodDir = join(tmpdir(), `mikdash-prod-${process.pid}`);
+  await viteBuild({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), build: { outDir: prodDir, emptyOutDir: true } });
+  server = await vitePreview({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'),
+    build: { outDir: prodDir }, preview: { port: 0, host: '127.0.0.1', strictPort: false } });
+} else {
+  server = await createServer({
+    root, logLevel: 'error', configFile: join(root, 'vite.config.js'),
+    server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null },
+  });
+  await server.listen();
+}
 const base = server.resolvedUrls.local[0];
 const browser = await chromium.launch({
   executablePath: EDGE, headless: true,
@@ -93,7 +105,8 @@ try {
         tier: c.quality?.key, gpu, fps: Math.round(c.engine.fps),
         calls: r.info.render.calls, triangles: r.info.render.triangles,
         geometries: r.info.memory.geometries, textures: r.info.memory.textures,
-        buildTimes: c.buildTimes, time: c.time?.t, error: globalThis.__mikdashError,
+        buildTimes: c.buildTimes, bootTimes: c.bootTimes, programs: r.info.programs?.length,
+        time: c.time?.t, error: globalThis.__mikdashError,
       };
     }).catch((e) => ({ error: String(e) }));
     const evals = [];
@@ -113,6 +126,7 @@ try {
   }
 } finally {
   await browser.close();
-  await server.close();
+  await (server.close?.() ?? server.httpServer?.close?.());
+  if (prodDir) { try { rmSync(prodDir, { recursive: true, force: true }); } catch { /* ignore */ } }
 }
 process.exit(failures ? 1 : 0);
