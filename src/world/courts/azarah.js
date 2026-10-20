@@ -1,9 +1,10 @@
 // The Azarah gates (Middot 1:4–5, 2:3; Rambam BhB 5:4; lock #9; lock §58 stations) with their gold-plated doors,
 // gate curtains (Yoma 54a) and exterior flights (32 half-steps, EK I 202–215); the Water Gate house with Beit Avtinas
 // over it and the Kohen Gadol's first mikveh on its roof (Yoma 19a, 31a; Tamid 1:1); the Nitzotz exedra with
-// Beit HaNitzotz above (Middot 1:5); Lishkat HaKelim (Shekalim 5:6; Tamid 3:4).
+// Beit HaNitzotz above (Middot 1:5); Lishkat HaKelim (Shekalim 5:6; Tamid 3:4) with its two lamps lit before Shabbat
+// (fires 'courts.kelim.lamp-w' / '-s', schedule 'service'; Rambam BhB 8:12).
 import { B, gridSolid, lathe } from './lib/geo.js';
-import { shell, flight, spiral } from './lib/parts.js';
+import { shell, flight, spiral, wallLamp } from './lib/parts.js';
 import { classify } from './masonry.js';
 
 export function buildAzarah(C) {
@@ -187,5 +188,11 @@ function kelim(C) {
       C.kit.geo(lathe(vessel, [b.min[0] + t + 0.7 + k * 1.2, b.max[1] - t - 0.7, zz], 10), i++ % 3 === 0 ? 'silver' : 'gold_vessel', { collide: false });
     }
   }
+  // two lamps on wall brackets, lit before Shabbat: on Shabbat the vessels are taken out by their light, with no light in
+  // hand (Rambam BhB 8:12 — the night's search 'by the lamps lit there from Erev Shabbat'; Tamid 3:4 the torch on
+  // weekdays). Fire schedule 'service', dark until the sim lights them ⚙ places: the free west wall and the south wall
+  // east of the door, clear of the shelves and the door leaf
+  wallLamp(C, 'courts.kelim.lamp-w', b.min[0] + t, (b.min[1] + b.max[1]) / 2, z + 4.2, [1, 0], { schedule: 'service', intensity: 0 });
+  wallLamp(C, 'courts.kelim.lamp-s', b.max[0] - t - 1.1, b.min[1] + t, z + 4.2, [0, 1], { schedule: 'service', intensity: 0 });
   C.anchor('courts.chamber.kelim', [(dr.x[0] + dr.x[1]) / 2, b.min[1] + t + 2.5, z], 0, e.name.en);
 }

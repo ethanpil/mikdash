@@ -9,11 +9,11 @@
 //           south of the kiyor (params.wheel box) carrying a windlass (axle, rope drum, a spoked hand-wheel inside the
 //           east trestle) and a braced boom over the kiyor with a head-sheave; the rope descends to a bronze bail that
 //           is hooked into the laver's lugs only while it is lowered or raised (unhooked once it stands in place).
-// Movables: 'altar.kiyor' (userData.raise(f): 1 = up, in use; 0 = sunk in the well; also turns the wheel, shows the
-//           bail while f < 1 and the dark shaft mouth while the laver is down), 'wheel:altar.kiyor.muchni'
+// Movables: 'altar.kiyor' (userData.raise(f): 1 = up, in use; 0 = sunk in the well carved by build-courts, its water
+//           at +14½; also turns the wheel and shows the bail while f < 1), 'wheel:altar.kiyor.muchni'
 //           (userData.spin(rad) about its E–W axle).
 // Collider: a static cylinder 'altar:kiyor' round the raised laver (it also fences the open shaft at night).
-import { Group, Mesh, CylinderGeometry, CircleGeometry, TorusGeometry, CatmullRomCurve3, TubeGeometry, Vector3, BoxGeometry, Matrix4, PlaneGeometry } from 'three';
+import { Group, Mesh, CylinderGeometry, CircleGeometry, TorusGeometry, CatmullRomCurve3, TubeGeometry, Vector3, BoxGeometry, Matrix4 } from 'three';
 import { Mesher, latheLocal, torusUV } from './lib.js';
 import { applyWorldUV, mergeGeometries } from '../geom.js';
 import { AMAH } from '../../core/units.js';
@@ -88,7 +88,7 @@ export function buildKiyor(A) {
   water.receiveShadow = true;
   kiyor.add(water);
 
-  // ---------------------------------------------------------------- the well curb and the shaft mouth (static)
+  // ---------------------------------------------------------------- the well curb (static)
   // a dressed-stone curb round the well mouth, 3 cm proud of the pavement, in which the platform sits a hair lower
   {
     const Z0 = cz, cw = 0.3, zc = Z0 + 0.03;
@@ -103,13 +103,8 @@ export function buildKiyor(A) {
       m.quad([q[0], q[1], Z0 - 0.05], [p[0], p[1], Z0 - 0.05], [p[0], p[1], zc], [q[0], q[1], zc]);   // inner (facing the well)
     }
   }
-  // the dark shaft mouth, shown only while the laver is down (build-courts cuts the well itself — requested); it lies under
-  // the platform when the laver is up
-  const shaft = new Mesh(new PlaneGeometry((wb.max[0] - wb.min[0]) * s, (wb.max[1] - wb.min[1]) * s).rotateX(-Math.PI / 2)
-    .translate(cx * s, (cz + 0.012) * s, -cy * s), ctx.mats.get(A.mat('glass_dark', 'iron')));
-  shaft.name = 'altar.kiyor:shaft';
-  shaft.receiveShadow = true;
-  A.group.add(shaft);
+  // (no shaft-mouth plane: build-courts carves the real well under the curb, its water 1½ amot under the pavement —
+  // masonry.js azarah.floor shafts — so the sunk laver is seen standing in it)
   // the raised laver as a static collider (the player does not walk through the bronze; at night it fences the shaft)
   {
     const g = new CylinderGeometry(2.0 * sc * s, 1.4 * sc * s, (zRim + 0.04) * s, 16).translate(cx * s, (cz + (zRim + 0.04) / 2) * s, -cy * s);
@@ -203,7 +198,6 @@ export function buildKiyor(A) {
     kiyor.position.y = cz * s + off;
     const hooked = raised < 0.999;
     bail.visible = hooked;
-    shaft.visible = raised < 0.98;
     const len = hooked ? Math.max(0.05, zSheave * s - (cz * s + off + ringTop * s)) : slack * s;
     rope.scale.set(1, len, 1);
     // rope paid out from the drum turns the windlass

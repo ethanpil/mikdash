@@ -96,27 +96,8 @@ export function parseSyllable(s) {
   return { onset: toks.slice(0, vi).map((t) => t.c), vowel, coda };
 }
 
-/**
- * Split a text line into syllables: words separated by spaces, syllables by '-'. Stress defaults to the
- * last syllable of a word (Hebrew milra); '*' after a syllable marks penultimate stress (milel).
- * ',' ends a half-verse, '.' a verse. Returns [{ syl, stress, wordEnd, pause: 0|1|2 }].
- */
-export function syllabify(text) {
-  const out = [];
-  for (const raw of text.trim().split(/\s+/)) {
-    let pause = 0, w = raw;
-    if (/[.;!?]$/.test(w)) pause = 2; else if (/,$/.test(w)) pause = 1;
-    w = w.replace(/[.,;!?]+$/, '');
-    if (!w) continue;
-    const parts = w.split('-').filter(Boolean);
-    let stressIdx = parts.length - 1;
-    parts.forEach((p, k) => { if (p.endsWith('*')) stressIdx = k; });
-    parts.forEach((p, k) => out.push({
-      syl: p.replace('*', ''), stress: k === stressIdx, wordEnd: k === parts.length - 1, pause: k === parts.length - 1 ? pause : 0,
-    }));
-  }
-  return out;
-}
+// syllabify lives in chant.js (pure, shared with the main thread's caption timing); re-exported for the callers here
+export { syllabify } from './chant.js';
 
 // ---------------------------------------------------------------------------------------------
 // Glottal source wavetables (band-limited, mip-mapped by maximum harmonic)

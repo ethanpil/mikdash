@@ -42,7 +42,8 @@
 //                     Friday only until sunset; on Shabbat they put Shabbat's own limbs and fats on and arrange them before
 //                     sunset — Rambam MK 4:3 — and tend them after it). After midnight:
 //                     one kohen turning what lies on the pile now and then, until the clearing — never on Friday night.
-//                     `fats-burning` itself (no participants) is the fire alone.
+//                     `fats-burning` itself (no participants) is the fire alone. Shabbat by day (`shabbat-altar-day`):
+//                     one or two kohanim now and then turning the tamid's and the musaf's limbs on the great pile.
 //   moked-dawn        volunteers immersing in the Beit HaTevilah; Gevini's call (head of the 15 steps); the officer's
 //                     knock at the Moked's chel door and the door opened.
 //   lotteries         the circle of kohanim, the officer lifting a mitre, fingers raised: 1st lottery in the Moked hall;
@@ -80,8 +81,12 @@
 //   shabbat-showbread eight kohanim exchanging the stacks and bazichin at the Shulchan (north brings in, south takes out);
 //                     old loaves to the gold table in the Ulam; bazichin burned on the incense pile by two of the
 //                     INCOMING mishmar (Sukkah 56b), after the musafim (Abaye, Yoma 33a–34a).
-//   shabbat-mishmar   the outgoing mishmar dividing its share in the south, the incoming in the north.
-//   sanhedrin         71 in a semicircle in the Gazit's chol half (station 'sanhedrin'); on Shabbat in the Chel.
+//   shabbat-mishmar   the outgoing mishmar dividing its share in the south, the incoming in the north, each man eating
+//                     his bean's worth where he stands; then (`showbread-eaten`) the Kohen Gadol with his half of each
+//                     watch's loaves (six of the twelve) and a few kohanim eating them standing in the court until the
+//                     afternoon lottery.
+//   sanhedrin         71 in a semicircle in the Gazit's chol half (station 'sanhedrin'); on Shabbat in rows on the
+//                     steps of the Gazit's flight inside the soreg, facing the Mount.
 //   private-offerings the continuous stream of individuals' offerings between the temidim, staged from offerings.js
 //                     (OFFERING_TYPES steps, OFFERING_RULES.lanes, offeringWindows): owners leaning and confessing and
 //                     slaughter at the rings (2–6 at once); kohanim catching the blood; hanging and flaying at the
@@ -129,11 +134,10 @@ const V = {
   heichal: [150, 330.5, 22],           // Heichal, east end, facing the golden altar
   heichalNE: [146, 333, 22],           // Heichal, facing the Menorah (south side)
   enNikanor: [290, 330.5, 6],          // Ezrat Nashim, below the fifteen steps, facing Nikanor
-  slaughterNW: [221, 343, 16],         // north of the altar, facing the morning ring
-  slaughterNE: [230, 342.5, 16],       // north of the altar, facing the afternoon ring
+  slaughterNE: [230, 342.5, 16],       // north of the altar, facing the second row of rings (the musaf's)
   flaying: [217, 364, 16],             // among the rings, facing the tables and the nanasin
   duchan: [234, 342, 16],              // Ezrat Kohanim by the altar's NE corner, facing the duchan
-  maamad: [252, 352, 13.5],            // Ezrat Yisrael, north of the axis
+  maamad: [253, 389.5, 13.5],          // Ezrat Yisrael, north end of the ma'amad's place, looking over it to the altar
   roofWalk: [216.25, 261.8, 36],       // Water Gate roof walk, by the Beit Avtinas door
   avtinas: [212.75, 261.8, 36],        // inside Beit Avtinas
 };
@@ -254,12 +258,12 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'From the locking until the officer\'s knock before dawn; the minutes are reconstruction.' },
     zone: 'beit-hamoked',
     pos: [202.5, 402, 16],
-    view: { at: [207.75, 404, 16], heading: 270 },
+    view: { at: V.moked, heading: 0 },
     summary: `The elders of the beit av sleep on the stone ledges with the keys of the Azarah; the young kohanim sleep on the floor.`,
     description: `Beit HaMoked was a large domed hall ringed with ledges of stone (rovadin). The elders of the beit av serving that day slept there with the keys of the Azarah in their hands, and the young kohanim on the floor, each with his own cushion (Tamid 1:1; Middot 1:8; Rambam BhB 8:5). A fire was kept in the hall — the Mishnah speaks of "the fire of Beit HaMoked" (Shabbat 1:11).\n\nThey did not sleep in the sacred garments: they took them off, folded them, laid them under their heads and covered themselves with their own clothes (Tamid 1:1). The Gemara reads "under" as beside their heads (Rav Pappa, Yoma 69a), and so does the Rambam (BhB 8:6); Rav Ashi keeps "under". Shown beside their heads (report §34.1).`,
     participants: [
       { role: 'elder', count: 6, note: 'elders of the beit av, on the ledges — number not given' },
-      { role: 'kohen', count: 20, note: 'young kohanim on the floor, in their own clothes — number not given' },
+      { role: 'kohen', count: 5, note: 'young kohanim on the floor, in their own clothes, and the kohen on the keys slab — number not given; the hall\'s floor as built holds four sleeping places, so one or two sit up by the fire' },
     ],
     sources: ['Tamid 1:1', 'Middot 1:8', 'Rambam BhB 8:5–6', 'Yoma 69a', 'Shabbat 1:11', 'Report §34.1'],
     sounds: [],
@@ -445,7 +449,7 @@ export const EVENTS = [
     view: { at: [203.25, 452, -12], heading: 260 },
     summary: `Kohanim who hope to clear the altar rise and immerse before the officer arrives.`,
     description: `Whoever wished to take up the ashes of the altar rose early and immersed before the officer came (Tamid 1:2). No one entered the Azarah for service — not even someone pure — without first immersing (Yoma 3:3).\n\nThe Mishnah does not say where this immersion took place. The one mikveh it names off Beit HaMoked is the Beit HaTevilah at the end of the passage under the Birah (Tamid 1:1), so it is staged there.`,
-    participants: [{ role: 'kohen', count: 4, note: 'the volunteers — number not given' }],
+    participants: [{ role: 'kohen', count: 5, note: 'the volunteers, who then draw the first lottery — number not given; five are shown' }],
     sources: ['Tamid 1:2', 'Yoma 3:3', 'Tamid 1:1'],
     sounds: [],
     choreo: 'moked-dawn',
@@ -503,7 +507,7 @@ export const EVENTS = [
     summary: `The kohanim stand in a circle and hold out their fingers; the count decides who will take up the ashes.`,
     description: `Once, anyone who wished could clear the altar. When many wanted it they raced up the ramp, and whoever came first within four amot won. One day two were level; one pushed the other, who fell and broke his leg. Seeing the danger, the court decreed that the altar be cleared only by lottery (Yoma 2:1–2). The kohanim stand in a circle; the officer lifts the mitre from one man's head to mark where the count begins, and they hold out one finger or two — never a thumb (Yoma 2:1; Yoma 25a). The winner also lays the new fire and the two logs (Yoma 22a).\n\nWhere it was held: Tamid 1:2–3 tells of the call and the lot before the wicket into the Azarah is opened, so this lottery is staged in Beit HaMoked, as the report's clock has it ("Moked → altar", §28 #2). Elsewhere the report holds all four lotteries in Lishkat HaGazit (§27.2, §62), after the braita in Yoma 25a that puts "the lottery in its east"; Yoma 22a–25a do not say where the first one was held.`,
     participants: [
-      { role: 'kohen', count: 12, note: 'those who immersed — number not given' },
+      { role: 'kohen', count: 5, note: 'those who immersed — number not given; the five who immersed are shown' },
       { role: 'kohen', count: 1, note: 'the officer; Matityah (Matya) ben Shmuel was over the lots (Shekalim 5:1)' },
     ],
     sources: ['Tamid 1:2', 'Tamid 1:3', 'Yoma 2:1–2', 'Yoma 22a', 'Yoma 25a', 'Shekalim 5:1', 'Report §27.2', 'Report §28'],
@@ -525,7 +529,7 @@ export const EVENTS = [
     description: `The officer took the key, opened the wicket and went from Beit HaMoked into the Azarah, and the kohanim followed him with two burning torches. They split into two companies: one went along the colonnade (achsadra) by way of the east, the other by way of the west, inspecting as they went, until both reached the chamber of the chavitin makers. Meeting, they said: "Shalom — all is well." Then they set the chavitin makers to work (Tamid 1:3; Rambam BhB 8:11).\n\nRabbi Yehudah says the door from Beit HaMoked to the Azarah had a small wicket by which they went in to search the court (Middot 1:7). The Mishnah names a colonnade but gives neither its size nor its course; the route walked here is reconstruction.`,
     participants: [
       { role: 'kohen', count: 1, note: 'the officer, with the key' },
-      { role: 'kohen', count: 8, note: 'two companies, a torch with each — number of men not given' },
+      { role: 'kohen', count: 5, note: 'two companies, a torch with each — number of men not given; the five of the first lottery are shown' },
     ],
     sources: ['Tamid 1:3', 'Rambam BhB 8:11', 'Middot 1:7'],
     sounds: ['footsteps', 'shalom-call'],
@@ -546,7 +550,7 @@ export const EVENTS = [
     description: `The same circuit as every night, with one difference: on Shabbat nights they had no light in their hands, and inspected by the lamps that had been lit there from before Shabbat (Rambam BhB 8:12).\n\nThe companies still part east and west at the wicket, meet at the chamber of the chavitin makers, greet each other — "Shalom, all is well" — and set the bakers to work (Tamid 1:3).`,
     participants: [
       { role: 'kohen', count: 1, note: 'the officer' },
-      { role: 'kohen', count: 8, note: 'two companies, without torches — number not given' },
+      { role: 'kohen', count: 5, note: 'two companies, without torches — number not given; the five of the first lottery are shown' },
     ],
     sources: ['Rambam BhB 8:12', 'Tamid 1:3'],
     sounds: ['footsteps', 'shalom-call'],
@@ -560,7 +564,7 @@ export const EVENTS = [
     dayTypes: ALL,
     when: { start: alot(-50), end: sunrise(80) },
     timing: { confidence: 'ordering', note: 'Set to work when the inspection ends (Tamid 1:3), until the chavitin are offered after the minchah (Yoma 33a).' },
-    zone: 'ezrat-yisrael',
+    zone: 'lishkat-chavitin',
     pos: [251, 319.5, 13.5],
     view: { at: [246, 309, 13.5], heading: 30 },
     summary: `In their chamber beside Sha'ar Nikanor, the bakers prepare the Kohen Gadol's daily griddle-cakes.`,
@@ -598,7 +602,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'At cock-crow or near it (Yoma 1:8), after the muchni is heard (Tamid 1:4); minutes reconstruction.' },
     zone: 'mizbeach',
     pos: { el: 'altar.top' },
-    view: { at: [236, 290, 16], heading: 295 },
+    view: { at: [236, 277, 16], heading: 320 },
     summary: `Alone, by the light of the altar fire, the winner sanctifies at the kiyor, scoops coals with the silver pan and heaps them east of the ramp.`,
     description: `His brothers warn him: "Take care not to touch the vessel until you have sanctified your hands and feet at the kiyor — and the pan is set in the corner between the ramp and the altar, on the west of the ramp." No one goes in with him and he carries no lamp; he walks by the light of the altar fire (Tamid 1:4).\n\nHe sanctifies his hands and feet, takes the silver pan, climbs to the top of the altar, sweeps the coals aside and scoops from the inner, consumed embers, and goes down. On the pavement he turns to the north and walks along the east of the ramp about ten amot, and heaps the coals on the floor three tefachim from the ramp — where the crops of the birds and the ashes of the inner altar and the Menorah are put (Tamid 1:4; Vayikra 6:3).`,
     participants: [{ role: 'kohen', count: 1, note: 'the winner of the first lottery' }],
@@ -738,7 +742,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'After "Barkai" (Tamid 3:3); minutes reconstruction.' },
     zone: 'beit-hamoked',
     pos: [203.25, 395, 16],
-    view: { at: [207.5, 396, 16], heading: 270 },
+    view: { at: [210.5, 399.8, 16], heading: 205 },
     summary: `"Go and bring a lamb from the lamb chamber" — a corner room of Beit HaMoked where at least six inspected lambs are kept.`,
     description: `The officer said: "Go out and bring a lamb from the lamb chamber." It was one of four chambers in Beit HaMoked (Tamid 3:3). Tamid puts it in the north-west corner and Middot 1:6 in the south-west; the Gemara reconciles them — the chamber was cut off at the corner, so each counting meets it from another side (Yoma 17a). The model follows the south-west (report lock #8).\n\nNo fewer than six inspected lambs were kept in the chamber, enough for a Shabbat and the two days of Rosh HaShanah (Arachin 2:5).`,
     participants: [{ role: 'kohen', count: 2, note: '"go out and bring" — who went is not stated' }],
@@ -774,7 +778,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'After the vessels, before the slaughter (Tamid 3:4–5); the report\'s clock puts it near sunrise (§28 #5). Minutes reconstruction.' },
     zone: 'slaughter-zone',
     pos: [210.75, 386, 16],
-    view: { at: [216, 381, 16], heading: 320 },
+    view: { at: [217.5, 387.5, 16], heading: 270 },
     summary: `The tamid is given water from a gold cup and inspected again by torchlight, then drawn to the slaughter-place.`,
     description: `They gave the tamid water to drink from a cup of gold. Although it had been inspected the evening before, they inspected it again by the light of torches (Tamid 3:4).\n\nThe one who won the slaughtering draws it to the slaughter-place north of the altar, and those who won the limbs walk after him (Tamid 3:5).`,
     participants: [
@@ -869,7 +873,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'On hearing the great gate (Tamid 3:7); minutes reconstruction.' },
     zone: 'slaughter-zone',
     pos: [213, 347.5, 16],
-    view: { at: V.slaughterNW, heading: 290 },
+    view: { at: [209.8, 344.2, 16], heading: 40 },
     summary: `At the north-west, on the second ring: the lamb bound, head to the south, face to the west; the slaughterer stands on the east.`,
     description: `They did not tie the lamb's four legs together but bound it in the manner of the akeidah, and those who won the limbs held it. Its head was to the south and its face to the west; the slaughterer stood on the east, facing west. The morning tamid was slaughtered at the north-western corner, on the second ring; the afternoon one at the north-eastern corner, on the second ring. The slaughterer slaughtered and the receiver received the blood (Tamid 4:1).\n\nThe rings were set in the pavement north of the altar, six rows of four (Middot 3:5; report lock #18); the corners are reckoned from the altar, the rings standing opposite them.`,
     participants: [
@@ -887,8 +891,8 @@ export const EVENTS = [
     id: 'inner-clearing',
     title: { en: 'The inner altar cleared and five lamps dressed', he: 'דישון מזבח הפנימי והטבת חמש נרות' },
     dayTypes: ALL,
-    when: { start: sunrise(-1), end: sunrise(4) },
-    timing: { confidence: 'ordering', note: 'After the gate is opened (Tamid 3:9); five lamps before the tamid\'s blood (Yoma 33a). Minutes reconstruction.' },
+    when: { start: sunrise(-1), end: sunrise(3) },
+    timing: { confidence: 'ordering', note: 'After the gate is opened (Tamid 3:9); five lamps before the tamid\'s blood (Yoma 33a), so the two men are out before the blood is thrown. Minutes reconstruction.' },
     zone: 'heichal',
     pos: { el: 'heichal.menorah' },
     view: { at: V.heichalNE, heading: 250 },
@@ -905,11 +909,11 @@ export const EVENTS = [
     id: 'tamid-blood',
     title: { en: 'The blood on the altar', he: 'זריקת הדם' },
     dayTypes: ALL,
-    when: { start: sunrise(4), end: sunrise(8) },
-    timing: { confidence: 'ordering', note: 'Directly after the slaughter (Tamid 4:1); minutes reconstruction.' },
+    when: { start: sunrise(3), end: sunrise(8) },
+    timing: { confidence: 'ordering', note: 'Directly after the slaughter (Tamid 4:1): the receiver goes straight from the ring to the north-eastern corner. Minutes reconstruction.' },
     zone: 'mizbeach',
     pos: [232.5, 337, 18],
-    view: { at: [238, 343, 16], heading: 225 },
+    view: { at: [239.5, 332.5, 16], heading: 305 },
     summary: `The receiver throws the blood at the north-east and south-west corners, each throw reaching two sides; the rest is poured on the southern base.`,
     description: `The receiver came to the north-eastern corner and gave the blood toward the east and the north; then to the south-western corner, giving it toward the west and the south. What remained he poured out on the southern base (yesod) of the altar (Tamid 4:1).\n\nA red line girds the altar at half its height, dividing the upper blood from the lower (Middot 3:1; Zevachim 53a); the blood of an olah goes below it (Zevachim 98b).`,
     participants: [{ role: 'kohen', count: 1, note: 'the thrower' }],
@@ -1046,8 +1050,8 @@ export const EVENTS = [
     when: { start: sunrise(55), end: sunrise(56) },
     timing: { confidence: 'ordering', note: 'As they reach the space between the Ulam and the altar (Tamid 5:6); minutes reconstruction.' },
     zone: 'bein-haulam-lamizbeach',
-    pos: [195, 300, 16],
-    view: { at: [186, 290, 16], heading: 40 },
+    pos: [196.3, 314.7, 16],
+    view: { at: [196.5, 302.5, 16], heading: 5 },
     summary: `Between the Ulam and the altar one of them hurls down the magrefah — no one in Jerusalem can hear his neighbour — the call to prostrate and to sing.`,
     description: `When they reached the space between the Ulam and the altar, one of them took the magrefah and threw it down there. No one in Jerusalem could hear his fellow's voice for the sound of the magrefah (Tamid 5:6).\n\nIt served three purposes: a kohen who heard it knew that his brothers were going in to prostrate, and came running; a Levite who heard it knew that his brothers were going in to sing, and came running; and the head of the ma'amad stood the impure at the eastern gate (Tamid 5:6).`,
     participants: [{ role: 'kohen', count: 1, note: '"one of them"' }],
@@ -1288,13 +1292,13 @@ export const EVENTS = [
     pos: [221, 351.5, 16],
     view: { at: V.slaughterNE, heading: 290 },
     summary: `Two yearling lambs with their flour and wine — and nine more trumpet blasts while the Levites sing a section of Ha'azinu.`,
-    description: `On Shabbat two more yearling lambs are offered as an olah, with their flour-offering and their wine (Bamidbar 28:9–10). The musafim follow the tamid's libations (Yoma 33a); this changeover Shabbat they are offered by the outgoing mishmar (Sukkah 56b; report §27.3).\n\nNine blasts are added for the musafim (Sukkah 5:5). Over the Shabbat musaf the Levites sang Ha'azinu, divided into six sections, one each Shabbat, the cycle then beginning again (Rosh HaShanah 31a).`,
+    description: `On Shabbat two more yearling lambs are offered as an olah, with their flour-offering and their wine (Bamidbar 28:9–10). The musafim follow the tamid's libations (Yoma 33a); this changeover Shabbat they are offered by the outgoing mishmar (Sukkah 56b; report §27.3), with no new lottery: whoever won a task at the morning tamid does it for the two lambs (Rambam TuM 4:9).\n\nNine blasts are added for the musafim (Sukkah 5:5). Over the Shabbat musaf the Levites sang Ha'azinu, divided into six sections, one each Shabbat, the cycle then beginning again (Rosh HaShanah 31a).`,
     participants: [
-      { role: 'kohen', count: 11, note: 'the outgoing mishmar' },
+      { role: 'kohen', count: 11, note: 'the morning tamid\'s winners, each at his task (Rambam TuM 4:9) — of the outgoing mishmar' },
       { role: 'levi', count: 12, note: 'on the duchan' },
       { role: 'kohen', count: 2, note: 'trumpeters' },
     ],
-    sources: ['Bamidbar 28:9–10', 'Yoma 33a', 'Sukkah 5:5', 'Rosh HaShanah 31a', 'Sukkah 56b'],
+    sources: ['Bamidbar 28:9–10', 'Yoma 33a', 'Sukkah 5:5', 'Rosh HaShanah 31a', 'Sukkah 56b', 'Rambam TuM 4:9'],
     sounds: ['sheep', 'trumpet-tekiah', 'choir-psalm'],
     choreo: 'shabbat-musaf',
     importance: 2,
@@ -1308,7 +1312,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'The bazichin follow the musafim in Abaye\'s order (Yoma 33a), so the change is shown after musaf. A braita has the bazichin before the musafim; the Gemara calls it a dispute of Tannaim, and Abaye prefers the musafim first, which is shown (Yoma 34a). Minutes reconstruction.' },
     zone: 'heichal',
     pos: { el: 'heichal.shulchan' },
-    view: { at: [146, 331, 22], heading: 290 },
+    view: { at: [135.6, 337.5, 22], heading: 271 },
     summary: `Four kohanim draw the old loaves off the golden table as four slide the new ones on, hand-breadth beside hand-breadth — the table is never bare.`,
     description: `Four kohanim went in, two holding the two stacks of bread and two holding the two bowls of frankincense (bazichin), and four went ahead of them, two to take the two old stacks and two to take the two old bowls. Those bringing in stood on the north facing south; those taking out stood on the south facing north. These drew off and those laid down, the hand-breadth of one beside the hand-breadth of the other, for it says "before Me always". Rabbi Yosi says even if these took away and those laid down later, it was still "always" (Menachot 11:7).\n\nThey came out and put the old loaves on the gold table in the Ulam: on the marble table the bread was laid as it came in, on the gold one as it went out, for one goes up in holiness and not down (Menachot 11:7).`,
     participants: [{ role: 'kohen', count: 8, note: 'four bringing in, four taking out' }],
@@ -1326,7 +1330,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'At the removal of the old loaves (Menachot 11:7).' },
     zone: 'ulam',
     pos: { el: 'heichal.ulam.tables' },
-    view: { at: [170, 333, 22], heading: 270 },
+    view: { at: [171.0, 323.6, 22], heading: 270 },
     summary: `The week-old loaves come off the table still warm — counted among the wonders of the Mikdash.`,
     description: `Rabbi Yehoshua ben Levi: a great miracle was done with the showbread — its removal was like its setting, as it says "to put warm bread on the day it is taken" (Yoma 21a; Shmuel I 21:7). At the festivals the table was lifted up to show the pilgrims: "See how beloved you are before the Omnipresent" (Yoma 21b; Chagigah 26b).\n\nAggadah layer: a wonder the tradition itself reports, to be shown subtly or not at all.`,
     participants: [{ role: 'kohen', count: 4, note: 'those who took the old loaves out' }],
@@ -1346,9 +1350,9 @@ export const EVENTS = [
     pos: [206, 311.5, 25],
     view: { at: V.keveshWest, heading: 330 },
     summary: `The two bowls of frankincense from last week's bread are burned on the incense fire, built with eight se'ah of coals for them.`,
-    description: `After the change they burned the bazichin — the two bowls of frankincense that had lain on the bread all week — and the loaves were divided among the kohanim (Menachot 11:7). On Shabbat the incense pile was built with eight se'ah of coals instead of five, because the two bazichin were put there (Tamid 2:5).\n\nWhen and by whom is disputed. The Mishnah counts two kohanim carrying the bazichin with the tamid on Shabbat, making eleven (Yoma 2:5), and the Gemara takes that to be the morning tamid (Yoma 26b). Abaye's order burns the bazichin after the musafim and before the afternoon tamid (Yoma 33a), while a braita puts them before the musafim (Yoma 34a). A braita gives the afternoon tamid and the bazichin to the incoming mishmar (Sukkah 56b). Shown: Abaye's order, with the bazichin burned on their own by two of the incoming watch; so the morning tamid is shown with nine and the afternoon one with its usual eleven.`,
+    description: `After the change they burned the bazichin — the two bowls of frankincense that had lain on the bread all week — and the loaves were divided among the kohanim (Menachot 11:7). The bread may not be eaten until the frankincense is burned, and the frankincense is salted like every offering (Rambam TuM 4:10). On Shabbat the incense pile was built with eight se'ah of coals instead of five, because the two bazichin were put there (Tamid 2:5).\n\nWhen and by whom is disputed. The Mishnah counts two kohanim carrying the bazichin with the tamid on Shabbat, making eleven (Yoma 2:5), and the Gemara takes that to be the morning tamid (Yoma 26b). Abaye's order burns the bazichin after the musafim and before the afternoon tamid (Yoma 33a), while a braita puts them before the musafim (Yoma 34a); the Rambam rules after the musafim, by two kohanim (TuM 4:11). A braita gives the afternoon tamid and the bazichin to the incoming mishmar (Sukkah 56b). Shown: Abaye's order, with the bazichin burned on their own by two of the incoming watch; so the morning tamid is shown with nine and the afternoon one with its usual eleven.`,
     participants: [{ role: 'kohen', count: 2, note: 'the two with the bazichin — of the incoming mishmar (Sukkah 56b)' }],
-    sources: ['Menachot 11:7', 'Tamid 2:5', 'Yoma 2:5', 'Yoma 26b', 'Yoma 33a', 'Yoma 34a', 'Sukkah 56b'],
+    sources: ['Menachot 11:7', 'Tamid 2:5', 'Yoma 2:5', 'Yoma 26b', 'Yoma 33a', 'Yoma 34a', 'Sukkah 56b', 'Rambam TuM 4:10–11'],
     sounds: [],
     choreo: 'shabbat-showbread',
     importance: 2,
@@ -1364,12 +1368,51 @@ export const EVENTS = [
     pos: [236, 330.5, 16],
     view: { at: [240, 350, 16], heading: 200 },
     summary: `The incoming watch takes its share in the north and the outgoing in the south — everyone can see who is arriving and who is going home.`,
-    description: `The loaves are divided between the two watches: the incoming take six and the outgoing six; Rabbi Yehudah says the incoming take seven and the outgoing five, the two extra for closing the gates (Sukkah 5:8; report §27.3). The anonymous Mishnah's six and six is shown. The incoming divide theirs in the north and the outgoing in the south. Bilgah always divided in the south; its ring was fixed and its niche sealed (Sukkah 5:8) — a mark of disgrace whose cause the Gemara relates (Sukkah 56b).\n\nThe showbread was baked on Friday and eaten on Shabbat, on the ninth day (Menachot 11:9), by the kohanim.`,
+    description: `The loaves are divided between the two watches: the incoming take six and the outgoing six; Rabbi Yehudah says the incoming take seven and the outgoing five, the two extra for closing the gates (Sukkah 5:8; report §27.3). The anonymous Mishnah's six and six is shown. The incoming divide theirs in the north, where the public offerings are slaughtered, and the outgoing in the south (Sukkah 5:8; Rambam TuM 4:12). Bilgah always divided in the south; its ring was fixed and its niche sealed (Sukkah 5:8) — a mark of disgrace whose cause the Gemara relates (Sukkah 56b).\n\nThe showbread was baked on Friday and eaten on Shabbat, on the ninth day (Menachot 11:9), by the kohanim. In the days of Shimon HaTzaddik an olive's bulk satisfied a kohen; after him a share came to a bean's worth, and the modest drew back their hands (Yoma 39a).`,
     participants: [{ role: 'kohen', count: 30, note: 'outgoing (south) and incoming (north)' }],
-    sources: ['Sukkah 5:8', 'Sukkah 56b', 'Menachot 11:7', 'Menachot 11:9', 'Report §27.3'],
+    sources: ['Sukkah 5:8', 'Sukkah 56b', 'Menachot 11:7', 'Menachot 11:9', 'Report §27.3', 'Yoma 39a', 'Rambam TuM 4:12'],
     sounds: [],
     choreo: 'shabbat-mishmar',
     importance: 2,
+    layer: 'ritual',
+  },
+  {
+    id: 'showbread-eaten',
+    title: { en: 'Shabbat: the Kohen Gadol\'s loaves eaten in the court', he: 'חלקו של כהן גדול בלחם הפנים' },
+    dayTypes: ['shabbat'],
+    when: { start: sunrise(190), end: dayH(8.1) },
+    timing: { confidence: 'reconstruction', note: 'Not before the frankincense is burned (Rambam TuM 4:10) and by midnight (Rambam MK 10:7–8). Whether the Kohen Gadol ate his loaves in the court that day, who ate with him and for how long are not recorded: shown from the division until the incoming watch gathers for the afternoon lottery.' },
+    zone: 'ezrat-kohanim',
+    pos: [236, 330.5, 16],
+    view: { at: [240, 350, 16], heading: 200 },
+    summary: `The Kohen Gadol's half of the bread, six of the twelve great loaves, is eaten standing in the court; he is shown with a few kohanim eating with him.`,
+    description: `The Kohen Gadol always takes half of the loaves each watch has won, "and it shall be for Aharon and his sons": half to Aharon and half to his sons (Rambam TuM 4:14; Yoma 17b). With six and six to the watches that is six of the twelve, and never a broken piece, which is not fitting for him (Yoma 17b). Each loaf is of two tenths of an ephah of fine flour (Vayikra 24:5). He may take of the holy things without waiting for a division (Rambam MK 10:18).\n\nThe bread is most holy, "and they shall eat it in a holy place" (Vayikra 24:9): only male kohanim, within the Azarah, that day and the night until midnight (Rambam MK 10:3, 10:7–8), standing, for no one sits in the Azarah (Rambam BhB 7:6). The watches' own shares, a bean's worth to a man, are eaten where they are handed out at the division (Yoma 39a). Six great loaves are far more than one man eats. Whether he ate them in the court that day or shared them, with whom, and for how long, the sources do not say: the model shows him with a few kohanim in the Ezrat Kohanim until the afternoon lottery.`,
+    participants: [
+      { role: 'kohen_gadol', count: 1, note: 'takes half of each watch\'s loaves, never a broken piece (Rambam TuM 4:14; Yoma 17b)' },
+      { role: 'kohen', count: 6, note: 'eating with him: who and how many is not recorded' },
+    ],
+    sources: ['Rambam TuM 4:14', 'Yoma 17b', 'Vayikra 24:5', 'Vayikra 24:9', 'Rambam MK 10:18', 'Rambam TuM 4:10', 'Rambam MK 10:3', 'Rambam MK 10:7–8', 'Rambam BhB 7:6', 'Yoma 39a'],
+    sounds: [],
+    choreo: 'shabbat-mishmar',
+    importance: 1,
+    layer: 'ritual',
+  },
+  {
+    id: 'shabbat-altar-day',
+    title: { en: 'Shabbat day: the morning\'s limbs on the fire', he: 'אברי שבת על המערכה' },
+    dayTypes: ['shabbat'],
+    when: { start: sunrise(166), end: dayH(8.3) },
+    timing: { confidence: 'reconstruction', note: 'Shabbat\'s limbs burn in their day (Rambam MK 4:3); who tended the pile between the services, and how often, is not recorded. Shown from the bazichin until just before the afternoon tamid.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
+    view: { at: V.kevesh, heading: 0 },
+    summary: `Between the services the limbs of the morning tamid and of the two musaf lambs burn on the great pile; now and then a kohen tends the fire with a fork.`,
+    description: `"A perpetual fire shall be kept burning on the altar; it shall not go out" (Vayikra 6:6). Besides the great pile and the incense pile a third was kept for no purpose but to sustain the fire (Rambam TuM 2:4; Yoma 45a, Rabbi Yosi). On Shabbat nothing new comes up to the altar between the services, for an individual's offering does not override Shabbat (Temurah 2:1); but the limbs of the tamid and of the musaf burn in their day, overriding Shabbat, and are not put off until the night (Rambam MK 4:3).\n\nKohanim tend the pile with forks, as they turn the limbs through the night (Tamid 2:1; Rambam TuM 1:6). Who did so by day on Shabbat, and how often, the sources do not say; the model shows one or two kohanim at the great pile now and then.`,
+    participants: [{ role: 'kohen', count: 2, note: 'now and then at the pile — who tended it by day is not recorded' }],
+    sources: ['Vayikra 6:6', 'Rambam TuM 2:4', 'Yoma 45a', 'Temurah 2:1', 'Rambam MK 4:3', 'Tamid 2:1', 'Rambam TuM 1:6'],
+    sounds: [],
+    choreo: 'altar-night',
+    importance: 1,
     layer: 'ritual',
   },
   {
@@ -1379,12 +1422,12 @@ export const EVENTS = [
     when: { start: sunrise(110), end: dayH(8.3) },
     timing: { confidence: 'ordering', note: 'Between the two temidim (Sanhedrin 88b); the minutes are reconstruction.' },
     zone: 'chel',
-    pos: [40, 368, 0],
-    view: { at: [50, 364, 0], heading: 270 },
-    summary: `On Shabbat and festivals the judges do not sit in Lishkat HaGazit but in the Chel, outside the courts.`,
-    description: `The court of seventy-one sat in Lishkat HaGazit from the morning tamid until the afternoon tamid; on Shabbatot and festivals they sat in the Chel (Sanhedrin 88b). The Tosefta speaks instead of the beit midrash on Har HaBayit (report §37.3).\n\nWhere in the Chel they sat is not recorded; they are shown below the Gazit's door to the Chel.`,
+    pos: [37.75, 381, 11],
+    view: { at: [22, 379, 0], heading: 82 },
+    summary: `On Shabbat and festivals the judges do not sit in Lishkat HaGazit but in the Chel — here on the steps below the Gazit's door, facing the Mount.`,
+    description: `The court of seventy-one sat in Lishkat HaGazit from the morning tamid until the afternoon tamid; on Shabbatot and festivals they sat in the Chel (Sanhedrin 88b). The Tosefta speaks instead of the beit midrash on Har HaBayit (report §37.3).\n\nWhere in the Chel they sat is not recorded. They are shown seated in rows on the steps of the Gazit's flight where it rises inside the soreg, below the Gazit's door, facing the Mount, the Nasi in the middle of the front row; people come to the foot of the flight to ask. Sages sitting on a step on Har HaBayit is attested: Rabban Gamliel sat so with the elders when he sent his letters (Sanhedrin 11b; Tosefta Sanhedrin 2:6).`,
     participants: [{ role: 'sanhedrin', count: 71 }],
-    sources: ['Sanhedrin 88b', 'Report §37.3'],
+    sources: ['Sanhedrin 88b', 'Report §37.3', 'Sanhedrin 11b', 'Tosefta Sanhedrin 2:6'],
     sounds: [],
     choreo: 'sanhedrin',
     importance: 1,
@@ -1400,7 +1443,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'From the morning tamid to the afternoon tamid (Sanhedrin 88b); the minutes are reconstruction.' },
     zone: 'gazit',
     pos: [53, 381, 16],
-    view: { at: [68, 381, 16], heading: 270 },
+    view: { at: [46, 381, 16], heading: 90 },
     summary: `Seventy-one judges sit in a half-circle in the profane half of the hall; among their cases, the lineage of the kohanim.`,
     description: `In Lishkat HaGazit sat the Great Sanhedrin of Israel and judged the priesthood. A kohen found unfit put on black and wrapped himself in black and went away; one found fit put on white and wrapped himself in white, went in and served with his brothers; and they made a festive day when no flaw was found in the seed of Aharon (Middot 5:4). They sat from the morning tamid to the afternoon tamid (Sanhedrin 88b), in the profane half of the hall, for no one sits in the Azarah (Yoma 25a; Rambam BhB 5:17).\n\nForty years before the destruction the Sanhedrin left the Gazit and sat in the "stores" (chanut) on Har HaBayit (Shabbat 15a). The model's baseline shows them in the Gazit (report lock §58, era).`,
     participants: [{ role: 'sanhedrin', count: 71 }],
@@ -1554,7 +1597,7 @@ export const EVENTS = [
     timing: { confidence: 'reconstruction', note: 'Baked on Friday (Menachot 11:9); the hours are not given.' },
     zone: 'beit-hamoked',
     pos: [218.25, 395, 16],
-    view: { at: [214, 396, 16], heading: 90 },
+    view: { at: [206.5, 404, 16], heading: 100 },
     summary: `In the showbread chamber of Beit HaMoked, the house of Garmu bakes the twelve loaves for tomorrow's table.`,
     description: `The house of Garmu was over the making of the showbread (Shekalim 5:1); the bread was made in a chamber of Beit HaMoked (Middot 1:6). Its kneading and shaping may be done outside, but its baking is inside, and it does not override Shabbat (Menachot 11:2) — so it is baked on Friday and eaten on Shabbat of the following week, on the ninth day (Menachot 11:9).\n\nEach loaf was ten tefachim long and five wide, with "horns" seven fingers high (Menachot 11:4). The house of Garmu would not teach their craft, and the Sages remembered them for it with disgrace (Yoma 3:11).`,
     participants: [{ role: 'kohen', count: 4, note: 'the house of Garmu — their number, and lineage, are not stated' }],
@@ -1708,7 +1751,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'After the flaying; the fats ought to be on the fire before the afternoon tamid — "on it complete all the offerings" (Pesachim 58b–59b). The minutes are reconstruction.' },
     zone: 'mizbeach',
     pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
-    view: { at: [231, 292, 16], heading: 315 },
+    view: { at: [217, 266.5, 16], heading: 0 },
     summary: `Limbs and fats are salted on the ramp and carried up to the great pile; each olah's and shelamim's flour goes up with it, and its wine is poured at the south-west horn.`,
     description: `Each part is brought to the ramp and salted there with salt from Lishkat HaMelach, then carried up and thrown across the hair's-breadth gap onto the great pile (Rambam MK 6:4; Middot 5:3; Zevachim 62b). The kohanim go up on the east side of the ramp, round to the right and down on the west (Zevachim 6:3). A lamb's limbs take six carriers, and two more its flour and wine; a ram's eleven; a bull's twenty-four (Yoma 2:5–7; Rambam MK 6:10–18).\n\nWith every olah and shelamim go its libations: fine flour mixed with oil, burned whole, and wine — for a lamb three log, a ram four, a bull six (Menachot 9:3, 9:6; Report §65.1). The wine is poured into the silver cup at the south-western horn, the kohen going straight there and back on his heel (Zevachim 6:2–3). The fats ought to burn before the afternoon tamid (Pesachim 59b); what remains burns into the night.`,
     participants: [{ role: 'kohen', count: 10, note: 'carriers — per animal as above' }],
@@ -1727,7 +1770,7 @@ export const EVENTS = [
     timing: { confidence: 'ordering', note: 'Between the temidim, like every individual offering (Pesachim 59a); the minutes are reconstruction.' },
     zone: 'mizbeach',
     pos: { el: 'altar.keren.se' },
-    view: { at: [240, 296, 16], heading: 320 },
+    view: { at: [229.8, 288.6, 16], heading: 2 },
     summary: `Kohanim nip the birds with a thumbnail: burnt-offering birds on the ledge at the south-east horn, sin-offering birds below the red line at the south-west.`,
     description: `Turtledoves and young pigeons — the doves only when grown, the pigeons only when young (Chullin 1:5) — are the commonest offering of all: the pair of every mother after childbirth, of the zav and zavah, of the poor. For a bird olah the kohen goes up the ramp onto the sovev to the south-eastern horn, nips off the head at the nape with his thumbnail, drains the blood on the wall, salts the head and throws it on the fire; the crop and feathers he flings to the ash place east of the ramp, then splits, salts and burns the body (Zevachim 6:5; Rambam MK 6:20–23). When the birds are many he works at the south-west, above the line (Zevachim 6:2).\n\nA bird sin-offering is made below the line at the south-western corner: the feet and wings held between his fingers and the neck over his thumb, he nips without severing — "one of the hard services of the Mikdash" (Zevachim 64b) — sprinkles its blood on the wall and squeezes the rest onto the yesod. The altar has only its blood; the kohanim eat the bird (Zevachim 6:2, 6:4; Kinnim 1:1). A bird takes no leaning (Rambam MK 3:7), so its owners stay outside; much of the bird money came through the chest marked "kinnin" (Shekalim 6:5).`,
     participants: [{ role: 'kohen', count: 4, note: 'at the SE horn and the SW corner — number not given' }],
@@ -1832,7 +1875,7 @@ export const EVENTS = [
     timing: { confidence: 'reconstruction', note: 'Brought from Shavuot until Chanukah (Bikkurim 1:3, 1:6). The schedule knows no seasons, so this stays reference-only; offeringWindows() in src/data/offerings.js opens a bikkurim lane by the Hebrew date (22 Cheshvan is in season).' },
     zone: 'azarah',
     pos: [201.5, 304.5, 16],
-    view: { at: [200, 286, 16], heading: 60 },
+    view: { at: [200.2, 289, 16], heading: 2 },
     summary: `In Cheshvan a farmer may still bring late first fruits — choice olives or dates — and set the basket beside the altar, but he no longer recites the declaration.`,
     description: `From Shavuot until Sukkot one brings first fruits and recites "My father was a wandering Aramean"; from Sukkot until Chanukah one brings but does not recite — Rabbi Yehudah ben Beteira says he recites (Bikkurim 1:6). They come only from the seven species: not dates of the hills, nor fruit of the valleys, nor olives that are not choice (Bikkurim 1:3); and they require a peace-offering, song, waving and a night in Jerusalem (Bikkurim 2:4).\n\nFrom the Mount on he carries the basket himself, as even King Agrippa did; at the court the Levites sing "I will exalt You, O Lord" (Bikkurim 3:4). The kohen puts his hand beneath the basket and waves it, and it is set down beside the altar, south of the south-western horn; the bringer bows and leaves (Bikkurim 3:6; Rambam Bikkurim 3:12). On 22 Cheshvan a lone basket is a fair sight but a rare one; the processions with the ox and the flute belong to the summer season.`,
     participants: [
@@ -1893,7 +1936,7 @@ export const EVENTS = [
     timing: { confidence: 'explicit', note: '"The tamid is slaughtered at eight and a half hours and offered at nine and a half" (Pesachim 5:1) — seasonal hours from sunrise.' },
     zone: 'slaughter-zone',
     pos: [221, 347.5, 16],
-    view: { at: V.slaughterNE, heading: 290 },
+    view: { at: [217.8, 344.2, 16], heading: 40 },
     summary: `Eight and a half seasonal hours: the second lamb of the day is slaughtered at the north-east, on the second ring, and its blood thrown.`,
     description: `The tamid is slaughtered at eight and a half hours and offered at nine and a half; on the eve of Pesach an hour earlier, and earlier still when the eve of Pesach falls on a Friday (Pesachim 5:1). The afternoon lamb is slaughtered at the north-eastern corner, on the second ring (Tamid 4:1), and its blood is thrown as in the morning.\n\n"The one lamb you shall offer in the morning, and the second lamb you shall offer between the evenings" (Bamidbar 28:4).`,
     participants: [{ role: 'kohen', count: 11, note: 'on weekdays the morning\'s winners, with no new lottery; on Shabbat the incoming mishmar, by a new lottery (Yoma 26a); with two log-bearers (Yoma 2:5)' }],
@@ -2075,7 +2118,7 @@ export const EVENTS = [
     timing: { confidence: 'reconstruction', note: 'Sukkah 5:5 counts the six Friday blasts; it gives neither hour nor place. Shown before sunset, from a roof (report §33.1).' },
     zone: 'beit-avtinas',
     pos: [220, 261.8, 36],
-    view: { at: [231, 292, 16], heading: 200 },
+    view: { at: [216.3, 261.2, 36], heading: 78 },
     summary: `On the eve of Shabbat six blasts are added; the first three tell the people to stop their work.`,
     description: `On the eve of Shabbat they added six blasts: three to make the people stop working, and three to separate the holy from the profane (Sukkah 5:5). An ordinary day has twenty-one blasts; a Friday, twenty-seven.\n\nThe Mishnah does not say from where they were blown; the report speaks of a roof station (§33.1). They are shown on the roof of the Water Gate, facing the city.`,
     participants: [{ role: 'kohen', count: 2, note: 'trumpeters' }],
@@ -2093,7 +2136,7 @@ export const EVENTS = [
     timing: { confidence: 'reconstruction', note: 'Sukkah 5:5 gives no hour; shown just before sunset.' },
     zone: 'beit-avtinas',
     pos: [220, 261.8, 36],
-    view: { at: [231, 292, 16], heading: 200 },
+    view: { at: [216.3, 261.2, 36], heading: 78 },
     summary: `As Shabbat comes in, three more blasts mark the line between the profane and the holy.`,
     description: `The second three of the six Friday blasts were "to separate the holy from the profane" (Sukkah 5:5) — the last trumpets of the week.\n\nThe Mishnah gives neither their hour nor their place; they are shown just before sunset, from the roof of the Water Gate (report §33.1).`,
     participants: [{ role: 'kohen', count: 2, note: 'trumpeters' }],

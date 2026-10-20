@@ -8,8 +8,9 @@ import { Vector3, Quaternion } from 'three';
 import { m2w, w2m } from '../core/units.js';
 import { zoneAtSite } from '../data/site.js';
 import { Renderer } from './renderer.js';
-import { CUE_LIB, LOOP_LIB, CUE_ALIAS, VOICE_LIMIT, SYNTH_RATE, IR_MAX, CACHE_MB, OCCLUSION_RAYS, ROLLOFF, splToGainDb } from './library.js';
+import { CUE_LIB, LOOP_LIB, CUE_ALIAS, VOICE_LIMIT, SYNTH_RATE, CHOIR_RATE, IR_MAX, CACHE_MB, OCCLUSION_RAYS, ROLLOFF, splToGainDb } from './library.js';
 import { spaceForZone, CAPTIONS } from './synth/meta.js';
+import { sectionLyrics, sectionTiming } from './timeline.js';
 
 const dbToGain = (d) => Math.pow(10, d / 20);
 // acoustic coupling per space: critical distance r_c (m) where direct = reverberant, and how fast the
@@ -30,6 +31,8 @@ const BED_BY_SPACE = {
 const TRANSMISSION = { heichal: 0.9, chamber: 0.8, hall: 0.75, tight: 0.6, stoa: 0.3, court: 0.3, mount: 0, open: 0 };
 
 const _v = new Vector3(), _f = new Vector3(), _u = new Vector3(), _q = new Quaternion(), _ray = new Vector3(), _a = new Vector3();
+const perfNow = () => performance.now() / 1000;
+const sameOpts = (a, b) => JSON.stringify(a, Object.keys(a).sort()) === JSON.stringify(b, Object.keys(b).sort());
 
 export class AudioEngine {
   constructor(ctx) {
@@ -50,6 +53,8 @@ export class AudioEngine {
     this.zoneId = null;
     this.warned = new Set();
     this.captionsOn = true;
+    this.tracks = new Set();   // lyric caption tracks of sung sections (cues and loops)
+    this.music = new Set();    // choir-psalm cues sounding or due ({ v, end (perf s) }) — a 'choir' loop continues after one
   }
 
   get running() { return this.ac?.state === 'running'; }
@@ -57,6 +62,8 @@ export class AudioEngine {
   /** synthesis sample rate: fixed (48 kHz; 32 kHz on low) so buffers rendered before the AudioContext exists stay
    *  valid; AudioBufferSourceNode resamples. Only impulse responses must match the context rate. */
   get synthRate() { return SYNTH_RATE[this.tier] || 48000; }
+  /** synthesis rate for a render id: the choir has its own (CHOIR_RATE) */
+  rateFor(id) { return id === 'choir-psalm' || id === 'choir' ? CHOIR_RATE[this.tier] || this.synthRate : this.synthRate; }
 
   // ---------------------------------------------------------------- lifecycle
   async unlock() {
@@ -101,13 +108,15 @@ export class AudioEngine {
     this.hidden = hidden;
     if (!this.ac) return;
     if (hidden) this.ac.suspend().catch(() => {}); else if (this.state !== 'locked') this.ac.resume().catch(() => {});
+    // a suspended context paused the sung loops while their verses' clock ran on: restart them at the right verse
+    if (!hidden) for (const v of this.loops) if (v.anchor !== undefined && v.nodes) this.deactivate(v, 0.05);
   }
 
   setTier(key) {
     if (!key || key === this.tier) return;
     this.tier = key;
     this.renderer.budget = (CACHE_MB[key] || 80) * 1024 * 1024;
-    this.renderer.retier(key, this.synthRate, IR_MAX[key] || 3.5);
+    this.renderer.retier(key, (id) => this.rateFor(id), IR_MAX[key] || 3.5);
     this.panningModel = key === 'high' || key === 'ultra' ? 'HRTF' : 'equalpower';
     // rebuild the current room at the new tier's impulse-response length
     if (this.ac && this.space) {
@@ -217,36 +226,56 @@ export class AudioEngine {
     v.handle = handle;
     const capKey = def.caption?.(opts);
     const wantCaption = capKey && opts.caption !== false && this.captionsOn;
+    // a sung section: its verses are captioned as they are sung (after the heading), and its clock is known exactly
+    // before it renders (timeline.js) — due at request + delay, from opts.offset
+    const lyrics = def.lyrics && opts.caption !== false;
+    const heading = opts.captionHeading !== false ? capKey : null;
+    const offset0 = Math.max(0, +opts.offset || 0);
+    if (def.lyrics) {
+      const timing = sectionTiming(opts), due = perfNow() + (opts.delay || 0);
+      this.music.add({ v, sOpts, end: due + timing.duration - offset0 }); // a 'choir' loop of this section follows on
+      // the verses run on the real clock from the moment they are due — the text is not held up by a slow render, and
+      // shows with sound locked — and follow the buffer's own playhead once it sounds (tickTracks)
+      if (lyrics) this.startTrack(v, { t0: due, offset: offset0, heading });
+    }
     if (!this.ac || this.ac.state !== 'running') {
       // no sound yet (locked / hidden): still show the subtitle so the moment is not lost
-      if (wantCaption && this.audibleEnough(v)) this.caption(capKey, opts.captionDuration || 5, v);
+      if (!def.lyrics && wantCaption && this.audibleEnough(v)) this.caption(capKey, opts.captionDuration || 5, v);
       endResolve(false);
       return handle;
     }
     const t0 = this.ac.currentTime;
     this.inflight.add(v); // a time jump must also cancel cues whose buffer is still rendering (§9)
-    this.renderer.get('cue', id, sOpts, this.synthRate, { priority: 10 + def.priority }).then((buf) => {
+    this.renderer.get('cue', id, sOpts, this.rateFor(id), { priority: 10 + def.priority }).then((buf) => {
       this.inflight.delete(v);
       if (v.stopped || !this.ac) { endResolve(false); return; }
-      const late = this.ac.currentTime - t0;
-      // a blast heard a few seconds late still means something; much later it would be a wrong moment
-      if (late > (opts.maxLatency ?? (def.cat === 'music' || def.cat === 'voice' ? 15 : 10))) { endResolve(false); return; }
+      const late = this.ac.currentTime - t0, delay = opts.delay || 0;
+      // a sung section that rendered late joins in progress (its verses keep their clock); otherwise a blast heard a
+      // few seconds late still means something, much later it would be a wrong moment
+      const catchUp = def.lyrics && opts.catchUp !== false;
+      let offset = offset0;
+      if (catchUp) { if (late - delay > 0.25) offset += late - delay; }
+      // (a dropped cue is marked stopped: a 'choir' loop must not wait for its end)
+      else if (late > (opts.maxLatency ?? (def.cat === 'music' || def.cat === 'voice' ? 15 : 10))) { v.stopped = true; endResolve(false); return; }
+      if (offset >= buf.duration - 0.5) { v.stopped = true; endResolve(false); return; }
       v.buffer = buf;
       // the start time is fixed on the audio clock now; a delayed cue claims its voice slot only just
       // before it sounds (scheduled sequences must not crowd out what is playing in between)
-      const when = this.ac.currentTime + Math.max(0, (opts.delay || 0) - late);
+      const when = this.ac.currentTime + Math.max(0, delay - late);
       const go = () => {
         if (v.stopped || !this.ac) { endResolve(false); return; }
-        if (!this.admit(v)) { endResolve(false); return; }
-        this.startVoice(v, buf, Math.max(when, this.ac.currentTime), 0, opts.fadeIn ?? 0.004);
+        if (!this.admit(v)) { v.stopped = true; endResolve(false); return; }
+        const at = Math.max(when, this.ac.currentTime);
+        const off = catchUp ? offset + (at - when) : offset;
+        this.startVoice(v, buf, at, off, opts.fadeIn ?? (catchUp && off > 0.3 ? 0.6 : 0.004));
         // subtitles only if the call is audible where the observer stands when it sounds
-        if (wantCaption) setTimeout(() => { if (!v.stopped && this.audibleEnough(v)) this.caption(capKey, buf.duration, v); }, Math.max(0, (when - this.ac.currentTime) * 1000));
+        if (!def.lyrics && wantCaption) setTimeout(() => { if (!v.stopped && this.audibleEnough(v)) this.caption(capKey, buf.duration, v); }, Math.max(0, (when - this.ac.currentTime) * 1000));
         if (id === 'magrefah') this.onMagrefah?.(v);
         if (id === 'crowd-prostrate') this.onProstrate?.(v);
       };
       const lead = (when - this.ac.currentTime - 0.15) * 1000;
       if (lead > 0) { v.pending = setTimeout(go, lead); this.pending.add(v); } else go();
-    }).catch((e) => { this.inflight.delete(v); this.warnOnce(`render:${id}`, `[audio] render failed for ${id}: ${e.message}`); endResolve(false); });
+    }).catch((e) => { this.inflight.delete(v); v.stopped = true; this.warnOnce(`render:${id}`, `[audio] render failed for ${id}: ${e.message}`); endResolve(false); });
     return handle;
   }
 
@@ -255,11 +284,11 @@ export class AudioEngine {
    * the drawn variant renders in the background for a later play.
    */
   pickVariant(id, def, opts) {
-    const n = def.variants || 1, k = Math.floor(Math.random() * n);
-    if (n < 2 || this.renderer.peek('cue', id, this.synthOpts(def, opts, k), this.synthRate)) return k;
+    const n = def.variants || 1, k = Math.floor(Math.random() * n), sr = this.rateFor(id);
+    if (n < 2 || this.renderer.peek('cue', id, this.synthOpts(def, opts, k), sr)) return k;
     for (let j = 0; j < n; j++) {
-      if (!this.renderer.peek('cue', id, this.synthOpts(def, opts, j), this.synthRate)) continue;
-      this.renderer.get('cue', id, this.synthOpts(def, opts, k), this.synthRate, { priority: 1 });
+      if (!this.renderer.peek('cue', id, this.synthOpts(def, opts, j), sr)) continue;
+      this.renderer.get('cue', id, this.synthOpts(def, opts, k), sr, { priority: 1 });
       return j;
     }
     return k;
@@ -273,6 +302,45 @@ export class AudioEngine {
     const text = typeof key === 'string' ? CAPTIONS[key] : key;
     if (!text) return;
     this.ctx.bus?.emit('caption', { id: typeof key === 'string' ? key : v?.id, text, duration: Math.max(2.5, Math.min(12, duration || 4)), pos: v?.pos?.clone?.() || null });
+  }
+
+  /**
+   * A lyric caption track: the section's verses shown as they are sung. t0: real seconds (performance clock) when
+   * the section is at `offset`; a one-shot that is sounding follows its buffer's playhead on the AudioContext clock
+   * instead (exact; holds through a suspended context). period: a loop's length (the verses come round again).
+   */
+  startTrack(v, { t0, offset = 0, period = 0, heading = null }) {
+    const lines = sectionLyrics(v.opts);
+    if (!lines.length) return null;
+    const tr = { v, lines, t0, offset, period, heading, i: 0, last: -1 };
+    this.tracks.add(tr);
+    return tr;
+  }
+
+  /** per frame (also while sound is locked): emit the verse being sung when it starts, if the choir is audible */
+  tickTracks() {
+    const pnow = perfNow();
+    for (const m of this.music) if (m.v.stopped || m.end < pnow - 1) this.music.delete(m);
+    if (!this.tracks.size) return;
+    const anow = this.ac ? this.ac.currentTime : 0;
+    for (const tr of this.tracks) {
+      const v = tr.v;
+      if (v.stopped || v.removed) { this.tracks.delete(tr); continue; }
+      const playing = v.kind === 'cue' && v.nodes && v.startTime !== undefined;
+      let pos = playing ? (anow - v.startTime) * (v.rate || 1) : pnow - tr.t0 + tr.offset;
+      if (pos < 0) continue;
+      if (tr.period > 0) { pos %= tr.period; if (pos < tr.last) tr.i = 0; }
+      tr.last = pos;
+      const show = this.captionsOn && this.audibleEnough(v);
+      if (tr.heading) { if (pos < 3 && show) this.caption(tr.heading, 6, v); tr.heading = null; }
+      let k = -1;
+      while (tr.i < tr.lines.length && tr.lines[tr.i].t <= pos) k = tr.i++;
+      if (k >= 0 && show) {
+        const L = tr.lines[k], rem = L.t + L.dur - pos;
+        if (rem > 1) this.ctx.bus?.emit('caption', { id: v.id, verse: L.key, text: L.text, duration: Math.max(2.5, Math.min(20, rem)), pos: v.pos?.clone?.() || null });
+      }
+      if (!tr.period && tr.i >= tr.lines.length) this.tracks.delete(tr);
+    }
   }
 
   /** voice budget: admit v, stealing the quietest playing voice if needed */
@@ -388,6 +456,18 @@ export class AudioEngine {
     if (v.area || (spatial && !v.pos)) v.pos = new Vector3();
     v.space = v.spatial ? this.spaceAt(this.sourcePos(v)) : null;
     v.occ = v.floor = this.transmission(v.space);
+    if (def.shareCue) {
+      // a section sung through, over and over, on its own clock (real seconds): it plays the choir-psalm cue's own
+      // buffer, from opts.offset — or, when a choir-psalm cue of the same section is still sounding, from its end on
+      v.rsOpts = this.synthOpts(CUE_LIB[def.shareCue], opts, 0);
+      const now = perfNow();
+      let anchor = now - Math.max(0, +opts.offset || 0);
+      for (const m of this.music) if (!m.v.stopped && m.end > now + 0.5 && sameOpts(m.sOpts, v.rsOpts)) anchor = Math.max(anchor, m.end);
+      v.anchor = anchor;
+      // verse captions on request only: a loop never captioned before audio-2, and a caller staging another text over
+      // this sound (G3's Shabbat stand-in) must not see the stand-in's verses named
+      if (def.lyrics && opts.caption === true) this.startTrack(v, { t0: anchor, period: sectionTiming(opts).duration });
+    }
     this.loops.add(v);
     const handle = {
       id,
@@ -400,7 +480,11 @@ export class AudioEngine {
         v.pos = (v.pos || new Vector3()).copy(np); v.area = null; v.space = this.spaceAt(v.pos); v.floor = this.transmission(v.space);
         if (v.nodes?.pan) this.placePanner(v);
       },
-      stop: (fade = 1) => { this.loops.delete(v); this.deactivate(v, fade); },
+      stop: (fade = 1) => {
+        this.loops.delete(v); v.removed = true; this.deactivate(v, fade);
+        // the shared section buffer stays pinned only while a loop still sings it
+        if (v.rsOpts && ![...this.loops].some((o) => o.rsOpts && sameOpts(o.rsOpts, v.rsOpts))) this.renderer.pin('cue', def.shareCue, v.rsOpts, this.rateFor(def.shareCue), false);
+      },
       get active() { return !!v.nodes; },
     };
     v.handle = handle;
@@ -409,11 +493,11 @@ export class AudioEngine {
 
   activate(v) {
     if (v.loading || !this.running) return;
-    const sr = this.synthRate;
-    const buf = this.renderer.peek('loop', v.id, v.sOpts, sr);
+    const share = v.def.shareCue, kind = share ? 'cue' : 'loop', rid = share || v.id, ro = v.rsOpts || v.sOpts, sr = this.rateFor(rid);
+    const buf = this.renderer.peek(kind, rid, ro, sr);
     if (!buf) {
       v.loading = true;
-      this.renderer.get('loop', v.id, v.sOpts, sr, { priority: 5 + (v.def.priority || 1), pin: true })
+      this.renderer.get(kind, rid, ro, sr, { priority: 5 + (v.def.priority || 1), pin: true })
         .then(() => { v.loading = false; })
         .catch((e) => { v.loading = false; v.failed = true; this.warnOnce(`render:${v.id}`, `[audio] loop render failed ${v.id}: ${e.message}`); });
       return;
@@ -424,9 +508,15 @@ export class AudioEngine {
       v.floor = this.transmission(v.space);
       v.occ = Math.max(v.occ || 0, v.floor);
     }
-    // resume the "virtual playhead" so culled-and-restored loops do not restart from zero
-    const offset = ((this.ac.currentTime / buf.duration + v.phase) % 1) * buf.duration;
-    this.startVoice(v, buf, this.ac.currentTime + 0.01, offset, 1.2);
+    if (share) this.renderer.pin(kind, rid, ro, sr, true);
+    // resume the "virtual playhead" so culled-and-restored loops do not restart from zero; a sung section's playhead
+    // is its own clock (it may start in the future, after the cue it follows)
+    let when = this.ac.currentTime + 0.01, offset, fadeIn = 1.2;
+    if (v.anchor !== undefined) {
+      const d = perfNow() + 0.01 - v.anchor;
+      if (d < 0) { when -= d; offset = 0; fadeIn = 0.01; } else { offset = d % buf.duration; if (offset < 0.3) fadeIn = 0.01; }
+    } else offset = ((this.ac.currentTime / buf.duration + v.phase) % 1) * buf.duration;
+    this.startVoice(v, buf, when, offset, fadeIn);
   }
 
   deactivate(v, fade = 0.8) {
@@ -499,6 +589,7 @@ export class AudioEngine {
       cam.matrixWorld.decompose(_v, _q, _u);
       this.listener.copy(_v); // tracked even while locked: captions are gated by distance
     }
+    this.tickTracks();
     if (!running) return;
     if (cam) {
       _f.set(0, 0, -1).applyQuaternion(_q);
@@ -576,6 +667,10 @@ export class AudioEngine {
     for (const v of [...this.voices, ...this.pending]) this.stopVoice(v, fade);
     for (const v of this.inflight) { v.stopped = true; v.endResolve?.(false); }
     this.inflight.clear();
+    // sung sections' captions (also those running on the real clock while sound is locked); loops keep theirs
+    for (const m of this.music) m.v.stopped = true;
+    this.music.clear();
+    for (const tr of this.tracks) if (tr.v.kind === 'cue') { tr.v.stopped = true; this.tracks.delete(tr); }
   }
 }
 

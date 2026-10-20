@@ -13,10 +13,13 @@
 //   azarah.js      N/S gates & flights, Water Gate house + Beit Avtinas + mikveh, Nitzotz + Beit HaNitzotz, Kelim
 //   chambers.js    Gazit, Golah, Etz/Parhedrin, Melach, Parvah (+ roof mikveh), Medichin (+ stair)
 //   moked.js       Beit HaMoked and the underground passage / Beit HaTevilah
-//   watch.js       night-watch post lamps
+//   watch.js       night-watch post lamps; the lamps of the Shabbat dawn search inside the Azarah
 //
 // Movables: 'door:<element id>' (userData.open(f), f 0 shut … 1 folded back), 'curtain:<gate id>' (userData.open(f),
-// 1 = gathered), 'wheel:azarah.chamber.golah' (userData.spin(rad)). Anchors: 'courts.*'. Fires: 'courts.*'.
+// 1 = gathered), 'wheel:azarah.chamber.golah' (userData.spin(rad)), 'azarah.moked.keys-slab' (userData.lift(f) = open(f),
+// 0 in place … 1 raised on its ring; setKeys(bool | n | ids) the keys on the chain below). Anchors: 'courts.*'.
+// Fires: 'courts.*' (lamps lit before Shabbat, schedule 'service', intensity 0: 'courts.kelim.lamp-w|-s',
+// 'courts.moked.lambs.lamp', and the Shabbat dawn search's 'courts.azarah.lamp-{wicket,ne,nw,sw,s,se,chavitin}').
 import { Kit, Doors, Curtains, leafGeometry } from './lib/kit.js';
 import { lathe } from './lib/geo.js';
 import { AMAH } from '../../core/units.js';

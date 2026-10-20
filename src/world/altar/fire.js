@@ -8,7 +8,9 @@
 // pile, for keeping the fire. The gizer itself (Zevachim 62b): "the gizrin Moshe made — length an amah, width an amah,
 // thickness as the strickle of a heaped se'ah; R' Yirmiyah: in a shortened amah". Positions/sizes from site.js
 // altar.maarachah-area params. Second Temple: an ordinary wood fire (fx 'pyre'), smoke straight up; no heavenly glow.
-import { Group, Mesh, OctahedronGeometry, Matrix4, Quaternion, Euler, Vector3 } from 'three';
+// Movables: 'altar.maarachah.great.pile' (build(f); its rows follow the tapuach's size), 'altar.tapuach' (grow(f),
+// heightAt(X, Y)), 'altar.two-logs' (.visible) — below.
+import { Group, Mesh, OctahedronGeometry, Matrix4, Quaternion, Euler, Vector3, BufferAttribute, DynamicDrawUsage } from 'three';
 import { heightField, polarField, logGeometry, logBetween, rng, noise2, Mesher } from './lib.js';
 import { applyWorldUV, mergeGeometries } from '../geom.js';
 
@@ -29,7 +31,7 @@ export function buildFire(A) {
   // (glass_dark: charcoal's satin black) — never the fresh bark, which hid the burnt core
   const CHAR = A.mat('timber_charred', A.mat('glass_dark', BARK));
   const GIZ = A.mat('timber_split', A.mat('wood_lattice', BARK));   // riven faces of the two Moshe-standard gizrin
-  const jitter = (s) => (R() - 0.5) * 2 * s;
+  const jitter = (s, rnd = R) => (rnd() - 0.5) * 2 * s;
 
   // ---------------------------------------------------------------- the tapuach: heaped ash at its angle of repose
   // a broad, slightly flattened crown, straight flanks (tan ≈ 0.84, 40°: site.js's 3 high on a radius of 4 leaves no
@@ -64,7 +66,10 @@ export function buildFire(A) {
     return Z - 0.03 + Math.max(0, h);
   };
   const rings = [8, 12, 20, 28][d], segs = [16, 28, 44, 60][d];
-  B.geo(polarField(tcx, tcy, rings, segs, (t) => RE * lobe(t), (r01, t, X, Y) => tapZ(X, Y), (u) => 0.35 * u * u + 0.65 * u), ASH, { collide: true, cast: true });
+  // a movable of its own (grow(f), below); its collider stays the full mound
+  const tapGeo = polarField(tcx, tcy, rings, segs, (t) => RE * lobe(t), (r01, t, X, Y) => tapZ(X, Y), (u) => 0.35 * u * u + 0.65 * u);
+  ctx.addCollider(tapGeo.clone(), 'altar:tapuach');
+  const tapChars = [];
 
   // ---------------------------------------------------------------- the ash floor of the 24 × 24 (a fine drift, 0 at the edge)
   const n = [1, 24, 40, 56][d];
@@ -80,16 +85,20 @@ export function buildFire(A) {
   // ---------------------------------------------------------------- wood
   const seg = [5, 7, 8, 10][d], rows = d === 0 ? 1 : d === 1 ? 2 : 3;
   const sides = [], caps = [], chars = [];
-  /** a billet from site point a to b (amot), radius r; o: { char, taper (radius factor at a), squash, roll } */
-  const addLog = (a, b, r, o = {}) => {
+  /** a billet from site point a to b (amot), radius r; o: { char, taper (radius factor at a), squash, roll };
+   *  rec: a great-pile billet record that takes the geometry (the movable pile) instead of the static lists;
+   *  rnd: the random stream (the pile's extension billets draw from their own, so nothing else moves) */
+  const addLog = (a, b, r, o = {}, rec = null, rnd = R) => {
     const { matrix, len } = logBetween(a, b);
-    const rb = r * A.AMAH * (0.92 + 0.16 * R());
-    const g = logGeometry(len, rb * (o.taper ?? 1), rb * (0.88 + 0.12 * R()), seg, R, d >= 2 ? 0.07 : 0.04, rows, o.squash ?? 1, o.roll ?? 0);
+    const rb = r * A.AMAH * (0.92 + 0.16 * rnd());
+    const g = logGeometry(len, rb * (o.taper ?? 1), rb * (0.88 + 0.12 * rnd()), seg, rnd, d >= 2 ? 0.07 : 0.04, rows, o.squash ?? 1, o.roll ?? 0);
     g.side.applyMatrix4(matrix);
     g.caps.applyMatrix4(matrix);
+    if (rec) { rec.char = !!o.char; rec.side = g.side; rec.caps = g.caps; pileRecs.push(rec); return; }
     if (o.char) chars.push(g.side, g.caps); else { sides.push(g.side); caps.push(g.caps); }
   };
-  const section = () => (R() < 0.35 ? { squash: 0.55 + 0.15 * R(), roll: R() * Math.PI } : {});   // split or round
+  const pileRecs = [];
+  const section = (rnd = R) => (rnd() < 0.35 ? { squash: 0.55 + 0.15 * rnd(), roll: rnd() * Math.PI } : {});   // split or round
   const GL = 5 / 6;                                      // a gizer: one shortened amah (5 tefachim ⚙) — Zevachim 62b
 
   // the bed of coals and ash the great pile has burnt down into: deepest at its heart, toward the tapuach
@@ -114,6 +123,9 @@ export function buildFire(A) {
   const layerH = 2 * lr * 0.88, sp = 2 * lr * 1.55;
   const nL = Math.max(1, Math.floor((gz1 - gz0 - lr) / layerH) + 1);
   const mJ = (j) => 0.15 + j * 0.18;                     // side margin of layer j (the pile narrows upward)
+  // every row and its billet slots, laid or not (interior, buried and burnt-away slots are still there for support):
+  // the movable pile below fits the rows to the tapuach's current size
+  const pileRows = [];
   for (let j = 0; j < nL; j++) {
     const z = gz0 + lr * 0.8 + j * layerH;
     const ys = [];
@@ -122,9 +134,11 @@ export function buildFire(A) {
     ys.forEach((y0, ri) => {
       const y = y0 + jitter(0.05);
       // inner end: march west until the mound's surface stands at the billet's height (its end touches the tapuach)
-      let xin = gx0 + jitter(0.25);
-      for (let x = gx0 + 1.0; x > gx0 - 2.6; x -= 0.05) { if (tapZ(x, y) >= z - lr * 0.4) { xin = x + 0.03; break; } }
+      let xin = gx0 + jitter(0.25), touch1 = false;
+      for (let x = gx0 + 1.0; x > gx0 - 2.6; x -= 0.05) { if (tapZ(x, y) >= z - lr * 0.4) { xin = x + 0.03; touch1 = true; break; } }
       const xout = gx1 - j * 0.12 + 0.3 - R() * 0.9;      // staggered, broken east ends
+      const row = { j, ri, y, z, xin, touch1, slots: [] };
+      pileRows.push(row);
       if (xout - xin < 0.5) return;
       const edgeRow = ri < 2 || ri >= ys.length - 2 || y < gy0 + m2 + sp || y > gy1 - m2 - sp;
       let x = xout, first = true;
@@ -133,6 +147,8 @@ export function buildFire(A) {
         const last = x - L - xin < 0.25;
         if (last) L = x - xin;
         const xa = x - L, xm = x - L / 2;
+        const slot = { xa, xb: x, ext: false, mask: 0, rec: null };
+        row.slots.push(slot);
         const b = burnAt(xm, y, j);
         const top = j >= nL - 2, visible = top || edgeRow || first || last || b > 0.2;
         const buried = z + lr < bedZ(xm, y) - 0.02;
@@ -143,11 +159,11 @@ export function buildFire(A) {
             const Ls = L * (0.45 + 0.35 * R()), slump = R() < 0.33 ? (10 + 15 * R()) * Math.PI / 180 : 0;
             const zz = z - (b - 0.4) * 0.5;
             const inner = [x - Ls, y + jitter(0.06), zz - Ls * Math.sin(slump)], outer = [x - 0.02, y + jitter(0.06), zz];
-            addLog(inner, outer, lr * (0.65 + 0.4 * R()), { char: true, taper: 0.45 + 0.3 * R(), ...section() });
+            addLog(inner, outer, lr * (0.65 + 0.4 * R()), { char: true, taper: 0.45 + 0.3 * R(), ...section() }, slot.rec = { j, ri, x: xm });
           } else {
             const yaw = jitter(0.035), pitch = jitter(0.025);
             addLog([xa + 0.02, y - yaw, z + jitter(0.03) - pitch], [x - 0.02, y + yaw, z + jitter(0.03) + pitch], lr * (0.75 + 0.5 * R()),
-              { char: b > 0.22 && R() < 0.5, ...section() });
+              { char: b > 0.22 && R() < 0.5, ...section() }, slot.rec = { j, ri, x: xm });
           }
         }
         x = xa - 0.03 - R() * 0.08;
@@ -156,6 +172,90 @@ export function buildFire(A) {
     });
   }
   const gTop = gz0 + lr * 0.8 + (nL - 1) * layerH + lr;
+
+  // ---------------------------------------------------------------- the great pile against a smaller tapuach
+  // The rows above are laid against the full mound (site.js r 4, h 3). When the tapuach is smaller (grow(f) < 1) the
+  // gizrin are still laid "with their inner ends touching the tapuach" (Tamid 2:4), so for each size on a grid of
+  // tenths each row is fitted again:
+  //  · where the smaller mound still reaches the row's height (within the original reach, 2.6 amot west of the pile
+  //    box), the row runs on west to touch it: extension billets (their own random stream, so nothing else moves),
+  //    the innermost one's tip pushed into the ash;
+  //  · where it no longer does, the row keeps only the billets that rest on the layer below — each layer may overhang
+  //    the one under it by at most OV (the corbel the mound's 40° flank gives, ≈ ¼ amah a layer, with a margin), or by
+  //    its own overhang in the full pile if that is more; the bottom layer lies on the floor and the ember bed.
+  // The pile at 1 is untouched; every billet carries a mask of the sizes at which it lies there.
+  const GN = 10, OV = 0.35, Zb = Z - 0.03;
+  const growScale = (g) => [0.55 + 0.45 * g, 0.25 + 0.75 * g];   // the tapuach's radius / height factors (grow(f))
+  const tapZg = (X, Y, sr, sz) => Zb + sz * (tapZ(tcx + (X - tcx) / sr, tcy + (Y - tcy) / sr) - Zb);
+  for (const row of pileRows) {
+    row.xt = new Array(GN + 1).fill(null);
+    row.xt[GN] = row.touch1 ? row.xin : null;
+    const zt = row.z - lr * 0.4;
+    let start = gx0 + 1.0;
+    for (let gi = GN - 1; gi >= 0; gi--) {          // the mounds are nested: once a row misses one, it misses the smaller
+      const [sr, sz] = growScale(gi / GN);
+      if (Math.abs(row.y - tcy) > RE * 1.12 * sr || Zb + sz * (TH + 0.3) < zt) break;   // beside or below the mound
+      // a coarse march, then the first touch to 0.05 amah inside the last coarse step
+      const hit = (x) => tapZg(x, row.y, sr, sz) >= zt;
+      let x = start;
+      while (x > gx0 - 2.6 && !hit(x)) x -= 0.2;
+      if (x <= gx0 - 2.6) break;
+      let xf = x + 0.15;
+      while (xf > x + 0.01 && !hit(xf)) xf -= 0.05;
+      row.xt[gi] = (xf > x + 0.01 ? xf : x) + 0.03;
+      start = Math.min(gx0 + 1.0, row.xt[gi] + 0.3);
+    }
+  }
+  const R2 = rng(A.seed ^ 0x2b7c);
+  for (const row of pileRows) {
+    const reach = row.xt.filter((v) => v != null);
+    if (!reach.length || !row.slots.length) continue;
+    const xmin = Math.min(...reach) - 0.1, { y, z, j, ri } = row;
+    let x = row.slots[row.slots.length - 1].xa - 0.03 - R2() * 0.05;
+    while (x - xmin > 0.15) {
+      let L = Math.min(GL * (0.9 + 0.2 * R2()), x - xmin);
+      if (x - L - xmin < 0.25) L = x - xmin;
+      const xa = x - L, xm = x - L / 2;
+      const slot = { xa, xb: x, ext: true, mask: 0, rec: null };
+      row.slots.push(slot);
+      const b = burnAt(xm, y, j);
+      if (z + lr >= bedZ(xm, y) - 0.02 && !(b > 0.62 && j <= 4)) {
+        const yaw = jitter(0.035, R2), pitch = jitter(0.025, R2);
+        addLog([xa + 0.02, y - yaw, z + jitter(0.03, R2) - pitch], [x - 0.02, y + yaw, z + jitter(0.03, R2) + pitch], lr * (0.75 + 0.5 * R2()),
+          { char: b > 0.4 || (b > 0.22 && R2() < 0.5), ...section(R2) }, slot.rec = { j, ri, x: xm, ext: true }, R2);
+      }
+      x = xa - 0.03 - R2() * 0.08;
+    }
+  }
+  {
+    const byLayer = [];
+    for (const row of pileRows) (byLayer[row.j] ||= []).push(row);
+    for (const row of pileRows) {
+      row.under = row.j ? byLayer[row.j - 1].filter((q) => Math.abs(q.y - row.y) < sp * 0.9) : [];
+      row.E = new Float64Array(GN + 1);
+      row.allow = OV;
+    }
+    for (const gi of [GN, ...Array.from({ length: GN }, (_, k) => GN - 1 - k)]) {
+      for (const layer of byLayer) for (const row of layer) {
+        const xt = row.xt[gi];
+        let S = -Infinity;                               // the inner end of the layer below, under this row
+        for (const q of row.under) S = Math.max(S, q.E[gi]);
+        if (gi === GN && xt == null && row.j > 0 && Number.isFinite(S)) {
+          let own = Infinity;
+          for (const s of row.slots) if (!s.ext) own = Math.min(own, s.xa);
+          if (Number.isFinite(own)) row.allow = Math.max(OV, S - own + 0.02);
+        }
+        const lim = S === -Infinity ? -Infinity : S - row.allow;
+        let E = Infinity;
+        for (const s of row.slots) {
+          const on = gi === GN ? !s.ext : xt != null ? s.xb > xt + 0.1 : row.j === 0 ? !s.ext : !s.ext && s.xa >= lim;
+          if (on) { s.mask |= 1 << gi; if (s.xa < E) E = s.xa; }
+        }
+        row.E[gi] = E;
+      }
+    }
+    for (const row of pileRows) for (const s of row.slots) if (s.rec) s.rec.mask = s.mask;
+  }
 
   // the second pile (incense coals, Tamid 2:5) and the third (keeping the fire, Yoma 45a): cribs of gizrin over a
   // heap of coals, the billets a shortened amah long, laid end to end where the crib is wider than one
@@ -188,19 +288,21 @@ export function buildFire(A) {
   if (d >= 1) {
     const oct = new OctahedronGeometry(1, 0);
     const q = new Quaternion(), e = new Euler(), sv = new Vector3(), pv = new Vector3(), mtx = new Matrix4();
-    const chunk = (X, Y, Zs, size) => {
+    const chunk = (X, Y, Zs, size, list = chars) => {
       e.set(R() * 6.3, R() * 6.3, R() * 6.3);
       q.setFromEuler(e);
       const sz = size * A.AMAH;
       sv.set(sz * (0.8 + 0.6 * R()), sz * (0.45 + 0.3 * R()), sz * (0.6 + 0.5 * R()));
       pv.set(X * A.AMAH, (Zs + size * 0.12) * A.AMAH, -Y * A.AMAH);
-      chars.push(applyWorldUV(oct.clone().applyMatrix4(mtx.compose(pv, q, sv))));
+      list.push(applyWorldUV(oct.clone().applyMatrix4(mtx.compose(pv, q, sv))));
     };
     const nT = [0, 26, 55, 85][d];
     for (let i = 0; i < nT; i++) {                       // over the tapuach's flanks and toe, thicker toward the toe
       const a = R() * Math.PI * 2, r01 = 0.4 + 0.6 * Math.sqrt(R());
       const X = tcx + Math.cos(a) * RE * lobe(a) * r01, Y = tcy + Math.sin(a) * RE * lobe(a) * r01;
-      chunk(X, Y, Math.max(tapZ(X, Y), ashH(X, Y)), 0.035 + 0.055 * R());
+      // on the mound itself they go with it (the tapuach movable); on the floor drift beyond its toe they stay
+      const zt = tapZ(X, Y), za = ashH(X, Y);
+      chunk(X, Y, Math.max(zt, za), 0.035 + 0.055 * R(), zt >= za ? tapChars : chars);
     }
     const nB = [0, 20, 40, 64][d];
     for (let i = 0; i < nB; i++) {                       // on the great pile's coal bed, round its hollow heart
@@ -218,6 +320,116 @@ export function buildFire(A) {
   for (const [list, key] of [[sides, BARK], [caps, END], [chars, CHAR]]) {
     const g = merged(list);
     if (g) B.geo(g, key, { collide: false, cast: true });
+  }
+
+  // ---------------------------------------------------------------- the great pile and the tapuach as movables
+  // The sim (terumat-hadeshen) clears the great pile down to its bed of embers and builds it again with the new gizrin
+  // (Tamid 2:3–4), and heaps the raked ash onto the tapuach (Tamid 2:2).
+  //   'altar.maarachah.great.pile'  userData.build(f): 0 = cleared (only the static ember bed and its coals remain) …
+  //                                 1 = the built pile; billets appear layer by layer from the bottom, each layer row by
+  //                                 row from the south, each row from the tapuach out to the face ⚙ order. The pile at 1
+  //                                 is the burning pile (its heart burnt hollow and charred), as before.
+  //   'altar.tapuach'               userData.grow(f): 1 = site.js's mound (r 4, h 3: "at times about 300 kor") … 0 = a low
+  //                                 remnant (radius × 0.55, height × 0.25) after the ash was carried out ⚙ scale. The
+  //                                 pile follows it: its rows run on to touch the smaller mound, and billets the mound
+  //                                 no longer carries are not laid (above, in tenths of f). heightAt(X, Y): the visible
+  //                                 mound's site Z there at the current size (null off it) — the colliders stay static.
+  // Both also answer open(f) (the sim's door-handle contract) and report amount / openAmount; default 1.
+  {
+    const order = pileRecs.map((r, i) => i).sort((a, b) => {
+      const p = pileRecs[a], q = pileRecs[b];
+      return p.j - q.j || p.ri - q.ri || p.x - q.x;
+    });
+    const recs = order.map((i) => pileRecs[i]);
+    const N = recs.length;
+    const vc = (g) => (g.index ? g.index.count : g.attributes.position.count);
+    const mats = [[BARK, (r) => (r.char ? [] : [r.side])], [END, (r) => (r.char ? [] : [r.caps])], [CHAR, (r) => (r.char ? [r.side, r.caps] : [])]];
+    const pile = new Group();
+    pile.name = 'altar.maarachah.great.pile';
+    const parts = [];
+    for (const [key, pick] of mats) {
+      const list = [], start = new Int32Array(N), count = new Int32Array(N);
+      let c = 0;
+      recs.forEach((r, k) => { start[k] = c; for (const g of pick(r)) { list.push(g); c += vc(g); } count[k] = c - start[k]; });
+      if (!list.length) continue;
+      // the billets laid at the tapuach's current size, in building order: an index over the merged billets
+      const geo = mergeGeometries(list, false);
+      const index = new BufferAttribute(c > 65535 ? new Uint32Array(c) : new Uint16Array(c), 1);
+      index.setUsage(DynamicDrawUsage);
+      geo.setIndex(index);
+      const mesh = new Mesh(geo, ctx.mats.get(key));
+      mesh.name = `altar.maarachah.great.pile:${key}`;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      pile.add(mesh);
+      parts.push({ mesh, index, start, count, cum: new Int32Array(N + 1) });
+    }
+    let gi = -1, laid = [];                               // the grid size in force; the record indices laid at it
+    const fit = (g) => {
+      const k = Math.min(GN, Math.max(0, Math.floor(g * GN + 1e-6)));
+      if (k === gi) return;
+      gi = k;
+      laid = [];
+      for (let i = 0; i < N; i++) if (recs[i].mask & (1 << gi)) laid.push(i);
+      for (const p of parts) {
+        const a = p.index.array;
+        let c = 0;
+        laid.forEach((i, n) => { const s = p.start[i], m = p.count[i]; for (let v = 0; v < m; v++) a[c++] = s + v; p.cum[n + 1] = c; });
+        p.index.needsUpdate = true;
+      }
+    };
+    const pud = {
+      kind: 'pile', id: 'altar.maarachah.great.pile', f: 1,
+      get billets() { return laid.length; },
+      get amount() { return pud.f; },
+      get openAmount() { return pud.f; },
+      build(f) {
+        const v = Math.min(1, Math.max(0, +f || 0));
+        pud.f = v;
+        const k = Math.round(v * laid.length);
+        for (const { mesh, cum } of parts) { mesh.geometry.setDrawRange(0, cum[k]); mesh.visible = cum[k] > 0; }
+        return v;
+      },
+      open(f) { return pud.build(f); },
+    };
+    fit(1);
+    pud.build(1);
+    pile.userData = pud;
+    A.group.add(pile);
+    A.movables.set(pile.name, pile);
+
+    const tap = new Group();
+    tap.name = 'altar.tapuach';
+    const base = new Vector3(tcx * A.AMAH, (Z - 0.03) * A.AMAH, -tcy * A.AMAH);
+    tap.position.copy(base);
+    const add = (g, key) => {
+      const mesh = new Mesh(g.translate(-base.x, -base.y, -base.z), ctx.mats.get(key));
+      mesh.name = `altar.tapuach:${key}`;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      tap.add(mesh);
+    };
+    add(tapGeo, ASH);
+    if (tapChars.length) add(mergeGeometries(tapChars, false), CHAR);
+    const tud = {
+      kind: 'mound', id: 'altar.tapuach', f: 1,
+      get amount() { return tud.f; },
+      get openAmount() { return tud.f; },
+      grow(f) {
+        const v = Math.min(1, Math.max(0, +f || 0));
+        tud.f = v;
+        const [sr, sz] = growScale(v);
+        tap.scale.set(sr, sz, sr);
+        fit(v);
+        pud.build(pud.f);
+        return v;
+      },
+      open(f) { return tud.grow(f); },
+      heightAt(X, Y) { const [sr, sz] = growScale(tud.f), h = tapZg(X, Y, sr, sz); return h > Zb + 1e-3 ? h : null; },
+    };
+    tap.userData = tud;
+    A.group.add(tap);
+    A.movables.set(tap.name, tap);
   }
 
   // ---------------------------------------------------------------- ash spilt onto the walkway beside the piles

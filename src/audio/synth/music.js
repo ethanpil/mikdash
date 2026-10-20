@@ -1,5 +1,6 @@
-// The Levites' song: psalm of the day (Tamid 7:4), sung in three sections with a teki'ah and the people's
-// prostration at each break (Tamid 7:3). Minimum 12 Levites on the duchan = 9 kinnorot + 2 nevalim +
+// The Levites' song: psalm of the day (Tamid 7:4) — or on Shabbat the musaf's Ha'azinu and the afternoon's Song at
+// the Sea / of the Well (Rosh HaShanah 31a) — sung in three sections with a teki'ah and the people's prostration at
+// each break (Tamid 7:3). Each section is sung through, every verse of it (src/audio/songs.js). Minimum 12 Levites on the duchan = 9 kinnorot + 2 nevalim +
 // 1 cymbal; boy Levites below sweeten the treble (Arachin 2:3-6, 13b; report §27.1, §29).
 //
 // The melodies are NOT preserved: everything here is a labelled modal reconstruction (docs/decisions/audio.md).
@@ -10,63 +11,16 @@
 //    four-voice homophonic psalmody (falsobordone) in quarter-comma meantone with cadential musica ficta.
 //    A style layer, never the default.
 import { Rng, resonate, cents } from './dsp.js';
-import { syllabify, buildSegments, renderVoice } from './voice.js';
+import { buildSegments, renderVoice } from './voice.js';
+import { psalmMelody, SECTION_TAIL } from './chant.js';
+import { SONGS, songId, sectionText } from '../songs.js';
 import { pluck, reedNote, BODY } from './instruments.js';
 
-// Divine names are written in their customary non-liturgical substitutes (Hashem, Elokim, Kel): this is a
-// simulation, not liturgy. Sections give the opening verses of each third of the psalm (the Mishnah fixes
-// three sections, not where they break — reconstruction). '*' marks penultimate stress.
-export const PSALMS = {
-  24: {
-    sections: [
-      'Le-da-vid miz-mor, la-ha-shem ha-a*-retz u-me-lo-ah, te-vel ve-yo-she-vei vah. Ki hu al ya-mim ye-sa-dah, ve-al ne-ha-rot ye-cho-ne-ne-ha.',
-      'Ne-ki cha-pa-yim u-var le-vav, a-sher lo na-sa la-shav naf-shi, ve-lo nish-ba le-mir-mah. Yi-sa ve-ra-chah me-et ha-shem, u-tze-da-kah me-e-lo-kei yish-o.',
-      'Se-u she-a-rim ra-shei-chem, ve-hi-na-se-u pit-chei o-lam, ve-ya-vo me-lech ha-ka-vod. Mi zeh me-lech ha-ka-vod, ha-shem i-zuz ve-gi-bor, ha-shem gi-bor mil-cha-mah.',
-    ],
-  },
-  48: {
-    sections: [
-      'Shir miz-mor liv-nei ko-rach. Ga-dol ha-shem u-me-hu-lal me-od, be-ir e-lo-kei-nu har kod-sho.',
-      'Hem-mah ra-u ken ta-ma-hu, niv-ha-lu nech-pa-zu. Re-a-dah a-cha-za-tam sham, chil ka-yo-le-dah.',
-      'Di-mi-nu e-lo-kim chas-de-cha, be-ke*-rev hei-cha-le-cha. Ke-shim-cha e-lo-kim ken te-hi-la-te-cha al katz-vei e*-retz, tze*-dek ma-le-ah ye-mi-ne-cha.',
-    ],
-  },
-  82: {
-    sections: [
-      'Miz-mor le-a-saf, e-lo-kim ni-tzav ba-a-dat kel, be-ke*-rev e-lo-kim yish-pot. Ad ma-tai tish-pe-tu a*-vel, u-fe-nei re-sha-im tis-u se-lah.',
-      'Pal-tu dal ve-ev-yon, mi-yad re-sha-im ha-tzi-lu. Lo ya-de-u ve-lo ya-vi-nu, ba-cha-she-chah yit-ha-la-chu, yi-mo-tu kol mos-dei a*-retz.',
-      'A-ni a-mar-ti e-lo-kim a-tem, u-ve-nei el-yon kul-chem. Ku-mah e-lo-kim shof-tah ha-a*-retz, ki a-tah tin-chal be-chol ha-go-yim.',
-    ],
-  },
-  94: {
-    sections: [
-      'Kel ne-ka-mot ha-shem, kel ne-ka-mot ho-fi-a. Hi-na-se sho-fet ha-a*-retz, ha-shev ge-mul al ge-im.',
-      'Bi-nu bo-a-rim ba-am, u-che-si-lim ma-tai tas-ki-lu. Ha-no-ta o*-zen ha-lo yish-ma, im yo-tzer a*-yin ha-lo ya-bit.',
-      'Mi ya-kum li im me-re-im, mi yit-ya-tzev li im po-a-lei a*-ven. Lu-lei ha-shem ez-ra-tah li, kim-at sha-che-nah du-mah naf-shi.',
-    ],
-  },
-  81: {
-    sections: [
-      'Har-ni-nu le-e-lo-kim u-ze-nu, ha-ri-u le-e-lo-kei ya-a-kov. Se-u zim-rah u-te-nu tof, ki-nor na-im im na-vel.',
-      'Ha-si-ro-ti mi-se*-vel shich-mo, ka-pav mi-dud ta-a-vor-nah. Ba-tza-rah ka-ra-ta va-a-chal-tze-ka, e-en-cha be-se*-ter ra-am.',
-      'Ve-lo sha-ma a-mi le-ko-li, ve-yis-ra-el lo a-vah li. Lu a-mi sho-me-a li, yis-ra-el bid-ra-chai ye-ha-le-chu.',
-    ],
-  },
-  93: {
-    sections: [
-      'Ha-shem ma-lach ge-ut la-vesh, la-vesh ha-shem oz hit-a-zar, af ti-kon te*-vel bal ti-mot. Na-chon kis-a-cha me-az, me-o-lam a-tah.',
-      'Na-se-u ne-ha-rot ha-shem, na-se-u ne-ha-rot ko-lam, yis-u ne-ha-rot doch-yam. Mi-ko-lot ma*-yim ra-bim, a-di-rim mish-be-rei yam, a-dir ba-ma-rom ha-shem.',
-      'E-do-te-cha ne-em-nu me-od, le-vei-te-cha na-a-vah ko*-desh, ha-shem le-o*-rech ya-mim.',
-    ],
-  },
-  92: {
-    sections: [
-      'Miz-mor shir le-yom ha-sha-bat. Tov le-ho-dot la-ha-shem, u-le-za-mer le-shim-cha el-yon. A-lei a-sor va-a-lei na-vel, a-lei hi-ga-yon be-chi-nor.',
-      'Ish ba-ar lo ye-da, uch-sil lo ya-vin et zot. Bif-ro-ach re-sha-im ke-mo e*-sev, va-ya-tzi-tzu kol po-a-lei a*-ven.',
-      'Tza-dik ka-ta-mar yif-rach, ke-e*-rez bal-va-non yis-geh. She-tu-lim be-veit ha-shem, be-chatz-rot e-lo-kei-nu yaf-ri-chu.',
-    ],
-  },
-};
+// The texts (Hebrew, chant syllables, English) and the three sections of each psalm and song are in ../songs.js.
+// Divine names are sung in their customary substitutes (Hashem, Elokim, Kel, Kah): a simulation, not liturgy.
+/** psalm number → { sections: [chant text × 3] } — every verse of each section (kept for older callers) */
+export const PSALMS = Object.fromEntries(Object.values(SONGS).filter((S) => S.kind === 'psalm')
+  .map((S) => [S.psalm, { get sections() { return [0, 1, 2].map((k) => sectionText(`psalm-${S.psalm}`, k)); } }]));
 export { PSALM_BY_DAY } from './meta.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -84,47 +38,9 @@ export function freq(name, oct = 3, tuning = 'pyth') {
   return D3 * t[name] * Math.pow(2, oct - 3);
 }
 
-// ---------------------------------------------------------------------------------------------
-// Psalm-tone melody (reconstruction): intonation F-G → recite A; mediant: accent Bb→A, after-tones G;
-// termination: preparatory accent on A (Bb grace), then G-F-E → D.
-// ---------------------------------------------------------------------------------------------
-/** Returns [{ t, dur, syl, notes: [[frac, name]], stress, cadence: 'm'|'f'|null, breathAfter }]. */
-export function psalmMelody(text, { tempo = 1, firstIntonation = true } = {}) {
-  const syl = syllabify(text);
-  // split into hemistichs at pauses
-  const hemis = []; let cur = [];
-  for (const s of syl) { cur.push(s); if (s.pause) { hemis.push({ syl: cur, end: s.pause }); cur = []; } }
-  if (cur.length) hemis.push({ syl: cur, end: 2 });
-  const out = [];
-  let t = 0.25, verseStart = true;
-  const U = 0.27 / tempo, S = 0.41 / tempo, M = 0.3 / tempo;
-  for (const h of hemis) {
-    const n = h.syl.length;
-    const stresses = h.syl.map((s, i) => (s.stress ? i : -1)).filter((i) => i >= 0);
-    const last = stresses[stresses.length - 1] ?? n - 1, prep = stresses[stresses.length - 2] ?? -1;
-    const final = h.end === 2;
-    for (let i = 0; i < n; i++) {
-      const s = h.syl[i];
-      let notes, dur = s.stress ? S : U, cadence = null;
-      if (verseStart && firstIntonation && i < 2 && i < last - 1) notes = [[0, i === 0 ? 'F' : 'G']];
-      else if (i < last) notes = [[0, final && i === prep ? 'A' : (final && i > prep && prep >= 0 ? 'G' : 'A')]];
-      if (final && i === prep) { notes = [[0, 'Bb'], [0.3, 'A']]; dur = S * 1.15; }
-      if (i === last) {
-        cadence = final ? 'f' : 'm';
-        if (final) { notes = i === n - 1 ? [[0, 'G'], [0.25, 'F'], [0.5, 'E'], [0.72, 'D']] : [[0, 'G'], [0.4, 'F'], [0.72, 'E']]; dur = M * (i === n - 1 ? 5.2 : 3); }
-        else { notes = i === n - 1 ? [[0, 'Bb'], [0.35, 'A'], [0.7, 'G']] : [[0, 'Bb'], [0.5, 'A']]; dur = M * (i === n - 1 ? 3.4 : 2); }
-      } else if (i > last) {
-        notes = final ? [[0, i === n - 1 ? 'D' : 'E']] : [[0, 'G']];
-        if (i === n - 1) dur = final ? M * 3.2 : M * 2;
-      }
-      const breathAfter = i === n - 1 ? (final ? 0.55 : 0.3) / tempo : 0;
-      out.push({ t, dur: dur + breathAfter, syl: s.syl, notes, stress: s.stress, cadence, breathAfter, hemi: h, gap: breathAfter });
-      t += dur + breathAfter;
-    }
-    verseStart = final;
-  }
-  return { events: out, length: t };
-}
+// The psalm-tone melody (intonation F-G, recitation on A, mediant Bb-A-G, termination G-F-E-D) is in chant.js, pure,
+// so the main thread times captions and libationTimeline() exactly as this renders.
+export { psalmMelody };
 
 // falsobordone voicing for the SG 1612 layer: melody (tenor) note → [bass, tenor, alto, cantus] (name, octave)
 const FB = {
@@ -142,17 +58,16 @@ const FB = {
 // ---------------------------------------------------------------------------------------------
 /**
  * Render a psalm section with voices and the Levites' strings. Mono Float32Array.
- * o: { sr, seed, psalm, section, style, men, boys, kinnorot, nevalim, fluteDay, tempo,
+ * o: { sr, seed, psalm | song (src/audio/songs.js ids), section, style, men, boys, kinnorot, nevalim, fluteDay, tempo, text,
  *      cr, hiGain (per-voice cost: control rate, parallel high-formant branch — weak tiers) }
  */
 export function renderPsalm(o) {
   const sr = o.sr, rng = new Rng(o.seed || 48);
-  const ps = PSALMS[o.psalm] || PSALMS[48];
-  const text = o.text || ps.sections[Math.max(0, Math.min(2, o.section | 0))];
+  const text = o.text || sectionText(songId(o), Math.max(0, Math.min(2, o.section | 0)));
   const style = o.style === 'sg1612' ? 'sg1612' : 'mishnah';
   const tuning = style === 'sg1612' ? 'meantone' : 'pyth';
   const { events, length } = psalmMelody(text, { tempo: o.tempo || 1 });
-  const total = length + 3.5;
+  const total = length + SECTION_TAIL;
   const out = new Float32Array(Math.ceil(total * sr));
 
   const men = o.men ?? 12, boys = style === 'sg1612' ? 0 : (o.boys ?? 4);

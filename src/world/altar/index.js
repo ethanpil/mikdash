@@ -23,6 +23,9 @@
 //   'altar.libation-cups', 'altar.libation-cup.water', 'altar.libation-cup.wine'   the silver cups at the SW horn
 //   'altar.machtah'             the silver fire-pan in its niche (Tamid 1:4)
 //   'altar.two-logs'            the two gizrin laid on the great pile (toggle .visible)
+//   'altar.maarachah.great.pile'  userData.build(f) — 0 cleared to its ember bed … 1 the built (burning) pile; open(f) alias
+//   'altar.tapuach'             userData.grow(f) — 1 site.js's mound … 0 a low remnant (the great pile's rows follow it);
+//                               open(f) alias; heightAt(X, Y) the visible mound's site Z (colliders stay the full mound)
 // Fires: 'altar.maarachah.great' | '.incense' | '.kiyum' (kind 'pyre', smoke, always); 'altar.kitchen.fire' (hearth) and
 // 'altar.beit-hadeshen.fire' (small pyre, smoke) — schedule 'service', intensity 0: the sim lights them (fx.setFire).
 // Anchors: 'altar.*' and 'station.<offerings.js STATIONS id>' (see registerAnchors).

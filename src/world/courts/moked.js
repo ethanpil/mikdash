@@ -1,14 +1,15 @@
 // Beit HaMoked (Middot 1:5–9; Tamid 1:1; Rambam BhB 5:9–10, 8:5–6; locks #8, #43; lock §58 24 × 24): a domed hall
 // (kippah) straddling the north wall, ringed by stepped stone ledges (rovadin) where the elders slept with the keys;
-// four corner chambers "like small bedrooms opening onto a banquet hall"; the marble keys slab with its ring; the
-// hearth; the gate with its wicket and the door to the chel. Below: the winding stair, the lamp-lit passage under the
-// Birah and the Beit HaTevilah with its mikveh, fire and privy (Tamid 1:1; Middot 1:9).
-import { B, gridSolid, lathe, sweep } from './lib/geo.js';
+// four corner chambers "like small bedrooms opening onto a banquet hall"; the marble keys slab with its ring, the keys
+// on a chain below it (movable 'azarah.moked.keys-slab': lift(f), setKeys(bool | n | ids)); the hearth; the gate with its wicket
+// and the door to the chel. Below: the winding stair, the lamp-lit passage under the Birah and the Beit HaTevilah with
+// its mikveh, fire and privy (Tamid 1:1; Middot 1:9). Fire 'courts.moked.lambs.lamp' (lamb chamber, 'service').
+import { B, gridSolid, lathe, sweep, Mesher } from './lib/geo.js';
 import { shell, flight, spiral, lamp, lampStand, wallLamp, starFire } from './lib/parts.js';
 import { classify } from './masonry.js';
-import { leafGeometry, meshOf, Object3D } from './lib/kit.js';
+import { leafGeometry, meshOf, Object3D, finishLocal, boxAt } from './lib/kit.js';
 import { AMAH, m2w } from '../../core/units.js';
-import { TorusGeometry } from 'three';
+import { TorusGeometry, CylinderGeometry, BufferAttribute, DynamicDrawUsage } from 'three';
 
 export function buildMoked(C) {
   hall(C);
@@ -147,14 +148,9 @@ function furnishings(C) {
   // rashei pispasin across the hall on the kodesh/chol line (Middot 1:6)
   const ph = C.kit.m('marble_veined', false, true);
   for (let x = i.min[0] + 3.5; x < i.max[0] - 3; x += 1) ph.box([x - 0.15, ky - 0.15, Z], [x + 0.15, ky + 0.15, Z + 0.07]);
-  // the keys slab: marble, an amah square, a ring fixed in it (Middot 1:9)
+  // the keys slab: marble, an amah square, a ring fixed in it, the keys on a chain below (Middot 1:9) — movable
+  keysSlab(C, Z);
   const ks = C.el('azarah.moked.keys-slab').box;
-  C.kit.m('marble_white', true, true).box([ks.min[0] + 0.02, ks.min[1] + 0.02, ks.min[2]], [ks.max[0] - 0.02, ks.max[1] - 0.02, ks.max[2]]);
-  const ring = new TorusGeometry(0.16 * AMAH, 0.03 * AMAH, 6, 16);
-  ring.rotateX(Math.PI / 2);
-  const rp = m2w((ks.min[0] + ks.max[0]) / 2, (ks.min[1] + ks.max[1]) / 2, ks.max[2] + 0.03);
-  ring.translate(rp.x, rp.y, rp.z);
-  C.kit.geo(ring, 'iron', { collide: false });
   // the hearth (the moked): a stone kerb with embers and a star fire of round logs, in the chol half where everyone it
   // warms sits and sleeps (no sitting in the kodesh half — Yoma 25a), north of the keys slab in the bay before the door
   // to the chel ⚙ (site.js: "centre of the hall", which is the kodesh line and the slab)
@@ -168,6 +164,133 @@ function furnishings(C) {
   C.anchor('courts.moked.hall', [c[0], i.min[1] + 4.5, Z], 0, 'Beit HaMoked — the hall');
   C.anchor('courts.moked.keys', [(ks.min[0] + ks.max[0]) / 2, ks.max[1] + 1.6, Z], 180, 'Beit HaMoked — the keys slab');
   C.anchor('courts.moked.ledges', [c[0] - 3, ky + 2, Z], 270, 'Beit HaMoked — the rovadin (sleeping ledges)');
+}
+
+// ------------------------------------------------------------------------------------------- the keys slab
+// Middot 1:9: "a place an amah by an amah, a marble tablet with a ring fixed in it, and a chain on which the keys hung.
+// At the locking he raised the tablet by the ring and took the keys from the chain ... returned the keys to the chain
+// and the tablet to its place, put his garment on it and slept." The place is site.js's 1 × 1 seat, cut ½ amah into
+// the hall floor (masonry.js). The tablet, ⅙ amah thick, rests flush on a stone rebate round the seat; the ring is
+// toward its south edge, where the kohen kneels — a drop-ring lying in a groove cut in the tablet, its top flush with
+// the floor, since "he put his garment on it and slept"; the chain hangs from an iron staple in the seat's north wall ⚙
+// (thickness, rebate, ring and staple placement; the Mishnah gives the size and the parts).
+// The keys: "the keys of the Azarah" (Middot 1:8; Rambam BhB 8:5) — one for each of its seven gates (Middot 1:4) and
+// one for the wicket between the Moked and the Azarah, which the officer takes alone at dawn ("he took the key and
+// opened the small gate", Rambam BhB 8:11) ⚙ count and form; the wicket key hangs at the bottom of the ring, the
+// smallest, with the widest bow.
+// Movable 'azarah.moked.keys-slab': userData.lift(f), 0 = in its place … 1 = raised by the ring, tipped up on its
+// north edge to 80° ⚙ (open(f) is the same, for the sim's door handles); setKeys(v) the keys on the chain: true all,
+// false none (in the kohen's hand), a number n the first n of keyIds (the wicket key is last: n = 7 when the officer
+// has taken it), or an array of ids. A static collider keeps the closed lid walkable.
+const KEY_IDS = ['azarah.gate.nitzotz', 'azarah.gate.korban', 'azarah.gate.moked', 'azarah.gate.delek', 'azarah.gate.bechorot',
+  'azarah.gate.mayim', 'azarah.gate.nikanor', 'azarah.gate.moked.pishpash'];
+const WICKET_KEY = 'azarah.gate.moked.pishpash';
+function keysSlab(C, Z) {
+  const A = AMAH, ks = C.el('azarah.moked.keys-slab').box;
+  const T = 1 / 6, reb = 0.07, seatZ = ks.min[2];
+  const x0 = ks.min[0] + 0.02, x1 = ks.max[0] - 0.02, y0 = ks.min[1] + 0.02, y1 = ks.max[1] - 0.02, cx = (x0 + x1) / 2;
+  // the rebate: a stone frame inside the seat, its top a tablet's thickness under the floor (faces against the seat's
+  // walls and floor omitted)
+  const st = C.kit.m('ashlar_plain', false, true);
+  st.box([ks.min[0], ks.min[1], seatZ], [ks.max[0], ks.min[1] + reb, Z - T], 'YZ');
+  st.box([ks.min[0], ks.max[1] - reb, seatZ], [ks.max[0], ks.max[1], Z - T], 'yZ');
+  st.box([ks.min[0], ks.min[1] + reb, seatZ], [ks.min[0] + reb, ks.max[1] - reb, Z - T], 'XZ');
+  st.box([ks.max[0] - reb, ks.min[1] + reb, seatZ], [ks.max[0], ks.max[1] - reb, Z - T], 'xZ');
+  // the closed lid as a collider only (the moving tablet is not one)
+  const lid = new Mesher().box([x0, y0, Z - T], [x1, y1, Z]);
+  C.ctx.addCollider(lid.geometry(), 'courts:keys-slab');
+  // the tablet and its ring, about a pivot on the tablet's top north edge
+  const pivotW = m2w(cx, y1, Z);
+  const slabGeo = new Mesher().box([x0, y0, Z - T], [x1, y1, Z]).geometry().translate(-pivotW.x, -pivotW.y, -pivotW.z);
+  const ry = y0 + 0.25, rr = 0.12, rt = 0.025;
+  // laid flat in its groove: the hexagonal section's top face (0.866 rt over the centre) a millimetre proud of the floor
+  const ringGeo = new TorusGeometry(rr * A, rt * A, 6, C.d >= 2 ? 20 : 14).rotateX(Math.PI / 2);
+  const rw = m2w(cx, ry, Z + 0.002 - 0.866 * rt);
+  ringGeo.translate(rw.x - pivotW.x, rw.y - pivotW.y, rw.z - pivotW.z);
+  const pivot = new Object3D();
+  pivot.name = 'azarah.moked.keys-slab';
+  pivot.position.copy(pivotW);
+  pivot.add(meshOf(C.kit, slabGeo, 'marble_white', 'courts:keys-slab-tablet'));
+  pivot.add(meshOf(C.kit, ringGeo, 'iron', 'courts:keys-slab-ring'));
+  // the staple just under the tablet's bearing, a short chain, the keys on a ring at its foot (shown / hidden); all of
+  // it hangs in the ⅓ amah between the tablet and the seat's floor
+  const yS = ks.max[1] - reb, zS = Z - T - 0.02;
+  C.kit.m('iron', false, false).box([cx - 0.05, yS - 0.03, zS - 0.04], [cx + 0.05, yS, zS + 0.01], 'xXyZz');
+  const chain = [], nL = 2, pitch = 0.035;
+  for (let i = 0; i < nL; i++) {
+    const g = new TorusGeometry(0.016 * A, 0.005 * A, 4, 8).scale(1, 1.5, 1);
+    if (i % 2) g.rotateY(Math.PI / 2);
+    const p = m2w(cx, yS - 0.03, zS - 0.03 - pitch * (i + 0.5));
+    chain.push(g.translate(p.x, p.y, p.z));
+  }
+  C.kit.geo(finishLocal(chain), 'iron', { collide: false, castShadow: false });
+  const kR = 0.035, zR = zS - 0.03 - pitch * nL - kR;   // the keys' ring: its centre
+  const kr = m2w(cx, yS - 0.03, zR);
+  const ringG = finishLocal([new TorusGeometry(kR * A, 0.006 * A, 4, 12).translate(kr.x, kr.y, kr.z)]);
+  // the keys, threaded on the ring's lower arc: a ring bow, a round shank and a toothed bit ⚙ (Roman-period form).
+  // Arc slots from west to east; the wicket key takes the bottom one
+  const n = KEY_IDS.length, slots = KEY_IDS.map((id, k) => k).filter((k) => KEY_IDS[k] !== WICKET_KEY);
+  slots.splice(Math.floor(slots.length / 2), 0, KEY_IDS.indexOf(WICKET_KEY));
+  const keyG = [];
+  slots.forEach((k, s) => {
+    const wk = KEY_IDS[k] === WICKET_KEY;
+    const a = ((s + 0.5) / n - 0.5) * 2.2;                // ± 63° about the ring's bottom
+    const bw = wk ? 0.026 : 0.02, L = wk ? 0.06 : 0.07 + 0.012 * ((k * 2) % 3);
+    const key = [];
+    key.push(new TorusGeometry(bw * A, 0.006 * A, 4, 10).translate(0, -bw * A, 0));
+    key.push(new CylinderGeometry(0.007 * A, 0.007 * A, L * A, 6).translate(0, -(2 * bw + L / 2) * A, 0));
+    const zb = 2 * bw + L;                                 // the bit at the shank's foot, its wards toward the tip
+    key.push(boxAt(0.007 * A, -zb * A, -0.004 * A, 0.032 * A, -(zb - 0.03) * A, 0.004 * A));
+    for (const tz of [0.006, 0.019]) key.push(boxAt(0.032 * A, -(zb - tz) * A, -0.004 * A, 0.04 * A, -(zb - tz - 0.008) * A, 0.004 * A));
+    const g = finishLocal(key).rotateY(0.45 * (s - (n - 1) / 2) + 0.2);
+    const p = m2w(cx + Math.sin(a) * kR, yS - 0.03, zR - Math.cos(a) * kR + 0.006);
+    keyG[k] = g.translate(p.x, p.y, p.z);
+  });
+  // one mesh: the ring, then the keys in keyIds order; an index over the keys on the chain
+  const geo = finishLocal([ringG, ...keyG]);
+  const ranges = [];
+  let v0 = ringG.attributes.position.count;
+  for (const g of keyG) { const c = g.attributes.position.count; ranges.push([v0, c]); v0 += c; }
+  const index = new BufferAttribute(new Uint16Array(v0), 1);
+  index.setUsage(DynamicDrawUsage);
+  geo.setIndex(index);
+  const keys = meshOf(C.kit, geo, 'iron', 'azarah.moked.keys-slab:keys');
+  keys.castShadow = false;
+  C.kit.group.add(keys);
+  const showKeys = (on) => {
+    const a = index.array, ringN = ringG.attributes.position.count;
+    let c = 0;
+    if (on.length) for (let v = 0; v < ringN; v++) a[c++] = v;   // the ring goes with the last key
+    for (const k of on) { const [s, m] = ranges[k]; for (let v = 0; v < m; v++) a[c++] = s + v; }
+    index.needsUpdate = true;
+    geo.setDrawRange(0, c);
+    keys.visible = c > 0;
+  };
+  const MAX = (80 * Math.PI) / 180;
+  const ud = {
+    kind: 'slab', id: 'azarah.moked.keys-slab', label: 'The keys slab of Beit HaMoked (Middot 1:9)', f: 0, keys: true,
+    keyIds: KEY_IDS.slice(), keyCount: n, wicketKey: WICKET_KEY, keysOn: KEY_IDS.slice(),
+    get openAmount() { return ud.f; },
+    get amount() { return ud.f; },
+    lift(f) { const v = Math.min(1, Math.max(0, +f || 0)); ud.f = v; pivot.rotation.x = -v * MAX; return v; },
+    open(f) { return ud.lift(f); },
+    /** true: every key on the chain; false: none; n: the first n of keyIds; [ids]: those keys. Returns `keys`
+     *  (true only while every key hangs there); `keysOn` lists the ids on the chain. */
+    setKeys(v) {
+      let on;
+      if (Array.isArray(v)) on = KEY_IDS.map((id, k) => (v.includes(id) ? k : -1)).filter((k) => k >= 0);
+      else if (typeof v === 'number') on = KEY_IDS.map((id, k) => k).slice(0, Math.max(0, Math.min(n, Math.round(v))));
+      else on = v ? KEY_IDS.map((id, k) => k) : [];
+      ud.keysOn = on.map((k) => KEY_IDS[k]);
+      ud.keys = on.length === n;
+      showKeys(on);
+      return ud.keys;
+    },
+  };
+  ud.setKeys(true);
+  pivot.userData = ud;
+  C.kit.group.add(pivot);
+  C.ctx.movables.set(pivot.name, pivot);
 }
 
 // -------------------------------------------------------------------------------------- corner chambers
@@ -207,6 +330,10 @@ function cornerChambers(C) {
       // a manger and a water trough for the inspected lambs (Arachin 2:5; Tamid 3:4) ⚙
       const st = C.kit.m('ashlar_plain', true, true);
       st.box([b.min[0] + 0.1, b.min[1] + 0.2, Z], [b.min[0] + 1.1, b.max[1] - 2.5, Z + 1.1]);
+      // a lamp on a bracket on the south wall over the lambs: lit before Shabbat, so that on Shabbat the lamb is chosen
+      // and examined by its light (no light in hand on Shabbat — Rambam BhB 8:12; Tamid 3:3–4). Fire schedule
+      // 'service', dark until the sim lights it ⚙ place
+      wallLamp(C, 'courts.moked.lambs.lamp', b.min[0] + 2.8, b.min[1], Z + 3.6, [0, 1], { schedule: 'service', intensity: 0 });
     }
     C.kit.solid(gridSolid(adds, subs, (f) => (f.sub?.mat ? f.sub.mat : f.axis === 2 ? (f.dir > 0 ? 'ashlar_plain' : 'plaster') : 'ashlar_plain')), true, true);
     // the door's cedar leaf (Middot 2:3 — every opening there had doors): the lamb chamber's opens in through its

@@ -32,7 +32,7 @@ export function installDebug(ctx, engine, amb) {
     async analyze(id, { kind = 'cue', opts = {} } = {}) {
       const lib = kind === 'cue' ? CUE_LIB[id] : LOOP_LIB[id];
       const t0 = performance.now();
-      const b = await engine.renderer.get(kind, id, engine.synthOpts(lib, opts, opts.v || 0), engine.synthRate, { priority: 50 });
+      const b = await engine.renderer.get(kind, id, engine.synthOpts(lib, opts, opts.v || 0), engine.rateFor(id), { priority: 50 });
       return { id, kind, renderMs: Math.round(performance.now() - t0), ...analyze(chans(b), b.sampleRate) };
     },
     async renderAll() {
@@ -44,7 +44,7 @@ export function installDebug(ctx, engine, amb) {
     async throughSpace(id, space = 'court', { kind = 'cue', send = 0.6, opts = {}, wav = false } = {}) {
       const lib = kind === 'cue' ? CUE_LIB[id] : LOOP_LIB[id];
       const sr = 48000;
-      const dry = await engine.renderer.get(kind, id, engine.synthOpts(lib, opts, 0), engine.synthRate, { priority: 50 });
+      const dry = await engine.renderer.get(kind, id, engine.synthOpts(lib, opts, 0), engine.rateFor(id), { priority: 50 });
       const irB = await engine.renderer.get('ir', space, { maxLen: 6 }, sr, { priority: 50 });
       const len = Math.ceil((dry.duration + irB.duration) * sr);
       const oc = new OfflineAudioContext({ numberOfChannels: 2, length: len, sampleRate: sr });

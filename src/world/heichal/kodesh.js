@@ -215,13 +215,16 @@ function lamps(H, men) {
   // Lamps run east–west (lock #11, Raavad from Tamid 3:9 / 6:1): "he found the two eastern lamps burning, cleaned
   // the eastern and left the western burning" — so the ner ma'aravi is the second lamp from the east. Which lamp it is
   // comes from site.js heichal.menorah params.nerMaaravi ({ lamp, countFrom }; readings.northSouth keeps the Rambam's
-  // middle lamp). It stays lit by day; the others burn from evening to morning. men.flames run east → west.
+  // middle lamp). It stays lit by day ('always'); the other six burn from their lighting in the afternoon (Yoma 15a,
+  // Tamid 6:1 — after the incense, "bein ha'arbayim") until their cleaning in the morning (Tamid 3:9): schedule
+  // 'service' (not 'night', which the sun would put out at sunrise and light only at sunset), so the sim cleans and
+  // lights them at their times. Lit until the sim says otherwise. men.flames run east → west.
   const nm = H.el('heichal.menorah').params.nerMaaravi;
   const nerMaaravi = nm.countFrom === 'west' ? men.flames.length - 1 - nm.lamp : nm.lamp;
   const size = 0.075;
   men.flames.forEach((p, i) => {
     const id = `heichal.menorah.lamp-${i}`;
-    ctx.addFire({ id, kind: 'lamp', pos: p, size, intensity: 1, schedule: i === nerMaaravi ? 'always' : 'night' });
+    ctx.addFire({ id, kind: 'lamp', pos: p, size, intensity: 1, schedule: i === nerMaaravi ? 'always' : 'service' });
     const node = new Object3D();
     node.name = id;
     node.position.copy(m2w(p[0], p[1], p[2]));

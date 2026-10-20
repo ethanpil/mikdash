@@ -25,7 +25,8 @@ const TIER_CHOIR = {
 function choir(sr, rng, o, tier) {
   const t = TIER_CHOIR[tier] || TIER_CHOIR.medium;
   const psalm = o.psalm || PSALM_BY_DAY[o.weekday ?? 1] || 48;
-  return renderPsalm({ sr, seed: rng.int(1, 1e9), psalm, section: o.section || 0, style: o.style, fluteDay: !!o.fluteDay, ...t, ...(o.men ? { men: o.men } : {}) }).buffer;
+  // o.song (Ha'azinu, the Shabbat afternoon songs) wins over the psalm (src/audio/songs.js songId)
+  return renderPsalm({ sr, seed: rng.int(1, 1e9), psalm, song: o.song, section: o.section || 0, style: o.style, fluteDay: !!o.fluteDay, ...t, ...(o.men ? { men: o.men } : {}) }).buffer;
 }
 
 export const CUES = {

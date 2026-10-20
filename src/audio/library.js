@@ -10,7 +10,7 @@
 // send: reverb send scale · cat: mixer category · variants: distinct renders rotated per play ·
 // synth: option keys that change the rendered buffer (everything else is playback-only) ·
 // people: crowd size the level refers to (+10·log10 N/N0, power sum).
-import { psalmCaption } from './synth/meta.js';
+import { songHeading, songId } from './songs.js';
 
 export const ROLLOFF = 0.6;
 export const splToGainDb = (spl) => 6 + 0.6 * (spl - 100);
@@ -30,7 +30,8 @@ export const CUE_LIB = {
   gevini: C(106, 1, { cat: 'voice', priority: 3, send: 0.55, caption: () => 'gevini' }),
   'shalom-call': C(90, 1, { cat: 'voice', priority: 2, send: 0.55, synth: ['variant'], caption: (o) => (o.variant === 'all-well' ? 'shalom-all-well' : 'shalom-call') }),
   cymbal: C(110, 1, { cat: 'music', variants: 2, priority: 3, send: 0.7 }),
-  'choir-psalm': C(89, 3, { cat: 'music', priority: 3, send: 0.75, synth: ['psalm', 'section', 'style', 'fluteDay', 'weekday', 'men'], caption: (o) => psalmCaption(o.psalm, o.section, o.style) }),
+  // lyrics: the section's verses are captioned as they are sung (timeline.js sectionLyrics), after a heading
+  'choir-psalm': C(89, 3, { cat: 'music', priority: 3, send: 0.75, synth: ['psalm', 'song', 'section', 'style', 'fluteDay', 'weekday', 'men'], lyrics: true, caption: (o) => songHeading(songId(o), o.section, o.style) }),
   kinnor: C(78, 1, { cat: 'music', variants: 3, send: 0.6 }),
   nevel: C(80, 1, { cat: 'music', variants: 2, send: 0.6 }),
   chalil: C(94, 1, { cat: 'music', variants: 2, priority: 2, send: 0.65 }),
@@ -61,7 +62,10 @@ export const LOOP_LIB = {
   doves: C(47, 4, { bed: true, cat: 'animal', send: 0.3 }),
   sheep: C(70, 2, { send: 0.4, cat: 'animal' }),
   'night-insects': C(48, 1, { bed: true, cat: 'insects', send: 0, synth: ['temp'] }),
-  choir: C(89, 3, { send: 0.75, cat: 'music', synth: ['psalm', 'section', 'style', 'fluteDay', 'weekday', 'men'], priority: 3 }),
+  // the section sung through, again and again: plays the choir-psalm cue's own buffer (shareCue), from its start or
+  // straight after a choir-psalm cue of the same section that is still sounding; its verses captioned as sung when the
+  // caller asks (opts.caption: true)
+  choir: C(89, 3, { send: 0.75, cat: 'music', synth: ['psalm', 'song', 'section', 'style', 'fluteDay', 'weekday', 'men'], priority: 3, shareCue: 'choir-psalm', lyrics: true }),
   bells: C(72, 1, { send: 0.5, cat: 'fx', priority: 2 }),
 };
 
@@ -69,6 +73,9 @@ export const LOOP_LIB = {
 export const VOICE_LIMIT = { low: 14, medium: 24, high: 36, ultra: 48 };
 /** Synthesis sample rate per tier (low renders at 32 kHz: less CPU and memory; content < 16 kHz). */
 export const SYNTH_RATE = { low: 32000, medium: 48000, high: 48000, ultra: 48000 };
+/** The Levites' song renders at 32 kHz on medium too: a whole section is 13–71 s (Worker time and ~9 MB at 32 kHz vs
+ *  ~13 MB and 1.5× the time at 48 kHz); voices and strings sit below 16 kHz. */
+export const CHOIR_RATE = { low: 32000, medium: 32000, high: 48000, ultra: 48000 };
 /** Longest impulse response per tier (s). */
 export const IR_MAX = { low: 2.2, medium: 3.5, high: 6, ultra: 6 };
 /** Rendered-buffer cache budget (MB). */

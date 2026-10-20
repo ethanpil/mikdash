@@ -88,7 +88,9 @@ export function buildMizbeach(A) {
     if (key !== LIME || z > Z_SIK - SIK_H || z < Z_SIK - 3) return null;
     return (x - bx0 < 0.9 && y - by0 < 0.9) || (bx1 - x < 0.9 && by1 - y < 0.9) ? STAIN : null;
   };
-  sweepRing(M, ring, P, { mat: LIME, smoothProf: 50, ...dispOpts, dispZMax: Z_TOP - 0.005, matAt: cornerStain });
+  // capBottom: the cast mass is closed at the pavement (never seen), so the pavement inside it is not a standable floor
+  // (an observer placed by plan alone stood inside the altar — world-3)
+  sweepRing(M, ring, P, { mat: LIME, smoothProf: 50, ...dispOpts, dispZMax: Z_TOP - 0.005, matAt: cornerStain, capBottom: true });
 
   // ---------------------------------------------------------------- karkov (ornament) under the sovev — lock #19
   // Zevachim 62a: "under its karkov below, to its half" puts a karkov at mid-height, and RNbY: "two — one for beauty"

@@ -4,72 +4,126 @@
 //   unlock() → Promise<bool>          resume/create the AudioContext (call from a user gesture; also self-unlocks on any gesture)
 //   cue(id, worldPos?, opts) → handle  one-shot; worldPos: Vector3 (world m) | [X,Y,Z] (site amot) | Object3D; omit = non-spatial
 //        opts: { gain, levelDb, delay (s), rate, variant, area: {min:[X,Y,Z], max:[X,Y,Z]} | [boxes], follow: Object3D, people,
-//                caption (false = no subtitle), psalm, section (0-2), style ('mishnah'|'sg1612'), fluteDay, steps, kind }
+//                caption (false = no subtitle), psalm, song (+ week), section (0-2), style ('mishnah'|'sg1612'), fluteDay,
+//                steps, kind, offset (s into the buffer), captionHeading (false), catchUp (false) }
 //        handle: { stop(fade), setPosition(p), setGain(g), ended: Promise<bool>, duration }
 //   loop(id, worldPos?, opts) → { setGain(g, t), setPeople(n), setPosition(p), stop(fade), active }
+//        'choir': the section's buffer on its own clock (opts.offset); its verses captioned only with opts.caption: true
 //   setMaster(v 0..1)
 //   tekiahSet(pos, opts)               teki'ah-teru'ah-teki'ah by two trumpeters (Tamid 7:3)
-//   libation(opts) → { stop(), done }  the daily concert: 3 × (TaRaT + prostration) each before a psalm section;
-//                                      cymbal at the pour (Tamid 7:3-4; Sukkah 5:5 — 9 blasts)
+//   libation(opts) → { stop(), done, timeline, started: Promise<{ perf (ms), sim (min) } | null> (when t = 0 sounds) }
+//                                      the concert: 3 × (TaRaT + prostration) each before a section of the song;
+//                                      cymbal at the pour (Tamid 7:3-4; Sukkah 5:5 — 9 blasts). opts.psalm | opts.song:
+//                                      'haazinu-1'…'haazinu-6' (Shabbat musaf), 'az-yashir' | 'mi-chamocha' |
+//                                      'az-yashir-yisrael' (Shabbat afternoon) — Rosh HaShanah 31a; or song 'haazinu' |
+//                                      'shirah' with week
+//   libationTimeline(opts) → the concert's schedule in seconds (timeline.js), as libation(opts) would play it here
+//   sectionTiming(opts, section) → one sung section's duration and verse times
+//   prefetchLibation(opts)             render the concert's sounds ahead (the song is minutes of audio); kept from
+//                                      eviction for opts.holdS (default 600 s)
 //   ambience: { hush(s), release(), setPopulation(n|null), setLayer(name, g), enabled }
 //   state, prefetch(list), stopAll(), cues, loops, captions (bool)
 // }
 // Bus: listens 'audio:unlock', 'settings:change' {key:'volume'|'captions'|'musicStyle'}, 'time:jump', 'quality:change';
-//      emits 'caption' { id, text: {en, he}, duration, pos }, 'audio:state' { state }, 'audio:space' { space, zone }.
+//      emits 'caption' { id, text: {en, he}, duration, pos, verse? ('Ps 24:1' — a sung verse) }, 'audio:state' { state },
+//      'audio:space' { space, zone }.
+// Module exports (pure, usable without ctx.audio, e.g. in node): libationTimeline, sectionTiming, sectionLyrics, D_SET,
+// SET_BLASTS, SONGS, songId, resolveSong, shabbatSong, sectionVerses (src/audio/timeline.js, songs.js).
 import { PRIORITY } from '../core/engine.js';
 import { AudioEngine } from './engine.js';
 import { Ambience } from './ambience.js';
 import { CUE_LIB, LOOP_LIB } from './library.js';
 import { PSALM_BY_DAY } from './synth/meta.js';
 import { AMAH } from '../core/units.js';
+import { libationTimeline, sectionTiming } from './timeline.js';
+import { SONGS, resolveSong, shabbatSong } from './songs.js';
+
+export { libationTimeline, sectionTiming, sectionLyrics, D_SET, SET_BLASTS } from './timeline.js';
+export { SONGS, songId, resolveSong, shabbatSong, sectionVerses } from './songs.js';
 
 const NOOP_HANDLE = Object.freeze({ id: null, stop() {}, setPosition() {}, setGain() {}, setPeople() {}, ended: Promise.resolve(false), duration: null, active: false });
 
-function noopApi(state) {
+function noopApi(state, ctx) {
+  const C = concert(ctx, (k) => { try { return ctx.settings?.get?.(k); } catch { return undefined; } });
   return {
     state, unlock: async () => false, cue: () => NOOP_HANDLE, loop: () => NOOP_HANDLE, setMaster() {}, tekiahSet: () => NOOP_HANDLE,
-    libation: () => ({ stop() {}, done: Promise.resolve(false) }), ambience: { hush() {}, release() {}, setPopulation() {}, setLayer() {}, enabled: false },
-    prefetch() {}, stopAll() {}, cues: Object.keys(CUE_LIB), loops: Object.keys(LOOP_LIB), captions: false,
+    libation: (o = {}) => ({ stop() {}, done: Promise.resolve(false), started: Promise.resolve(null), timeline: libationTimeline(C.opts(o)) }), ambience: { hush() {}, release() {}, setPopulation() {}, setLayer() {}, enabled: false },
+    prefetch() {}, prefetchLibation() {}, stopAll() {}, cues: Object.keys(CUE_LIB), loops: Object.keys(LOOP_LIB), captions: false,
+    // the concert's clock is still there to stage by with sound off
+    libationTimeline: (o = {}) => libationTimeline(C.opts(o)), sectionTiming: (o = {}, s) => sectionTiming(C.music(o), s ?? o.section ?? 0),
   };
+}
+
+/**
+ * The concert's places and options from the site, the clock and the settings: where the trumpets, Ben Arza and the
+ * Levites stand, how long the trumpeters' walk takes, and which song is sung today.
+ */
+function concert(ctx, setting) {
+  const el = (id) => ctx.elOpt?.(id) || ctx.site?.elements?.[id] || null;
+  const center = (id, dz = 0) => { const e = el(id); return e?.box ? [(e.box.min[0] + e.box.max[0]) / 2, (e.box.min[1] + e.box.max[1]) / 2, e.box.max[2] + dz] : null; };
+  /** walking time between two site points at the 'walk' pace (1.4 m/s, ARCHITECTURE §12), 4–25 s */
+  const walkSeconds = (a, b) => (!a || !b ? 8 : Math.max(4, Math.min(25, Math.hypot(a[0] - b[0], a[1] - b[1]) * AMAH / 1.4)));
+  const warned = new Set();
+  /** musical options: the psalm of the day unless a psalm or song is given; the style setting */
+  const music = (opts = {}) => {
+    const o = { ...opts };
+    if (o.song !== undefined && o.song !== null) {
+      const id = resolveSong(o.song, o.week), S = SONGS[id];
+      if (!S) { if (!warned.has(o.song)) { warned.add(o.song); console.warn(`[audio] unknown song "${o.song}" — the psalm of the day is sung`); } delete o.song; }
+      else if (S.kind === 'psalm') { o.psalm = S.psalm; delete o.song; } else { o.song = id; delete o.psalm; delete o.weekday; }
+      delete o.week;
+    }
+    if (o.psalm === undefined && o.song === undefined) {
+      const wd = Number.isInteger(o.weekday) ? o.weekday : ctx.time?.dayType === 'shabbat' ? 6 : ctx.time?.weekday;
+      o.psalm = PSALM_BY_DAY[wd] ?? PSALM_BY_DAY[1];
+    }
+    // the psalm or song is resolved: the weekday selects nothing more, and left in it would give the same section a
+    // second cache key (the scheduler's prefetch without a psalm vs a choreography's cue that names it)
+    delete o.weekday;
+    o.style = (o.style ?? setting('musicStyle')) === 'sg1612' ? 'sg1612' : 'mishnah';
+    return o;
+  };
+  const places = (opts = {}) => {
+    const table = opts.trumpets ?? center('altar.table.marble', 3);
+    const duchan = opts.duchan ?? center('azarah.duchan', 3);
+    // Ben Arza with the Levites on the duchan; the trumpeters flank him, 1.5 amot to either side (one centred source)
+    const benArza = opts.benArza ?? duchan;
+    return { table, duchan, benArza, walk: opts.walk ?? walkSeconds(table, benArza) };
+  };
+  return { music, places, center, opts: (o = {}) => ({ ...music(o), walk: places(o).walk }) };
 }
 
 export async function init(ctx) {
   const params = ctx.params || {};
   const debug = params.debug?.has?.('audio');
   if ((params.audio === false && !debug) || !globalThis.AudioContext) {
-    ctx.audio = noopApi(globalThis.AudioContext ? 'disabled' : 'unsupported');
+    ctx.audio = noopApi(globalThis.AudioContext ? 'disabled' : 'unsupported', ctx);
     return;
   }
   const engine = new AudioEngine(ctx);
   const amb = new Ambience(ctx, engine);
   const setting = (k) => { try { return ctx.settings?.get?.(k); } catch { return undefined; } };
   const vol = (v) => (Number.isFinite(+v) ? (+v > 1 ? +v / 100 : +v) : null);
+  const C = concert(ctx, setting);
 
   /** fill in musical options from the clock and settings (id already resolved from any alias) */
   const music = (id, opts) => {
     if (id !== 'choir-psalm' && id !== 'choir') return opts;
-    const o = { ...opts };
-    if (o.psalm === undefined) {
-      const wd = ctx.time?.dayType === 'shabbat' ? 6 : ctx.time?.weekday;
-      o.weekday = Number.isInteger(wd) ? wd : 1;
-      o.psalm = PSALM_BY_DAY[o.weekday];
-    }
-    // explicit style always (idempotent: the same options give the same cached render)
-    o.style = (o.style ?? setting('musicStyle')) === 'sg1612' ? 'sg1612' : 'mishnah';
+    const o = C.music(opts); // psalm or song, and an explicit style always (the same options give the same cached render)
     if (!o.fluteDay) delete o.fluteDay; // the chalil plays only on the 12 flute days (Arachin 2:3)
     return o;
   };
 
-  /** pre-render a cue (variant 0, or all its variants) */
-  const fetchCue = (id, opts = {}, priority = 2, allVariants = false) => {
+  /** pre-render a cue (variant 0, or all its variants); hold: performance.now() ms until which it is not evicted */
+  const fetchCue = (id, opts = {}, priority = 2, allVariants = false, hold = 0) => {
     const def = CUE_LIB[id];
     if (!def) return;
     const o = music(id, opts);
-    for (let v = 0; v < (allVariants ? def.variants || 1 : 1); v++) engine.renderer.get('cue', id, engine.synthOpts(def, o, v), engine.synthRate, { priority });
+    for (let v = 0; v < (allVariants ? def.variants || 1 : 1); v++) engine.renderer.get('cue', id, engine.synthOpts(def, o, v), engine.rateFor(id), { priority, hold });
   };
-
-  const el = (id) => ctx.elOpt?.(id) || ctx.site?.elements?.[id] || null;
-  const center = (id, dz = 0) => { const e = el(id); return e?.box ? [(e.box.min[0] + e.box.max[0]) / 2, (e.box.min[1] + e.box.max[1]) / 2, e.box.max[2] + dz] : null; };
+  /** how long a fetched concert is kept from eviction when nothing says when it ends (real ms) */
+  const HOLD_MS = 600000;
+  const center = C.center;
 
   let unlocking = null;
   const libations = new Set();
@@ -90,11 +144,24 @@ export async function init(ctx) {
       });
       return unlocking;
     },
-    cue(id, pos, opts = {}) { const rid = engine.resolveId(id) || id; return engine.cue(rid, pos, music(rid, opts)) || NOOP_HANDLE; },
+    cue(id, pos, opts = {}) {
+      const rid = engine.resolveId(id) || id, o = music(rid, opts);
+      // a section is cued: the song's later sections render now, in the background, whichever song the caller chose
+      // (the scheduler's prefetch is a guess; on Shabbat it fetches only the opening sections)
+      if (rid === 'choir-psalm' && engine.running) for (let s = Math.max(0, o.section | 0) + 1; s < 3; s++) fetchCue(rid, { ...o, section: s }, 3, false, performance.now() + HOLD_MS);
+      return engine.cue(rid, pos, o) || NOOP_HANDLE;
+    },
     loop(id, pos, opts = {}) { return engine.loop(id, pos, music(id, opts)) || NOOP_HANDLE; },
     setMaster(v) { engine.setVolume(+v || 0); },
     tekiahSet(pos, opts = {}) { return api.cue('trumpet-set', pos ?? center('altar.table.marble', 3), opts); },
     libation: (opts = {}) => libation(opts),
+    /** the concert's schedule (s from the first blast) exactly as libation(opts) plays it here (same defaults) */
+    libationTimeline: (opts = {}) => libationTimeline(C.opts(opts)),
+    /** one section's timing: { duration, singEnd, verses: [{ key, ref, he, en, t0, t1 }], heading } */
+    sectionTiming: (opts = {}, section) => sectionTiming(C.music(opts), section ?? opts.section ?? 0),
+    /** render a concert's sounds ahead of time (opts as libation; default: the psalm of the day), kept from eviction for
+     *  opts.holdS real seconds (default 600) */
+    prefetchLibation: (opts = {}, priority = 2) => prefetchLibation(priority, opts, performance.now() + (Number.isFinite(opts.holdS) ? opts.holdS * 1000 : HOLD_MS)),
     ambience: {
       hush: (s) => amb.hush(s), release: () => amb.release(), setPopulation: (n) => amb.setPopulation(n), setLayer: (k, g) => amb.setLayer(k, g),
       get enabled() { return amb.enabled; }, set enabled(b) { amb.enabled = !!b; },
@@ -118,45 +185,40 @@ export async function init(ctx) {
   // left"; the kohen bends to pour, the segan waves the flags, Ben Arza strikes the cymbal and the Levites sing;
   // "at each section a teki'ah, and at each teki'ah a prostration". Reading chosen: Sukkah 5:5 counts 9 blasts for
   // the tamid = three teki'ah-teru'ah-teki'ah sets, the opening one and one before each later section, every set
-  // with the people's prostration (docs/decisions/audio.md).
+  // with the people's prostration (docs/decisions/audio.md). Every moment comes from libationTimeline (timeline.js),
+  // so a choreography staging by the timeline sees what is heard. opts.gap: a pause after section 1 / 2.
   function libation(opts = {}) {
-    const table = opts.trumpets ?? center('altar.table.marble', 3);
-    const duchan = opts.duchan ?? center('azarah.duchan', 3);
-    // Ben Arza with the Levites on the duchan; the trumpeters flank him, 1.5 amot to either side (one centred source)
-    const benArza = opts.benArza ?? duchan;
-    const walk = opts.walk ?? walkSeconds(table, benArza);
-    const sg = (opts.style ?? setting('musicStyle')) === 'sg1612';
-    const sections = [0, 1, 2];
-    const choirOpts = (s) => music('choir-psalm', { ...opts, section: s, style: sg ? 'sg1612' : 'mishnah' });
-    const sr = engine.synthRate;
-    let stopped = false;
+    const P = C.places(opts);
+    const base = music('choir-psalm', { ...opts, walk: undefined, gap: undefined });
+    const T = libationTimeline({ ...base, walk: P.walk, gap: opts.gap });
+    const choirOpts = (s) => ({ ...base, section: s });
+    let stopped = false, startedResolve;
     const handles = [];
-    const get = (id, o = {}) => engine.renderer.get('cue', id, engine.synthOpts(CUE_LIB[id], o, 0), sr, { priority: 20 });
-    const self = { stop: () => { stopped = true; handles.forEach((h) => h?.stop?.(0.5)); } };
+    // every part is kept from eviction until the concert is over (the render wait is at most tens of seconds)
+    const hold = performance.now() + (T.done + 120) * 1000;
+    const get = (id, o = {}, priority = 20) => engine.renderer.get('cue', id, engine.synthOpts(CUE_LIB[id], o, 0), engine.rateFor(id), { priority, hold });
+    // started: when t = 0 (the first blast) sounds — { perf: performance.now() ms, sim: ctx.time.t (min) } — or null
+    const started = new Promise((r) => { startedResolve = r; });
+    const self = { stop: () => { stopped = true; handles.forEach((h) => h?.stop?.(0.5)); }, timeline: T, started };
     libations.add(self);
     self.done = (async () => {
-      const bufs = await Promise.all([get('trumpet-set'), get('cymbal'), get('crowd-prostrate'), ...sections.map((s) => get('choir-psalm', choirOpts(s)))]);
+      // the blasts and the first section must be ready; sections 2-3 render meanwhile (a late one joins in progress)
+      const first = [get('trumpet-set'), get('cymbal'), get('crowd-prostrate'), get('choir-psalm', choirOpts(0))];
+      [1, 2].forEach((s) => get('choir-psalm', choirOpts(s), 19 - s)); // queued behind section 1 (same lane)
+      await Promise.all(first);
       if (stopped || !engine.running) return false;
-      const set = bufs[0];
-      let t = 0;
-      for (const s of sections) {
-        handles.push(api.cue('trumpet-set', s === 0 ? table : benArza, { delay: t, variant: 0 }));
-        handles.push(api.cue('crowd-prostrate', opts.crowd ?? null, { delay: t + set.duration - 2.2, variant: 0, people: opts.people, area: opts.crowd ? undefined : crowdArea() }));
-        t += set.duration - 0.2;
-        if (s === 0) t += walk; // the trumpeters cross to Ben Arza; the pour
-        if (s === 0 || sg) { handles.push(api.cue('cymbal', benArza, { delay: t, variant: 0 })); t += 0.9; }
-        handles.push(api.cue('choir-psalm', duchan, { ...choirOpts(s), delay: t }));
-        t += bufs[3 + s].duration - 2.6;
+      // every part is ready (or joins in progress): each cue is placed at its delay from now, so t = 0 is now
+      startedResolve({ perf: performance.now(), sim: Number.isFinite(ctx.time?.t) ? ctx.time.t : null });
+      for (const c of T.cues) {
+        if (c.id === 'trumpet-set') handles.push(api.cue('trumpet-set', c.at === 'table' ? P.table : P.benArza, { delay: c.t, variant: 0 }));
+        else if (c.id === 'crowd-prostrate') handles.push(api.cue('crowd-prostrate', opts.crowd ?? null, { delay: c.t, variant: 0, people: opts.people, area: opts.crowd ? undefined : crowdArea() }));
+        else if (c.id === 'cymbal') handles.push(api.cue('cymbal', P.benArza, { delay: c.t, variant: 0 }));
+        else handles.push(api.cue('choir-psalm', P.duchan, { ...choirOpts(c.opts.section), delay: c.t }));
       }
-      await new Promise((r) => setTimeout(r, t * 1000));
+      await new Promise((r) => setTimeout(r, T.done * 1000));
       return !stopped;
-    })().finally(() => libations.delete(self));
+    })().finally(() => { libations.delete(self); startedResolve(null); });
     return self;
-  }
-  /** walking time between two site points at the 'walk' pace (1.4 m/s, ARCHITECTURE §12), 4–25 s */
-  function walkSeconds(a, b) {
-    if (!a || !b) return 8;
-    return Math.max(4, Math.min(25, Math.hypot(a[0] - b[0], a[1] - b[1]) * AMAH / 1.4));
   }
   /** where the people prostrate: Ezrat Nashim and Ezrat Yisrael, each at its own floor */
   function crowdArea() {
@@ -167,7 +229,7 @@ export async function init(ctx) {
   // ---- pre-rendering (Worker time): what is needed, shortly before it is needed
   /**
    * Beds and the common cues. Medium and up: everything at unlock (all variants of the cues that must start on
-   * time), at low priority. Low (phones): only the beds and the sounds of the next scheduled events; the
+   * time), at low priority. Low (phones): only the beds and the sounds of the next scheduled events. Every tier: the
    * Levites' song is fetched shortly before each libation (scheduled()).
    */
   let warmed = false;
@@ -179,13 +241,30 @@ export async function init(ctx) {
     for (const [id, o] of amb.bedSpecs()) R.get('loop', id, o, sr, { priority: 4, pin: true });
     if (engine.tier === 'low') { scheduled(true); return; }
     for (const id of ['trumpet-set', 'trumpet-tekiah', 'gate-boom', 'magrefah', 'great-gate-open', 'cymbal', 'barkai', 'gevini', 'shalom-call', 'crowd-prostrate', 'knock', 'muchni']) fetchCue(id, {}, 2, true);
-    if (!early) for (const s of [0, 1, 2]) fetchCue('choir-psalm', { section: s }, 1);
+    // the song itself is not pre-rendered here on any tier: whole sections are minutes of audio and seconds of Worker
+    // time each; scheduled() fetches them a few real minutes before a concert
   }
 
-  /** the day's libation set: trumpets, cymbal, prostration, the three sections of the psalm of the day */
-  function prefetchLibation(priority) {
-    for (const id of ['trumpet-set', 'cymbal', 'crowd-prostrate']) fetchCue(id, {}, priority);
-    for (const s of [0, 1, 2]) fetchCue('choir-psalm', { section: s }, priority);
+  /**
+   * A libation set: trumpets, cymbal, prostration and the song's sections (default: all three of the psalm of the day),
+   * kept from eviction until `hold` (performance.now() ms) — a concert is up to ~25 MB at 32 kHz, more than a low-tier
+   * cache holds beside the beds, and must not be evicted between its prefetch and its moment.
+   */
+  function prefetchLibation(priority, opts = {}, hold = performance.now() + HOLD_MS, sections = [0, 1, 2]) {
+    for (const id of ['trumpet-set', 'cymbal', 'crowd-prostrate']) fetchCue(id, {}, priority, false, hold);
+    for (const s of sections) fetchCue('choir-psalm', { ...opts, section: s }, priority, false, hold);
+  }
+  /**
+   * What an event's concert will sing: [[opts, sections]]. Shabbat musaf / afternoon: Ha'azinu's section / the Shirah
+   * of the week (shabbatSong) — but the choreographies (G3, G6) still sing Psalm 92 there as a stand-in, so only the
+   * opening section of each is fetched ahead; the rest of whichever is cued follows on (api.cue). Otherwise the psalm of
+   * the day, whole.
+   */
+  function songsFor(ev) {
+    const id = ev?.id || '';
+    const service = ctx.time?.dayType === 'shabbat' && ctx.time?.date ? (/musaf/.test(id) ? 'musaf' : /afternoon/.test(id) ? 'afternoon' : null) : null;
+    if (service) return [[{}, [0]], [{ song: shabbatSong(service, ctx.time.date) }, [0]]];
+    return [[{}, [0, 1, 2]]];
   }
 
   /**
@@ -219,7 +298,15 @@ export async function init(ctx) {
       for (const raw of ev.sounds || []) {
         const id = engine.resolveId(raw);
         if (!id) continue;
-        if (id === 'choir-psalm') { if (soon) prefetchLibation(2); continue; }
+        if (id === 'choir-psalm') {
+          if (!soon) continue;
+          // kept until the event is over (real seconds at the clock's speed; re-held every 10 s while it is due)
+          const t1 = Number.isFinite(ev.t1) ? ev.t1 : time.resolve?.(ev.when?.end);
+          const toEnd = Number.isFinite(t1) ? (((t1 - time.t) % 1440) + 1440) % 1440 : 30;
+          const hold = performance.now() + (Math.min(1800, speed > 0 ? (toEnd * 60) / speed : 1800) + 120) * 1000;
+          for (const [o, sections] of songsFor(ev)) prefetchLibation(2, o, hold, sections);
+          continue;
+        }
         if (soon || (atUnlock && n < 3)) fetchCue(id, {}, soon ? 3 : 1, engine.tier !== 'low');
       }
       n++;

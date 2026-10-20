@@ -20,7 +20,8 @@
 // 'door:heichal.gate.wicket-s' (never opened), 'door:heichal.chalifot.{n,s}.wicket', 'door:heichal.ta.door-ne',
 // 'door:heichal.ta-wall.north', 'door:heichal.aliyah.door', 'curtain:heichal.ulam-curtain', 'curtain:heichal.gate-curtain',
 // 'curtain:heichal.parochet.outer', 'curtain:heichal.parochet.inner', 'heichal.nivreshet',
-// 'heichal.menorah.lamp-0' … '-6' (east → west; userData.setLit(v)).  Fires: 'heichal.menorah.lamp-0' … '-6'.
+// 'heichal.menorah.lamp-0' … '-6' (east → west; userData.setLit(v)).  Fires: 'heichal.menorah.lamp-0' … '-6' (the
+// ner ma'aravi 'always'; the six others 'service', lit at 1 until the sim cleans / lights them).
 import { AMAH } from '../../core/units.js';
 import { zoneAtSite } from '../../data/site.js';
 import { Kit } from './lib/kit.js';

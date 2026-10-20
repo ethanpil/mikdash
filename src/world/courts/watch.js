@@ -3,7 +3,9 @@
 // is set by moked.js). The Levite posts — outside the Azarah gates, at Nikanor, at the Azarah's four outer corners and
 // behind the Beit HaKaporet — carry torches on iron wall brackets, as the Levite posts of the Mount do (mount/posts.js);
 // the fittings are reconstruction. schedule 'night'.
-import { lampStand } from './lib/parts.js';
+// Inside the Azarah, the lamps of the dawn search on Shabbat (inspectionLamps): fires 'courts.azarah.lamp-*', schedule
+// 'service', dark until the sim lights them.
+import { lampStand, wallLamp } from './lib/parts.js';
 
 const KOHANIC = new Set(['beit-avtinas', 'beit-hanitzotz']);
 const LEVITE = new Set(['gate-delek', 'gate-bechorot', 'gate-mayim', 'gate-korban', 'gate-nikanor',
@@ -61,4 +63,36 @@ export function buildWatch(C) {
     const xc = west ? W.azW.min[0] + 1.2 : X;
     torch(C, id, [xc, south ? W.azS.min[1] - off : W.azN.max[1] + off, Z + TORCH_Z], [0, south ? -1 : 1]);
   }
+  inspectionLamps(C);
+}
+
+/**
+ * The dawn search of the Azarah goes from the Moked's wicket in two companies, east and west round the court, to the
+ * chavitin bakers' chamber (Tamid 1:3; Rambam BhB 8:11). "So they did every night except Shabbat nights, when they had
+ * no light in hand, but searched by the lamps lit there from Erev Shabbat" (BhB 8:12) — so lamps burn in the court
+ * itself, along the companies' way. Seven oil lamps on stone wall brackets, 4½ amot up, where site.js's circuit
+ * (azarah.achsadra-route) turns: by the wicket on the Moked's south face, on the north wall where the east company
+ * turns south, on the west wall at the Gazit's corner and at its south end, on the Water Gate house beside the south
+ * turn, on the south wall at the east company's line, and beside the chavitin chamber's door at the meeting place ⚙
+ * (no source places or counts them). Fires kind 'lamp', schedule 'service', intensity 0 (dark until the sim lights
+ * them before Shabbat).
+ */
+function inspectionLamps(C) {
+  const W = C.walls, Z_AZ = C.datums.azarah, h = 4.5;
+  const { east, west } = C.el('azarah.achsadra-route').params.routes;
+  const hall = C.el('azarah.moked.hall').box, gate = C.el('azarah.gate.moked').box, wg = C.el('azarah.gate.mayim').box;
+  const house = C.el('azarah.gate.mayim.house').box, chv = C.el('azarah.chamber.chavitin'), cb = chv.box;
+  const xEK = east[1][0];                                   // the east company's line down the court
+  const dr = chv.params.door?.y || [(cb.min[1] + cb.max[1]) / 2 - 2, (cb.min[1] + cb.max[1]) / 2 + 2];
+  const o = { schedule: 'service', intensity: 0 };
+  const lamps = [
+    ['wicket', [(gate.max[0] + hall.max[0]) / 2, hall.min[1], Z_AZ + h], [0, -1]],
+    ['ne', [xEK, W.azN.min[1], Z_AZ + h], [0, -1]],
+    ['nw', [W.azW.max[0], west[3][1], Z_AZ + h], [1, 0]],
+    ['sw', [W.azW.max[0], west[4][1] + 2, Z_AZ + h], [1, 0]],
+    ['s', [(house.min[0] + wg.min[0]) / 2, house.max[1], Z_AZ + h], [0, 1]],
+    ['se', [xEK, W.azS.max[1], Z_AZ + h], [0, 1]],
+    ['chavitin', [cb.min[0], (dr[1] + cb.max[1]) / 2 + 0.2, cb.min[2] + h], [-1, 0]],
+  ];
+  for (const [k, [x, y, z], out] of lamps) wallLamp(C, `courts.azarah.lamp-${k}`, x, y, z, out, o);
 }

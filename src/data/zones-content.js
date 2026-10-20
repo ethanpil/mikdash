@@ -102,7 +102,8 @@ export const ZONE_CONTENT = {
     ],
     description: "The ridge across the Kidron, facing the Temple's eastern gates. From its head the kohen burning the Parah looked straight down the Temple axis into the open doorway of the Heichal — the reason every eastern wall on that line was kept low (Middot 2:4; Rambam BhB 6:5). The model puts the burning place on the axis at the crest, about 800 m east of the Mount and 68 m above its pavement; the observer stands just behind the kohen's place.",
     sources: ['Middot 1:3', 'Middot 2:4', 'Parah 3:6–9', 'Parah 3:11', 'Rambam BhB 6:5', 'Bamidbar 19:3'],
-    stand: [PYRE.params.kohenEye[0] + 3, AX, PYRE.box.min[2]],
+    // site.js's daily viewpoint on the crest ground (params.groundEye); Z is the ground under that eye
+    stand: [PYRE.params.groundEye[0], PYRE.params.groundEye[1], PYRE.params.groundEye[2] - (PYRE.params.kohenEye[2] - PYRE.params.kohenStand[2])],
     confidence: 'reconstruction',
     confidenceNote: 'The burning place on the axis at the crest and the terrain are approximate (site.js context.parah.pyre); the sources fix only "the head of Har HaMishchah" facing the Heichal.',
   },

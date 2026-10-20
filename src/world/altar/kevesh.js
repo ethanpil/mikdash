@@ -120,9 +120,12 @@ export function buildKevesh(A) {
   const fade = (y, a, b) => Math.min(1, Math.max(0, Math.max(a - 0.6 - y, y - b - 0.6) / 1.2));
   const wob = d >= 2 ? (x, y) => 0.025 * nzK(y * 0.25, x * 0.5, 3) * (x > (X0 + X1) / 2 ? fade(y, rsY.min[1], rsY.max[1] + 2) : fade(y, ryY.min[1], ryY.max[1] + 3)) : null;
   const base = { x0: X0, x1: X1, top: kevZ, bot: flat(gp.min[2]), f, fs, mTop: MT, ...(wob ? { subdiv: d >= 3 ? 0.6 : 1.0, displace: wob } : {}) };
-  rampSweep(M, { ...base, y0: gp.min[1], y1: ry0, faces: 'wes' });
-  rampSweep(M, { ...base, y0: ry0, y1: ry1, faces: 'we', westGap: [rv.min[2], rv.max[2]] });
-  rampSweep(M, { ...base, y0: ry1, y1: gp.max[1], faces: 'wen' });
+  // closed underneath ('u', flush with the pavement and never seen): open, the pavement under the ramp counted as a
+  // standable floor 7½ amot under its top, and an observer placed by plan alone (a jump, a stand without Z) stood
+  // INSIDE the kevesh, looking at the altar's south face through its culled skin (world-3)
+  rampSweep(M, { ...base, y0: gp.min[1], y1: ry0, faces: 'wesu' });
+  rampSweep(M, { ...base, y0: ry0, y1: ry1, faces: 'weu', westGap: [rv.min[2], rv.max[2]] });
+  rampSweep(M, { ...base, y0: ry1, y1: gp.max[1], faces: 'wenu' });
   // the revuvah cavity (Middot 3:3): a recess in the same limed mass, depth ⚙ 1½
   {
     const cav = B.m(LIME);
