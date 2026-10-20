@@ -10,8 +10,8 @@
 //   ish-har-habayit        the officer of the Mount goes round every Levite post, torches burning before him; at each
 //                          post "Shalom alecha!" (Middot 1:2) — a cue only while the clock runs through the moment.
 //   sleeping-guard         the officer finds a guard asleep: strikes him with his staff and burns his garment (Middot 1:2).
-// While no 'moked-night' module exists, the Moked's sleepers (elders on the ledges, young kohanim on the floor, the
-// kohen on the keys slab — Tamid 1:1, Middot 1:8–9) are staged here too, in that event's window.
+// The Moked's sleepers (elders on the ledges, young kohanim on the floor, the kohen on the keys slab — Tamid 1:1, Middot
+// 1:8–9) are staged by the 'moked-night' module.
 //
 // Determinism: every pose is a pure function of (t, date, seed). The officer's timeline comes from the circuit's
 // authored waypoints (straight lengths — nav-independent) and the day's windows, computed once per date: he comes in by
@@ -71,15 +71,14 @@ export default {
     const levites = posts.filter((p) => p.by === 'leviim');
     for (const p of levites) { p.face = faceOf(ctx, p); p.exit = exitOf(ctx, p); }
     sim.setBounds([-10, -10, -30], [510, 510, 50]);
-    const upper = upperSleepers(ctx), moked = mokedSleepers(ctx);
+    const upper = upperSleepers(ctx);
     const C = circuit(ctx, levites);
     const state = {
-      levites, upper, moked,
+      levites, upper,
       guards: sim.pool({ name: 'guards', role: 'guard_levi', count: levites.length, seed: SEED, importance: 2, prop: null }),
       officer: sim.pool({ name: 'officer', role: 'guard_levi', count: 1, seed: SEED + 1, importance: 3, prop: null }),
       bearers: sim.pool({ name: 'torch-bearers', role: 'guard_levi', count: 2, seed: SEED + 2, importance: 3, prop: 'torch' }),
       upperPool: sim.pool({ name: 'rovim', role: 'kohen_offduty', count: upper.length, seed: SEED + 3, importance: 1, prop: null }),
-      mokedPool: sim.hasChoreo('moked-night') ? null : sim.pool({ name: 'moked', role: 'kohen_offduty', count: moked.length, seed: SEED + 4, importance: 1, prop: null }),
       sway: levites.map((p, i) => wanderer(SEED + i * 31, 5 + 3 * rand(SEED, i))),
       // the circuit: its timeline is fixed by the straight legs; the walked line is nav's once ready
       stops: C.stops, entry: C.entry, nom: nominal(C.stops, C.entry),
@@ -143,7 +142,6 @@ export default {
 
     // ---- the kohanim asleep at their posts
     if (W.upper && within(t, W.upper[0], W.upper[1])) sleepAll(state.upperPool, state.upper, t, W.upper);
-    if (state.mokedPool && W.moked && within(t, W.moked[0], W.moked[1])) sleepAll(state.mokedPool, state.moked, t, W.moked);
   },
 
   release(ctx, state) {
@@ -189,10 +187,9 @@ function windows(ctx, sim) {
     incidentPost = at ? nearestPost(sim.ctx, at) : null;
   }
   if (!incidentPost) incident = null;
-  const moked = win(sim.schedule.byId('moked-night')) || (watch ? [wrap(watch[0] + 5), wrap(watch[1] - 75)] : null);
   const lockEv = sim.schedule.byId('locking-up');
   const lockStart = lockEv && Number.isFinite(lockEv.t0) ? lockEv.t0 : (watch ? wrap(watch[0] - 15) : NaN);
-  return { watch, upper: win(sim.event('watch-upper-chambers')) || watch, patrol, incident, incidentPost, moked, lockStart };
+  return { watch, upper: win(sim.event('watch-upper-chambers')) || watch, patrol, incident, incidentPost, lockStart };
 }
 
 /**
@@ -596,29 +593,6 @@ function upperSleepers(ctx) {
     out.push({ X: nz.min[0] + 4.2, Y: y, Z: nz.min[2], heading: 0, pose: 'sleep' });
     out.push({ X: nz.min[0] + 10.4, Y: y, Z: nz.min[2], heading: 180, pose: 'sleep' });
   }
-  return out;
-}
-
-/** Beit HaMoked's chol half (no sleeping in the kodesh — Yoma 25a): elders on the lowest ledge, young kohanim on the
- * floor, one kohen on the keys slab (Middot 1:9) ⚙ spots */
-function mokedSleepers(ctx) {
-  const out = [];
-  const hall = ctx.elOpt('azarah.moked.hall');
-  if (!hall) return out;
-  const i = hall.params.interior, Z = hall.params.floorZ ?? i.min[2];
-  const ky = hall.params.kodeshLine?.y ?? (i.min[1] + i.max[1]) / 2;
-  const yEnd = ctx.elOpt('azarah.moked.chamber.tevilah-descent')?.box.min[1] ?? ky + 4;
-  // 'lie': feet at the figure's origin, head away from its heading (≈ 3.6 amot long). The elders lie along the lowest
-  // tread of the ledges, feet at the kodesh line, heads north; the slab kohen lies east–west with the slab under his
-  // back — both wholly in the chol half
-  out.push({ X: i.min[0] + 2.5, Y: ky + 0.25, Z: Z + 0.5, heading: 180, pose: 'lie' });
-  out.push({ X: i.max[0] - 2.5, Y: ky + 0.25, Z: Z + 0.5, heading: 180, pose: 'lie' });
-  const ks = ctx.elOpt('azarah.moked.keys-slab')?.box;
-  if (ks) out.push({ X: (ks.min[0] + ks.max[0]) / 2 + 2.3, Y: (ks.min[1] + ks.max[1]) / 2, Z, heading: 90, pose: 'lie' });
-  const cx = (i.min[0] + i.max[0]) / 2;
-  out.push({ X: cx - 4.6, Y: ky + 2.2, Z, heading: 0, pose: 'sleep' });
-  out.push({ X: cx + 4.4, Y: ky + 2.4, Z, heading: 180, pose: 'sleep' });
-  out.push({ X: cx - 2.4, Y: yEnd + 2.6, Z, heading: 0, pose: 'sleep' });
   return out;
 }
 
