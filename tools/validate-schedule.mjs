@@ -97,6 +97,11 @@ const SEQ = [
   ['ketoret-morning', 'birkat-kohanim'], ['birkat-kohanim', 'limbs-up'], ['limbs-up', 'libation'], ['chavitin-bakers', 'libation'],
   ['libation', 'song-weekday'], ['libation', 'song-friday'], ['libation', 'song-shabbat'],
   ['song-shabbat', 'shabbat-musaf'], ['shabbat-musaf', 'showbread-swap'], ['showbread-swap', 'bazichin'], ['bazichin', 'showbread-divided'],
+  // Shabbat between the services: the bread is not eaten before the frankincense burns (Rambam TuM 4:10); the Kohen
+  // Gadol's loaves are shown until the incoming watch gathers for the lottery (staging); the altar's tending is shown
+  // after the bazichin and before the afternoon crew takes the altar
+  ['bazichin', 'showbread-eaten'], ['showbread-divided', 'showbread-eaten'], ['showbread-eaten', 'afternoon-lottery-shabbat'],
+  ['bazichin', 'shabbat-altar-day'], ['shabbat-altar-day', 'tamid-afternoon'],
   ['song-weekday', 'sanhedrin'], ['song-weekday', 'private-offerings'], ['showbread-divided', 'afternoon-lottery-shabbat'],
   ['sanhedrin', 'tamid-afternoon'], ['private-offerings', 'tamid-afternoon'], ['kayitz-hamizbeach', 'tamid-afternoon'], ['court-in-chel', 'tamid-afternoon'],
   ['afternoon-lottery', 'tamid-afternoon'], ['afternoon-lottery-shabbat', 'tamid-afternoon'], ['tamid-afternoon', 'afternoon-flaying'],
@@ -151,7 +156,7 @@ const CREW = {
   'pan-man': ['coal-pan', 'into-heichal', 'birkat-kohanim'],
   trumpeters: ['gates-blasts', 'libation', 'song-weekday', 'song-friday', 'song-shabbat', 'shabbat-musaf', 'afternoon-song', 'afternoon-song-shabbat', 'friday-blasts-work', 'friday-blasts-holy'],
   segan: ['limbs-up', 'libation', 'afternoon-song', 'afternoon-song-shabbat'],
-  'kohen-gadol': ['ketoret-morning', 'birkat-kohanim', 'limbs-up'],
+  'kohen-gadol': ['ketoret-morning', 'birkat-kohanim', 'limbs-up', 'showbread-eaten'],
   choir: ['song-weekday', 'song-friday', 'song-shabbat', 'shabbat-musaf', 'afternoon-song', 'afternoon-song-shabbat'],
   maamad: ['maamad-morning', 'maamad-afternoon'],
   sanhedrin: ['sanhedrin', 'court-in-chel'],

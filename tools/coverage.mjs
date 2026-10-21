@@ -2,10 +2,12 @@
 //
 // Walks every minute of the cycle for each day type ('weekday' | 'friday' | 'shabbat') on several dates of the year and
 // lists the minutes in which NO watchable activity is going on in the courts or on the Mount. An event counts as
-// ACTIVE when people are doing something an observer can watch; static guards, sleepers and a standing delegation
-// count as LOW, and a scene with no participants (the fire alone) counts as NONE. Exit code 1 when any gap of
+// ACTIVE when people are doing something an observer can watch; static guards, sleepers, a standing delegation and
+// a figure who appears only now and then count as LOW, and a scene with no participants (the fire alone) counts as
+// NONE. Exit code 1 when any gap of
 // ACTIVE coverage is longer than --max minutes (default 10), including gaps that run across civil midnight between
-// consecutive day types of a real week.
+// consecutive day types of a real week, and when the Azarah itself has no ACTIVE event for longer than that between
+// sunrise and sunset.
 import { EVENTS, eventsFor, DAY_TYPES } from '../src/data/schedule.js';
 import { computeZmanim } from '../src/time/zmanim.js';
 
@@ -25,6 +27,10 @@ const LOW = new Set([
   'gate-levites',         // gatekeepers standing at the gates by day
   'maamad-morning',       // the ma'amad standing (the tamid itself is staged by its own events)
   'maamad-afternoon',
+  // intermittent: the window is long but a figure shows only now and then, so it cannot carry a stretch by itself
+  'late-turning',         // one kohen turning the limbs after midnight now and then
+  'night-turning',
+  'shabbat-altar-day',    // one or two kohanim now and then at the great pile on Shabbat by day
 ]);
 const level = (e) => {
   if (LOW.has(e.id)) return 'low';
@@ -101,6 +107,33 @@ for (const ds of DATES) {
       worst = Math.max(worst, g.len);
       const bad = g.len > MAX; if (bad) fails++;
       if (bad || VERBOSE) rows.push(`${bad ? 'GAP ' : 'gap '} ${ds} ${a}→${b} ${hm(g.from)}–${hm(g.to)} (${String(g.len).padStart(3)} min) across midnight  low: ${g.low.join(', ') || '—'}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------- the court by day
+// Activity on the Mount or in Ezrat Nashim fills the clock above, but the Azarah itself (its open court, the altar, the
+// Ulam and the Heichal — not its chambers) must not stand empty while the gates are open: from sunrise to sunset on
+// every day type some ACTIVE event must be in one of these zones (Shabbat between the services was such a gap).
+// Lishkat HaGazit counts only by the events held in its holy half (the Shema and the lotteries, the Mishnah's own
+// lull in the court); the Sanhedrin sits in its profane half, outside the Azarah, and must not fill the court's day.
+const COURT = new Set(['azarah', 'ezrat-yisrael', 'ezrat-kohanim', 'mizbeach', 'kevesh', 'slaughter-zone', 'bein-haulam-lamizbeach', 'kiyor', 'ulam-steps', 'ulam', 'heichal']);
+const GAZIT_HOLY = new Set(['second-lottery', 'gazit-shema', 'outgoing-blessing', 'third-fourth-lottery', 'afternoon-lottery', 'afternoon-lottery-shabbat']);
+const inCourt = (e) => COURT.has(e.zone) || (e.zone === 'gazit' && GAZIT_HOLY.has(e.id));
+for (const id of GAZIT_HOLY) if (!EVENTS.some((e) => e.id === id)) { console.log(`GAZIT_HOLY names unknown event ${id}`); fails++; }
+for (const ds of DATES) {
+  const z = zFor(ds);
+  const r = resolver(z);
+  for (const dt of DAY_TYPES) {
+    const evs = eventsFor(dt).filter((e) => inCourt(e) && level(e) === 'active').map((e) => ({ t0: r(e.when.start), t1: r(e.when.end) }));
+    const on = (x, t) => wrap(t - x.t0) < wrap(x.t1 - x.t0);
+    const day = [];
+    for (let t = Math.ceil(z.sunrise); t < Math.floor(z.sunset); t++) day.push({ active: evs.some((x) => on(x, t + 0.5)) ? ['court'] : [], low: [] });
+    for (const g of gaps(day, false)) {
+      worst = Math.max(worst, g.len);
+      const bad = g.len > MAX; if (bad) fails++;
+      const a = Math.ceil(z.sunrise) + g.from, b = Math.ceil(z.sunrise) + g.to;
+      if (bad || VERBOSE) rows.push(`${bad ? 'GAP ' : 'gap '} ${ds} ${dt.padEnd(8)} ${hm(a)}–${hm(b)} (${String(g.len).padStart(3)} min) nobody at work in the Azarah by day`);
     }
   }
 }
