@@ -111,15 +111,11 @@ export function g4Book(ctx, sim) {
 
 /**
  * Make sure every G4 module ahead of `id` in ORDER has planned for this date and generation (each module exports
- * plan(ctx, state, sim), idempotent per generation). Call at the top of a module's own plan.
+ * plan(ctx, state, sim), idempotent per generation; read through the runtime's sim.planOf, which initialises a module
+ * not yet initialised). Call at the top of a module's own plan.
  */
 export function planBefore(ctx, sim, id) {
-  const rt = sim.schedule?.runtime;
   const i = ORDER.indexOf(id);
-  if (!rt || i <= 0) return;
-  for (let k = 0; k < i; k++) {
-    const e = rt.choreo?.(ORDER[k]);
-    if (!e || e.failed || !e.inited || !e.state || typeof e.mod?.plan !== 'function') continue;
-    try { e.mod.plan(ctx, e.state, e.sim); } catch (err) { console.error(`[sim:g4] ${ORDER[k]} plan failed`, err); }
-  }
+  if (!sim.planOf || i <= 0) return;
+  for (let k = 0; k < i; k++) sim.planOf(ORDER[k]);
 }

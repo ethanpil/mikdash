@@ -13,11 +13,20 @@ import { wrap, since } from '../../lib/core.js';
 export const CUE_LEAD = 0.5;
 /** trumpet-set buffer: 0.03 + teki'ah 3.1 + 0.55 + teru'ah (9 × 0.27 + 0.12) + 0.55 + teki'ah 3.1, + 0.5 tail (s) */
 export const D_SET = 0.03 + 3.1 + 0.55 + (9 * 0.27 + 0.12) + 0.55 + 3.1 + 0.5;
-/** choir-psalm section buffers (s) by psalm: the opening verses of each third (audio decisions) */
-export const PSALM_DUR = {
+/**
+ * choir-psalm section buffers (s) by psalm, from the audio's own pure timing when it has one (src/audio/timeline.js
+ * sectionTiming — the same code that renders: since audio-2, every verse of each third), else the first audio
+ * version's lengths (the opening verses of each third). Read through an eager glob so the sim builds either way.
+ */
+const AUDIO_TIMELINE = Object.values(import.meta.glob('../../../audio/timeline.js', { eager: true }))[0] || null;
+const PSALM_DUR_V1 = {
   24: [23.043, 24.543, 25.993], 48: [16.883, 17.923, 22.443], 81: [20.503, 20.493, 20.373], 82: [23.093, 22.803, 21.233],
   92: [24.304, 20.323, 19.413], 93: [22.243, 25.313, 15.251], 94: [18.383, 20.373, 21.503],
 };
+const sectionDurs = (psalm) => {
+  try { return [0, 1, 2].map((s) => AUDIO_TIMELINE.sectionTiming({ psalm }, s).duration); } catch { return null; }
+};
+export const PSALM_DUR = Object.fromEntries(Object.entries(PSALM_DUR_V1).map(([p, v]) => [p, (AUDIO_TIMELINE?.sectionTiming && sectionDurs(+p)) || v]));
 export const PSALM_BY_DAY = [24, 48, 82, 94, 81, 93, 92];   // Tamid 7:4 (Sun … Shabbat)
 export const PROSTRATE_S = 13;     // s: a full-length prostration — down, flat, up (people clip phases 0.3 / 0.7) ⚙
 export const MAX_WALK_S = 25;      // the audio clamps the trumpeters' walk to 4–25 s

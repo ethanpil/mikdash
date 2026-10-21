@@ -21,6 +21,7 @@ import { headingTo, angleDiff, floorZ, navRoute, straightRoute } from '../lib/pa
 import { within, since, span, wrap, wanderer, rand, clamp, smooth, window4, upperBound } from '../lib/core.js';
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
 import { m2w, AMAH } from '../../core/units.js';
+import { mokedPlaces } from './g1/places.js';
 
 const SEED = 0x6e77;
 const PATROL_SPEED = 1.15;         // m/s — a measured round ⚙
@@ -90,7 +91,7 @@ export default {
       plan: null, planGen: -1,
       fmt: (m) => ctx.time?.format?.(m) ?? '--',
       tmp: {}, tmpA: {}, tmpB: {}, tmpG: {}, pat: {},
-      patrol: null, cloak: null, cloakLevel: -1, cloakAt: null,
+      patrol: null, cloak: null, cloakLevel: 0, cloakAt: null,
     };
     buildPaths(ctx, state);
     return state;
@@ -132,8 +133,10 @@ export default {
           b.placeNear(X, Y, Z).heading(hd).pose(bw ? 'torch_walk' : 'torch', bw ? phaseFor(ctx, b, 'torch_walk', O.d + TORCH_AHEAD) : undefined).show();
         }
       }
-      greetCues(ctx, state, sim, P);
     }
+    // (outside the officer's window too: the update whose crossing holds his last greeting, just before the window
+    // ends, may come after it — at 600× a frame is a sim minute)
+    if (P.patrol) greetCues(ctx, state, sim, P);
     mokedDoors(state, P, t);
     incident(ctx, state, sim, t, W, incPost, shabbatNight);
 
@@ -144,9 +147,7 @@ export default {
     if (W.upper && within(t, W.upper[0], W.upper[1])) sleepAll(state.upperPool, state.upper, t, W.upper);
   },
 
-  release(ctx, state) {
-    if (state.cloak) { state.cloak.setIntensity(0); state.cloakLevel = 0; }
-  },
+  release(ctx, state) { state.cloakLevel = 0; },
 
   debug(s) {
     const R = s.route, P = s.plan, O = s.patrol, f = s.fmt;
@@ -496,6 +497,15 @@ function circuit(ctx, levites) {
     in: [(pish.min[0] + pish.max[0]) / 2, pish.min[1] - 2, pish.min[2]],
   } : null;
   const DOOR_CHEL = 'azarah.moked.door-chel', PISH = 'azarah.gate.moked.pishpash';
+  // across the hall (Middot 1:6–7): down the hearth's west side between it and the west bay's mat, along its south side
+  // between it and the mats by the kodesh line, then down the east lane between the slab kohen's mat and the seats by the
+  // east ledges into the kodesh half — clear of the sleepers moked-night lays out (g1/plan.js floorPlan: by the hearth's
+  // centre, the hall's axis and the kodesh line) and of the fire ⚙
+  let hallWay = null;
+  try {
+    const H = mokedPlaces(ctx), hx = H.cx, ky = H.ky, hz = H.Z;
+    hallWay = [[hx - 2.15, ky + 8.4], [hx - 2.25, ky + 5.0], [hx - 1.45, ky + 2.75], [hx + 1.45, ky + 2.5], [hx + 4.65, ky + 2.2], [hx + 4.65, ky - 0.6]].map(([X, Y]) => [X, Y, hz]);
+  } catch { hallWay = moked ? [moked.hall] : null; }
 
   post('gate-chuldah-w');
   if (tw && te) { viaP(tw.low); viaP(tw.high); viaP(te.high); viaP(te.low); }
@@ -510,13 +520,16 @@ function circuit(ctx, levites) {
   post('azarah-ne');
   via(rx, 407); via(rx, 345); viaP(out); via(413, 330.5); via(413, 418); via(236, 428);
   if (moked) {
-    viaP(moked.foot); viaP(moked.door, { pass: DOOR_CHEL, straight: true }); viaP(moked.hall); viaP(moked.out, { straight: true });
+    viaP(moked.foot); viaP(moked.door, { pass: DOOR_CHEL, straight: true });
+    for (const p of hallWay) viaP(p, { straight: true });
+    viaP(moked.out, { straight: true });
     viaP(moked.pass, { pass: PISH, straight: true }); viaP(moked.in);
     // round the Gazit's kodesh half and the Heichal's NW corner to the strip behind the Kaporet
     via(94.3, 374.5, 16); via(76.6, 365.1, 16);
     post('achorei-beit-hakaporet');
     via(76.6, 365.1, 16); via(94.3, 374.5, 16);
-    viaP(moked.in, { straight: true }); viaP(moked.pass, { pass: PISH, straight: true }); viaP(moked.out); viaP(moked.hall, { straight: true });
+    viaP(moked.in, { straight: true }); viaP(moked.pass, { pass: PISH, straight: true }); viaP(moked.out, { straight: true });
+    for (let k = hallWay.length - 1; k >= 0; k--) viaP(hallWay[k], { straight: true });
     viaP(moked.door, { pass: DOOR_CHEL, straight: true }); viaP(moked.foot);
   }
   // Lishkat HaKorban (its door to the east), the Korban gate up its flight, Lishkat HaParochet (its door to the west)
@@ -605,13 +618,13 @@ function near(ctx, s, range) {
 
 /** the sleeping guard: struck with the staff, his garment burned (Middot 1:2) — fire and captions */
 function incident(ctx, state, sim, t, W, post, shabbatNight) {
-  if (!post) { setCloak(ctx, state, 0); return; }
+  if (!post) { state.cloakLevel = 0; return; }
   const [i0, i1] = W.incident;
   const Ln = span(i0, i1) || 1;
   const u = within(t, i0, i1) ? since(t, i0) / Ln : -1;
   // no burning on Shabbat night ⚙
   const level = !shabbatNight && u >= 0 ? smooth(INC.fire[0], INC.fire[1], u) * (1 - smooth(INC.fire[2], INC.fire[3], u)) : 0;
-  setCloak(ctx, state, level);
+  setCloak(ctx, state, sim, level);
   const tStrike = wrap(i0 + INC.strike[0] * Ln + 0.05);
   if (crossed(state, tStrike)) {
     cueAt(state, `strike:${Math.round(i0)}`, tStrike, () => {
@@ -626,13 +639,14 @@ function incident(ctx, state, sim, t, W, post, shabbatNight) {
   }
 }
 
-function setCloak(ctx, state, level) {
-  if (Math.abs(level - state.cloakLevel) < 0.01) return;
-  if (!state.cloak && level > 0 && ctx.fx?.add && state.cloakAt) {
+/** the burning garment: this module's own small fire (added at 0 when first needed), a shared want while it burns */
+function setCloak(ctx, state, sim, level) {
+  state.cloakLevel = level;
+  if (!(level > 0)) return;
+  if (!state.cloak && ctx.fx?.add && state.cloakAt) {
     const c = state.cloakAt;
     const z = floorZ(ctx, c.X, c.Y, c.Z) ?? c.Z;
     try { state.cloak = ctx.fx.add({ id: CLOAK_FIRE, kind: 'torch', pos: [c.X, c.Y, z + 0.1], size: 0.3, intensity: 0, schedule: 'always', smoke: true }); } catch { state.cloak = null; }
   }
-  state.cloak?.setIntensity(level);
-  state.cloakLevel = level;
+  sim.fireWant(CLOAK_FIRE, level);
 }

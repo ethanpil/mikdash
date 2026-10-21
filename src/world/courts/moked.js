@@ -5,7 +5,7 @@
 // and the door to the chel. Below: the winding stair, the lamp-lit passage under the Birah and the Beit HaTevilah with
 // its mikveh, fire and privy (Tamid 1:1; Middot 1:9). Fire 'courts.moked.lambs.lamp' (lamb chamber, 'service').
 import { B, gridSolid, lathe, sweep, Mesher } from './lib/geo.js';
-import { shell, flight, spiral, lamp, lampStand, wallLamp, starFire } from './lib/parts.js';
+import { shell, flight, spiral, lamp, lampStand, wallLamp, starFire, slabRingGeometry, SLAB_RING } from './lib/parts.js';
 import { classify } from './masonry.js';
 import { leafGeometry, meshOf, Object3D, finishLocal, boxAt } from './lib/kit.js';
 import { AMAH, m2w } from '../../core/units.js';
@@ -172,12 +172,16 @@ function furnishings(C) {
 // and the tablet to its place, put his garment on it and slept." The place is site.js's 1 × 1 seat, cut ½ amah into
 // the hall floor (masonry.js). The tablet, ⅙ amah thick, rests flush on a stone rebate round the seat; the ring is
 // toward its south edge, where the kohen kneels — a drop-ring lying in a groove cut in the tablet, its top flush with
-// the floor, since "he put his garment on it and slept"; the chain hangs from an iron staple in the seat's north wall ⚙
-// (thickness, rebate, ring and staple placement; the Mishnah gives the size and the parts).
+// the floor, since "he put his garment on it and slept" (the fitting shared with the shit and sotah slabs:
+// parts.js slabRingGeometry); the chain hangs from an iron staple in the seat's north wall ⚙ (thickness, rebate, ring
+// and staple placement; the Mishnah gives the size and the parts).
 // The keys: "the keys of the Azarah" (Middot 1:8; Rambam BhB 8:5) — one for each of its seven gates (Middot 1:4) and
 // one for the wicket between the Moked and the Azarah, which the officer takes alone at dawn ("he took the key and
-// opened the small gate", Rambam BhB 8:11) ⚙ count and form; the wicket key hangs at the bottom of the ring, the
-// smallest, with the widest bow.
+// opened the small gate", Rambam BhB 8:11) ⚙ count and form. Gate keys at gate scale, 0.36–0.42 amah (17–20 cm) ⚙ —
+// the Temple's keys were large (Tamid 3:6: the Heichal's "goes down to the armpit"); the wicket key the smallest
+// (0.3), with the widest bow. Under the ⅙-amah tablet the ½-amah seat leaves ⅓ amah, too little for them to hang
+// clear: the chain runs down to the seat's floor and the keys lie there on their ring, fanned south toward the kohen,
+// still on the chain ("took the keys from the chain").
 // Movable 'azarah.moked.keys-slab': userData.lift(f), 0 = in its place … 1 = raised by the ring, tipped up on its
 // north edge to 80° ⚙ (open(f) is the same, for the sim's door handles); setKeys(v) the keys on the chain: true all,
 // false none (in the kohen's hand), a number n the first n of keyIds (the wicket key is last: n = 7 when the officer
@@ -202,48 +206,52 @@ function keysSlab(C, Z) {
   // the tablet and its ring, about a pivot on the tablet's top north edge
   const pivotW = m2w(cx, y1, Z);
   const slabGeo = new Mesher().box([x0, y0, Z - T], [x1, y1, Z]).geometry().translate(-pivotW.x, -pivotW.y, -pivotW.z);
-  const ry = y0 + 0.25, rr = 0.12, rt = 0.025;
-  // laid flat in its groove: the hexagonal section's top face (0.866 rt over the centre) a millimetre proud of the floor
-  const ringGeo = new TorusGeometry(rr * A, rt * A, 6, C.d >= 2 ? 20 : 14).rotateX(Math.PI / 2);
-  const rw = m2w(cx, ry, Z + 0.002 - 0.866 * rt);
-  ringGeo.translate(rw.x - pivotW.x, rw.y - pivotW.y, rw.z - pivotW.z);
+  const ringGeo = slabRingGeometry(cx, ks.min[1] + SLAB_RING.inset, Z, C.d).translate(-pivotW.x, -pivotW.y, -pivotW.z);
   const pivot = new Object3D();
   pivot.name = 'azarah.moked.keys-slab';
   pivot.position.copy(pivotW);
   pivot.add(meshOf(C.kit, slabGeo, 'marble_white', 'courts:keys-slab-tablet'));
   pivot.add(meshOf(C.kit, ringGeo, 'iron', 'courts:keys-slab-ring'));
-  // the staple just under the tablet's bearing, a short chain, the keys on a ring at its foot (shown / hidden); all of
-  // it hangs in the ⅓ amah between the tablet and the seat's floor
-  const yS = ks.max[1] - reb, zS = Z - T - 0.02;
-  C.kit.m('iron', false, false).box([cx - 0.05, yS - 0.03, zS - 0.04], [cx + 0.05, yS, zS + 0.01], 'xXyZz');
-  const chain = [], nL = 2, pitch = 0.035;
+  // the staple just under the tablet's bearing, the chain down to the seat's floor, the keys on a ring at its foot
+  // lying on the floor (shown / hidden)
+  const yS = ks.max[1] - reb, zS = Z - T - 0.02, yC = yS - 0.035;
+  C.kit.m('iron', false, false).box([cx - 0.06, yS - 0.035, zS - 0.05], [cx + 0.06, yS, zS + 0.01], 'xXyZz');
+  const kR = 0.075, kt = 0.011, sh = 0.013;            // the keys' ring (radius, section) and the keys' shank radius
+  const zK = seatZ + sh, zR = zK + 0.008;               // the keys' axes; the ring rides on their bows
+  const zTop = zS - 0.05, nL = 5, pitch = (zTop - zR) / nL;
+  const chain = [];
   for (let i = 0; i < nL; i++) {
-    const g = new TorusGeometry(0.016 * A, 0.005 * A, 4, 8).scale(1, 1.5, 1);
-    if (i % 2) g.rotateY(Math.PI / 2);
-    const p = m2w(cx, yS - 0.03, zS - 0.03 - pitch * (i + 0.5));
+    const g = new TorusGeometry(0.022 * A, 0.007 * A, 4, 8).scale(1, 1.5, 1);
+    if (i % 2 === 0) g.rotateY(Math.PI / 2);         // the end links face east: round the staple's bar and the ring
+    const p = m2w(cx, yC, zTop - pitch * (i + 0.5));
     chain.push(g.translate(p.x, p.y, p.z));
   }
   C.kit.geo(finishLocal(chain), 'iron', { collide: false, castShadow: false });
-  const kR = 0.035, zR = zS - 0.03 - pitch * nL - kR;   // the keys' ring: its centre
-  const kr = m2w(cx, yS - 0.03, zR);
-  const ringG = finishLocal([new TorusGeometry(kR * A, 0.006 * A, 4, 12).translate(kr.x, kr.y, kr.z)]);
-  // the keys, threaded on the ring's lower arc: a ring bow, a round shank and a toothed bit ⚙ (Roman-period form).
-  // Arc slots from west to east; the wicket key takes the bottom one
+  const ry = yC - kR;                                   // the ring's north edge under the chain
+  const kr = m2w(cx, ry, zR);
+  const ringG = finishLocal([new TorusGeometry(kR * A, kt * A, 5, 16).rotateX(Math.PI / 2).translate(kr.x, kr.y, kr.z)]);
+  // the keys, each on its side with its bow on the ring's south arc and its shank radiating south: a ring bow, a round
+  // shank and a flat bit with two wards ⚙ (Roman-period form). Fanned ± 44° from west to east; the wicket key in the middle
   const n = KEY_IDS.length, slots = KEY_IDS.map((id, k) => k).filter((k) => KEY_IDS[k] !== WICKET_KEY);
   slots.splice(Math.floor(slots.length / 2), 0, KEY_IDS.indexOf(WICKET_KEY));
   const keyG = [];
   slots.forEach((k, s) => {
     const wk = KEY_IDS[k] === WICKET_KEY;
-    const a = ((s + 0.5) / n - 0.5) * 2.2;                // ± 63° about the ring's bottom
-    const bw = wk ? 0.026 : 0.02, L = wk ? 0.06 : 0.07 + 0.012 * ((k * 2) % 3);
+    const a = ((s + 0.5) / n - 0.5) * 1.75 + 0.03 * Math.sin(k * 2.3);   // from due south, + toward the east
+    const bw = wk ? 0.05 : 0.04, L = wk ? 0.2 : 0.28 + 0.03 * ((k * 2) % 3);   // bow radius; shank length
+    const bitL = wk ? 0.05 : 0.065, bitW = wk ? 0.05 : 0.065, side = a > 0 ? 1 : -1;  // the bit turned toward the fan's middle
+    // local metres: +x along the shank from the bow's centre, y up, the bit toward ±z
     const key = [];
-    key.push(new TorusGeometry(bw * A, 0.006 * A, 4, 10).translate(0, -bw * A, 0));
-    key.push(new CylinderGeometry(0.007 * A, 0.007 * A, L * A, 6).translate(0, -(2 * bw + L / 2) * A, 0));
-    const zb = 2 * bw + L;                                 // the bit at the shank's foot, its wards toward the tip
-    key.push(boxAt(0.007 * A, -zb * A, -0.004 * A, 0.032 * A, -(zb - 0.03) * A, 0.004 * A));
-    for (const tz of [0.006, 0.019]) key.push(boxAt(0.032 * A, -(zb - tz) * A, -0.004 * A, 0.04 * A, -(zb - tz - 0.008) * A, 0.004 * A));
-    const g = finishLocal(key).rotateY(0.45 * (s - (n - 1) / 2) + 0.2);
-    const p = m2w(cx + Math.sin(a) * kR, yS - 0.03, zR - Math.cos(a) * kR + 0.006);
+    key.push(new TorusGeometry(bw * A, kt * A, 5, 12).rotateX(Math.PI / 2));
+    key.push(new CylinderGeometry(sh * A, sh * A, L * A, 6).rotateZ(Math.PI / 2).translate((bw + L / 2 - 0.005) * A, 0, 0));
+    const tip = bw + L - 0.005;
+    const zb = (w0, w1, l0, l1) => boxAt(l0 * A, -0.006 * A, Math.min(side * w0, side * w1) * A, l1 * A, 0.006 * A, Math.max(side * w0, side * w1) * A);
+    key.push(zb(0, bitW, tip - bitL, tip));
+    for (const w of [0.008, bitL - 0.02]) key.push(zb(bitW, bitW + 0.014, tip - bitL + w, tip - bitL + w + 0.012));
+    // bunched on the ring, the bows lie on one another: each key's bow raised a little, its tip on the floor
+    const lift = 0.012 * (s % 3), phi = Math.asin(lift / tip);
+    const g = finishLocal(key).rotateZ(-phi).translate(0, lift * A, 0).rotateY(a - Math.PI / 2);
+    const p = m2w(cx + Math.sin(a) * kR, ry - Math.cos(a) * kR, zK);
     keyG[k] = g.translate(p.x, p.y, p.z);
   });
   // one mesh: the ring, then the keys in keyIds order; an index over the keys on the chain

@@ -19,12 +19,11 @@
 // The kohanim stand in a circle (kuliyar), in the four garments, barefoot; the officer in its middle turns to each finger
 // as he counts. Every pose is a pure function of (t, date). ⚙ marks reconstruction (minutes, spots, counts).
 import { nightPlan, SEED } from './g1/plan.js';
-import { makePools, stage, runCues, FreeProps } from './g1/stage.js';
+import { makePools, stage, runCues, FreeProps, windowAmount } from './g1/stage.js';
 import { Track, lotHand, personAt, applyLeg } from './g1/util.js';
-import { gazitPlaces } from './g1/places.js';
+import { gazitPlaces, mokedPlaces, lotRadius } from './g1/places.js';
 import { rand, clamp } from '../lib/core.js';
 import { CUE_LEAD } from '../lib/cue.js';
-import { AMAH } from '../../core/units.js';
 
 const WALK = 1.15, SLOW = 0.85;   // m/s ⚙
 const TEXT = {
@@ -45,7 +44,7 @@ const G2_ID = 'terumat-hadeshen';
 
 export default {
   id: 'lotteries',
-  lead: 5,          // the officer leaves the chavitin chamber for the second lottery at its t0 − 4.75
+  lead: 5,          // the officer leaves Beit HaMoked for the second lottery at its t0 − 4.75
   lag: 16,          // after the second lottery they wait in the Gazit for the barkai and go out to bring the lamb ⚙
   importance: 3,
 
@@ -59,7 +58,7 @@ export default {
     pools['gazit:off'] = sim.pool({ name: 'gazit:off', role: 'kohen_offduty', count: 20, seed: SEED.gazit, importance: 2 });
     // the attendants (chazzanim) of Tamid 5:3 ⚙ Levites
     pools['chazzan:levi'] = sim.pool({ name: 'chazzan:levi', role: 'levi', count: 3, seed: SEED.chazzan, importance: 2 });
-    return { pools, G: gazitPlaces(ctx), gz: null, gzGen: -1, gzG2: false, plan: null, cues: [], props: new FreeProps(ctx), fmt: (m) => ctx.time?.format?.(m) ?? '--', n: 0, out: {} };
+    return { pools, G: gazitPlaces(ctx), M: mokedPlaces(ctx), wicket: sim.door('azarah.gate.moked.pishpash'), gz: null, gzGen: -1, gzG2: false, plan: null, cues: [], props: new FreeProps(ctx), fmt: (m) => ctx.time?.format?.(m) ?? '--', n: 0, out: {} };
   },
 
   update(ctx, state, t, dt, sim) {
@@ -91,6 +90,9 @@ export default {
       n++;
     }
     runCues(ctx, sim, state, gz.cues, 'lot');
+    // Beit HaMoked's wicket for the officer going out to the second lottery
+    const a = windowAmount(t, gz.wicket, 0.25);
+    if (a > 0) state.wicket.set(a);
     state.n = n;
   },
 
@@ -114,23 +116,22 @@ function firstCues(P) {
   ];
 }
 
-/** terumat-hadeshen's per-date plan (read-only), when it exists for this date: its men's arrival in the Gazit */
+/** terumat-hadeshen's per-date plan (sim.planOf: built now if need be), read-only: its men's arrival in the Gazit */
 function g2Plan(sim) {
-  const e = sim.schedule.runtime?.choreo?.(G2_ID);
-  const st = e?.state;
-  if (!st?.plan || st.planGen !== sim.generation || !st.plan.W || !Array.isArray(st.plan.B)) return null;
-  return st.plan;
+  const P = sim.planOf?.(G2_ID);
+  return P && P.W && Array.isArray(P.B) ? P : null;
 }
 
 // --------------------------------------------------------------------------------------------------- the Gazit
 /**
  * One scene per Gazit lottery of the day. Each participant: an episode from his arrival to his going out; the officer in
- * the circle's middle. Circle: radius from the count at ≈0.55 m a man, round the lottery station ⚙.
+ * the circle's middle. Circle: round the lottery station, its radius from the count (g1/places.js lotRadius: ≈0.68 m a
+ * man, 2.6–3.9 amot, clear of the column plinths; the twenty of the third lottery ≈0.59 m apart) ⚙.
  */
 function gazitScenes(ctx, sim, state, g2) {
   const G = state.G;
   const ev = (id) => { const e = sim.schedule.byId(id); return e && Number.isFinite(e.t0) && Number.isFinite(e.t1) ? e : null; };
-  const out = { scenes: [], people: [], cues: [], props: [] };
+  const out = { scenes: [], people: [], cues: [], props: [], wicket: [] };
   const people = new Map();   // `${pool}:${idx}` -> person
   const person = (pool, idx) => {
     const k = `${pool}:${idx}`;
@@ -145,7 +146,7 @@ function gazitScenes(ctx, sim, state, g2) {
     const ar = (a * Math.PI) / 180;
     return { at: [c[0] + Math.sin(ar) * r, c[1] + Math.cos(ar) * r, Z], h: (a + 180) % 360 };
   };
-  const radius = (n) => clamp((n * 0.68) / (2 * Math.PI) / AMAH, 2.6, 4.4);   // ≈0.68 m a man, inside the nave ⚙
+  const radius = lotRadius;
 
   // ---- the second lottery
   const L2 = ev('second-lottery');
@@ -192,11 +193,16 @@ function gazitScenes(ctx, sim, state, g2) {
       }
       p.eps.push(tr.episode());
     });
-    // the officer: out of the chavitin chamber with them; the call; the mitre; the count; then he waits with them
+    // the officer: from Beit HaMoked, where he waited after the inspection (g1/plan.js takes him there from the chavitin
+    // chamber through the court), out by the wicket and along the court's north side under the Moked's wall ⚙; the call;
+    // the mitre; the count; then he waits with them
     {
       const p = person('officer', 0);
-      const tr = new Track(S - 4.75, fromChav[0], 270, 'lot', 'k');
-      tr.walk([...fromChav.slice(1), doorway, doorIn, c], { speed: WALK });
+      const M = state.M, Zc = M.Z;
+      const tr = new Track(S - 4.75, M.gateIn, 180, 'lot', 'k');
+      tr.walk([[M.pish[0], M.pish[1], Zc], M.gateOut], { speed: SLOW });
+      out.wicket.push([S - 4.75 - 0.05, tr.now() + 0.05]);
+      tr.walk([[M.gateOut[0] - 1.2, 387.2, Zc], [200, 386.4, Zc], [181, 384.5, Zc], [156, 383.6, Zc], [99.2, 377, Zc], [G.b.max[0] + 3, G.eastY, Zc], doorway, doorIn, c], { speed: WALK });
       officerDraw(tr, c, counted.map((w) => w.spot), draw, 0x2a);
       tr.until(tDisp + 0.12 * n + 0.2, { pose: 'stand', h: 90 });
       tr.walk([doorIn, doorway], { speed: SLOW });

@@ -29,7 +29,9 @@ function snap() {
   const crowds = E.crowds.map((c) => (c.want ? `1${c._pose || ''}${Number.isNaN(c._phase) ? '' : '@' + r3(c._phase)}` : '0')).join(' ');
   const mv = ctx.movables.get('curtain:heichal.gate-curtain');
   return {
-    figs, props, crowds, lamps: S.lamps.map((L) => L.v).join(''), coals: Math.max(0, S.coalsV), incense: Math.max(0, S.incenseV), glow: Math.max(0, S.glowV),
+    // the module's fires as the runtime's shared board applied them (sim.fireWant → FireBoard)
+    figs, props, crowds, lamps: S.lamps.map((L) => L.v).join(''), incense: Math.max(0, S.incenseV),
+    fires: ['g3.mizbach-hazahav.coals', 'g3.pan-coals', 'g3.pan-coals.ledge', ...S.lamps.map((L) => L.id)].map((id) => r3(Math.max(0, rt.fires.state(id)?.value ?? 0))).join(' '),
     curtain: r3(mv?.userData?.openAmount ?? -1), pan: ctx.movables.get('altar.machtah')?.visible,
   };
 }
@@ -201,9 +203,51 @@ try {
   durations = bad.length ? bad : 'ok';
 } catch (e) { durations = `error ${e.message}`; }
 
+// ---- 6. the incense (I1) and pan (P1) men from the third lottery: lotteries.js walks its winners (Gazit circle slots 3
+// and 4, seed 0x6745) to the Gazit's east doorway; ketoret-morning's scripts take them there from their first leg. Every
+// 0.01 min across the hand-over: exactly one module wants each man, and he never jumps (≤ 3 m/s); also after jumps
+const doorway = {};
+{
+  const tl1 = ctx.schedule.byId('third-fourth-lottery')?.t1;
+  const who = () => {
+    const m = new Map();
+    for (const e of rt.entries) if (e.relevant) for (const p of e.pools) if (p.spec?.seed === 0x6745) for (const s of p.slots) {
+      if (!s.want || (s.index !== 3 && s.index !== 4)) continue;
+      const k = s.index;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push({ id: e.id, at: s._site.slice() });
+    }
+    return m;
+  };
+  const ev = [];
+  let prev = null;
+  for (let t = tl1 - 1.0; t <= tl1 + 0.2; t += 0.01) {
+    ctx.time.set(t); await frames(1);
+    const cur = who();
+    for (const k of [3, 4]) {
+      const c = cur.get(k) || [];
+      if (c.length !== 1) ev.push(`${ctx.time.format(t)}+${(t % 1).toFixed(2)} #${k} wanted by ${c.length} (${c.map((x) => x.id).join(',')})`);
+      const p = prev?.get(k)?.[0];
+      if (p && c[0]) { const dm = Math.hypot(c[0].at[0] - p.at[0], c[0].at[1] - p.at[1]) * 0.48; if (dm > 3.0 * 0.6 + 0.2) ev.push(`${ctx.time.format(t)} #${k} jump ${dm.toFixed(2)} m ${p.id}→${c[0].id}`); }
+    }
+    prev = cur;
+  }
+  // a jump straight into the hand-over: the same place whichever module stages him
+  ctx.time.set(tl1 - 0.44); await frames(3);
+  const j1 = who();
+  ctx.time.set(tl1 + 120); await frames(2); ctx.time.set(tl1 - 0.44); await frames(3);
+  const j2 = who();
+  const same = [3, 4].every((k) => JSON.stringify(j1.get(k)) === JSON.stringify(j2.get(k)));
+  doorway.ok = ev.length === 0 && same;
+  doorway.events = ev.slice(0, 8);
+  doorway.jumpSame = same;
+  doorway.owner = Object.fromEntries([3, 4].map((k) => [k, (j1.get(k) || []).map((x) => x.id).join(',')]));
+}
+
 cost.sort((a, b) => a - b);
 const pct = (p) => +(cost[Math.min(cost.length - 1, Math.floor(p * cost.length))] || 0).toFixed(3);
 return {
+  doorway,
   deterministic: diffs.length === 0, diffs: diffs.slice(0, 6), summary,
   cues: { sounds: count, libations: libs, at1x, loops1x, choirLoops: loops.length, hushes, captions: caps.map((c) => `${ctx.time.format(c.t)} ${c.id}`), captionDoubles: capDup.slice(0, 5), keys: keysFired, multi, doubles: dup.slice(0, 5), jumpCalls, jumpCaps, jumpLibs },
   jumpto, shabbat, alive,

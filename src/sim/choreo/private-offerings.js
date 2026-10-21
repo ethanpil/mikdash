@@ -42,7 +42,7 @@ export default {
       pools[name] = sim.pool({ name: `g5-${name}`, ...(animal ? { animal: name } : { role: name }), count: n, seed: SEED + name.length * 131 + n, importance: imp[name] || 1, prop: animal ? undefined : null });
     }
     const state = {
-      G, pools, plan: null, planKey: '', planGen: -1, free: null, propsOn: new Set(), fires: new Map(), fireLast: new Map(),
+      G, pools, plan: null, planKey: '', planGen: -1, free: null, propsOn: new Set(), fires: new Map(),
       o: {}, tmp: {}, fmt: (m) => ctx.time?.format?.(m) ?? '--', lastMs: 0,
     };
     // free props: the hung carcass stages at each lane's hook, a bird cage per bird lane, the bikkurim basket
@@ -57,7 +57,7 @@ export default {
 
   update(ctx, state, t, dt, sim) {
     const P = getPlan(ctx, state, sim);
-    if (!P?.ok) { hideFree(state); setFires(state, sim, null, t); return; }
+    if (!P?.ok) { hideFree(state); return; }
     const forced = sim.forced;
     // ---- figures: each pool slot's timeline at t
     for (const pool in P.slotTracks) {
@@ -80,10 +80,15 @@ export default {
     cues(ctx, state, sim, P);
   },
 
-  release(ctx, state, sim) {
-    hideFree(state);
-    for (const [id, last] of state.fireLast) if (last > 0) { sim.fire(id).set(0); state.fireLast.set(id, 0); }
-  },
+  release(ctx, state) { hideFree(state); },
+
+  /**
+   * The day's plan, for other choreos through sim.planOf('private-offerings'): built now if it is not yet. Contracts
+   * read by G4 (nikanor-stations, g4/sets.js): P.ok, P.counts (the day's counts of every type, the sets included),
+   * P.insts (each with job.set, and s: the kohen takes a bird pair at Sha'ar Nikanor at inst.s + 0.5), P.hot (the shared
+   * places' bookings), P.G (the court geometry).
+   */
+  plan(ctx, state, sim) { return getPlan(ctx, state, sim); },
 
   debug(s) {
     const P = s.plan;
@@ -217,27 +222,19 @@ function allFree(state) { return state.free?.list || []; }
 function hideFree(state) { for (const f of allFree(state)) if (f.on) { f.on = false; f.a.setVisible(false); } }
 
 // ------------------------------------------------------------------------------------------------ fires
-/** the notar fire on the ash place east of the ramp, the court's hearth while meal-offerings are fried or baked */
+/**
+ * The notar fire on the ash place east of the ramp, the court's hearth while meal-offerings are fried or baked: this
+ * module's wants (sim.fireWant — courts-daily wants the same hearth for the kohanim's meal; the larger wins).
+ */
 function setFires(state, sim, P, t) {
   const want = state.fires;
   want.clear();
-  if (P) {
-    for (const f of P.fires) {
-      if (t < f.t0 - 0.01 || t >= f.t1 + (f.fadeOut || 0.4)) continue;
-      const fi = f.fadeIn || 0.3, fo = f.fadeOut || 0.4;
-      // up as it is lit, down over fadeOut as the last of it burns away
-      const v = f.v * smooth(f.t0, f.t0 + fi, t) * (1 - smooth(f.t1, f.t1 + fo, t));
-      want.set(f.id, Math.max(want.get(f.id) || 0, clamp(v)));
-    }
-  }
-  for (const id of ['altar.kitchen.fire', 'altar.beit-hadeshen.fire']) {
-    const v = want.get(id) || 0;
-    const last = state.fireLast.get(id) ?? -1;
-    if (Math.abs(v - last) < 0.01) continue;
-    // write only what this module wants, and only on a change (another scene may tend the same hearth)
-    if (v === 0 && last <= 0) continue;
-    sim.fire(id).set(v);
-    state.fireLast.set(id, v);
+  for (const f of P.fires) {
+    if (t < f.t0 - 0.01 || t >= f.t1 + (f.fadeOut || 0.4)) continue;
+    const fi = f.fadeIn || 0.3, fo = f.fadeOut || 0.4;
+    // up as it is lit, down over fadeOut as the last of it burns away
+    const v = f.v * smooth(f.t0, f.t0 + fi, t) * (1 - smooth(f.t1, f.t1 + fo, t));
+    if (v > 0) want.set(f.id, sim.fireWant(f.id, clamp(v)));
   }
 }
 
@@ -263,4 +260,4 @@ function distTo(ctx, p) {
   return Math.hypot(pp.x - w.x, pp.z - w.z, (pp.y - w.y) * 0.5);
 }
 
-export { getPlan as _getPlan, HOLD, WALK };
+export { HOLD, WALK };

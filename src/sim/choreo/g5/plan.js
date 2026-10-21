@@ -10,8 +10,9 @@
 // day only, in the morning (Rambam Pesulei HaMukdashin 19:4–5). Minutes and traffic are reconstruction.
 import { OFFERING_TYPES, OFFERING_RULES, NESACHIM, offeringWindows } from '../../../data/offerings.js';
 import { hashStr, rand, rng } from '../../lib/core.js';
-import { Track, one, cyc, fix, WALK } from './track.js';
+import { Track, one, cyc, fix, WALK, tableOrder } from './track.js';
 import { SitePath } from '../../lib/path.js';
+import { vesselAt } from '../g4/metzora.js';
 
 const AM = 0.48;
 export const POOLS = { kohen: 44, israelite: 16, kohen_offduty: 3, nazir: 3, levi: 6, lamb: 10, ram: 6, goat: 6 };
@@ -151,9 +152,16 @@ export function buildPlan(ctx, G, ev) {
       if (Math.abs(L.ring[0] - 229) < 1 && Math.abs(L.ring[1] - 355.5) < 6) { R.ring.push(w); R.hold.push(w); }
       if (Math.abs(L.pillarX - 228) < 2.5) { R.hook.push(w); R.table.push(w); }
     });
-    // its asham's blood is thrown at the SW corner by the Nikanor module's kohen (its T.blood 20.4 min into the window,
-    // then the walk from the NE corner): keep the corner free then
-    P.hot[0].book.push([mz.t0 + 19.5, mz.t0 + 25]);
+    // its asham's blood is thrown at the NE and the SW corners by the Nikanor module's vessel kohen: booked for exactly
+    // the minutes he holds them — the pure itinerary that module stages (g4/metzora.js), which it publishes as its
+    // plan.M.neBlood / plan.M.swBlood — on the days this plan counts a metzora
+    if (P.counts.metzora > 0) {
+      const sw = P.hot.find((h) => h.id === 'sw'), ne = P.hot.find((h) => h.id === 'ne');
+      const [a, b] = vesselAt(mz.t0, [sw, ne]);
+      if (a) sw.book.push(a);
+      if (b) ne.book.push(b);
+      P.metzoraBlood = { sw: a, ne: b };
+    }
   }
 
   // arrivals: stratified over the window (seeded); a mother's lamb waits for her bird (below)
@@ -730,15 +738,19 @@ function scriptAnimal(P, job, lane) {
     const C = pairs.map((_, k) => new Track(null, `C${k}`, 'kohen'));
     B.tracks.push(...C);
     // round their own table, within its width, clear of the next lane's (tables 4 amot apart) ⚙
-    const spots = pairs.map((_, k) => add(L.tableStand, (k % 4 - 1.5) * 0.98, 0.2 + Math.floor(k / 4) * 1.25));
-    C.forEach((c, k) => arriveAt(G, c, 'MOK_X', spots[k], tH0 + 0.1 + 0.04 * k));
+    // (the first to go wait in the back row, by the way out, and come last: track.js tableOrder)
+    const spots = pairs.map((_, k) => { const j = tableOrder(n, k).spot; return add(L.tableStand, (j % 4 - 1.5) * 0.98, 0.2 + Math.floor(j / 4) * 1.25); });
+    C.forEach((c, k) => arriveAt(G, c, 'MOK_X', spots[k], tH0 + 0.1 + 0.04 * tableOrder(n, k).arrive));
     const tPick = tH0 + 0.12 * n * 0.25 + 0.2;
     hungFinal.t1 = tH0 + 0.1;
+    let tGo = -Infinity;
     C.forEach((c, k) => {
       const [pr, pl] = pairs[k];
       c.hold(Math.max(c.t, tH0), { pose: 'stand', h: 180 });
       c.holdFor(0.18, { pose: pl ? 'carry_limbs' : 'carry', h: 180, prop: pr, prop2: pl });
-      c.hold(tPick + 0.05 * k, { pose: pl ? 'carry_limbs' : 'carry', h: 180, prop: pr, prop2: pl });
+      // each goes once he has his limbs and 0.05 after the one before him (the first to go came last: never two at once)
+      tGo = Math.max(c.t, tGo + 0.05, tPick + 0.05 * k);
+      c.hold(tGo, { pose: pl ? 'carry_limbs' : 'carry', h: 180, prop: pr, prop2: pl });
     });
     // to the lower west half of the ramp, where a kohen salts them (Rambam MK 6:4; Tamid 4:3)
     // the salter stands west of the limbs, a step east of the way down the west half ⚙

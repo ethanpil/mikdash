@@ -1,5 +1,5 @@
 // Handles on the world the sim animates: movables registered by the builders (doors, curtains — ctx.movables),
-// fires (ctx.fx.setFire), sounds (ctx.audio) and captions (bus 'caption'). All tolerate a missing target
+// fires (FireBoard → ctx.fx.setFire), sounds (ctx.audio) and captions (bus 'caption'). All tolerate a missing target
 // (a builder still in progress, audio disabled) and are change-cached so they can be driven every frame.
 import { clamp, smooth, since, span } from './core.js';
 
@@ -56,25 +56,69 @@ export function doorAmount(t, tOpen, tClose, swing = 0.4) {
   return 1 - smooth(0, swing, d - dayLen);
 }
 
-/** a scheduled fire (ctx.fires / ctx.fx): set(0..1) eases there (fx) — no-op when the id is unknown */
-export function fire(ctx, id) {
-  let known = null, last = NaN;
-  const h = {
-    id,
-    get exists() {
-      if (known === null) {
-        try { known = ctx.fx?.fires?.has ? ctx.fx.fires.has(id) : !!ctx.fx?.list?.().some?.((f) => f.id === id); } catch { known = false; }
+/**
+ * Shared fire levels (the runtime's sim.fireWant): like the doors, every owner states the level it wants for a fire
+ * (ctx.fx id) in its update, and resolve() — once per frame, after every owner has stated its wants — applies the
+ * largest. A fire nobody wants goes back to its builder's level: the intensity of its fx spec, which fx's own schedule
+ * ('night', 'day', 'service', 'always') then modulates; a fire a module added itself returns to the intensity it was
+ * added with (0 for the sim's own). Only fires someone has wanted are on the board; fx eases toward each new level, and
+ * snaps on clock jumps, so a jump re-poses the fires with the figures.
+ */
+export class FireBoard {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.byId = new Map();
+    /** [{ id, wants: [{ v, owner }], value (applied), def (builder's level), rec (fx record) }] */
+    this.list = [];
+  }
+  /** the board's record of fire id (made on first use) */
+  entry(id) {
+    let F = this.byId.get(id);
+    if (!F) {
+      F = { id, wants: [], value: NaN, def: NaN, rec: null };
+      this.byId.set(id, F);
+      this.list.push(F);
+    }
+    return F;
+  }
+  /** a want slot of `owner` for fire id: its owner sets w.v (NaN = no want) */
+  slot(id, owner) {
+    const F = this.entry(id);
+    const w = { v: NaN, owner, F };
+    F.wants.push(w);
+    return w;
+  }
+  /** the level the board applies to F now: the largest want, else the builder's level */
+  static levelOf(F) {
+    let v = NaN;
+    const W = F.wants;
+    for (let k = 0; k < W.length; k++) { const x = W[k].v; if (x === x && !(x <= v)) v = x; }
+    return v === v ? Math.max(0, v) : F.def;
+  }
+  /** apply every fire's level (fx.setFire only on a change against what fx holds) */
+  resolve() {
+    const fx = this.ctx.fx, fires = fx?.fires;
+    if (!fires?.get) return;
+    for (let i = 0; i < this.list.length; i++) {
+      const F = this.list[i];
+      const rec = fires.get(F.id);
+      if (!rec) continue;                       // not added yet (a builder's spec fx has not consumed, a lazy fire)
+      if (rec !== F.rec) {
+        F.rec = rec;
+        F.def = Number.isFinite(rec.spec?.intensity) ? Math.max(0, rec.spec.intensity) : (Number.isFinite(rec.target) ? rec.target : 1);
+        F.value = NaN;
       }
-      return known;
-    },
-    set(v) {
-      if (!h.exists || Math.abs(v - last) < 1e-3) return h;
-      last = v;
-      try { ctx.fx.setFire(id, v); } catch { /* fx missing */ }
-      return h;
-    },
-  };
-  return h;
+      const v = FireBoard.levelOf(F);
+      const held = typeof rec.target === 'number' ? rec.target : F.value;
+      if (!(Math.abs(held - v) < 1e-4)) { try { fx.setFire(F.id, v); } catch { /* fx missing */ } }
+      F.value = v;
+    }
+  }
+  /** what the board holds for fire id: { value, def, wants: [{ owner, v }] } (debug, tests) */
+  state(id) {
+    const F = this.byId.get(id);
+    return F ? { value: F.value, def: F.def, wants: F.wants.filter((w) => w.v === w.v).map((w) => ({ owner: w.owner, v: w.v })) } : null;
+  }
 }
 
 /** one-shot sound (ctx.audio.cue); pos: [X,Y,Z] site | Vector3 | Object3D. Never throws. */

@@ -24,7 +24,8 @@ Scope: requests from the choreography groups (G1 night, G2 altar, G3 sanctuary) 
   the floor (he would have to push it past upright from his kneeling place).
 - **The keys are short (≈ 9 cm: bow, round shank, toothed bit — Roman-period form ⚙) because the seat is only ½ amah
   deep (site.js); they hang clear of its floor.** *(world-3-fix: wrong. They reached ⅙ amah below the seat's floor;
-  the staple, chain and keys were shortened to fit.)* — A deeper pit or longer keys would change site.js. The keys and chain
+  the staple, chain and keys were shortened to fit. r2: now gate-scale keys, 0.30–0.42 amah, lying on the seat's floor
+  at the chain's foot.)* — A deeper pit or longer keys would change site.js. The keys and chain
   are small and dark; they read at arm's length (`low-slab-lifted-close`), not across the hall.
 - **The closed lid is a static collider (box over the tablet's footprint); the moving tablet is not a collider.** — The
   open seat would otherwise be a 24 cm pit in the walking floor for the few seconds it is open; nav and the sleepers'
@@ -85,11 +86,12 @@ a Z and always stood on the ramp, where nothing changed. Item 4 stays open with 
   the open pavement (16) stays, as it should. — A collider-only lid (a down-facing-only collider trips the physics
   orientation warning), or asking player to test insideAt (the masses should be closed anyway).
 - **Not a material, UV or z-fighting fault: with the observer on the ramp, its top in front reads grey by night because
-  the great pile's light (fx puts a fire's point light 0.6 × size over its base: +28.9) lies almost exactly on the
-  ramp's plane extended (+28.94 at that Y), so N·L ≈ 0 for the ramp while the level walkway beyond is lit.** A real
-  2.4 m flame reaches ~+31, above that plane, and would light the ramp at a grazing angle (roughly a quarter of the
-  walkway's fire light). That is the light model's (render: a vertical extent or wrap for pyre lights) — reported, not
-  faked here.
+  the great pile's light stands below the ramp's plane extended, so the ramp faces away from it while the level
+  walkway beyond is lit.** *(world-3-fix r2, measured: fx merges the great pile's two emitters into one light at their
+  candela-weighted mean, +28.55, which is 0.42 amah under the plane there (+28.97). This bullet first said +28.9 "on the
+  plane", which was the main emitter alone. See `world-3-fix.md` item 4.)* A real 2.4 m flame reaches ~+32.6, above
+  that plane, and would light the ramp at a grazing angle. That is the light model's (render: the pyre's light at its
+  flames' height, ≥ +30, or a wrap term). Reported, not faked here.
 - **The kiyor's dark shaft-mouth plane (`altar.kiyor:shaft`) is removed**: build-courts carves the well (masonry.js,
   `azarah.floor` params.shafts), its water at +14½, so the sunk laver stands in real water (`low-kiyor-sunk`).
 

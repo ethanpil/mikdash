@@ -22,8 +22,8 @@ import { Script, runScripts, playerNear, win, SPEED, jit, wrap, walkMin, heading
 import { places } from './g2/places.js';
 import { buildTamid, tamidWindows, cfgFor, CREW, CREW_N, SEEDS, N_IN, GAZIT_SEED } from './g2/tamid.js';
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
-import { rand, clamp } from '../lib/core.js';
-import { AMAH } from '../../core/units.js';
+import { rand } from '../lib/core.js';
+import { lotRadius } from './g1/places.js';
 
 const SEED = 0x6773;
 const G1 = { gazit: GAZIT_SEED, officer: 0x6743 };   // lotteries.js (g1/plan.js SEED): the same men, the same faces
@@ -85,13 +85,14 @@ function plan(ctx, sim, state) {
   const near = (x) => w[0] + ((x - w[0] + 2160) % 1440) - 720;      // unwrapped near the event
   const t0 = w[0], t1 = near(w[1]);
   const tOb = ob ? near(ob[0]) : NaN;
-  // the lotteries' circle (lotteries.js gazitScenes: N 20 round the station, ≈0.68 m a man; it takes them over at S − 0.3)
+  // the lotteries' circle (lotteries.js gazitScenes: N 20 round the station, g1/places.js lotRadius; it takes them over
+  // at S − 0.3)
   const lot = win(sim, 'third-fourth-lottery');
   const S = lot ? near(lot[0]) : t1;
   const tSwap = S - 0.3;
   const gz = ctx.elOpt?.('azarah.chamber.gazit')?.params;
   const c = gz?.stations?.lottery || P.gazit.lottery;
-  const r = clamp((NREG * 0.68) / (2 * Math.PI) / AMAH, 2.6, 4.4);
+  const r = lotRadius(NREG);
   const circle = (k) => { const a = (k / NREG) * 360 + 90, ar = a / 57.2958; return { at: [c[0] + Math.sin(ar) * r, c[1] + Math.cos(ar) * r, Z], h: (a + 180) % 360 }; };
   // the hall (courts/chambers.js): a basilica nave between two rows of columns (Y 375.6 and 386.4; X 69.5, 76, 82.5)
   // with lamp stands by them. The rows: in the nave, facing south toward the Heichal ⚙; Shabbat: the incoming in the
@@ -174,10 +175,10 @@ function plan(ctx, sim, state) {
   // ---- the tamid's nine and its slaughterer, from the ramp: tamid-morning brings them to the door (same seeds) and
   // drops each there the moment this module takes him (Script start = his arrival at the inside spot)
   const crew = Array.from({ length: CREW_N }, () => null);
-  // tamid-morning's plan for this date when it has one (it is always relevant); else the same builder here
+  // tamid-morning's plan for this date (sim.planOf: built now if need be); without that module the same builder here
   let gazitIn = null;
-  const tm = sim.schedule.runtime?.choreo?.('tamid-morning')?.state;
-  if (tm?.plan?.M && tm.planGen === sim.generation) gazitIn = tm.plan.M.t.gazitIn;
+  const tm = sim.planOf?.('tamid-morning');
+  if (tm?.M) gazitIn = tm.M.t.gazitIn;
   else {
     try { gazitIn = buildTamid(ctx, P, cfgFor('morning', ctx, P, tamidWindows(ctx, sim))).t.gazitIn; } catch (e) { console.warn('[gazit-shema] tamid plan failed', e); }
   }

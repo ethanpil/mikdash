@@ -23,7 +23,9 @@ const snap = () => {
     figs.push(`${e.id}/${p.name}#${s.index} ${r3(o.x)},${r3(o.y)},${r3(o.z)} h${r3(s._heading)} ${s._pose}${Number.isNaN(s._phase) ? '' : '@' + r3(s._phase)} ${s._prop || ''}${s._p2 ? '+' + s._p2 : ''}`);
   }
   const st = (id) => rt.choreo(id)?.state || {};
-  const fires = [`kitchen=${r3(st('courts-daily').kfLevel ?? 0)}`, `nazirites=${r3(st('chambers-daily').nazLevel ?? 0)}`, `chavitin=${r3(st('chambers-daily').chavLevel ?? 0)}`];
+  // the fires as the runtime's shared board applied them (every G4 want, and private-offerings' on the kitchen hearth)
+  const fires = ['altar.kitchen.fire', 'courts.en.nazirites.hearth', 'sim.chambers.nazirites.0', 'sim.chambers.nazirites.2', 'sim.chambers.chavitin']
+    .map((id) => `${id}=${r3(Math.max(0, rt.fires.state(id)?.value ?? 0))}`);   // (not yet on the board = its level 0)
   const wheel = ctx.movables?.get?.('wheel:azarah.chamber.golah')?.userData?.angle;
   const doors = ['door:azarah.gate.moked.pishpash', 'door:azarah.moked.door-chel'].map((id) => { const n = ctx.movables?.get?.(id); return `${id}=${r3(+(n?.userData?.openAmount ?? 0))}`; });
   return { figs, fires, wheel: r3(wheel ?? 0), doors };
@@ -122,7 +124,7 @@ const rows = [];
 for (const s of ['d2.2', 'd3', 'd4.2', naz ? naz.t0 + 9 : 'd4.4', M ? M.t0 + 33 : 'd3.6', 'd6']) {
   ctx.time.set(tOf(s)); await frames(2);
   const dyn = ctx.schedule.dynamic?.(tOf(s)) || [];
-  const mine = dyn.filter((ev) => ev.id.startsWith('g4:') || /offering:(nazir|metzora)/.test(ev.id));
+  const mine = dyn.filter((ev) => ev.id.startsWith('g4:') || ev.id.startsWith('set:'));
   rows.push(`${ctx.time.format(tOf(s))}: ${mine.map((ev) => `${ev.id} [${ev.parent}] ${ev.view ? 'view' : 'NO VIEW'} "${(ev.title?.en || '').slice(0, 60)}"`).join(' | ') || '-'}`);
 }
 out.rows = rows;
@@ -206,6 +208,27 @@ for (const [name, T, pos, look] of [['mount', 'd3.2', [290, 228, 0], [300, -3]],
 }
 for (const e of E) e.mod.update = e._origUpdate;
 out.cost = cost;
+
+// ---------------------------------------------------------------------------------------------- the metzora's corners
+// nikanor-stations publishes the minutes its vessel kohen holds the altar's NE and SW corners (plan.M.neBlood /
+// swBlood); private-offerings books exactly those (its P.hot 'ne' / 'sw'), read through the documented sim.planOf
+{
+  ctx.time.setDate('2026-11-02'); await frames(3);
+  ctx.time.set(ctx.time.parse('d3')); await frames(3);
+  const P5 = rt.planOf('private-offerings'), PN = rt.planOf('nikanor-stations');
+  const M = PN?.M;
+  const book = (id, iv) => { const h = P5?.hot?.find((x) => x.id === id)?.book; if (!h || !iv) return null; for (let i = 0; i < h.s.length; i++) if (Math.abs(h.s[i] - iv[0]) < 1e-9 && Math.abs(h.e[i] - iv[1]) < 1e-9) return true; return false; };
+  const hms = (x) => { const s = Math.round((((x % 1440) + 1440) % 1440) * 60); return [Math.floor(s / 3600), Math.floor(s / 60) % 60, s % 60].map((v) => String(v).padStart(2, '0')).join(':'); };
+  const fmt = (iv) => (iv ? `${iv.map(hms).join('–')} (${(iv[1] - iv[0]).toFixed(2)} min)` : null);
+  out.metzoraCorners = {
+    planOf: { g5: !!P5, nikanor: !!PN },
+    counted: P5?.counts?.metzora ?? null,
+    sw: fmt(M?.swBlood), ne: fmt(M?.neBlood), g5: P5?.metzoraBlood ? { sw: fmt(P5.metzoraBlood.sw), ne: fmt(P5.metzoraBlood.ne) } : null,
+    bookedExactly: M ? { sw: book('sw', M.swBlood), ne: book('ne', M.neBlood) } : 'no metzora today',
+    setIds: (ctx.schedule.dynamic?.(M ? M.t0 + 33 : ctx.time.t) || []).map((ev) => ev.id).filter((id) => !id.startsWith('offering:')).slice(0, 6),
+  };
+  out.metzoraCorners.ok = !!P5 && !!PN && (!M || (out.metzoraCorners.bookedExactly.sw === true && out.metzoraCorners.bookedExactly.ne === true));
+}
 // the plans' build time for a fresh date (all four Mount modules, warm code)
 const tp0 = performance.now();
 ctx.time.setDate('2026-11-04'); await frames(1);

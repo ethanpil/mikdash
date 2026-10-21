@@ -18,9 +18,8 @@
 // the hand leading it, the slain lamb carried in the arms, props, turning at a natural rate), on the calling module's
 // own pools. The free props hung on the hooks are spawned here.
 import { buildGeo } from '../g5/geo.js';
-import { Track, one, fix, segAt, sampleSeg, phaseOf, HOLD, WALK, CARRIED, WALKPH } from '../g5/track.js';
+import { Track, one, fix, segAt, sampleSeg, phaseOf, HOLD, WALK, CARRIED, WALKPH, tableOrder } from '../g5/track.js';
 import { createSource } from '../g5/dynamic.js';
-import { _getPlan } from '../private-offerings.js';
 import { SPURS, SPUR_SUB } from './mount.js';
 import { OFFERING_TYPES, NESACHIM } from '../../../data/offerings.js';
 import { SitePath, angleDiff } from '../../lib/path.js';
@@ -165,11 +164,13 @@ export const NAZIR_COMBOS = [
   { rA: 0, rB: 1, hC: 2, hO: 3, hR: 0 }, { rA: 1, rB: 0, hC: 3, hO: 2, hR: 1 },
 ];
 
-/** private-offerings' plan for the current date (built now if it is not yet), or null without that module */
+/**
+ * private-offerings' plan for the current date through the runtime's documented getter (sim.planOf: built now if it is
+ * not yet; null without that module). Read here: P.ok, P.counts, P.hot (the shared places' bookings), P.insts.
+ */
 export function g5PlanOf(ctx, sim) {
-  const e = sim.schedule?.runtime?.choreo?.('private-offerings');
-  if (!e || e.failed || !e.inited || !e.state) return null;
-  try { const P = _getPlan(ctx, e.state, e.sim); return P && P.ok ? P : (P ? { ...P, counts: P.counts || {} } : null); } catch { return null; }
+  const P = sim.planOf?.('private-offerings') ?? null;
+  return P && !P.counts ? { ...P, counts: {} } : P;
 }
 
 /** a set under construction: tracks, steps, props, resources used (minutes from its own start) */
@@ -425,14 +426,18 @@ function limbsUp(B, G, t, H, title, r) {
   const n = pairs.length;
   const C = pairs.map((_, k) => new Track(null, `${B.role}C${k}`, 'kohen'));
   B.tracks.push(...C);
-  const spots = pairs.map((_, k) => add(H.table.stand, (k % 4 - 1.5) * 0.98, 0.2 + Math.floor(k / 4) * 1.25));
-  C.forEach((c, k) => arriveAt(G, c, 'MOK_X', spots[k], t + 0.1 + 0.04 * k));
+  // (the first to go wait in the back row, by the way out, and come last: g5/track.js tableOrder)
+  const spots = pairs.map((_, k) => { const j = tableOrder(n, k).spot; return add(H.table.stand, (j % 4 - 1.5) * 0.98, 0.2 + Math.floor(j / 4) * 1.25); });
+  C.forEach((c, k) => arriveAt(G, c, 'MOK_X', spots[k], t + 0.1 + 0.04 * tableOrder(n, k).arrive));
   const tPick = t + 0.12 * n * 0.25 + 0.2;
+  let tGo = -Infinity;
   C.forEach((c, k) => {
     const [pr, pl] = pairs[k];
     c.hold(Math.max(c.t, t), { pose: 'stand', h: 180 });
     c.holdFor(0.18, { pose: pl ? 'carry_limbs' : 'carry', h: 180, prop: pr, prop2: pl });
-    c.hold(tPick + 0.05 * k, { pose: pl ? 'carry_limbs' : 'carry', h: 180, prop: pr, prop2: pl });
+    // each goes once he has his limbs and 0.05 after the one before him (the first to go came last: never two at once)
+    tGo = Math.max(c.t, tGo + 0.05, tPick + 0.05 * k);
+    c.hold(tGo, { pose: pl ? 'carry_limbs' : 'carry', h: 180, prop: pr, prop2: pl });
   });
   const saltAt = [214.1, 280.8, G.kevZ(280.8)], salter = new Track(null, `${B.role}S`, 'kohen');
   B.tracks.push(salter);
@@ -1070,14 +1075,15 @@ export function setsSource(ctx, id, getSets) {
       cache.list = sets;
       const insts = sets.filter((B) => B.steps.length).map((B, i) => {
         const t0 = Math.min(...B.tracks.map((tr) => tr.t0)), t1 = Math.max(...B.tracks.map((tr) => tr.t1));
-        return { id: `offering:${B.type}:${B.role}:${i + 1}`, type: B.type, kind: 'set', lane: 0, steps: [...B.steps].sort((a, b) => a.t0 - b.t0), tracks: B.tracks,
+        return { id: `set:${B.type}:${B.role}:${i + 1}`, type: B.type, kind: 'set', lane: 0, steps: [...B.steps].sort((a, b) => a.t0 - b.t0), tracks: B.tracks,
           title: B.title, t0, t1, tEnd: Math.max(...B.steps.map((st) => st.t1)), ev: null, cur: -1, job: null };
       }).sort((a, b) => a.t0 - b.t0);
       cache.P = { ok: true, insts, instT0: Float64Array.from(insts, (x) => x.t0), maxDur: insts.reduce((m, x) => Math.max(m, x.t1 - x.t0), 0), parents, G: { lanes: [] } };
     }
     return cache.P;
   };
-  const src = createSource(ctx, getPlan);
+  // its rows' ids are 'set:<type>:<role>:<n>' (private-offerings' own are 'offering:…': byId never confuses them)
+  const src = createSource(ctx, getPlan, { prefix: 'set:' });
   src.id = id;
   return src;
 }

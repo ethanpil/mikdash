@@ -79,6 +79,9 @@ export default {
     cues(ctx, S, P, sim);
   },
 
+  /** the day's plan, for sim.planOf('tamid-morning'): read by gazit-shema.js (M.t.gazitIn — each man's arrival in the Gazit) */
+  plan(ctx, state, sim) { return plan(ctx, sim, state); },
+
   debug(s) {
     const P = s.plan, f = s.fmt;
     if (!P) return 'no plan';

@@ -5,19 +5,21 @@
 //                            companies — one along the colonnade by the east, one by the west (site.js
 //                            azarah.achsadra-route, reconstruction), stopping to look as they go — until both reach the
 //                            chamber of the chavitin makers: "Shalom — all is well"; the bakers are set to work —
-//                            the officer lays the torches by their griddle and stays with them until the second lottery.
+//                            the officer lays the torches by their griddle, then walks back through the court to Beit
+//                            HaMoked by its wicket and waits there until the second lottery.
 //   lamp-inspection-shabbat  the same on Shabbat night with no light in hand: they search by the lamps lit before Shabbat
 //                            (Rambam BhB 8:12).
 // The five kohanim and the officer are the first lottery's (g1/plan.js); at the end the officer takes the torches into
 // the chavitin chamber ⚙ and the five stand where terumat-hadeshen's winner and brothers take over (same seeds) at
-// muchni.t0 − 0.8. Every pose is a pure function of (t, date).
+// muchni.t0 − 0.8; the officer goes back to Beit HaMoked through the court, where lotteries.js takes him at the second
+// lottery's t0 − 4.75. Every pose is a pure function of (t, date).
 import { nightPlan } from './g1/plan.js';
 import { makePools, stage, runCues, windowAmount } from './g1/stage.js';
 
 export default {
   id: 'torch-inspection',
   lead: 1,
-  lag: 38,          // the officer stays with the chavitin makers until he goes to the second lottery (alot − 12.75)
+  lag: 38,          // the officer waits in Beit HaMoked until he goes to the second lottery (alot − 12.75)
   importance: 3,
 
   init(ctx, events, sim) {
@@ -33,7 +35,7 @@ export default {
     const P = nightPlan(ctx, sim);
     state.plan = P;
     state.n = stage(ctx, sim, state.pools, P, 'insp', t);
-    const a = windowAmount(t, [P.insp.pishOpen], 0.25);
+    const a = windowAmount(t, P.insp.pishWins, 0.25);
     if (a > 0) state.wicket.set(a);
     runCues(ctx, sim, state, P.cues, 'insp');
   },

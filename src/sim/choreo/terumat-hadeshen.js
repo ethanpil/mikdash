@@ -18,7 +18,7 @@
 // muchni raises it — the two logs on the great pile (morning and afternoon, Yoma 2:5, 22a), the wood stack by the ramp
 // and the shovels and forks kept with the service vessels west of the ramp. Every pose is a pure function of (t, date):
 // one Script per figure, rebuilt per date.
-import { Script, runScripts, FreeProps, driveFire, movableCall, playerNear, win, walkMin, jit, SPEED, headingOf,
+import { Script, runScripts, FreeProps, movableCall, playerNear, win, walkMin, jit, SPEED, headingOf,
   since, within, wrap, smooth } from './g2/lib.js';
 import { places, rampUp, rampDown, circuit } from './g2/places.js';
 import { pmLogs } from './g2/tamid.js';
@@ -42,7 +42,10 @@ const SHABBAT_INCENSE_EASE = 240;  // … burning down to the builder's level ov
 const CAPTION_RANGE = 260;         // m — the muchni was heard as far as Yericho (Tamid 3:8)
 const NEAR = 45;                   // m — spoken lines
 const FIRES = { great: 'altar.maarachah.great', inner: 'altar.maarachah.great.inner', incense: 'altar.maarachah.incense', kiyum: 'altar.maarachah.kiyum' };
+const FIRE_KEYS = Object.keys(FIRES);
 const FIRE_DEFAULT = { great: 1, inner: 0.9, incense: 0.6, kiyum: 0.75 };   // as the altar builder lights them
+/** the night's embers the clearer finds at the muchni ⚙ — altar-night's wants sink to them before this module's begin */
+export const EMBERS = { great: 0.55, inner: 0.45 };
 const COALS_FIRE = 'sim.g2.terumat-coals';
 
 export default {
@@ -62,7 +65,7 @@ export default {
       props: new FreeProps(ctx),
       plan: null, planGen: -1,
       out: {}, fW: [], fB: [], fL: [],
-      coals: null, coalsLevel: -1, fireOwned: false, incLevel: NaN,
+      coals: null, coalsLevel: 0,
       fmt: (m) => ctx.time?.format?.(m) ?? '--',
     };
     // the per-date plan now, behind the loader (it is rebuilt on a new date)
@@ -90,10 +93,13 @@ export default {
     let wk = 0;
     for (const [a, b] of P.wicket) if (within(t, a, b)) wk = Math.max(wk, smooth(0, 0.08, since(t, a)) * (1 - smooth(since(b, a) - 0.08, since(b, a), since(t, a))));
     if (wk > 0) S.wicket.set(wk);
-    fires(ctx, S, P, t, sim);
-    coals(ctx, S, P, t);
+    fires(P, t, sim);
+    coals(ctx, S, P, t, sim);
     cues(ctx, S, P, sim);
   },
+
+  /** the day's plan, for sim.planOf('terumat-hadeshen'): read by lotteries.js (W, B[i].tEnd — its men's arrival in the Gazit) */
+  plan(ctx, state, sim) { return plan(ctx, sim, state); },
 
   debug(s) {
     const P = s.plan, f = s.fmt;
@@ -479,7 +485,7 @@ function plan(ctx, sim, state) {
     twoLogs: [[wrap(tTwoLogs), wrap(tTwoLogs + TWO_LOGS_BURN)]],
     coals: [wrap(tPour), wrap(tPour + COALS_GLOW)],
     fireWin: [wrap(MU[0] - 0.5), wrap(SP[1] + 0.5)],
-    fireKeys: fireKeys(CL, TP, GP, SP, tLight, shabbat),
+    fireKeys: fireKeys(MU[0] - 0.5, CL, TP, GP, SP, tLight, shabbat),
     // Shabbat: the bigger incense pile burns down to the builder's level after the window (Tamid 2:5) ⚙
     incenseExt: shabbat ? [wrap(SP[1] + 0.5), wrap(SP[1] + 0.5 + SHABBAT_INCENSE_EASE)] : null,
     keys: { muchni: `muchni:${Math.round(tWheel * 10)}`, lower: `lower:${Math.round(L0 * 10)}`, warn: `warn:${Math.round(tGo * 10)}`, pour: `pour:${Math.round(tPour * 10)}`,
@@ -592,14 +598,18 @@ function pathOnTop(A, from, to) {
 
 // ------------------------------------------------------------------------------------------------ fires, coals, cues
 
-/** the fire's strength through the morning: the night's embers, raked down, the new piles lit ⚙ */
-function fireKeys(CL, TP, GP, SP, tLight, shabbat) {
+/**
+ * The fire's strength through the morning (keys on the clock unwrapped from the window's start, a0 = muchni.t0 − 0.5): the
+ * night's embers, raked down, the new piles lit ⚙. Each curve starts at a0 from the level the fire has there — the
+ * embers altar-night's wants sink to (EMBERS), the builder's levels of the two small piles — so nothing jumps.
+ */
+function fireKeys(a0, CL, TP, GP, SP, tLight, shabbat) {
   return {
-    great: [[CL[0], 0.55], [CL[1], 0.4], [TP[1], 0.3], [GP[1], 0.35], [tLight + 0.2, 0.35], [tLight + 1.4, 1]],
-    inner: [[CL[0], 0.45], [CL[1], 0.3], [TP[1], 0.22], [GP[1], 0.3], [tLight + 0.2, 0.3], [tLight + 1.4, 0.9]],
+    great: [[a0, EMBERS.great], [CL[0], EMBERS.great], [CL[1], 0.4], [TP[1], 0.3], [GP[1], 0.35], [tLight + 0.2, 0.35], [tLight + 1.4, 1]],
+    inner: [[a0, EMBERS.inner], [CL[0], EMBERS.inner], [CL[1], 0.3], [TP[1], 0.22], [GP[1], 0.3], [tLight + 0.2, 0.3], [tLight + 1.4, 0.9]],
     // five se'ah of coals; on Shabbat eight, for the two bowls of frankincense (Tamid 2:5)
-    incense: [[CL[0], 0.25], [GP[1], 0.2], [tLight + 0.2, 0.2], [tLight + 1.4, shabbat ? SHABBAT_INCENSE : 0.6]],
-    kiyum: [[CL[0], 0.7], [SP[1], 0.75]],
+    incense: [[a0, FIRE_DEFAULT.incense], [CL[0], 0.25], [GP[1], 0.2], [tLight + 0.2, 0.2], [tLight + 1.4, shabbat ? SHABBAT_INCENSE : 0.6]],
+    kiyum: [[a0, FIRE_DEFAULT.kiyum], [CL[0], 0.7], [SP[1], 0.75]],
   };
 }
 
@@ -614,42 +624,36 @@ function curveAt(keys, u) {
   return keys[keys.length - 1][1];
 }
 
-function fires(ctx, S, P, t, sim) {
+/** this module's fire wants (sim.fireWant): the four piles through its window; on Shabbat the incense pile after it */
+function fires(P, t, sim) {
   if (within(t, P.fireWin[0], P.fireWin[1])) {
-    const u = P.MU[0] + since(t, P.MU[0]);
-    for (const k of Object.keys(FIRES)) driveFire(ctx, FIRES[k], curveAt(P.fireKeys[k], u));
-    S.fireOwned = true;
-    S.incLevel = NaN;
+    // the keys' clock, unwrapped from the window's start (it begins half a minute before the muchni)
+    const a0 = P.MU[0] - 0.5, u = a0 + since(t, a0);
+    for (let i = 0; i < FIRE_KEYS.length; i++) sim.fireWant(FIRES[FIRE_KEYS[i]], curveAt(P.fireKeys[FIRE_KEYS[i]], u));
     return;
   }
-  // Shabbat: the eight se'ah of the incense pile burn down slowly to the builder's level (no one else drives that pile)
+  // Shabbat: the eight se'ah of the incense pile burn down slowly to the builder's level
   const X = P.incenseExt;
   if (X && within(t, X[0], X[1])) {
-    const v = FIRE_DEFAULT.incense + (SHABBAT_INCENSE - FIRE_DEFAULT.incense) * (1 - smooth(0, SHABBAT_INCENSE_EASE, since(t, X[0])));
-    if (!(Math.abs(v - S.incLevel) < 0.004)) { driveFire(ctx, FIRES.incense, v); S.incLevel = v; }
-  } else if (Number.isFinite(S.incLevel)) { driveFire(ctx, FIRES.incense, FIRE_DEFAULT.incense); S.incLevel = NaN; }
-  if (!S.fireOwned) return;
-  S.fireOwned = false;
-  // leaving the window: back to the builder's fire, unless the night's altar module owns the fire at this time
-  const night = sim.schedule.events.some((e) => e.choreo === 'altar-night' && Number.isFinite(e.t0) && within(t, e.t0, e.t1));
-  if (!night) for (const k of Object.keys(FIRES)) if (!(k === 'incense' && X && within(t, X[0], X[1]))) driveFire(ctx, FIRES[k], FIRE_DEFAULT[k]);
+    sim.fireWant(FIRES.incense, FIRE_DEFAULT.incense + (SHABBAT_INCENSE - FIRE_DEFAULT.incense) * (1 - smooth(0, SHABBAT_INCENSE_EASE, since(t, X[0]))));
+  }
 }
 
-/** the heaped coals glowing on the pavement east of the ramp (Tamid 1:4) — this module's own small fire */
-function coals(ctx, S, P, t) {
+/** the heaped coals glowing on the pavement east of the ramp (Tamid 1:4) — this module's own small fire (added at 0) */
+function coals(ctx, S, P, t, sim) {
   let v = 0;
   if (within(t, P.coals[0], P.coals[1])) {
     const e = since(t, P.coals[0]);
     v = COALS_PEAK * smooth(0, 0.15, e) * (1 - smooth(0.15 * COALS_GLOW, COALS_GLOW, e));
   }
-  if (Math.abs(v - S.coalsLevel) < 0.005) return;
-  if (!S.coals && v > 0 && ctx.fx?.add) {
+  S.coalsLevel = v;
+  if (!(v > 0)) return;
+  if (!S.coals && ctx.fx?.add) {
     const c = S.P.deshen.c;
     // a small hearth kept low: the coal bed glows, its tongues stay a few centimetres high ('embers' requested from fx)
     try { S.coals = ctx.fx.add({ id: COALS_FIRE, kind: 'hearth', pos: [c[0] - 0.2, c[1], c[2] + 0.5], size: 0.32, intensity: 0, schedule: 'always', smoke: true, light: false }); } catch { S.coals = null; }
   }
-  S.coals?.setIntensity(v);
-  S.coalsLevel = v;
+  sim.fireWant(COALS_FIRE, v);
 }
 
 function cues(ctx, S, P, sim) {

@@ -14,9 +14,9 @@
 //   keranot    altar.keren.* — 1 × 1 × 1, hollow (Zevachim 54b), open at the top
 //   shitin     two thin "nostril" holes in the SW yesod (altar.shitin); the libation cups (altar.libation-cups) at the
 //              SW horn; the marble ring-slab over the shit in the pavement (altar.shit-slab)
-import { Group, Mesh, TorusGeometry } from 'three';
+import { Group, Mesh } from 'three';
 import { polyRing, sweepRing, circle, lathe, noise2 } from './lib.js';
-import { AMAH } from '../../core/units.js';
+import { slabRingGeometry, SLAB_RING } from '../courts/lib/parts.js';
 
 const DEG = Math.PI / 180;
 
@@ -192,14 +192,9 @@ export function buildMizbeach(A) {
   const SP = [[0, ss.min[2]], [0, ss.max[2] + 0.005], [-0.03, ss.max[2] + 0.025]];
   sweepRing(M, roundedRectFn(ss.min[0] + 0.015, ss.min[1] + 0.015, ss.max[0] - 0.015, ss.max[1] - 0.015, (o) => 0.03 + o, d >= 1 ? 2 : 0),
     SP, { mat: 'marble_white', cap: true });
-  const slabRing = new TorusGeometry(0.16 * AMAH, 0.03 * AMAH, 6, d >= 1 ? 18 : 12);
-  slabRing.rotateX(Math.PI / 2);
-  slabRing.translate((ss.min[0] + ss.max[0]) / 2 * AMAH, (ss.max[2] + 0.055) * AMAH, -(ss.min[1] + ss.max[1]) / 2 * AMAH);
-  B.geo(slabRing, 'iron', { collide: false, cast: d >= 2, worldUV: true });
-  // its staple (a half-loop leaded into the slab)
-  const st = new TorusGeometry(0.06 * AMAH, 0.018 * AMAH, 5, 8, Math.PI).rotateY(Math.PI / 2);
-  st.translate((ss.min[0] + ss.max[0]) / 2 * AMAH, (ss.max[2] + 0.02) * AMAH, -((ss.min[1] + ss.max[1]) / 2 + 0.16) * AMAH);
-  B.geo(st, 'iron', { collide: false, cast: d >= 2, worldUV: true });
+  // its ring: the fitting shared with the keys and sotah slabs (courts/lib/parts.js), toward the south edge; the tablet
+  // stands 0.025 proud of the pavement (SP)
+  B.geo(slabRingGeometry((ss.min[0] + ss.max[0]) / 2, ss.min[1] + SLAB_RING.inset, ss.max[2] + 0.025, d), 'iron', { collide: false, cast: false });
 
   return { Z_TOP, Z_SOV, Z_YES };
 }

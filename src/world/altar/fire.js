@@ -476,6 +476,9 @@ export function buildFire(A) {
   // into ONE light, which takes the fire-shadow slot — a second, unshadowed light leaked through the altar onto the
   // yesod and the pavement. Both emitters smoke, so the great pile's column is two overlapping, fire-lit columns —
   // wider and denser than the small piles' single thin ones.
+  // The merged light sits at the candela-weighted mean, +28.55: under the kevesh's plane extended (+28.97 there), so the
+  // ramp's top gets none of it. Without .inner's light it would be +28.90, still under the plane, with a quarter less on
+  // the altar top. Where a pyre's light stands is fx's to decide (world-3-fix r2: render request).
   const gMain = [gcx + 0.4, gcy, Z + 0.9], gInner = [gcx + 0.4 - 2.7, gcy + 0.3, Z + bedH];
   A.fires.push(ctx.addFire({ id: 'altar.maarachah.great', kind: 'pyre', pos: gMain, size: 2.4, intensity: 1, schedule: 'always', smoke: true }));
   A.fires.push(ctx.addFire({ id: 'altar.maarachah.great.inner', kind: 'pyre', pos: gInner, size: 1.9, intensity: 0.9, schedule: 'always', smoke: true }));

@@ -3,4 +3,4 @@ export * from './core.js';
 export * from './path.js';
 export * from './cue.js';
 export { ActorPool, Slot, CrowdHandle } from './actors.js';
-export { movable, doorAmount, fire, sound, caption } from './world.js';
+export { movable, doorAmount, FireBoard, sound, caption } from './world.js';

@@ -55,14 +55,15 @@ export default {
     const stream = (h, j) => sim.crowd({ roles: 'israelite', count: 6, region: { min: [249, 328.7], max: [262, 332.3], z: P.EY }, pose: 'walk', heading: h, seed: SEED + 20 + j });
     const props = new FreeProps(ctx);
     props.ensure(PROPS);
+    // the Menorah's lamps: their fx fires (build-heichal registers them 'service', the western one 'always')
     const lamps = [];
-    for (let i = 0; i < P.heichal.nLamps; i++) lamps.push({ id: `heichal.menorah.lamp-${i}`, node: ctx.movables?.get?.(`heichal.menorah.lamp-${i}`) || null, v: -1, svc: false });
+    for (let i = 0; i < P.heichal.nLamps; i++) lamps.push({ id: `heichal.menorah.lamp-${i}`, v: -1 });
     return {
       P, pools, props, lamps,
       crowds: [band(0, 10), band(1, 10), band(2, 10)], streamIn: stream(270, 0), streamOut: stream(90, 1),
       curtain: sim.door(CURTAIN),
       silverPan: ctx.movables?.get?.('altar.machtah') || null, panVis: null,
-      coals: null, coalsV: -1, glow: null, glowV: -1, ledge: null, ledgeV: -1, incense: null, incenseV: 0,
+      coals: null, glow: null, ledge: null, incense: null, incenseV: 0,
       plan: null, planGen: -1, out: {}, fns: {}, choir: null, choirKey: '', hushKey: '',
       fmt: (m) => ctx.time?.format?.(m) ?? '--',
     };
@@ -74,8 +75,8 @@ export default {
     const S = state, P = S.P, fl = P.floorAt;
     for (const k of Object.keys(S.pools)) runScripts(ctx, S.pools[k], D.L[k], t, S.out, (S.fns[k] ||= []), fl);
     S.props.update(t);
-    lamps(ctx, S, D, t);
-    fires(ctx, S, D, t);
+    lamps(S, D, t, sim);
+    fires(ctx, S, D, t, sim);
     silverPan(S, D, t);
     curtain(S, D, t);
     crowds(ctx, S, D, t, sim);
@@ -137,30 +138,19 @@ function plan(ctx, sim, state) {
 
 // ------------------------------------------------------------------------------------------------ the world
 
-/** the Menorah's lamps: lit from the evening lighting until the morning's cleaning; the western lamp always */
-function lamps(ctx, S, D, t) {
+/**
+ * The Menorah's lamps: lit from the evening lighting until the morning's cleaning; the western lamp always. Shared fire
+ * wants (sim.fireWant): this module is `always`, so every lamp's level is stated in every update.
+ */
+function lamps(S, D, t, sim) {
   const nm = S.P.heichal.nerMaaravi;
   for (let i = 0; i < S.lamps.length; i++) {
     const L = S.lamps[i];
-    if (!L.node) { L.node = ctx.movables?.get?.(L.id) || null; if (!L.node) continue; }
-    if (!L.svc) L.svc = serviceSchedule(ctx, L.id);
     const out = D.lampOut[i], light = D.lampLight[i];
     let v = 1;
     if (i !== nm && out === out && light === light) v = within(t, wrap(light), wrap(out)) ? 1 : 0;
-    if (v !== L.v) { L.v = v; try { L.node.userData?.setLit?.(v); } catch { /* fx missing */ } }
+    L.v = sim.fireWant(L.id, v);
   }
-}
-
-/**
- * The builder registers the six branch lamps with schedule 'night' (fx keeps them dark while the sun is up), but the
- * lighting is at 9.3 seasonal hours (Yoma 15a) and the sim decides which burn (heichal/kodesh.js): until build-heichal
- * registers them as 'service', the sim makes them so (requested).
- */
-function serviceSchedule(ctx, id) {
-  const f = ctx.fx?.fires?.get?.(id);
-  if (!f) return false;
-  if (f.schedule === 'night') f.schedule = 'service';
-  return true;
 }
 
 const level = (t, on, burn) => {
@@ -172,7 +162,8 @@ const level = (t, on, burn) => {
   return up * (b < 6 ? 1 : clamp(1 - (b - 6) / 34)) * (b < 0 ? 1 : 0.85 + 0.15 * clamp(1 - b / 6));
 };
 
-function fires(ctx, S, D, t) {
+/** the coals, the incense column and the coals in the pans: this module's own fires (added at 0), wanted while they burn */
+function fires(ctx, S, D, t, sim) {
   const fx = ctx.fx;
   if (!fx?.add) return;
   const H = S.P.heichal;
@@ -184,7 +175,7 @@ function fires(ctx, S, D, t) {
     // no point light (fx light:false): from the coals on its top it lit the altar's own gold sides, which then glowed ⚙
     try { S.coals = fx.add({ id: COALS, kind: 'brazier', pos: [H.goldC[0], H.goldC[1], H.goldC[2] + 0.02], size: 0.13, intensity: 0, schedule: 'always', smoke: false, light: false }); } catch { S.coals = null; }
   }
-  if (S.coals && c !== S.coalsV) { S.coalsV = c; try { fx.setFire(COALS, c); } catch { /* */ } }
+  if (S.coals && c > 0) sim.fireWant(COALS, c);
   // the incense column: rising straight from the golden altar (Yoma 38a; Avot 5:5)
   let inc = 0, dk = 1;
   for (const e of D.incense) {
@@ -220,7 +211,7 @@ function fires(ctx, S, D, t) {
   if (lv > 0 && !S.ledge) {
     try { S.ledge = fx.add({ id: LEDGE, kind: 'brazier', pos: onLedge.at, size: 0.1, intensity: 0, schedule: 'always', smoke: false, light: false }); } catch { S.ledge = null; }
   }
-  if (S.ledge && lv !== S.ledgeV) { S.ledgeV = lv; try { fx.setFire(LEDGE, lv); } catch { /* */ } }
+  if (S.ledge && lv > 0) sim.fireWant(LEDGE, lv);
   let gv = 0, pos = null;
   if (g) {
     const slot = S.pools[g.slot[0]]?.slot(g.slot[1]);
@@ -237,7 +228,7 @@ function fires(ctx, S, D, t) {
   }
   if (S.glow) {
     if (pos) S.glow.setPosition?.(pos);
-    if (gv !== S.glowV) { S.glowV = gv; try { fx.setFire(GLOW, gv); } catch { /* */ } }
+    if (gv > 0) sim.fireWant(GLOW, gv);
   }
 }
 

@@ -31,13 +31,22 @@
 // Movables: sim.door(id) is shared between choreos — each states the amount it wants in its update; the runtime
 // applies the largest wanted amount (the builder's default when none wants it), so a door one choreo stops driving
 // returns to its default deterministically.
+//
+// Fires: the same for ctx.fx fires — sim.fireWant(id, level) states this choreo's level for this update (several
+// calls in one update: the largest); once per frame, after every update, each fire gets the largest wanted level,
+// or its builder's level (the fx spec's intensity; fx's schedule modulates it) when no choreo wants it (lib/world.js
+// FireBoard). A choreo that is skipped by its LOD keeps its wants; one that stops being relevant drops them. Choreos
+// never write fx levels themselves: a hand-over between two choreos driving one fire is just two windows of wants.
+//
+// Plans: a module may export plan(ctx, state, sim) -> its per-date plan (built on demand, cached on sim.generation);
+// another choreo reads it with sim.planOf(id) (the module is initialised first if it was not yet).
 import { Box3, Vector3 } from 'three';
 import { PRIORITY } from '../core/engine.js';
 import { m2w } from '../core/units.js';
 import { wrap, near } from './lib/core.js';
 import { SIM, cueAt } from './lib/cue.js';
 import { ActorPool, CrowdHandle } from './lib/actors.js';
-import { movable, fire, sound, caption } from './lib/world.js';
+import { movable, FireBoard, sound, caption } from './lib/world.js';
 
 const MODULES = import.meta.glob('./choreo/*.js');
 const LOD_NEAR = 120, LOD_MID = 350;           // meters
@@ -56,6 +65,7 @@ export async function createRuntime(ctx, schedule) {
   const entries = [];
   const byId = new Map(); // choreo id or alias → entry
   const doorReg = new Map(), doorList = [];
+  const fireBoard = new FireBoard(ctx);
   const runtime = {
     entries,
     /** sim minutes of continuous forward play since load (never decreases; cue bookkeeping) */
@@ -71,6 +81,10 @@ export async function createRuntime(ctx, schedule) {
     remap,
     /** force every relevant choreo to re-pose on the next frame */
     repose() { for (const e of entries) e.jumped = true; },
+    /** the shared fires (lib/world.js FireBoard): fires.list, fires.state(id) -> { value, def, wants } */
+    fires: fireBoard,
+    /** a choreo's per-date plan (its module's exported plan()), or null — see sim.planOf */
+    planOf: (id) => planOf(id),
     update,
     /** stop and free everything (choreos' dispose(), their figures) */
     dispose() {
@@ -102,7 +116,7 @@ export async function createRuntime(ctx, schedule) {
     const e = {
       mod, id: mod.id, events: [], fixture: false, state: null, inited: false, failed: false,
       relevant: false, lod: 0, dist: 0, nextAt: 0, acc: 0, jumped: true, forced: true, lastUpdate: 0,
-      pools: [], crowds: [], doorWants: [], bounds: null, autoBounds: true, importance: mod.importance ?? 1,
+      pools: [], crowds: [], doorWants: [], fireWants: [], bounds: null, autoBounds: true, importance: mod.importance ?? 1,
       ms: 0, updates: 0,
     };
     e.handle = { runtime, entry: e, crossing: { ok: false, from: 0, span: 0 }, fired: new Map() };
@@ -143,8 +157,9 @@ export async function createRuntime(ctx, schedule) {
     };
     return p;
   }
-  const clearDoorWants = (e) => {
+  const clearSharedWants = (e) => {
     for (let i = 0; i < e.doorWants.length; i++) { const w = e.doorWants[i]; w.all = NaN; w.grp.fill(NaN); }
+    for (let i = 0; i < e.fireWants.length; i++) e.fireWants[i].v = NaN;
   };
   function resolveDoors() {
     for (let k = 0; k < doorList.length; k++) {
@@ -165,7 +180,13 @@ export async function createRuntime(ctx, schedule) {
   const F = { pp: ctx.camera.position, now: 0 };   // the observer (feet); seconds (performance clock)
 
   function makeSim(e) {
-    const doors = new Map(), fires = new Map();
+    const doors = new Map(), fireW = new Map(), fires = new Map();
+    const fireWant = (id, level) => {
+      let w = fireW.get(id);
+      if (!w) { w = fireBoard.slot(id, e.id); fireW.set(id, w); e.fireWants.push(w); }
+      if (Number.isFinite(level) && !(w.v >= level)) w.v = level;
+      return level;
+    };
     return {
       ctx,
       get id() { return e.id; },
@@ -190,7 +211,21 @@ export async function createRuntime(ctx, schedule) {
       crowd(spec) { const c = new CrowdHandle(e.sim, spec); e.crowds.push(c); return c; },
       /** shared movable: set(f) / setGroup(g, f) state what this choreo wants this update (largest want wins) */
       door(id) { if (!doors.has(id)) doors.set(id, doorProxy(e, id)); return doors.get(id); },
-      fire(id) { if (!fires.has(id)) fires.set(id, fire(ctx, id)); return fires.get(id); },
+      /**
+       * shared fire (ctx.fx id): the level 0..1 this choreo wants for it in this update (the largest of its calls);
+       * the runtime applies the largest want of all choreos after the frame's updates, the builder's level when none
+       */
+      fireWant,
+      /** the old handle, kept as an alias: set(v) = fireWant(id, v) */
+      fire(id) {
+        if (!fires.has(id)) {
+          const h = { id, get exists() { return !!ctx.fx?.fires?.has?.(id); }, set(v) { fireWant(id, v); return h; } };
+          fires.set(id, h);
+        }
+        return fires.get(id);
+      },
+      /** another choreo's per-date plan: its module's exported plan(ctx, state, sim), built now if needed; null without it */
+      planOf: (id) => planOf(id),
       sound: (id, pos, opts) => sound(ctx, id, pos, opts),
       caption: (text, opts) => caption(ctx, text, opts),
       cueAt: (key, tCue, fn) => cueAt(e.state, key, tCue, fn),
@@ -231,6 +266,14 @@ export async function createRuntime(ctx, schedule) {
     }
   }
 
+  /** a choreo's per-date plan through its module's exported plan() (initialised first if it was not yet) */
+  function planOf(id) {
+    const x = byId.get(id);
+    if (!x || x.failed || typeof x.mod.plan !== 'function') return null;
+    if (!x.inited && !init(x)) return null;
+    try { return x.mod.plan(ctx, x.state, x.sim) ?? null; } catch (err) { console.error(`[sim] choreo "${x.id}" plan failed`, err); return null; }
+  }
+
   function boundsOf(events) {
     const b = new Box3();
     for (const ev of events) { const p = schedule.positionOf(ev); if (p) b.expandByPoint(p); }
@@ -257,7 +300,8 @@ export async function createRuntime(ctx, schedule) {
     const pp = F.pp = ctx.player?.position || ctx.camera.position;
     if (warmPending) { warmPending = false; if (warmFrame()) return; }
     const t = time.t, fd = time.frameDelta || 0;
-    if (jumpPending || fd < 0) {
+    const jump = jumpPending || fd < 0;
+    if (jump) {
       jumpPending = false;
       for (const e of entries) { e.jumped = true; e.acc = 0; e.handle.fired.clear(); }
     } else if (fd > 0) {
@@ -295,7 +339,7 @@ export async function createRuntime(ctx, schedule) {
       c.from = wrap(t - e.acc);
       for (let k = 0; k < e.pools.length; k++) e.pools[k].clearWants();
       for (let k = 0; k < e.crowds.length; k++) e.crowds[k].want = false;
-      clearDoorWants(e);
+      clearSharedWants(e);
       const u0 = performance.now();
       try {
         m.update(ctx, e.state, t, e.lastUpdate ? Math.min(1, nowS - e.lastUpdate) : 0, e.sim);
@@ -313,6 +357,9 @@ export async function createRuntime(ctx, schedule) {
       c.ok = false;
     }
     resolveDoors();
+    fireBoard.resolve();
+    // a jump (or a new date) re-poses the fires with the figures: fx takes the new levels without easing
+    if (jump) { try { ctx.fx?.snap?.(); } catch { /* fx missing */ } }
     budgetPass(pp);
     const ms = performance.now() - t0;
     const s = runtime.stats;
@@ -340,7 +387,7 @@ export async function createRuntime(ctx, schedule) {
     e.relevant = false;
     for (const p of e.pools) p.clearWants();
     for (const c of e.crowds) c.want = false;
-    clearDoorWants(e);
+    clearSharedWants(e);
     if (e.inited && e.mod.release) { try { e.mod.release(ctx, e.state, e.sim); } catch (err) { console.error(`[sim] choreo "${e.id}" release failed`, err); } }
   }
 

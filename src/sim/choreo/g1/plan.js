@@ -73,6 +73,8 @@ function times(ctx, sim) {
   T.late = W('late-turning');
   T.nightTurn = W('night-turning');
   T.fats = W('fats-burning');
+  T.sday = W('shabbat-altar-day');          // Shabbat between the services: the limbs burning, the pile tended now and then
+  T.divide = W('showbread-divided');         // … whose groups stand east of the altar, across the tenders' way
   T.sunset = z.sunset; T.midnight = z.midnight; T.alot = z.alot;
   // gates.js closes the court gates at the locking: CLOSE_AT court [0.2, 0.035] × window, order nikanor … korban (4) …
   // moked (6), swing 0.45 — the locking kohen locks the Korban gate and is back inside the Moked gate before it shuts
@@ -242,7 +244,7 @@ function build(ctx, sim) {
   const firstIn = Math.min(T.lock[0], ...Object.values(ALTAR.eveningHand).map((x) => x.t));
   P.doors.night = [firstIn - 1, T.mokedGateOpen];
   for (const u of P.stairLog) P.doors.nw.push(u.dir === 'down' ? [u.t0 - 0.45, u.t0 + 0.4] : [u.t1 - 0.4, u.t1 + 0.35]);
-  P.doors.pish.push(...ALTAR.wicket, P.insp.pishOpen);
+  P.doors.pish.push(...ALTAR.wicket, P.insp.pishOpen, P.insp.pishBack);
   P.fire = ALTAR.fire;
   return P;
 }
@@ -609,8 +611,10 @@ function officerInspection(tr, P, T, M) {
   } else tr.hold(0.5, { h: 180, pose: 'stand' });
   // down the duchan's steps to the chavitin chamber's door and in (Tamid 1:3; Middot 1:4 — beside Nikanor) ⚙; he stands
   // just inside, the torches lighting the makers' work (chambers-daily stages the bakers round him), then lays them by
-  // the griddle — the makers' fire is lit from them ⚙ — and stays with the makers until he goes to the Gazit for the
-  // second lottery (lotteries.js takes him from this spot, inside the door, at second-lottery − 4.75)
+  // the griddle — the makers' fire is lit from them ⚙ — and, the makers at work, walks out of the chamber and back
+  // through the court to Beit HaMoked by its wicket (never over the Mount in the holy garments; the court's gates are
+  // still shut), where he waits inside the wicket until he goes to the Gazit for the second lottery (lotteries.js takes
+  // him there at second-lottery − 4.75) ⚙
   const door = P.chavitinDoor;
   const props = R.torch ? ['torch', 'torch'] : null;
   const inside = [door[0] + 1.6, door[1], door[2]];
@@ -625,8 +629,22 @@ function officerInspection(tr, P, T, M) {
     tr.walk([inside], { speed: SLOW });
   }
   const tGo = (T.lot2 ? T.lot2[0] : T.insp[1] + 40) - 4.75;
-  dawdle(tr, tGo - 0.15, 90, 'officer', 'k');
-  tr.hold(0.15, { h: 270, turn: 0.1, pose: 'stand' });
+  // out of the chamber, up over the duchan into the court and along its east and north to the wicket ⚙
+  const back = [[door[0] - 0.7, door[1], door[2]], [door[0] - 3.6, door[1] + 0.6, Z], [236.4, 336, Z], [236.5, 372.5, Z], [M.gateOut[0] + 0.4, 383.5, Z], M.gateOut];
+  const tOut = Math.max(tr.now() + 0.6, Math.min(meet.tGiveW + 3.6, tGo - tr.walkMin(back, SLOW) - 2.5));
+  dawdle(tr, tOut, 90, 'officer', 'k');
+  tr.walk(back, { speed: SLOW });
+  const tPish = tr.now();
+  tr.walk([[M.pish[0], M.pish[1], Z], M.gateIn], { speed: SLOW });
+  R.pishBack = [tPish - 0.12, tr.now() + 0.05];
+  R.pishWins = [R.pishOpen, R.pishBack];
+  // inside the wicket, a little aside, until he leaves for the Gazit; then back at the wicket facing it
+  const wait = [M.gateIn[0] - 1.3, M.gateIn[1] + 1.6, Z];
+  tr.walk([wait], { speed: SLOW });
+  dawdle(tr, tGo - 0.35, 30, 'officer-moked', 'k');
+  tr.walk([M.gateIn], { speed: SLOW });
+  tr.until(tGo, { h: 180, turn: 0.1, pose: 'stand' });
+  P.officerOut = { at: M.gateIn, t: tGo };
 }
 
 // --------------------------------------------------------------------------------------------------- the evening
@@ -1060,9 +1078,77 @@ function altarPlan(P, T, M, A, altarAtNight) {
     (out.episodes.y0 ||= []).push(tr.episode());
     P.rise.y0 = out.y0hand;
   }
+  // ---------- Shabbat between the services (shabbat-altar-day)
+  if (T.sday) out.day = shabbatDay(T, M, A, out, round, forkDown);
   out.tosses.sort((a, b) => a - b);
   out.fire = T.fats ? { window: T.fats, tosses: out.tosses, quiet: !altarAtNight } : null;
   return out;
+}
+
+/**
+ * Shabbat between the services: the morning tamid's and the musaf's limbs burn on the great pile in their day, overriding
+ * Shabbat and not put off to the night (Rambam MK 4:3); the fire is kept (Vayikra 6:6). Who tended it by day is not
+ * recorded ⚙: now and then one or two of the beit av's young kohanim (the evening crew's faces) come out of Beit HaMoked
+ * by its gate (open by day), take forks with the vessels by the ramp's west foot, go up the east half (Zevachim 6:3) and
+ * stir the pile from its south and east — no wood carried, no new limbs: nothing comes up between the services on
+ * Shabbat (Temurah 2:1) — then down the west half, the forks laid by, and back in. A visit every 8–20 minutes (seeded),
+ * 3½–6½ minutes at the pile, the last ending before the afternoon crew takes the altar; the first once the division of
+ * the showbread is over (its two groups stand east of the altar, across the way round it). Returns { window, visits,
+ * tosses (the stirrings: the fire's flare) }.
+ */
+function shabbatDay(T, M, A, out, round, forkDown) {
+  const R = (k0, k1, k2, k3) => rand(0x6a1c, k0, k1, k2, k3);
+  const D0 = T.sday[0], D1 = D0 + span(T.sday[0], T.sday[1]);
+  const Z16 = 16, st = A.stations, GI = M.gateIn;
+  const fromMoked = [[M.cx + 1.4, M.pish[1] + 3, M.Z], [M.cx + 1.4, 384, Z16], ...[...round].reverse()];
+  const toMoked = [...round, [M.cx + 1.4, 384, Z16], [M.cx + 1.4, M.pish[1] + 3, M.Z], [M.cx - 0.6, GI[1] + 1.6, M.Z]];
+  const day = { window: [D0, D1], visits: [], tosses: [] };
+  const keys = ['y1', 'y2', 'y3', 'y0'];
+  const divEnd = T.divide ? D0 + ((T.divide[1] - D0 + 2160) % 1440) - 720 : -Infinity;
+  let t = Math.max(D0 + 0.9, divEnd + 4);
+  for (let v = 0; v < 60; v++) {
+    const two = R(v, 'n') < 0.4;
+    const who = two ? [keys[(2 * v) % 4], keys[(2 * v + 1) % 4]] : [keys[v % 4]];
+    const stay = 3.5 + 3 * R(v, 's');
+    const tracks = [], tosses = [];
+    who.forEach((key, i) => {
+      // out of the hall by the Moked gate, round the altar's east to the vessels by the ramp's west foot for a fork
+      const tr = new Track(t + 0.3 * i, [M.cx + 0.6 - 1.2 * i, GI[1] + 1.6, M.Z], 180, 'altar', 'k');
+      const rest = [A.forkRest[0] + 0.6 * (i - 1.5), A.forkRest[1] + 0.2, Z16];
+      tr.walk([...fromMoked, [A.xW + 1.2, A.yFoot - 1.6, Z16], [rest[0] + 1.1, rest[1], Z16]], { speed: WALK });
+      tr.hold(0.12, { h: 270, pose: 'bow', phase: (l, d) => 0.5 * clamp(l / d) });
+      tr.hold(0.1, { h: 270, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), prop: 'fork' });
+      const x = A.xE + (i % 2 ? 1.2 : -1.2);
+      tr.walk([[x, A.yFoot - 1.8 - 0.5 * i, Z16], [x, A.yFoot + 0.6, A.rampZ(A.yFoot + 0.6)], [x, A.yHead + 0.8, A.Zt]], { speed: WALK, prop: 'fork' });
+      // at the pile: its south side first (seen from the ramp's top), the second man at its east
+      let sIdx = i ? 2 : 0;
+      tr.walk([st[sIdx].at], { speed: WALK, prop: 'fork' });
+      const leave = tr.now() + stay;
+      for (let b = 0; tr.now() < leave - 0.45 && b < 12; b++) {
+        const stoke = Math.min(leave - tr.now() - 0.2, 0.7 + 1.1 * R(v, i, b, 'k'));
+        if (stoke > 0.05) { tosses.push(tr.now() + 0.15); tr.hold(stoke, { h: st[sIdx].h, pose: 'stoke', prop: 'fork' }); }
+        const rest2 = Math.min(leave - tr.now() - 0.2, 0.4 + 0.9 * R(v, i, b, 'r'));
+        if (rest2 > 0.05) tr.hold(rest2, { h: st[sIdx].h + 25 * (R(v, i, 'h') - 0.5), pose: 'stand', prop: 'fork' });
+        if (R(v, i, b, 'm') < 0.35 && leave - tr.now() > 1.5) {
+          // a step round the pile: the south and east sides ⚙
+          sIdx = i ? (sIdx === 2 ? 3 : 2) : (sIdx === 0 ? 1 : 0);
+          tr.walk([st[sIdx].at], { speed: SLOW, prop: 'fork' });
+        }
+      }
+      tr.until(Math.max(tr.now(), leave), { h: st[sIdx].h, pose: 'stand', prop: 'fork' });
+      forkDown(tr, i);
+      tr.walk(toMoked, { speed: WALK });
+      tracks.push({ key, tr });
+    });
+    const end = Math.max(...tracks.map((x) => x.tr.now()));
+    if (end > D1 - 0.3) break;
+    for (const { key, tr } of tracks) (out.episodes[key] ||= []).push(tr.episode());
+    day.tosses.push(...tosses);
+    day.visits.push({ t0: t, t1: end, who });
+    t = end + 8 + 12 * R(v, 'gap');
+  }
+  day.tosses.sort((a, b) => a - b);
+  return day;
 }
 
 /**

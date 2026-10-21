@@ -103,14 +103,11 @@ export default {
     let pw = 0;
     for (const x of P.pishPass) { const d = t - x; if (d > -0.12 && d < 0.16) pw = Math.max(pw, smooth(-0.12, -0.06, d) * (1 - smooth(0.1, 0.16, d))); }
     if (pw > 0) state.pish.set(pw);
-    kitchenFire(ctx, state, sim, t, P);
+    kitchenFire(state, sim, t, P);
     cues(ctx, state, sim, t, P);
   },
 
-  release(ctx, state) {
-    if (state.kfLevel > 0) { try { ctx.fx?.setFire?.(KITCHEN_FIRE, 0); } catch { /* fx missing */ } }
-    state.kfLevel = 0;
-  },
+  release(ctx, state) { state.kfLevel = 0; },
 
   debug(s) {
     const P = s.plan;
@@ -692,7 +689,7 @@ function passTime(it, tOut) {
 }
 
 // ------------------------------------------------------------------------------------------------ the kitchen fire
-function kitchenFire(ctx, state, sim, t, P) {
+function kitchenFire(state, sim, t, P) {
   const W = P.W;
   let v = 0;
   if (P.dayType !== 'shabbat') {
@@ -707,10 +704,9 @@ function kitchenFire(ctx, state, sim, t, P) {
       v = Math.max(v, n);
     }
   }
-  // the hearth is shared with private-offerings (meal-offerings fried, by day), which writes only on its own changes:
-  // while this module wants the fire it states it every update, and lets go once (shared max-wins fires requested)
-  if (v > 0) { try { ctx.fx?.setFire?.(KITCHEN_FIRE, v); } catch { /* fx missing */ } state.kfLevel = v; }
-  else if (state.kfLevel !== 0) { try { ctx.fx?.setFire?.(KITCHEN_FIRE, 0); } catch { /* fx missing */ } state.kfLevel = 0; }
+  // the hearth is shared with private-offerings (meal-offerings fried, by day): a shared want, the larger wins
+  state.kfLevel = v;
+  if (v > 0) sim.fireWant(KITCHEN_FIRE, v);
 }
 
 // ------------------------------------------------------------------------------------------------ cues

@@ -33,7 +33,8 @@ function stepIndex(inst, t) {
 /** the time its last step ends */
 const endOf = (inst) => (Number.isFinite(inst.tEnd) ? inst.tEnd : inst.t1);
 
-export function createSource(ctx, getPlan) {
+/** getPlan() → { ok, insts, instT0, maxDur, G }; opts.prefix: the ids' prefix its byId answers to ('offering:') */
+export function createSource(ctx, getPlan, { prefix = 'offering:' } = {}) {
   const zoneCache = new Map();
   function refresh(P, inst, t) {
     let ev = inst.ev;
@@ -129,7 +130,7 @@ export function createSource(ctx, getPlan) {
       return r;
     },
     byId(id) {
-      if (typeof id !== 'string' || !id.startsWith('offering:')) return null;
+      if (typeof id !== 'string' || !id.startsWith(prefix)) return null;
       const P = getPlan();
       const inst = P?.ok ? P.insts.find((x) => x.id === id) : null;
       return inst ? refresh(P, inst, ctx.time?.t ?? inst.t0) : null;

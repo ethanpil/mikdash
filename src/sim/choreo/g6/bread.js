@@ -17,18 +17,25 @@
 // altar and burn them on the incense pile (Sukkah 56b; Rambam TuM 4:11), salting the frankincense (TuM 4:10); the empty
 // bowls go back to Lishkat HaKelim ⚙. Only then is the bread eaten (TuM 4:10): the incoming divide their six loaves in
 // the north, the outgoing their six in the south (Sukkah 5:8; TuM 4:12).
-import { Script, SPEED, jit } from '../g2/lib.js';
+import { Script, SPEED, jit, walkMin } from '../g2/lib.js';
 import { rampUp, rampDown, circuit } from '../g2/places.js';
 import { SEEDS } from '../g2/tamid.js';
+import { POOLS as G3_POOLS } from '../g3/day.js';
+import { rand } from '../../lib/core.js';
 import { g6places, evWin, Z, ZH, wrap } from './common.js';
 
 /** pool seeds: slot i of a module's pool with this seed is the same man in both modules */
 export const SEED_OUT = 0x6f75;           // the outgoing watch's men in these scenes ⚙
 export const SEED_IN = SEEDS.shabbatIn;   // the incoming watch: the same faces as G2's Shabbat afternoon crew
 export const N_SIDE = 15;                 // men in each group at the division (the schedule's 30 — a staging number)
+/** the Kohen Gadol (G2 / G3's: the same face as at the Shabbat tamid) and the kohanim who eat his loaves with him ⚙ */
+export const SEED_KG = G3_POOLS.kg.seed;
+export const SEED_KGK = 0x6b6b;
+export const N_KGK = 12;                  // six places, each kept by two men in turn (shifts) ⚙
 const STACK = 'loaves_todah';             // stand-in for a stack of six showbread loaves (requested: 'showbread_stack')
 const BOWL = 'bazach';                    // a bowl (bazach) of frankincense
 const CARRY = 1.0;                        // m/s with the bread ⚙
+const HAND = 0.12;                        // min: the Kohen Gadol's man receiving his half from a group's leader ⚙
 
 /** the plan for the current date (null when it is not Shabbat); cached per runtime generation */
 export function breadPlan(ctx, sim) {
@@ -378,16 +385,23 @@ function build(ctx, sim) {
     divO[i] = sS;
   }
   // ---- the division itself: the leader holds the stack; each in turn comes up and receives a piece; they eat ⚙
-  const division = (scripts, ld, spots, c, start, seed, modest) => {
+  const division = (scripts, ld, spots, c, start, seed, modest, handAt) => {
     // round the horseshoe, the near row first (the spots run by angle within each row); "the modest drew back their
     // hands" (Yoma 39a) — two in each group do not come up ⚙
     const order = [];
     for (let i = 1; i < N_SIDE; i++) if (!modest.includes(i)) order.push(i);
     // the leader: wait with the bread until everyone is there, then the shares
     const L = scripts[0];
-    const tStart = start;
     const turn = 0.3;
-    L.until(tStart, { pose: 'carry', face: c, props: [STACK, null], sway: 6, seed });
+    L.until(start, { pose: 'carry', face: c, props: [STACK, null], sway: 6, seed });
+    // the Kohen Gadol's half comes off first, before the shares: "he takes a portion first" (Yoma 1:2; 17b) and eats
+    // "not by division: he takes whatever he wishes" (Rambam MK 10:18) — half of the watch's loaves (TuM 4:14). One of
+    // his kohanim, come up on the open side, takes it from the leader (kgMeal: receive over HAND); the leader keeps the
+    // rest for the watch ⚙
+    const tHand = handAt ? start : NaN;
+    if (handAt) L.until(tHand + HAND + 0.1, { pose: 'carry', face: handAt, props: [STACK, null] });
+    const tStart = handAt ? tHand + HAND + 0.25 : start;
+    L.until(tStart, { pose: 'carry', face: c, props: [STACK, null] });
     const tEndShares = tStart + turn * order.length;
     for (let n = 0; n < order.length; n++) {
       const i = order[n], sp = spots[i - 1], s = scripts[i];
@@ -401,14 +415,18 @@ function build(ctx, sim) {
       s.walk([sp], { speed: SPEED.slow });
       s.act(0.08, { pose: 'stand', heading: hOf(sp, ld) });
     }
-    L.until(tEndShares + 0.1, { pose: 'carry', face: c, props: [STACK, null] });
-    // the leader takes his own and the bread is gone ⚙
+    // the leader takes his own last and the watch's bread is gone ⚙
+    const tGone = tEndShares + 0.1;
+    L.until(tGone, { pose: 'carry', face: c, props: [STACK, null] });
     L.act(0.16, { pose: 'kemitzah', phase: [0, 1], face: c });
-    return tEndShares;
+    return { start: tStart, end: tEndShares, tHand, tSplit: tHand + HAND, tGone };
   };
-  const startN = D0 + 2.3, startS = D0 + 2.7;
-  const endN = division(divI, lead.N, spotsN, NC, startN, SEED_IN + 200, [6, 12]);
-  const endS = division(divO, lead.S, spotsS, SC, startS, SEED_OUT + 200, [8, 13]);
+  const eatW = evWin(sim, 'showbread-eaten', sr);
+  // where the Kohen Gadol's two men stand to take his half: on each horseshoe's open (east) side, by its leader ⚙
+  const handAt = eatW ? { N: [lead.N[0] + 1.2, lead.N[1] - 0.6, Z], S: [lead.S[0] + 1.2, lead.S[1] + 0.6, Z] } : null;
+  const dN = division(divI, lead.N, spotsN, NC, D0 + 2.3, SEED_IN + 200, [6, 12], handAt?.N);
+  const dS = division(divO, lead.S, spotsS, SC, D0 + 2.7, SEED_OUT + 200, [8, 13], handAt?.S);
+  const startN = dN.start, startS = dS.start, endN = dN.end, endS = dS.end;
   // eating where they stand (Menachot 11:7, 11:9; eaten in the court by male kohanim), then into the Gazit by turns ⚙
   const leave = (scripts, c, tFrom, seed, route) => {
     for (let i = 0; i < N_SIDE; i++) {
@@ -423,17 +441,151 @@ function build(ctx, sim) {
   leave(divO, SC, Math.max(endS + 6, D1 - 9.0), SEED_OUT, (i) => [[P.way.eastLine - 0.3 * (i % 2), 299, Z], [231.2, 273.2 + 0.4 * (i % 3), Z], [206.3, 274.3 - 0.4 * (i % 3), Z], [202.6, 296, Z], [199.7 + 0.3 * (i % 2), 309.4, Z], [P.apronX, 321, Z], [P.apronX, 340.2, Z], ...apronToGazit]);
   for (const s of [...divI, ...divO]) if (s.now() > D1 + 4) warn.push(`${s.name} out late`);
 
+  // ================================================================== the Kohen Gadol's loaves (showbread-eaten)
+  const hand = { N: dN, S: dS };
+  const kg = eatW ? kgMeal({ eat: eatW, D0, D1, P, gz, gazitToApron, apronToGazit, lead, handAt, tHand: { N: dN.tHand, S: dS.tHand }, items, warn }) : null;
+
   // ---- wrap every show window / key time for FreeProps
   for (const list of [items.swap, items.div]) for (const it of list) { it.show = it.show.map(wrap); it.keys = it.keys.map((k) => ({ ...k, t: wrap(k.t) })); }
-  for (const s of [...I, ...O, ...divI, ...divO]) warn.push(...s.warn);
+  for (const s of [...I, ...O, ...divI, ...divO, ...(kg ? [kg.KG, ...kg.K] : [])]) if (s) warn.push(...s.warn);
 
   return {
-    T, warm, baz, div, swapI: I, swapO: O, divI, divO, items,
+    T, warm, baz, div, swapI: I, swapO: O, divI, divO, items, kg,
     t: {
       bringLeave: tLeaveI, newOnMarble: Math.min(...tPlaceNew), takeNew: tTakeNew, lift: tLift, slide: tSlide, bowlsOn: tBowlsOn, out: tOut,
       oldOnGold: Math.min(...tPlaceOld), touch: tTouch, takeBaz: tTakeBaz, pour: tPour, takeOld: tTakeOld, startN, startS, endN, endS,
+      // the Kohen Gadol's half off each stack (NaN without showbread-eaten): receive from tHand, held by his man from
+      // tSplit; the leader's own share (his stack gone) at tGone
+      hand: { N: { t: hand.N.tHand, split: hand.N.tSplit, gone: hand.N.tGone }, S: { t: hand.S.tHand, split: hand.S.tSplit, gone: hand.S.tGone } },
     },
     at: { shulchan: [H.shC[0], H.shC[1], ZH], gold: H.goldTop, marble: H.marbleTop, pile: pileC, north: NC, south: SC, bakery: B.door },
     warn,
   };
+}
+
+
+/**
+ * The Kohen Gadol's loaves (showbread-eaten): half of each watch's six are his, never a broken piece (Rambam TuM 4:14;
+ * Yoma 17b) — six great loaves of two tenths each (Vayikra 24:5) — eaten in the court by male kohanim, standing, by
+ * midnight (Rambam MK 10:3, 10:7–8; BhB 7:6). Who ate with him, and for how long, is not recorded ⚙. Staged: he comes out
+ * of the Gazit with two of his kohanim by the north of the court before the division's groups form, and stands east of
+ * the altar, clear of its walkway (X 236–237.5) and of the duchan (X 242), in a horseshoe open to the north: he at its
+ * south facing north, the two at his right and left. As each group's shares are about to begin, one of the two takes
+ * the Kohen Gadol's half from its leader first (division(): handAt — Yoma 1:2, 17b "he takes a portion first"; Rambam
+ * MK 10:18 "not by division") and brings it to him; he takes his loaves from both; they eat, and the stacks are broken
+ * up among them. Through the window other kohanim come out of the Gazit by turns to the horseshoe's open side, take a
+ * piece from him, eat it where they stand, talk a while and go back in (visits of 12–35 min, seeded), so the group stays
+ * until the incoming watch gathers in the Gazit for the afternoon lottery; then all go in.
+ * Returns { KG, K (the two bearers, then the visitors), t, at }.
+ */
+function kgMeal({ eat, D0, D1, P, gz, gazitToApron, apronToGazit, lead, handAt, tHand }) {
+  const C = [240.0, 330.5, Z], R = 1.5;
+  const spotAt = (deg, r = R) => [C[0] + Math.sin(deg / 57.2958) * r, C[1] + Math.cos(deg / 57.2958) * r, Z];
+  const kgAt = spotAt(180);
+  const bear = [spotAt(125), spotAt(235)];            // the bearers of the south group's and the north group's stack
+  const vis = [spotAt(60), spotAt(300), spotAt(0)];   // the open side: the visitors' places
+  const O = spotAt(0, R + 1.9);                       // the horseshoe's mouth, where all come and go
+  const tEnd = eat[1] - 6;                            // in before the incoming come to the door for the afternoon lottery (lotteries.js: its t0 − 2.7)
+  // in by the north of the court (before the division's north group forms; later the court's north is clear), out the
+  // same way on the side nearer the altar ⚙
+  const inWay = (k) => [...gazitToApron, [P.apronX + 0.3, 338.8 + 0.25 * (k % 2), Z], [205, 340.0 + 0.25 * (k % 2), Z], [232.0, 340.3, Z], [238.8, 338.6, Z], [O[0] + 0.2, O[1] + 0.6, Z]];
+  const outWay = (k) => [[O[0] - 0.4, O[1], Z], [238.3, 336.6, Z], [233.6, 339.5, Z], [205, 339.4 - 0.25 * (k % 2), Z], [P.apronX - 0.3, 338.4, Z], ...apronToGazit];
+  // a stack of his loaves (G6's stand-in); a piece of one is eaten from the hands (eatLoop: no bread-piece prop yet)
+  const STACKP = [STACK, null];
+  const R0 = (k0, k1, k2, k3) => rand(SEED_KGK, k0, k1, k2, k3);
+
+  // ---- the Kohen Gadol and his two bearers: out of the Gazit before the division, in file
+  const KG = Script.from(D0 - 3.4, gz.inside, 90, 'kg-eat').exact();
+  KG.walk([...inWay(0), kgAt], { speed: SPEED.slow });
+  const K = [];
+  const tBack = [];
+  ['S', 'N'].forEach((side, b) => {
+    const S = Script.from(D0 - 3.4 + 0.14 * (b + 1), gz.inside, 90, `kgk${b}`).exact();
+    S.walk([...inWay(b + 1), bear[b]], { speed: SPEED.slow });
+    // his half from the leader of the south (b 0) / the north (b 1) group, before its shares, on its open side
+    const ha = handAt[side], th = tHand[side];
+    const via = b === 0 ? [[241.5, 316.0, Z]] : [[238.4, 334.0, Z], [239.2, 338.6, Z]];
+    S.until(th - walkMin(bear[b], [...via, ha], SPEED.slow) - 0.1, { pose: 'stand', face: kgAt, sway: 8, seed: SEED_KGK + b });
+    S.walk([...via, ha], { speed: SPEED.slow });
+    S.until(th, { pose: 'stand', face: lead[side] });
+    S.act(HAND, { pose: 'receive', face: lead[side] });
+    S.act(0.13, { pose: 'carry', face: lead[side], props: STACKP });   // then he turns away; the shares begin
+    S.walk([...[...via].reverse(), bear[b]], { speed: SPEED.carry, pose: 'carry_walk', props: STACKP });
+    tBack.push(S.now());
+    K.push(S);
+  });
+  // he takes his loaves from both stacks; the bearers hold them while the first comers take from them, then the loaves
+  // are broken up among those there and every man holds his portion ⚙
+  const tTake = Math.max(...tBack) + 0.3;
+  KG.until(tTake, { pose: 'stand', heading: 0, sway: 10, seed: SEED_KG + 1 });
+  KG.act(0.16, { pose: 'kemitzah', phase: [0, 1], face: bear[0] });
+  KG.act(0.12, { pose: 'stand', heading: 0 });
+  KG.act(0.16, { pose: 'kemitzah', phase: [0, 1], face: bear[1] });
+  const tShare = Math.max(D1 + 6, tTake + 18);
+  K.forEach((S, b) => {
+    S.until(tShare + 0.4 * b, { pose: 'carry', face: kgAt, props: STACKP, sway: 5, seed: SEED_KGK + 10 + b });
+    S.act(0.16, { pose: 'kemitzah', phase: [0, 1], heading: 0, props: STACKP });
+    eatLoop(S, kgAt, tEnd + 0.15 * (b + 1), R0, `b${b}`);
+  });
+  eatLoop(KG, O, tEnd + 0.6, R0, 'kg');
+
+  // ---- the visitors at the open side, by turns (each place free 2–10 min between visits)
+  const visits = [];
+  for (let q = 0; q < vis.length; q++) {
+    let t = tTake + 3 + 6 * q + 8 * R0('v0', q);
+    for (let j = 0; j < 40; j++) {
+      const stay = 12 + 23 * R0('vs', q, j);
+      const walkIn = walkMin(gz.inside, inWay(q), SPEED.walk) + walkMin(O, [vis[q]], SPEED.slow);
+      const tOut = Math.min(t + stay, tEnd - 0.5);
+      if (tOut - t < 6) break;
+      // the north of the court is crossed only after the division's north group has gone in (D1 + 4)
+      if (t - walkIn < D1 + 4) { t = D1 + 4 + walkIn + 0.5; continue; }
+      visits.push({ q, j, t0: t, t1: tOut, slot: 2 + q + vis.length * (j % 3) });
+      t = tOut + 2 + 8 * R0('vg', q, j);
+    }
+  }
+  // nobody steps out of the Gazit's door within 0.3 min of another coming out or going in there
+  const walkInOf = (q) => walkMin(gz.inside, [...inWay(q), vis[q]], SPEED.walk);
+  const walkOutOf = (q) => walkMin(vis[q], [O, ...outWay(q)], SPEED.walk * 0.95);
+  visits.sort((x, y) => (x.t0 - walkInOf(x.q)) - (y.t0 - walkInOf(y.q)));
+  const atDoor = [];
+  for (const v of visits) {
+    for (let k = 0; k < 8 && atDoor.some((x) => Math.abs(x - (v.t0 - walkInOf(v.q))) < 0.3); k++) v.t0 += 0.35;
+    atDoor.push(v.t0 - walkInOf(v.q), v.t1 + walkOutOf(v.q));
+  }
+  for (const v of visits) {
+    let S = K[v.slot];
+    const tLeave = v.t0 - walkInOf(v.q);
+    if (!S) S = Script.from(tLeave, gz.inside, 90, `kgk${v.slot}`).exact();
+    else S.hide(tLeave, gz.inside, 90);
+    S.walk([...inWay(v.q), vis[v.q]], { speed: SPEED.walk });
+    // a piece from the Kohen Gadol ⚙
+    S.act(0.12, { pose: 'stand', face: kgAt });
+    S.act(0.16, { pose: 'kemitzah', phase: [0, 1], face: kgAt });
+    eatLoop(S, kgAt, v.t1, R0, `v${v.slot}:${v.j}`);
+    S.walk([O, ...outWay(v.q)], { speed: SPEED.walk * 0.95 });
+    K[v.slot] = S;
+  }
+  // ---- all in: the visitors are gone; the bearers, then the Kohen Gadol, through the open side
+  K.forEach((S, b) => { if (b < 2) S.walk([[bear[b][0] + (b ? -0.2 : 0.2), O[1] - 1.4, Z], ...outWay(b)], { speed: SPEED.slow }); });
+  KG.walk([[C[0], C[1] + 0.6, Z], ...outWay(0)], { speed: SPEED.slow });
+  return { KG, K, t: { half: Math.min(tHand.N, tHand.S) + HAND, take: tTake, share: tShare, end: tEnd, visits }, at: { C, kg: kgAt, bear, vis, O } };
+}
+
+/**
+ * A man eating his portion where he stands until `until` (Script S): now and then a short while breaking morsels off
+ * the piece in his hands, then a longer while at ease, talking (stand, idle turning) ⚙. c: whom he faces (the Kohen
+ * Gadol; the horseshoe's mouth for him). The breaking is people's 'melikah' hands looped slowly (the left palm up, the
+ * right fingers nipping over it, the head bent to them): the hands stay together at the chest, so the missing piece
+ * reads far less than an empty two-handed 'carry'. There is no bread-piece prop or hand-to-mouth clip yet (requested).
+ */
+function eatLoop(S, c, until, R0, key) {
+  const sd = (n, k) => (Math.imul(n + 1, 2654435761) ^ (key.length * 97 + k)) >>> 0;
+  for (let n = 0; n < 400 && S.now() < until - 0.6; n++) {
+    const eat = Math.min(until - S.now() - 0.1, 0.3 + 0.5 * R0('ea', key, n));
+    if (eat > 0.05) S.act(eat, { pose: 'melikah', phase: { cycle: 2.6 + 1.8 * R0('ec', key, n), off: R0('eo', key, n) }, face: c, sway: 5, seed: sd(n, 1) });
+    const ease = Math.min(until - S.now() - 0.05, 1.0 + 2.5 * R0('es', key, n));
+    if (ease > 0.05) S.act(ease, { pose: 'stand', face: c, sway: 18, seed: sd(n, 2) });
+  }
+  S.until(Math.max(S.now(), until), { pose: 'stand', face: c, sway: 10, seed: sd(0, 3) });
 }

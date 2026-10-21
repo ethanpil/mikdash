@@ -143,7 +143,13 @@ export function applyLeg(ctx, slot, leg, local) {
   }
   if (leg.props) setProps(slot, leg.props[0], leg.props[1]);
   else {
-    if (slot._p2r !== undefined) { slot._p2r = slot._p2l = undefined; slot._prop = undefined; }
+    if (slot._p2r !== undefined) {
+      // back to one prop: people's setProp never clears the left hand, so the pair goes first (else the second torch
+      // stays in his left hand after he lays both down)
+      const a = slot.ensure();
+      if (typeof a.setProps === 'function') a.setProps(null, null);
+      slot._p2r = slot._p2l = undefined; slot._prop = undefined;
+    }
     slot.prop(leg.prop ?? null, leg.hand || 'right');
   }
   slot.show();

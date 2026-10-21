@@ -8,7 +8,7 @@
 // stands, which way he faces, what he does and holds. Plans are rebuilt once per date (sim.generation).
 //
 // FreeProps are vessels, limbs, logs and carcass states standing free in the world (people.spawnProp), each with a
-// visibility window and keyframed positions; Fires are the altar fires this group drives in its windows.
+// visibility window and keyframed positions. The altar fires this group drives are shared wants (sim.fireWant).
 import { SitePath } from '../../lib/path.js';
 import { clamp, since, within, wrap, rand, smooth } from '../../lib/core.js';
 import { m2w, AMAH } from '../../../core/units.js';
@@ -340,13 +340,7 @@ function keyAt(keys, t, base) {
   return k;
 }
 
-// ------------------------------------------------------------------------------------------------ fires and movables
-
-/** write an fx fire every update while owned (wins over a writer earlier in the frame); returns the value */
-export function driveFire(ctx, id, v) {
-  try { ctx.fx?.setFire?.(id, clamp(v)); } catch { /* fx missing */ }
-  return v;
-}
+// ------------------------------------------------------------------------------------------------ movables
 
 /** a movable's userData call, change-cached on the holder */
 export function movableCall(ctx, holder, id, fn, v) {

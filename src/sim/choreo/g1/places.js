@@ -5,6 +5,7 @@
 // kohanim on the floor (no sitting or sleeping in the kodesh half, Yoma 25a); the hearth; the keys slab; the NW corner
 // chamber with the winding stair down to the lamp-lit passage and the Beit HaTevilah (mikveh, fire, privy).
 import { SitePath } from '../../lib/path.js';
+import { AMAH } from '../../../core/units.js';
 
 const RAD = Math.PI / 180;
 
@@ -173,6 +174,15 @@ export function altarPlaces(ctx) {
   A.forkRest = [xW - 1.4, yFoot - 0.6, zFoot];
   return A;
 }
+
+/**
+ * The radius (amot) of a lottery circle of n men round the Gazit's lottery station: ≈0.68 m a man, between 2.6 amot and
+ * 3.9 — the nave between the two column rows (courts/chambers.js: columns at X 69.5 / 76 / 82.5 on Y 375.6 and 386.4,
+ * plinths 1.28 amot square from their axes; at 3.9 the nearest place clears a plinth's corner by 0.4 amah) ⚙. The
+ * third lottery's twenty stand ≈0.59 m apart at 3.9. Shared by lotteries.js and gazit-shema.js (which walks the
+ * regulars into the same places).
+ */
+export const lotRadius = (n) => Math.min(3.9, Math.max(2.6, (n * 0.68) / (2 * Math.PI) / AMAH));
 
 /** Lishkat HaGazit's kodesh half (site.js azarah.chamber.gazit) */
 export function gazitPlaces(ctx) {

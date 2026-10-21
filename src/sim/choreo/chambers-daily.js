@@ -129,14 +129,14 @@ export default {
       parvah: P('hide-salters', 'kohen', 3, 8),
       garmu: P('beit-garmu', 'kohen', 4, 9),
       seals: P('seals', 'israelite', 2, 10),
-      nazFire: sim.fire(NAZ_FIRE), nazLevel: -1,
-      chav: null, chavLevel: -1,
+      nazLevel: 0,
+      chav: null, chavLevel: 0,
       wheel: ctx.movables?.get?.(WHEEL) || null, wheelA: NaN,
       doorChel: sim.door(DOOR_CHEL),
       plan: null, planGen: -1, troupes: [],
       fmt: (m) => ctx.time?.format?.(m) ?? hm(m),
       baskets: [],
-      pitFires: [null, null, null], pitLevel: [-1, -1, -1],
+      pitFires: [null, null, null],
     };
     NAZ_PIT_FIRES.forEach((id, k) => {
       if (!id) return;
@@ -158,16 +158,18 @@ export default {
     for (const tr of state.troupes) tr.update(ctx, sim, t, tr.cb);
     state.cast.update(sim, t, dt);
     poseBaskets(ctx, state, P, t);
-    // fires and the wheel
-    // the nazirites' pots: the middle one's fire is the hearth's (shared want), the others the stand-ins
+    // fires (shared wants, sim.fireWant) and the wheel
+    // the nazirites' pots: the middle one's fire is the builder's hearth — cold unless a set is cooking (this module is
+    // `always`, so it always states that want) — the others the stand-ins (added at 0, wanted only while they burn)
     const naz = P.nazFire ? P.nazFire(t, 1) : 0;
-    if (Math.abs(naz - state.nazLevel) > 0.01 || (naz === 0 && state.nazLevel !== 0)) { state.nazFire.set(naz); state.nazLevel = naz; }
+    state.nazLevel = sim.fireWant(NAZ_FIRE, naz);
     for (const k of [0, 2]) {
       const v = P.nazFire ? P.nazFire(t, k) : 0;
-      if (state.pitFires[k] && Math.abs(v - state.pitLevel[k]) > 0.01) { state.pitFires[k].setIntensity?.(v); state.pitLevel[k] = v; }
+      if (v > 0 && NAZ_PIT_FIRES[k]) sim.fireWant(NAZ_PIT_FIRES[k], v);
     }
     const ch = P.W.chav && within(t, P.W.chav[0] - 2, P.W.chav[1] + 1) ? smooth(P.W.chav[0] - 1, P.W.chav[0] + 3, t) * (1 - smooth(P.W.chav[1] - 25, P.W.chav[1] - 10, t)) * 0.8 : 0;
-    if (state.chav && Math.abs(ch - state.chavLevel) > 0.01) { state.chav.setIntensity?.(ch); state.chavLevel = ch; }
+    state.chavLevel = ch;
+    if (ch > 0) sim.fireWant(CHAV_FIRE, ch);
     const a = P.wheelAngle(t);
     if (!state.wheel) state.wheel = ctx.movables?.get?.(WHEEL) || null;
     if (state.wheel?.userData?.spin && !(Math.abs(a - state.wheelA) <= 1e-4)) { state.wheel.userData.spin(a); state.wheelA = a; }
@@ -179,9 +181,6 @@ export default {
   },
 
   release(ctx, state) {
-    if (state.nazLevel !== 0) { state.nazFire.set(0); state.nazLevel = 0; }
-    for (const k of [0, 2]) if (state.pitLevel[k] !== 0) { state.pitFires[k]?.setIntensity?.(0); state.pitLevel[k] = 0; }
-    if (state.chavLevel !== 0) { state.chav?.setIntensity?.(0); state.chavLevel = 0; }
     state.cast?.hide();
     for (const b of state.baskets) if (b?.on) { b.on = false; b.a.setVisible(false); }
   },

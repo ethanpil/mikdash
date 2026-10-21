@@ -27,6 +27,7 @@ import { rampDown, circuit } from '../g2/places.js';
 import { CARRIERS_FALLBACK } from '../g2/tamid.js';
 import { g6places, evWin, Z, wrap, HAAZINU, haazinuSection } from './common.js';
 import { clamp } from '../../lib/core.js';
+import { PSALM_DUR as G3_PSALM_DUR } from '../g3/plan.js';
 import { AMAH } from '../../../core/units.js';
 
 /** crew slots = G2's tamid crew slots (same seed: the same men as the morning's winners) */
@@ -502,10 +503,10 @@ export function buildMusaf(ctx, sim, opts = {}) {
 }
 
 // the concert's lengths in seconds as ctx.audio.libation plays them (src/audio/index.js; the same numbers as
-// g3/plan.js libTimeline — the trumpet set's pattern, the Psalm 92 sections' melody + 3.5 s)
+// g3/plan.js libTimeline — the trumpet set's pattern, the Psalm 92 sections' melody + 3.5 s, from g3's PSALM_DUR)
 const D_SET = 0.03 + 3.1 + 0.55 + (9 * 0.27 + 0.12) + 0.55 + 3.1 + 0.5;
 export const PSALM_STAND_IN = 92;
-const PSALM_DUR = [24.304, 20.323, 19.413];
+const PSALM_DUR = G3_PSALM_DUR[PSALM_STAND_IN];
 
 /**
  * The concert in sim minutes, in step with ctx.audio.libation (as g3/plan.js libTimeline): the first set on the table

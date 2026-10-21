@@ -4,10 +4,10 @@
 // 51b–52b; locks #5, #42) — the two curtains above them in the aliyah and the lul's small curtain, the Even Shetiyah
 // (Yoma 5:2), and the aliyah's rashei pispasin and lulin (Middot 4:5). Registers the Menorah's seven lamps as fires
 // and as movables.
-import { TorusGeometry, Object3D } from 'three';
-import { AMAH, m2w } from '../../core/units.js';
-import { applyWorldUV } from '../geom.js';
-import { B, Mesher, gridSolid, sweep, lathe, tube } from './lib/geo.js';
+import { Object3D } from 'three';
+import { m2w } from '../../core/units.js';
+import { B, gridSolid, sweep, lathe, tube } from './lib/geo.js';
+import { slabRingGeometry, SLAB_RING } from '../courts/lib/parts.js';
 import { Drape } from './lib/kit.js';
 import { buildMenorah, buildShulchan, buildGoldenAltar } from './vessels.js';
 
@@ -86,15 +86,9 @@ function sotahSlab(H) {
   const b = el('heichal.sotah-slab').box;
   const m = kit.m('marble_white', true, true);
   m.box([b.min[0], b.min[1], b.min[2]], [b.max[0], b.max[1], b.max[2]], 'xXyYZ');
-  const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2;
-  const g = new TorusGeometry(0.11 * AMAH, 0.018 * AMAH, 6, 18);
-  g.rotateX(Math.PI / 2);
-  g.translate(...m2w(cx, cy, b.max[2] + 0.02).toArray());
-  applyWorldUV(g);
-  kit.geo(g, 'iron', { collide: false, castShadow: false });
-  const s = new Mesher();
-  s.box([cx - 0.14, cy - 0.03, b.max[2]], [cx - 0.09, cy + 0.03, b.max[2] + 0.04]);
-  kit.geo(s.geometry(), 'iron', { collide: false, castShadow: false });
+  // its ring: the fitting shared with the keys and shit slabs (courts/lib/parts.js), toward the south edge, where the
+  // kohen stands having turned right from the gate
+  kit.geo(slabRingGeometry((b.min[0] + b.max[0]) / 2, b.min[1] + SLAB_RING.inset, b.max[2], H.d), 'iron', { collide: false, castShadow: false });
 }
 
 /** the two parochot of the amah traksin, the two above them in the aliyah, and the lul's small curtain */

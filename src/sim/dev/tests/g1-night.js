@@ -24,7 +24,7 @@ function snap() {
     for (const p of e.pools) for (const s of p.slots) {
       if (!s.want) continue;
       const o = s.actor?.object3D;
-      figs.push(`${id}/${p.name}#${s.index} ${o ? `${r3(o.position.x)},${r3(o.position.y)},${r3(o.position.z)}` : '-'} h${r3(s._heading)} ${s._pose}${Number.isNaN(s._phase) ? '' : '@' + r3(s._phase)} ${s._prop || ''}${s._p2r !== undefined ? `[${s._p2r},${s._p2l}]` : ''}`);
+      figs.push(`${id}/${p.name}#${s.index} ${o ? `${r3(o.position.x)},${r3(o.position.y)},${r3(o.position.z)}` : '-'} h${r3(s._heading)} ${s._pose}${Number.isNaN(s._phase) ? '' : '@' + r3(s._phase)} ${s._prop || ''}${s._p2r !== undefined ? `[${s._p2r},${s._p2l}]` : ''} drawn:${s.actor?.prop?.name || ''}/${s.actor?.prop2?.name || ''}`);
     }
   }
   const props = [];
@@ -171,4 +171,29 @@ for (const id of IDS) {
   res.cost[id] = v.length ? { n: v.length, p50: r3(v[Math.floor(v.length / 2)]), p95: r3(v[Math.floor(v.length * 0.95)]), max: r3(v[v.length - 1]) } : null;
 }
 res.cost.simTotal = { ms: r3(rt.stats.ms), peak: r3(rt.stats.msPeak) };
+
+// ---- 5. the Ish Har HaBayit across Beit HaMoked (night-watch): round the hearth's west and south between the mats —
+// every leg of his circuit inside the hall against the hearth (its keep radius) and every mat's and seat's body
+{
+  const { footprint } = await import('/src/sim/choreo/g1/places.js');
+  const nw = rt.choreo('night-watch');
+  const Pl = nightPlan(ctx, E['moked-night'].sim), M = Pl.M, F = Pl.floor;
+  const inHall = (s) => s.X > M.i.min[0] && s.X < M.i.max[0] && s.Y > M.i.min[1] && s.Y < M.i.max[1] + 0.5 && Math.abs((s.Z ?? 16) - M.Z) < 1;
+  const st = nw.state.stops || [];
+  const segs = [];
+  for (let i = 0; i + 1 < st.length; i++) if (inHall(st[i]) && inHall(st[i + 1])) segs.push([st[i], st[i + 1]]);
+  const segPt = (a, b, p) => { const dx = b.X - a.X, dy = b.Y - a.Y, L = dx * dx + dy * dy || 1e-9; const u = Math.max(0, Math.min(1, ((p[0] - a.X) * dx + (p[1] - a.Y) * dy) / L)); return Math.hypot(a.X + dx * u - p[0], a.Y + dy * u - p[1]); };
+  const inPoly = (P, p) => { let c = false; for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const a = P[i], b = P[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) c = !c; } return c; };
+  let hearth = Infinity, body = Infinity, near = '';
+  for (const [a, b] of segs) {
+    hearth = Math.min(hearth, segPt(a, b, M.hearth) - M.keep.hearthR);
+    for (const [k, m] of Object.entries({ ...F.mats, ...F.seats })) {
+      const fp = footprint(m.pose, m.at, m.h, 'body').pts;
+      let d = Infinity;
+      for (let u = 0; u <= 1.0001; u += 0.02) { const p = [a.X + (b.X - a.X) * u, a.Y + (b.Y - a.Y) * u]; if (inPoly(fp, p)) d = 0; else for (let i = 0; i < 4; i++) d = Math.min(d, segPt({ X: fp[i][0], Y: fp[i][1] }, { X: fp[(i + 1) % 4][0], Y: fp[(i + 1) % 4][1] }, p)); }
+      if (d < body) { body = d; near = k; }
+    }
+  }
+  res.mokedRoute = { legs: segs.length, waypoints: [...new Set(segs.flat().map((s) => `${s.X.toFixed(2)},${s.Y.toFixed(2)}`))], hearthClear: r3(hearth), bodyClear: r3(body), nearest: near, ok: segs.length >= 4 && hearth > 0.3 && body > 0.3 };
+}
 return res;

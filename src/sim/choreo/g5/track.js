@@ -98,6 +98,17 @@ export class Track {
 
 export const isNear = (z) => !(Math.abs(z - 16) < 1e-3 || Math.abs(z - 13.5) < 1e-3 || Math.abs(z - 6) < 1e-3 || Math.abs(z - 22) < 1e-3);
 
+/**
+ * The limb carriers round their table: four in the front row by the table, the rest in a row behind them, and the way
+ * out behind both (north, to the corridor — g5/geo.js route). Carrier k goes k-th (the limbs' order); so that no one
+ * walks through a man still standing, the first to go stand in the back row and come last. Returns the index of his
+ * place (0–3 the front row, 4… the back row) and of his arrival.
+ */
+export function tableOrder(n, k) {
+  const nb = Math.max(0, n - 4);
+  return k < nb ? { spot: 4 + k, arrive: n - nb + k } : { spot: k - nb, arrive: k - nb };
+}
+
 /** a walk's sideways offset (metres) at d metres along a path of length len: full in the middle, eased to 0 over the
  * first and last 1.2 m so the walk starts and ends on its points */
 function sideAt(side, d, len) {

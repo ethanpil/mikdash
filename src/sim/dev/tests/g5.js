@@ -115,7 +115,7 @@ out.schedule = {
   const bad = [];
   let n = 0;
   for (let x = P.win.a; x < P.win.endAll; x += 3) {
-    // this module's rows only (other modules register dynamic sources too, some with 'offering:' ids)
+    // this module's rows only (other modules register dynamic sources too: G4's sets as 'set:…')
     for (const ev of sch.dynamic(x)) {
       const inst = P.insts.find((i) => i.id === ev.id);
       if (!inst) continue;

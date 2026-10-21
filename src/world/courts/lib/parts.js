@@ -1,6 +1,6 @@
 // Reusable architectural parts for the courts: chamber shells, straight flights, newel stairs, round logs, lamps.
 import { gridSolid, B, lathe, latheLocal } from './geo.js';
-import { CylinderGeometry, CircleGeometry, Matrix4, Quaternion, Vector3 } from 'three';
+import { CylinderGeometry, CircleGeometry, TorusGeometry, Matrix4, Quaternion, Vector3 } from 'three';
 import { masonryLayout } from '../../materials/gen/layout.js';
 import { classify } from '../masonry.js';
 import { placeAt, mergeGeometries, boxAt, finishLocal } from './kit.js';
@@ -312,6 +312,20 @@ export function wallLamp(C, id, X, Y, Z, out, opts = {}) {
   m.box([Math.min(X, X + out[0] * 0.3) - wx * 0.6, Math.min(Y, Y + out[1] * 0.3) - wy * 0.6, Z - 0.6], [Math.max(X, X + out[0] * 0.3) + wx * 0.6, Math.max(Y, Y + out[1] * 0.3) + wy * 0.6, Z - 0.25]);
   const heading = (Math.atan2(out[0], out[1]) * 180) / Math.PI;
   return lamp(C, id, X + out[0] * d * 0.55, Y + out[1] * d * 0.55, Z, { heading, ...opts });
+}
+
+// ------------------------------------------------------------------------------------------- ring-slabs
+// The three amah-square marble ring-slabs are one fitting (report Part IX §37.1: "model all three as identical
+// fittings"; site.js keys-slab note): the keys slab of the Moked (Middot 1:9), the slab over the shit (Middot 3:3) and
+// the sotah slab (Sotah 2:2). The ring is an iron drop-ring lying in a groove cut in the tablet, the top face of its
+// hexagonal section a millimetre proud ("he put his garment on it and slept"), toward the edge the kohen kneels at ⚙
+// (section, size, groove and place; the Mishnah gives only "a ring fixed in it"). Amot.
+export const SLAB_RING = { r: 0.12, t: 0.025, inset: 0.27 };
+/** the slabs' ring as WORLD geometry (meters, world UVs): centre (X, Y) in the site frame, on a tablet whose top is topZ */
+export function slabRingGeometry(X, Y, topZ, d) {
+  const g = new TorusGeometry(SLAB_RING.r * AMAH, SLAB_RING.t * AMAH, 6, d >= 2 ? 20 : 14).rotateX(Math.PI / 2);
+  const p = m2w(X, Y, topZ + 0.002 - 0.866 * SLAB_RING.t);
+  return finishLocal([g.translate(p.x, p.y, p.z)]);
 }
 
 /** wall niche lining (5 faces, inward) for a lamp in the passage: centre on the face, out normal, size w×h×depth */

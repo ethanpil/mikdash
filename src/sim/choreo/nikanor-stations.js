@@ -26,6 +26,7 @@ import { Itin, Troupe, Route, daySeed, dayQuantile, randInt, tierCount, win, hm,
 import { visit, fitAt, release } from './g4/mount.js';
 import { g4Book, planBefore } from './g4/book.js';
 import { geoOf, scriptMetzora, placeSet, bookSet, SetCast, g5PlanOf, setsSource } from './g4/sets.js';
+import { METZORA_T, VESSEL_START, PINCHAS, TO_RING, vesselKohen, vesselAt } from './g4/metzora.js';
 import { OFFERING_TYPES } from '../../data/offerings.js';
 
 const SEED = 0x6e6b;
@@ -46,22 +47,15 @@ const IMPURE_SPOTS = [[257.7, 327.7], [257.7, 333.3], [261.4, 326.4], [261.4, 32
 const IMPURE_WAIT = [[282.5, 323.5], [283.6, 326.6], [282.2, 329.4], [283.4, 333.6], [282.4, 336.4], [283.8, 339.2]];
 const KOHEN_POSTS = [[253.0, 328.2, 13.5], [253.0, 332.8, 13.5]];
 const RECEIVE_AT = [255.7, 330.5, 13.5];
-// Pinchas' chamber door to Ezrat Yisrael (the kohanim's way in and out) ⚙
-const PINCHAS = [[251.5, 341.5, 13.5], [246.6, 341.5, 13.5], [246.2, 337.0, 13.5]];
 // from Ezrat Yisrael up over the duchan into Ezrat Kohanim and round the ramp's foot to the altar's SW corner ⚙
 const TO_SW = [[252.4, 329.0, 13.5], [246.0, 325.6, 13.5], [244.4, 325.2, 13.5], [241.6, 324.8, 16], [236.2, 318, 16], [236.2, 273.0, 16], [206.5, 273.0, 16], [203.6, 279, 16], [199.4, 300.6, 16], [200.2, 303.6, 16]];
 // the asham: from Nikanor over the duchan to its ring in the north, then to a flaying station at the nanasin ⚙
 const RING = [229, 355.5, 16];
 const HOOK = [229, 383.75, 16];
-const TO_RING = [[253.4, 330.0, 13.5], [246.0, 334.6, 13.5], [244.4, 335.0, 13.5], [241.6, 336.2, 16], [234.5, 345.5, 16], [230.6, 352.4, 16], [229.8, 354.4, 16]];
 const TO_HOOK = [[230.2, 356.6, 16], [234.0, 362, 16], [234.0, 379.5, 16], [230.6, 382.0, 16]];
 // …and the dressed carcass to Lishkat HaMedichin, where the innards are rinsed (Middot 5:3) ⚙
 const TO_MEDICHIN = [[230.6, 382.0, 16], [235.0, 378, 16], [237.8, 345, 16], [237.8, 280, 16], [148.0, 280, 16], [147.25, 276.5, 16], [147.25, 272.5, 16]];
-// the asham's blood to the altar: the NE corner and the SW corner below the red line, the rest on the southern yesod
-const NE = [233.9, 338.6, 16], SW = [200.2, 304.6, 16];
-const BLOOD_WAY = [[230.2, 356.6, 16], [235.6, 345, 16], NE];
-const NE_TO_SW = [NE, [236.2, 318, 16], [236.2, 273.0, 16], [206.5, 273.0, 16], [203.6, 279, 16], [199.4, 300.6, 16], SW];
-const SW_BACK = [SW, [199.4, 300.6, 16], [203.6, 279, 16], [206.5, 273.0, 16], [236.2, 273.0, 16], [236.2, 318, 16], [241.6, 326.6, 16], [244.4, 327.0, 13.5], [252.2, 328.4, 13.5]];
+// the ways of the asham's blood to the altar's corners and the kohanim's door: g4/metzora.js (shared with G5's booking)
 
 export default {
   id: 'nikanor-stations',
@@ -217,17 +211,23 @@ function metzora(state, P, seed, sim, ctx) {
   if (!n) return;
   const M = { t0: w0 };
   P.M = M;
-  // the timeline (minutes from w0) — the sources give the order, the minutes are reconstruction ⚙
-  const T = { atGate: 15, wave: [16, 17.5], lean: [17.6, 19.0], lead: 19.1, slaughter: 19.6, blood: 20.4, bohen: [21.6, 23.6], oil: [24.0, 28.4] };
+  // the timeline (minutes from w0) — the sources give the order, the minutes are reconstruction ⚙ (g4/metzora.js)
+  const T = METZORA_T;
   M.T = T;
+  const G = geoOf(ctx);
+  // the minutes the vessel kohen holds the altar's NE and SW corners with the asham's blood (absolute), measured on
+  // private-offerings' own shared places (P5.hot — the same itinerary and places it books them by, so the two agree
+  // exactly); published for G5 and the tests
+  const hot = (id, r) => P.P5?.hot?.find?.((h) => h.id === id) || { c: id === 'sw' ? G.S.swPoint.pos : G.S.altarNE.pos, r, z: [15, 17.6] };
+  const [sw, ne] = vesselAt(w0, [hot('sw', 1.3), hot('ne', 1.2)]);
+  M.swBlood = sw; M.neBlood = ne;
   // the asham's places in the day's register: its ring, the NE and SW corners as its blood is thrown (so the chatat
   // and olah below keep clear of it; private-offerings keeps them clear in its own plan)
   const book = state.book;
   book.resource('ring:11').add(w0 + 14, w0 + 21.5, WHO);
-  book.resource('hot:ne').add(w0 + 20.6, w0 + 22.6, WHO);
-  book.resource('hot:sw').add(w0 + 21.4, w0 + 25.2, WHO);
+  if (ne) book.resource('hot:ne').add(ne[0], ne[1], WHO);
+  if (sw) book.resource('hot:sw').add(sw[0], sw[1], WHO);
   // ---- his chatat and olah (g4/sets.js): the first leaning a little after the oil
-  const G = geoOf(ctx);
   const gateAt = [255.9, 330.5];
   const B0 = scriptMetzora(G, seed, METZORA_COMBOS[0], gateAt, null);
   const s0 = w0 + T.oil[1] + 0.8 - B0.sync.lean[0][0];
@@ -293,7 +293,7 @@ function metzora(state, P, seed, sim, ctx) {
   // ---- the three kohanim: A leads the asham in by Sha'ar HaKorban and slaughters it, B (the vessel) and C (the palm,
   // the log in his left hand) out of Pinchas' door
   const at = (m) => w0 + m;
-  const KA = new Itin(), KB = new Itin(), KC = new Itin();
+  const KA = new Itin(), KC = new Itin();
   // A: from the Korban gate's passage, across the court, to the inside of Nikanor with the lamb (lead)
   const korban = [[161.5, 401.0, 16], [161.5, 388.5, 16], [236.0, 388.5, 16], [238.6, 380, 16], [238.6, 346, 16], [241.6, 337.6, 16], [244.4, 337.0, 13.5], [246.2, 334.0, 13.5], [252.6, 330.6, 13.5]];
   KA.walkTo(korban, 1.0, { pose: 'lead_walk' });
@@ -323,32 +323,12 @@ function metzora(state, P, seed, sim, ctx) {
   KA.done();
   const aT0 = at(T.atGate - 0.5) - aArr;
   M.lambT = { t0: aT0, arrive: aArr, lead0: aLead0, ring: aRing, lift: aLift, hang: aHang, take: aTake, A: KA };
-  // B: out of Pinchas' door with the mizrak; waits; follows to the ring; receives; the NE and SW corners; back
-  KB.walkTo([...PINCHAS, [251.4, 334.6, 13.5]], 1.1, { prop: 'mizrak_silver' });
-  const bArr = KB.T;
-  KB.stand(T.lead + 0.15 - (T.atGate - 1.5), 300, { prop: 'mizrak_silver' });
-  KB.walkTo([[251.4, 334.6, 13.5], ...TO_RING.slice(1, -1), [229.0, 353.8, 16]], 1.0, { prop: 'mizrak_silver' });
-  const bRing = KB.T;
-  KB.stand(Math.max(0.2, T.slaughter - T.lead - 0.15 - (bRing - bArr)), 180, { at: [229.0, 353.8, 16], prop: 'mizrak_silver' });
-  KB.stand(T.blood - T.slaughter, 180, { at: [229.0, 353.8, 16], pose: 'receive', prop: 'mizrak_silver' });
-  KB.walkTo(BLOOD_WAY, 1.1, { prop: 'mizrak_silver' });
-  KB.stand(0.3, 225, { pose: 'throw', phase: (q) => q, prop: 'mizrak_silver' });
-  const bNE = KB.T;
-  KB.walkTo(NE_TO_SW, 1.15, { prop: 'mizrak_silver' });
-  KB.stand(0.3, 45, { pose: 'throw', phase: (q) => q, prop: 'mizrak_silver' });
-  KB.stand(0.3, 20, { at: [200.6, 304.9, 16], pose: 'pour', phase: (q) => q, prop: 'mizrak_silver' });
-  KB.walkTo(SW_BACK, 1.15, { prop: null });
-  const bBack = KB.T;
-  KB.stand(Math.max(0.3, T.oil[0] - (T.atGate - 1.5) - bBack), 90);
-  const bOil = KB.T;
-  KB.stand(0.8, 60, { at: [253.0, 329.2, 13.5], pose: 'pour', prop: 'oil_flask' });
-  KB.stand(T.oil[1] - T.oil[0] - 0.8, 90, { at: [253.0, 329.2, 13.5], prop: 'oil_flask' });
-  KB.stand(1.5, 90, { at: [253.0, 329.2, 13.5] });
-  KB.walkTo([[253.0, 329.2, 13.5], [250.0, 336.0, 13.5], ...[...PINCHAS].reverse()], 1.1);
-  KB.done();
+  // B: out of Pinchas' door with the mizrak; waits; follows to the ring; receives; the NE and SW corners; back for the
+  // oil — the shared itinerary (g4/metzora.js), so private-offerings books the corners for exactly his minutes there
+  const KB = vesselKohen(T).it;
   // C: the palm and the log
   // (out of the door a few paces behind B; every stand runs to its moment on the rite's clock)
-  const C0 = T.atGate - 1.5, C_LAG = 0.25, kc0 = C0 + C_LAG;
+  const C0 = VESSEL_START, C_LAG = 0.25, kc0 = C0 + C_LAG;
   const until = (m) => Math.max(0.05, m - kc0 - KC.T);
   KC.walkTo([...PINCHAS, [250.6, 327.6, 13.5]], 1.1, { prop: null, left: 'oil_flask' });
   KC.stand(until(T.lead + 0.25), 300, { prop: null, left: 'oil_flask' });
