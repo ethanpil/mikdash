@@ -265,17 +265,20 @@ export function buildKevesh(A) {
     if (d >= 1) {
       // half-burnt brands, their burnt ends toward the crown: timber_charred once the materials task adds it, until then
       // grey with ash (never glass_dark, whose gloss drew them as black pipes — review); the rest bark
-      const CHAR = A.mat('timber_charred', 'ash'), BARK = 'timber_rough', END = A.mat('timber_pile_end', BARK);
-      const burnt = [], bark = [], ends = [];
+      // the bark: one species per brand — fig, walnut, oil-tree (Tamid 2:3; world-4), from its own stream
+      const BARKS = ['timber_bark_fig', 'timber_bark_walnut', 'timber_bark_pine'].map((k) => A.mat(k, 'timber_rough'));
+      const CHAR = A.mat('timber_charred', 'ash'), END = A.mat('timber_pile_end', 'timber_rough');
+      const RS = rng(A.seed ^ 0x51e5);
+      const burnt = [], bark = [[], [], []], ends = [];
       for (let i = 0; i < 4; i++) {
         const a = ph + i * 1.7 + R() * 0.4, L = 0.55 + 0.25 * R(), r0 = 0.12 + 0.1 * R();
         const p0 = [cx + Math.cos(a) * r0, cy + Math.sin(a) * r0], p1 = [p0[0] - Math.cos(a + 0.5) * L, p0[1] - Math.sin(a + 0.5) * L];
         const z0 = heapZ(Math.min(0.95, r0 / rr), a) + 0.02, z1 = heapZ(Math.min(0.95, Math.hypot(p1[0] - cx, p1[1] - cy) / rr), a) + 0.02;
         const g = brandGeometry([p0[0], p0[1], z0], [p1[0], p1[1], z1], 0.03, R, 0.5);
-        burnt.push(...g.burnt); bark.push(...g.bark); ends.push(...g.ends);
+        burnt.push(...g.burnt); bark[Math.min(2, Math.floor(RS() * 3))].push(...g.bark); ends.push(...g.ends);
       }
       B.geo(mergeGeometries(burnt, false), CHAR, { collide: false, cast: false });
-      B.geo(mergeGeometries(bark, false), BARK, { collide: false, cast: true });
+      bark.forEach((list, sp) => { if (list.length) B.geo(mergeGeometries(list, false), BARKS[sp], { collide: false, cast: true }); });
       B.geo(mergeGeometries(ends, false), END, { collide: false, cast: true });
     }
     A.fires.push(ctx.addFire({ id: 'altar.beit-hadeshen.fire', kind: 'pyre', pos: [cx, cy, crown], size: 0.6, intensity: 0, schedule: 'service', smoke: true }));

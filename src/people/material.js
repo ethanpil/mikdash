@@ -27,7 +27,7 @@ attribute vec4 pTint;    // figures: skin, hair, garment A, garment B   props: r
 attribute vec4 pMorph;   // per-vertex shape deltas (rest space): xyz = face-shape field (× pAnimB.y), w = fullness along the normal (× pAnimB.z)
 #endif
 #ifndef P_DEPTH
-uniform vec3 uPPal[14];
+uniform vec3 uPPal[18];
 varying float vPFade;
 varying vec4 vPMat;
 varying vec2 vPUv;
@@ -81,9 +81,10 @@ vec3 pPalette(int cls) {
   #ifndef P_PROP
   if (cls == 1) return mix(uPPal[0], uPPal[1], clamp(pTint.x, 0.0, 1.0));
   if (cls == 2) return mix(uPPal[2], uPPal[3], clamp(pTint.y, 0.0, 1.0));
-  if (cls == 3) { int i = int(clamp(floor(pTint.z), 0.0, 3.0)); return uPPal[4 + i] * (0.94 + 0.12 * fract(pTint.z)); }
-  if (cls == 4) { int i = int(clamp(floor(pTint.w), 0.0, 3.0)); return uPPal[8 + i] * (0.94 + 0.12 * fract(pTint.w)); }
-  if (cls == 5) return uPPal[12 + int(mod(floor(pTint.z * 7.0), 2.0))];
+  // garments A / B: the role's four colours (tint 0..3); 4 = black, 5 = white (Actor.setGarb; palette 14..17)
+  if (cls == 3) { int i = int(clamp(floor(pTint.z), 0.0, 5.0)); return (i < 4 ? uPPal[4 + i] : uPPal[14 + (i - 4) * 2]) * (0.94 + 0.12 * fract(pTint.z)); }
+  if (cls == 4) { int i = int(clamp(floor(pTint.w), 0.0, 5.0)); return (i < 4 ? uPPal[8 + i] : uPPal[15 + (i - 4) * 2]) * (0.94 + 0.12 * fract(pTint.w)); }
+  if (cls == 5) return pTint.z >= 4.0 ? uPPal[14 + int(clamp(floor(pTint.z) - 4.0, 0.0, 1.0)) * 2] * 0.9 : uPPal[12 + int(mod(floor(pTint.z * 7.0), 2.0))];
   #endif
   return vec3(1.0);
 }
@@ -141,8 +142,9 @@ vPMat = vec4(pMat.x, max(pMat.y, 0.0), pMat.zw);   // (a plumb fringe's hang hei
 vPUv = uv;
 vPFade = pAnimA.w;
 #ifndef P_PROP
-vPStripe = uPPal[12 + int(mod(floor(pTint.z * 7.0), 2.0))];
-vPHair = mix(uPPal[2], uPPal[3], clamp(pTint.y, 0.0, 1.0)) * 0.8;
+vPStripe = pPalette(5);
+// the brows' colour; < 0 = shaved off with the beard (mask bit 256: human.js GRP.SHAVEN_FACE, the metzora's seventh day)
+vPHair = ((int(pAnimB.w + 0.5) >> 8) & 1) == 1 ? vec3(-1.0) : mix(uPPal[2], uPPal[3], clamp(pTint.y, 0.0, 1.0)) * 0.8;
 vPSeed = fract(pTint.x * 13.17 + pTint.z * 3.31);
 #else
 vPStripe = vec3(0.0);
@@ -701,7 +703,7 @@ if (pat == 19 || pat == 25) { // face skin: brows, nostrils, lips, the flush of 
     float bw = 0.0021 * (1.0 - 0.5 * smoothstep(-0.6, 1.0, bxs));
     float strands = mix(1.0, 0.7 + 0.6 * pNoise(vec2(uv.x * 900.0, uv.y * 220.0)), ff);
     float brow = (1.0 - smoothstep(bw, bw + aa * 1.5, abs(by))) * (1.0 - smoothstep(0.88, 1.05, abs(bxs))) * strands;
-    pCol = mix(pCol, vPHair * 0.9, clamp(brow, 0.0, 1.0) * mix(0.4, 0.68, ff));
+    pCol = mix(pCol, vPHair * 0.9, clamp(brow, 0.0, 1.0) * mix(0.4, 0.68, ff) * step(0.0, vPHair.x));
     float nos = 1.0 - smoothstep(0.0016, 0.0016 + aa, length(vec2((abs(uv.x) - 0.0085) / 1.6, uv.y + 0.0395)));
     pCol *= 1.0 - 0.6 * nos * ff;
     float lx = uv.x / 0.021;
@@ -750,7 +752,7 @@ function patchVertex(src, { depth }) {
 }
 
 /**
- * opts: { atlas (AnimAtlas), palette: Color[14], prop: bool, lerp: bool, detail: bool, physical: bool, morph: bool,
+ * opts: { atlas (AnimAtlas), palette: Color[18], prop: bool, lerp: bool, detail: bool, physical: bool, morph: bool,
  *         groups: ['FIG'|'KG'|'BEAST'|'PROP'|'FLESH'] (pattern code compiled in; default FIG, or PROP for props),
  *         dither: bool (per-instance fade in pAnimA.w by ordered dither: far-cap and flowing-crowd fades) }
  */
@@ -765,7 +767,7 @@ export function createPeopleMaterial(opts) {
   const groups = (opts.groups || (prop ? ['PROP'] : ['FIG'])).map((g) => `P_G_${g}`);
   const defines = [prop ? 'P_PROP' : null, lerp ? 'P_LERP' : null, detail ? 'P_DETAIL' : null, dither ? 'P_DITHER' : null, opts.morph ? 'P_MORPH' : null, ...groups].filter(Boolean);
   mat.defines = Object.fromEntries(defines.map((d) => [d, '']));
-  const palette = { value: opts.palette || Array.from({ length: 14 }, () => new Color(1, 1, 1)) };
+  const palette = { value: opts.palette || Array.from({ length: 18 }, () => new Color(1, 1, 1)) };
   const glyph = { value: glyphTexture() };
   mat.userData.palette = palette;
   mat.onBeforeCompile = (shader) => {
@@ -797,7 +799,7 @@ material.sheenRoughness = 0.6;
     }
     shader.fragmentShader = f;
   };
-  const key = `people:${defines.join(',')}:${physical ? 'phys' : 'std'}:v6`;
+  const key = `people:${defines.join(',')}:${physical ? 'phys' : 'std'}:v7`;
   mat.customProgramCacheKey = () => key;
   return mat;
 }

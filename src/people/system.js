@@ -9,7 +9,7 @@ import {
 } from 'three';
 import { AnimAtlas } from './anim.js';
 import { LocalPose, blendPose } from './pose.js';
-import { ARCHETYPES, ROLES, ANIMALS } from './roles.js';
+import { ARCHETYPES, ROLES, ANIMALS, GARB } from './roles.js';
 import { buildHumanGeometry } from './human.js';
 import { buildAnimalGeometry, halterPoint } from './animals.js';
 import { gripOffset } from './clips.js';
@@ -31,6 +31,26 @@ const OFFDUTY_POSES = new Set(['sleep', 'lie']);
 const OFFDUTY_ARCH = 'israelite';   // a kohen's own clothes (Tamid 1:1): ordinary tunic + mantle, head bare
 const BATH_POSES = new Set(['bathe']);
 const MASK_HEADGEAR = 8, MASK_BARE = 16; // human.js GRP.HEADGEAR / GRP.BARE as instance mask bits
+// human.js GRP.HAIR / SHAVEN / BEARD / SHAVEN_FACE (people-4): the hair and beard on by default, the shaven shells off
+const MASK_HAIR = 32, MASK_SHAVEN = 64, MASK_BEARD = 128, MASK_SHAVEN_FACE = 256;
+const SHAVE_BITS = MASK_HAIR | MASK_SHAVEN | MASK_BEARD | MASK_SHAVEN_FACE;
+/** the mask with the hair as `mode` leaves it: false/null/'none' (grown), 'head' (the scalp shaved), 'all' (head, beard
+ *  and brows — Vayikra 14:9) */
+function shaveMask(m, mode) {
+  m &= ~SHAVE_BITS;
+  const md = mode === true ? 'head' : mode;
+  if (md === 'head' || md === 'all') m |= MASK_SHAVEN; else m |= MASK_HAIR;
+  if (md === 'all') m |= MASK_SHAVEN_FACE; else m |= MASK_BEARD;
+  return m;
+}
+/** the garments' tint: 'black' | 'white' (roles.js GARB, palette 14–17) over the figure's own colours (keeps their
+ *  per-figure shade); null = its own */
+function garbTint(t, own, name) {
+  const g = name && GARB[name];
+  t[2] = g ? g + (own[2] - Math.floor(own[2])) : own[2];
+  t[3] = g ? g + (own[3] - Math.floor(own[3])) : own[3];
+  return t;
+}
 const TORCH_FLAME = { size: 0.32, intensity: 1, kind: 'torch' };
 
 /**
@@ -249,7 +269,7 @@ function makeMask(R, role) {
   if (R() < (role?.mantle ?? 1)) m |= 1;
   if (R() < (role?.headcloth ?? 0)) m |= 2;
   m |= 4 | MASK_HEADGEAR;   // the priestly headgear on (setHeadgear)
-  return m;
+  return shaveMask(m, role?.shaven);   // hair and beard grown unless the role is shaven (nazir_shaven)
 }
 /** site Z argument: number (exact) | { near: Z } (the floor nearest Z) | omitted (the walking floor) */
 function zArg(Z) {
@@ -275,9 +295,13 @@ export class Actor {
     const roleDef = ROLES[opts.role] || null;
     this.roleDef = roleDef;
     this.tint = makeTint(R, roleDef, this.kind === 'animal');
+    this._tint0 = this.tint.slice();
+    this.garb = roleDef?.garb || null;
+    if (this.garb) garbTint(this.tint, this._tint0, this.garb);
     this.mask = makeMask(R, roleDef);
     const sc = roleDef?.scale || [0.97, 1.03];
     this.scale = lerp(sc[0], sc[1], R());
+    this._scale0 = this.scale;
     this.clip = arch ? (arch.clip('stand') || Object.values(arch.entry.clips)[0]) : null;
     this.phase = R();
     this.morph = makeMorph(R, this.kind !== 'human');
@@ -359,11 +383,16 @@ export class Actor {
     else { this.auto = false; this.phase = phase; }
     return this;
   }
-  /** prop: a name from ctx.people.props or null; hand: 'right' | 'left' */
+  /**
+   * prop: a name from ctx.people.props or null; hand: 'right' | 'left'. setProp(null) empties BOTH hands (a second prop
+   * set with setProps goes too — people-4); setProp(name) changes the one prop and leaves a left-hand second prop of
+   * setProps as it was.
+   */
   setProp(name, hand = 'right') {
     if (name && !PROPS[name]) { console.warn(`[people] unknown prop "${name}"`); name = null; }
     const was = this.prop?.name;
     this.prop = name ? { name, side: /^l/i.test(hand || '') ? 'l' : 'r' } : null;
+    if (!name && !this._inSetProps) this.prop2 = null;
     // the pose's clip may depend on the prop (PROPS[name].poses): re-resolve it
     if (this._req && this.arch && (name !== was) && (PROPS[name]?.poses || PROPS[was]?.poses)) this.setPose(this._req, this.auto ? undefined : this.phase);
     this.sys._syncFlames(this);
@@ -375,7 +404,8 @@ export class Actor {
    * left fist.
    */
   setProps(right, left) {
-    this.setProp(right || null, 'right');
+    this._inSetProps = true;
+    try { this.setProp(right || null, 'right'); } finally { this._inSetProps = false; }
     if (left && !PROPS[left]) { console.warn(`[people] unknown prop "${left}"`); left = null; }
     this.prop2 = left ? { name: left, side: 'l' } : null;
     return this;
@@ -400,6 +430,37 @@ export class Actor {
     return this;
   }
   get headgear() { return !!(this.mask & MASK_HEADGEAR); }
+  /**
+   * The hair shaved (people-4): 'head' — the scalp shaved, the beard kept (the nazir at the end of his term, Bamidbar
+   * 6:18); 'all' — head, beard and brows (the metzora on his seventh day, Vayikra 14:9); false — grown. The same figure
+   * (seed, face, skin, garments); shows on the roles whose figure has the shaven parts (israelite and those dressed as
+   * one, nazir, nazir_shaven, metzora, mourner, menudeh); others ignore it.
+   */
+  setShaven(mode = 'head') { if (this.kind === 'human') this.mask = shaveMask(this.mask, mode); return this; }
+  get shaven() { return this.mask & MASK_SHAVEN_FACE ? 'all' : this.mask & MASK_SHAVEN ? 'head' : false; }
+  /** the garments in 'black' or 'white' (the mourner and the one under a ban, Middot 2:2 — roles mourner / menudeh are
+   *  black by default); null = as the role has them (its garb, else the figure's own colours) (people-4). The tunic,
+   *  mantle and head-cloth classes change. */
+  setGarb(name = null) {
+    if (this.kind !== 'human') return this;
+    if (name && !GARB[name]) { console.warn(`[people] unknown garb "${name}" (black | white)`); name = null; }
+    const g = name || this.roleDef?.garb || null;
+    garbTint(this.tint, this._tint0, g);
+    this.garb = g;
+    return this;
+  }
+  /**
+   * The figure's size against its rig (people-4-fix): s a number (clamped to 0.8–1.2), or null = back to the size drawn
+   * from the seed (the role's range, e.g. kohen 0.95–1.05; readable as actor.scale). Poses that meet a partner or a
+   * fixture are made at scale 1 and scale with the figure: the tenufah pair at ONE scale s (kohen.setScale(owner.scale),
+   * or both 1), WAVE_UNDER.partner·s apart; an operator at a fixture whose geometry is in metres (CRANK, WINDLASS,
+   * WINDLASS_RAISE, KNEAD) at 1. Free props ignore it.
+   */
+  setScale(s = null) {
+    if (this.kind === 'prop') return this;
+    this.scale = Number.isFinite(s) && s > 0 ? clamp(s, 0.8, 1.2) : this._scale0;
+    return this;
+  }
   setVisible(b) { this.visible = !!b; this.object3D.visible = this.visible; this.sys._syncFlames(this); return this; }
   /** auto-advanced walking speed (m/s) for locomotion poses without an explicit phase */
   setSpeed(mps) { this.speed = mps; return this; }
@@ -513,7 +574,7 @@ export class Crowd {
     this.x = new Float32Array(n); this.y = new Float32Array(n); this.z = new Float32Array(n);
     this.bx = new Float32Array(n); this.bz = new Float32Array(n);
     this.yaw = new Float32Array(n); this.sc = new Float32Array(n); this.off = new Float32Array(n);
-    this.tint = new Float32Array(n * 4); this.mask = new Float32Array(n); this.morph = new Float32Array(n * 2);
+    this.tint = new Float32Array(n * 4); this.tint0 = new Float32Array(n * 4); this.mask = new Float32Array(n); this.morph = new Float32Array(n * 2);
     this.fadeM = new Float32Array(n).fill(1);
     this.pointH = new Float32Array(n).fill(NaN);
     this.autoY = new Uint8Array(n); this.hintY = new Float32Array(n).fill(NaN);
@@ -537,6 +598,8 @@ export class Crowd {
       const sc = def.scale || [0.96, 1.04];
       this.sc[i] = lerp(sc[0], sc[1], R());
       const t = makeTint(R, def, animal);
+      this.tint0.set(t, i * 4);
+      if (!animal && (opts.garb || def.garb)) garbTint(t, t.slice(), opts.garb || def.garb);
       this.tint.set(t, i * 4);
       this.mask[i] = animal ? 0 : makeMask(R, def);
       this.off[i] = R();
@@ -601,6 +664,17 @@ export class Crowd {
     return this;
   }
   setVisible(b) { this.visible = !!b; this.sys._syncFlames(this); return this; }
+  /** every person in the crowd in 'black' | 'white' garments, or null = each as his role has it (people-4) */
+  setGarb(name = null) {
+    const t = [0, 0, 0, 0];
+    for (let i = 0; i < this.capacity; i++) {
+      if (this.arch[i].isAnimal) continue;
+      for (let q = 0; q < 4; q++) t[q] = this.tint0[i * 4 + q];
+      garbTint(t, t.slice(), name || this.roleDef[i]?.garb || null);
+      this.tint.set(t, i * 4);
+    }
+    return this;
+  }
   setCount(n) { this.count = Math.max(0, Math.min(this.capacity, n | 0)); this.sys._syncFlames(this); return this; }
   dispose() { this.count = 0; this.prop = null; this.sys._syncFlames(this); this.sys.crowds.delete(this); }
   memberVariant(i) { return this.off_ ? poseVariant(this.roleDef[i], this.poseName) : null; }
@@ -776,6 +850,9 @@ export class PeopleSystem {
     if (rest.heading != null) a.setHeading(rest.heading);
     if (rest.pose) a.setPose(rest.pose, rest.phase);
     if (rest.prop) a.setProp(rest.prop, rest.hand);
+    if (rest.shaven != null) a.setShaven(rest.shaven);
+    if (rest.garb !== undefined) a.setGarb(rest.garb);
+    if (rest.scale != null) a.setScale(rest.scale);
     return a;
   }
   spawnAnimal(kind = 'lamb', opts = {}) {
@@ -783,6 +860,7 @@ export class PeopleSystem {
     const a = new Actor(this, this.arch(kind), { role: null, kind: 'animal', seed: opts.seed });
     a.animal = kind;
     this.actors.add(a);
+    if (opts.scale != null) a.setScale(opts.scale);
     return a;
   }
   spawnProp(name, opts = {}) {

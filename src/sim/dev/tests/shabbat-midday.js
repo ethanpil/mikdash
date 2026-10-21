@@ -101,8 +101,11 @@ const at = async (t) => { time.set(W(t)); await frames(3); return snap(); };
       if (near(t)) continue;
       time.set(W(t)); await frames(1);
       n++;
-      const got = figs(['shabbat-mishmar']).filter((x) => x.pr === 'loaves_todah' && (x.k === lead || x.k === man)).map((x) => x.k).sort().join('+');
+      // (choreo-adopt: people's showbread_stack — the leader's six until the split — and showbread_half after it)
+      const hold = figs(['shabbat-mishmar']).filter((x) => (x.pr === 'showbread_stack' || x.pr === 'showbread_half') && (x.k === lead || x.k === man));
+      const got = hold.map((x) => x.k).sort().join('+');
       if (got !== want(t).split('+').sort().join('+')) bad++;
+      else if (hold.some((x) => x.pr !== (t < H.split && x.k === lead ? 'showbread_stack' : 'showbread_half'))) bad++;
       if (holders[holders.length - 1] !== got) holders.push(got);
     }
     sides.push({ side, tHand: time.format(W(H.t)), sharesFrom: time.format(W(side === 'N' ? B.t.startN : B.t.startS)), gone: time.format(W(H.gone)), samples: n, holders, samplesWrong: bad });

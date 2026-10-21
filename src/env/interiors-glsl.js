@@ -67,8 +67,8 @@ layout( std140 ) uniform MkInteriors {
                                     // z half extents (cm), w normal axis code (0..2 outward +, 3..5 −)
   uvec4 mkPrH[ ${MK_LIMITS.probe} ]; // influence box grown by its margin (cm from MK_ORIGIN), w half2( shell, margin )
   vec4 mkPrC[ ${MK_LIMITS.probe} ]; // xyz capture position, w intensity (P now / P at capture …); 0 = unused
-  vec4 mkPrD[ ${MK_LIMITS.probe} ]; // xyz proxy min, w weight (fades a stale probe out)
-  vec4 mkPrE[ ${MK_LIMITS.probe} ]; // xyz proxy max, w atlas slice + 8 for an outdoor probe (× sky visibility); fraction: V at a skylit interior probe
+  vec4 mkPrD[ ${MK_LIMITS.probe} ]; // xyz proxy min, w weight (fades a stale probe out) + 2 × its sky share × 255
+  vec4 mkPrE[ ${MK_LIMITS.probe} ]; // xyz proxy max, w atlas slice + 8 for an outdoor probe (× sky visibility) + 16 × (cap + 16 × mode: all openings / the main one); fraction: V at an interior probe whose irradiance follows V
   vec4 mkIntP;                      // x volume count, y camera volume + 1 (0 none), z direct-light attenuation 0..1, w debug view
   vec4 mkIntQ;                      // z probe capture gain, w its texel clamp (read only while the capture flag is set)
   vec4 mkUnionA;                    // xyz min of all the selected rooms' grown boxes, w flags (MK_F_*) + active probes
@@ -94,6 +94,7 @@ int mkFlags = 0;        // mkUnionA.w: bits 0–2 active probes, 3 a point light
 float mkInvW = 0.0;     // mkUnionB.w
 float mkV = 1.0;      // sky visibility at this fragment (1 outdoors)
 float mkVap = 1.0;    // … through its room's apertures only (without the closed room's floor): lights outside the room
+float mkVm = 0.0;     // … through its room's main (first) opening alone: the Kodesh's great gate (render-audio-3, the probe's irradiance)
 float mkVol = 0.0;    // its volume slot + 1 (0 outdoors)
 float mkS = 0.0;      // how far inside it
 float mkSun = 1.0;    // the key light's way out of the room (1 outdoors)
@@ -266,7 +267,9 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
     vec2 he = vec2( float( U.z & 0xffffu ), float( U.z >> 16 ) ) * 0.01;
     MkApF F = mkApFrame( float( U.w & 255u ) );
     vec3 d = ac - P;
-    v += mkAperture( d, he, F, w );
+    float va = mkAperture( d, he, F, w );
+    v += va;
+    if ( k == 0 ) mkVm = va;
     if ( ! ownProbe ) hit = max( hit, mkApHit( d, Rw, 0.05, rough, he, F ) * w );
     sun = max( sun, mkApHit( d, K.xyz, K.w, 0.01, he, F ) * open );
   }
@@ -416,18 +419,31 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
     vec2 sm = unpackHalf2x16( H.w ); // shell, margin
     vec4 PC = mkPrC[ k ], PD = mkPrD[ k ];
     float sc = PC.w;
-    float w = sc > 0.0 ? mkInside( Pw, Nw, lo + sm.y, hi - sm.y, sm.y, sm.x ) * PD.w * rem : 0.0;
+    // PD.w = weight (0..1) + 2 × the probe's sky share × 255 (render-audio-3)
+    float shareQ = floor( PD.w * 0.5 );
+    float w = sc > 0.0 ? mkInside( Pw, Nw, lo + sm.y, hi - sm.y, sm.y, sm.x ) * ( PD.w - 2.0 * shareQ ) * rem : 0.0;
     if ( w >= 1e-3 ) {
       vec4 PE = mkPrE[ k ];
+      // PE.w = slice + 8 (outdoor) + 16 × (cap index + 16 × mode) + V at the probe (fraction)
       float code = floor( PE.w ), vRef = PE.w - code;
-      bool outdoor = code > 7.5;
-      float slice = outdoor ? code - 8.0 : code;
+      float cg = floor( code * 0.0625 ), base = code - 16.0 * cg;
+      float mq = floor( cg * 0.0625 );
+      bool outdoor = base > 7.5;
+      float slice = outdoor ? base - 8.0 : base;
       float kr;
       vec3 Rp = mkBoxProject( Rw, Pw, PD.xyz, PE.xyz, PC.xyz, kr );
       vec3 irr = sc * mkTextureCubeUV( envMap, Nw, 1.0, slice );
-      // a porch lit through its opening (the Ulam): its light follows the sky visibility, dim in the wings
-      if ( vRef > 0.0 ) irr *= clamp( mkV / vRef, 0.0, 1.5 );
+      // a room lit through its openings: its diffuse light follows the sky visibility here / at the probe — the Ulam's
+      // wings dim (all its openings, ≤ 1.5); the Kodesh's far end by the parochet dimmer, its gate end brighter
+      // (render-audio-3: the square root of the ratio through the great gate alone, ≤ 2.5 — the gold walls spread its
+      // light; fitted to captures moved along the axis) — for the share of the probe's light that came in as skylight
+      float vr = vRef > 0.0 ? mix( 1.0, min( mq > 0.5 ? sqrt( mkVm / vRef ) : mkV / vRef, 1.0 + 0.5 * ( cg - 16.0 * mq ) ), shareQ * ( 1.0 / 255.0 ) ) : 1.0;
+      irr *= vr;
       vec3 rad = sc * mkTextureCubeUV( envMap, Rp, min( roughness * sqrt( kr ), 1.0 ), slice );
+      // a rough lobe gathers its light like the irradiance, over a cone no box projection places: the same scale (the
+      // parochet's 4 % specular at roughness 0.85 is as bright as its 5.6 % diffuse); glossy gold keeps its projected image.
+      // The main-opening mode only (the Kodesh, where it was measured): the Ulam's reflections stay as render-env-2 had them
+      if ( mq > 0.5 ) rad *= mix( 1.0, vr, smoothstep( 0.35, 0.8, roughness ) );
       if ( outdoor ) {
         float E = envMapIntensity; // scene units per unit sky irradiance
         irr = mkV * mix( irr, LbN * E, mkS );

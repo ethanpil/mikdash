@@ -35,24 +35,36 @@ import { visit, arrive, leave, fitAt, mpOf, release, bestEntry, SPURS } from './
 import { g4Book, planBefore } from './g4/book.js';
 import { geoOf, scriptNazir, scriptWaving, placeSet, bookSet, SetCast, g5PlanOf, setsSource, entryBack, NAZIR_COMBOS } from './g4/sets.js';
 import { OFFERING_TYPES } from '../../data/offerings.js';
+import { w2m, AMAH } from '../../core/units.js';
 
 const SEED = 0x6368;
 const WHO = 'chambers-daily';
 const CAPTION_RANGE = 25;
 const NAZ_FIRE = 'courts.en.nazirites.hearth';
-const CHAV_FIRE = 'sim.chambers.chavitin';
+// the bakery's firebox under the griddle and the chambers' oil lamps (world-4: fires 'service', dark until the sim
+// lights them — sim.fireWant)
+const CHAV_FIRE = 'courts.chavitin.hearth';
+const LAMPS = { chav: 'courts.chavitin.lamp', golah: 'courts.golah.lamp', parvah: 'courts.parvah.lamp', garmu: 'courts.moked.showbread.lamp' };
 const WHEEL = 'wheel:azarah.chamber.golah';
+// people's stations (src/people/clips.js, figure frame at scale 1): the Golah wheel's operator (CRANK) and a kneading
+// surface (KNEAD); fallbacks repeat people's numbers when the people module is absent
+const CRANK_FALLBACK = { stand: { eastOfWheel: 0.84, fromAxle: -1.85, heading: 270 }, phaseAt(a) { const s0 = (36 * Math.PI) / 180, p = (a - s0) / (Math.PI / 2); return p - Math.floor(p); } };
+const KNEAD_FALLBACK = { surface: 0.78, reach: 0.42 };
 const DOOR_CHEL = 'azarah.moked.door-chel';
 // Pinchas' chamber door to Ezrat Yisrael (kohanim dressed by Pinchas haMalbish come out of it — Shekalim 5:1) ⚙
 const PINCHAS = [[251.5, 341.5, 13.5], [246.6, 341.5, 13.5], [246.0, 337.0, 13.5]];
 // the chavitin chamber (courts/nikanor.js): its door to Ezrat Yisrael at X 248, Y 317.5–321.5; hearth with the iron
-// griddle along its south wall (X 250–253.5); kneading table X 254.5–258, Y 318.5–320.5
+// griddle along its south wall (X 250–253.5); kneading table X 254.5–258, Y 318.5–320.5, its top 1.7 amot up (0.82 m,
+// people's KNEAD.surface 0.78): the kneader before its south edge, the dough KNEAD.reach ahead on it
+const WAVE_RATE = 0.4;          // people's 'wave' / 'wave_under' cycles per second (one phase for the pair)
+// the crank leg's phase is set per frame by the golah troupe's callback; a function here keeps the leg from being
+// skipped as 'still'
+const CRANK_PH = () => 0;
 const CHAV = {
   door: [[246.2, 319.5, 13.5], [249.4, 319.5, 13.5]],
-  knead: { at: [256.4, 317.7, 13.5], face: 0 },
+  knead: { at: [256.25, 318.5 - 0.2 / AMAH, 13.5], face: 0 }, tableTop: 13.5 + 1.7,
   griddle: { at: [252.9, 318.25, 13.5], face: 190 },
   measure: { at: [253.95, 319.6, 13.5], face: 90 },
-  fire: [251.75, 316.5, 14.6],
 };
 // the wood store (courts/en.js woodStore): piles along the N and E walls, a low sorting pile, loose logs ⚙
 const WOOD = {
@@ -71,9 +83,9 @@ const NAZ = {
   tend: 388.3,
   fireZ: 7.48,
 };
-// the hearth's own fire is under the middle pot (courts.en.nazirites.hearth); the other two pots get a stand-in fire
-// each until build-courts lights them (requested) ⚙
-const NAZ_PIT_FIRES = ['sim.chambers.nazirites.0', null, 'sim.chambers.nazirites.2'];
+// the hearth's own fire is under the middle pot (courts.en.nazirites.hearth, 'day'); the other two pits are the
+// builder's 'service' fires (world-4), wanted only while their pots cook
+const NAZ_PIT_FIRES = ['courts.en.nazirites.hearth.0', null, 'courts.en.nazirites.hearth.2'];
 // from the foot of the fifteen steps across Ezrat Nashim to the nazirites' chamber door (and back) ⚙
 const STEP_FOOT = [278.6, 330.5, 6];
 const TO_NAZ = [STEP_FOOT, [300, 324.5, 6], [360, 321, 6], [375, 309, 6], [375, 302, 6]];
@@ -92,9 +104,11 @@ const PARVAH = {
   melach: [[118.0, 279.5, 16], [85.0, 279.5, 16], [85.0, 273.4, 16], [85.0, 268.6, 16]],
 };
 // Beit HaMoked: the showbread chamber (SE, kodesh) with its oven; the hall's chol half north of the kodesh line (Y 402):
-// the kneading and the shaping there, the baking inside (Menachot 11:2)
+// the kneading and the shaping there, the baking inside (Menachot 11:2 "their kneading and shaping outside, their baking
+// inside"; Rambam TuM 5:7) — the chamber's own kneading table (world-4) is in the kodesh half, so it is not used for the
+// kneading ⚙. The baker before the oven: world-4's anchor courts.moked.showbread.oven (facing its mouth)
 const GARMU = {
-  oven: { at: [216.9, 393.55, 16], face: 90 },
+  oven: { at: [219.6, 394.9, 16], face: 0 },
   door: [217.0, 399.2, 16],
   kneaders: [{ at: [213.6, 404.9, 16], face: 100 }, { at: [216.2, 405.6, 16], face: 260 }],
   shaper: { at: [218.4, 403.4, 16], face: 200 },
@@ -102,9 +116,8 @@ const GARMU = {
 // from Pinchas' door over the duchan, north along Ezrat Kohanim and through the Moked gate into the hall ⚙
 const TO_MOKED = [[251.5, 341.5, 13.5], [246.6, 341.5, 13.5], [245.0, 338.8, 13.5], [244.4, 337.6, 13.5], [241.6, 335.8, 16], [240.6, 352, 16], [240.6, 387.4, 16], [216, 387.6, 16], [210.75, 388.6, 16], [210.75, 395.5, 16]];
 const SEALS = { door: [217.0, 405.2, 16], achiyah: { at: [213.7, 403.2, 16], face: 75 }, yochanan: { at: [215.5, 403.6, 16], face: 255 }, inside: [217.0, 408.2, 16] };
-// the shaven nazir: the people system has no shaven head yet (requested) — he is drawn from the moment the shaving is
-// done as an Israelite with his head covered, from a seed whose skin, greying, build and face match the nazir's ⚙
-const SHAVEN_SEEDS = [197784, 274650, 152485];
+// the shaven nazir: the same man (the nazir pool's slot) with people's setShaven('head') from the moment the razor has
+// done (Bamidbar 6:18; Nazir 6:8) — P.shaven windows, applied every update (a pure function of t)
 
 export default {
   id: 'chambers-daily',
@@ -117,15 +130,19 @@ export default {
     sim.setBounds([60, 255, -30], [400, 420, 46]);
     const P = (name, role, count, seed, imp = 1, prop = null) => sim.pool({ name, role, count, seed: SEED + seed, importance: imp, prop });
     const state = {
-      bakers: P('chavitin-bakers', 'kohen', 3, 1),
+      // the kneader works at a fixture whose geometry is in metres (people's KNEAD): scale 1 (people-4-fix)
+      bakers: sim.pool({ name: 'chavitin-bakers', role: 'kohen', count: 3, seed: SEED + 1, importance: 1, scale: 1 }),
       wood: P('wood-sorters', 'kohen_offduty', 4, 2),
-      nazir: P('nazirites', 'nazir', 3, 3, 2),
-      shaven: SHAVEN_SEEDS.map((s, i) => P(`nazirites-shaven-${i}`, 'israelite', 1, s, 2)),
+      // the nazirites at scale 1: the waving pair's hands meet at one scale (people-4-fix: WAVE_UNDER)
+      nazir: sim.pool({ name: 'nazirites', role: 'nazir', count: 3, seed: SEED + 3, importance: 2, scale: 1 }),
       comp: P('nazir-companions', 'israelite', 6, 5, 2),
       setK: P('set-kohanim', 'kohen', 18, 6, 2),
-      setLamb: sim.pool({ name: 'set-lambs', animal: 'lamb', count: 4, seed: SEED + 11, importance: 2 }),
+      // the nazir's chatat is a ewe lamb (Bamidbar 6:14 — people's ewe), his olah a lamb, his shelamim a ram
+      setLamb: sim.pool({ name: 'set-lambs', animal: 'lamb', count: 2, seed: SEED + 11, importance: 2 }),
+      setEwe: sim.pool({ name: 'set-ewes', animal: 'ewe', count: 2, seed: SEED + 13, importance: 2 }),
       setRam: sim.pool({ name: 'set-rams', animal: 'ram', count: 2, seed: SEED + 12, importance: 2 }),
-      golah: P('golah-levites', 'levi', 2, 7),
+      // the operator of the Golah wheel (people's CRANK): scale 1
+      golah: sim.pool({ name: 'golah-levites', role: 'levi', count: 2, seed: SEED + 7, importance: 1, scale: 1 }),
       parvah: P('hide-salters', 'kohen', 3, 8),
       garmu: P('beit-garmu', 'kohen', 4, 9),
       seals: P('seals', 'israelite', 2, 10),
@@ -135,16 +152,9 @@ export default {
       doorChel: sim.door(DOOR_CHEL),
       plan: null, planGen: -1, troupes: [],
       fmt: (m) => ctx.time?.format?.(m) ?? hm(m),
-      baskets: [],
-      pitFires: [null, null, null],
+      free: [],
     };
-    NAZ_PIT_FIRES.forEach((id, k) => {
-      if (!id) return;
-      try { state.pitFires[k] = ctx.fx?.add?.({ id, kind: 'hearth', pos: [NAZ.pits[k][0], NAZ.pits[k][1], NAZ.fireZ], size: 0.3, intensity: 0, schedule: 'always', smoke: true }) || null; } catch { state.pitFires[k] = null; }
-    });
-    state.cast = new SetCast(ctx, { kohen: state.setK, lamb: state.setLamb, ram: state.setRam, nazir: state.nazir, companion: state.comp });
-    // the bakers' fire under the griddle — a stand-in until build-courts lights the bakery's hearth (requested) ⚙
-    try { state.chav = ctx.fx?.add?.({ id: CHAV_FIRE, kind: 'hearth', pos: CHAV.fire, size: 0.28, intensity: 0, schedule: 'always', smoke: false }) || null; } catch { state.chav = null; }
+    state.cast = new SetCast(ctx, { kohen: state.setK, lamb: state.setLamb, ewe: state.setEwe, ram: state.setRam, nazir: state.nazir, companion: state.comp });
     // the nazir's offerings as watchable rows ("Happening now", the map), under the nazirites' event
     try { state.offSource = ctx.schedule?.addSource?.(setsSource(ctx, 'g4-nazir', () => plan(ctx, state, sim).sets)); } catch (e) { console.warn('[sim:g4] source failed', e); }
     return state;
@@ -155,9 +165,17 @@ export default {
 
   update(ctx, state, t, dt, sim) {
     const P = plan(ctx, state, sim);
+    P.tNow = t;
     for (const tr of state.troupes) tr.update(ctx, sim, t, tr.cb);
     state.cast.update(sim, t, dt);
-    poseBaskets(ctx, state, P, t);
+    poseFree(ctx, state, P, t);
+    // the nazir shaven from the razor on (people's setShaven('head') on the same figure, whoever poses the slot)
+    for (let k = 0; k < state.nazir.count; k++) {
+      let sh = false;
+      for (const w of P.shaven) if (w[2] === k && within(t, w[0], w[1])) { sh = true; break; }
+      const sl = state.nazir.slot(k);
+      if (sl.actor || sh) sl.shaven(sh ? 'head' : false);
+    }
     // fires (shared wants, sim.fireWant) and the wheel
     // the nazirites' pots: the middle one's fire is the builder's hearth — cold unless a set is cooking (this module is
     // `always`, so it always states that want) — the others the stand-ins (added at 0, wanted only while they burn)
@@ -170,6 +188,8 @@ export default {
     const ch = P.W.chav && within(t, P.W.chav[0] - 2, P.W.chav[1] + 1) ? smooth(P.W.chav[0] - 1, P.W.chav[0] + 3, t) * (1 - smooth(P.W.chav[1] - 25, P.W.chav[1] - 10, t)) * 0.8 : 0;
     state.chavLevel = ch;
     if (ch > 0) sim.fireWant(CHAV_FIRE, ch);
+    // the chambers' lamps while their work goes on in the dark or in a closed room ⚙ (P.lamps: [id, t0, t1])
+    for (const [id, a, b] of P.lamps) if (within(t, a, b)) sim.fireWant(id, smooth(0, 0.15, since(t, a)) * (1 - smooth(since(b, a) - 0.15, since(b, a), since(t, a))));
     const a = P.wheelAngle(t);
     if (!state.wheel) state.wheel = ctx.movables?.get?.(WHEEL) || null;
     if (state.wheel?.userData?.spin && !(Math.abs(a - state.wheelA) <= 1e-4)) { state.wheel.userData.spin(a); state.wheelA = a; }
@@ -182,10 +202,10 @@ export default {
 
   release(ctx, state) {
     state.cast?.hide();
-    for (const b of state.baskets) if (b?.on) { b.on = false; b.a.setVisible(false); }
+    for (const f of state.free) if (f?.on) { f.on = false; f.a.setVisible(false); }
   },
 
-  dispose(ctx, state) { try { state.chav?.remove?.(); for (const f of state.pitFires) f?.remove?.(); } catch { /* fx gone */ } state.cast?.dispose(); for (const b of state.baskets) b?.a?.dispose?.(); },
+  dispose(ctx, state) { state.cast?.dispose(); for (const f of state.free) f?.a?.dispose?.(); },
 
   debug(s) {
     const P = s.plan;
@@ -205,7 +225,7 @@ function plan(ctx, state, sim) {
     chav: win(sim, 'chavitin-bakers'), wood: win(sim, 'wood-chamber'), naz: win(sim, 'nazirites'), golah: win(sim, 'golah-wheel'),
     parvah: win(sim, 'parvah'), garmu: win(sim, 'beit-garmu'), seals: win(sim, 'seals'),
   };
-  const P = { W, seed, naz: [], cues: [], chelPass: [], nazFire: null, wheelAngle: () => 0, sets: [], baskets: [] };
+  const P = { W, seed, naz: [], cues: [], chelPass: [], nazFire: null, wheelAngle: () => 0, sets: [], free: [], shaven: [], lamps: [], ctx };
   state.troupes = [];
   state.cast.reset();
   if (W.chav) chavitin(state, P, seed, sim);
@@ -233,7 +253,8 @@ function workAt(it, min, at, face, poses, seed, key) {
     let x = rand(seed, key, n) * wsum, p = poses[0];
     for (const q of poses) { x -= q[2]; if (x <= 0) { p = q; break; } }
     const d = Math.min(left, 0.7 + 2.6 * rand(seed, key, n, 'd'));
-    it.stand(d, face + (rand(seed, key, n, 'h') - 0.5) * 16, { at, pose: p[0], prop: p[1], phase: p[3] ?? null, turn: n === 0 });
+    const ph = p[3] && p[3].cycle ? ((c) => (q, u) => { const x = (u * 60) / c; return x - Math.floor(x); })(p[3].cycle) : p[3] ?? null;
+    it.stand(d, face + (rand(seed, key, n, 'h') - 0.5) * 16, { at, pose: p[0], prop: p[1], phase: ph, turn: n === 0 });
     left -= d; n++;
   }
 }
@@ -260,13 +281,15 @@ function chavitin(state, P, seed, sim) {
     const it = new Itin();
     it.stand(Math.max(0.5, w0 + 0.3 + 0.2 * k - tIn), S.face, { at: S.at, pose: 'stand' });      // waiting in the dark
     const t0w = it.T, min = Math.max(1, w1 - 0.6 - 0.3 * k - (tIn + t0w));
-    if (k === 0) workAt(it, min, S.at, S.face, [['kemitzah', 'bowl', 3], ['stand', 'bowl', 1]], seed, 'kn');
+    // the dough worked at the kneading table (people's knead, the dough KNEAD.reach before him on the table — Menachot
+    // 5:1–2: the chavitin of the Kohen Gadol, a matzah kneaded with warm water and oil)
+    if (k === 0) workAt(it, min, S.at, S.face, [['knead', null, 4, { cycle: 2.6 }], ['stand', null, 1]], seed, 'kn');
     else if (k === 1) workAt(it, min, S.at, S.face, [['pour', 'oil_flask', 2], ['kemitzah', null, 2], ['stand', null, 1]], seed, 'gr');
     else {
-      // the whole isaron measured and halved (Menachot 4:5) — then the cakes from the griddle to the table; the morning
-      // six laid ready on the table for the tamid's bearer
+      // the whole isaron measured and halved (Menachot 4:5: people's measure, the heaped isaron) — then the cakes from the
+      // griddle to the table; the morning six laid ready on the table for the tamid's bearer
       const upto = Math.max(1, tLay - (tIn + it.T));
-      workAt(it, Math.min(upto, 14), S.at, S.face, [['pour', 'solet', 2], ['stand', 'solet', 1]], seed, 'me');
+      workAt(it, Math.min(upto, 14), S.at, S.face, [['carry', 'measure', 2], ['kemitzah', null, 1], ['stand', 'measure', 1]], seed, 'me');
       let n = 0;
       while (tIn + it.T < tLay - 2 && n < 200) {
         it.walkTo([S.at, [254.3, 318.0, 13.5]], 0.8, { prop: null });
@@ -285,6 +308,11 @@ function chavitin(state, P, seed, sim) {
     return [{ t0: tIn, T: it.T, it }];
   };
   state.troupes.push(new Troupe(state.bakers, { plan: planFn, legs: (e) => e.it }));
+  // the dough on the table while the kneader works it; the lamp lit from the inspection's torches (Tamid 1:3) ⚙
+  const K = P.ctx.people?.stations?.knead || KNEAD_FALLBACK;
+  const kn = CHAV.knead.at;
+  P.free.push({ name: 'dough', t0: tIn + 0.4, t1: w1 - 1, at: [kn[0], kn[1] + K.reach / AMAH, CHAV.tableTop], h: 0 });
+  P.lamps.push([LAMPS.chav, tIn + 0.2, w1]);
 }
 
 // ------------------------------------------------------------------------------------------------ the wood store
@@ -366,7 +394,7 @@ function nazirites(state, P, seed, sim, ctx, book) {
   P.nazSource = P5 ? 'private-offerings' : 'own draw';
   if (!n) return;
   const fires = [];
-  const ep = { nazir: [[], [], []], shaven: [[], [], []], comp: Array.from({ length: 6 }, () => []), lamb: [[], [], [], []], ram: [[], []] };
+  const ep = { nazir: [[], [], []], comp: Array.from({ length: 6 }, () => []), lamb: [[], []], ewe: [[], []], ram: [[], []] };
   const span = Math.max(0, w1 - w0 - 175);
   const back = entryBack();
   for (let i = 0; i < Math.min(3, n); i++) {
@@ -382,19 +410,20 @@ function nazirites(state, P, seed, sim, ctx, book) {
     const arrive3 = (target2, pose, prop, prev) => booked(book, target2, (it) => { arrive(it, { gate, spur: 'korban', cls: 0, pose, prop, prev }); it.mark = it.T; });
     const eO = arrive3(tA, 'lead_walk', null, null);
     const eC1 = arrive3(tA + sy.dtC1, 'lead_walk', null, eO.it.cols);
-    const eC2 = arrive3(tA + sy.dtC2, 'carry_shoulder_walk', 'loaves_todah', eC1.it.cols);
+    const eC2 = arrive3(tA + sy.dtC2, 'carry_shoulder_walk', 'sal_matzot', eC1.it.cols);
     // the animals walk where their leaders walked: keep the lane free behind them too
     for (const [e, lags] of [[eO, [sy.lagR]], [eC1, sy.lagL]]) {
       for (const h of [...(e.it.mp?.taken || [])]) if (h.lane) for (const g of lags) e.it.mp.taken.push(h.lane.shadow(h, g, WHO));
     }
-    const k3 = i % 3, kL = (i % 2) * 2, kR = i % 2;
+    const k3 = i % 3, k2 = i % 2, kR = i % 2;
     ep.nazir[k3].push(eO);
     ep.comp[2 * k3].push(eC1);
     ep.comp[2 * k3 + 1].push(eC2);
     const lead = (pool, k) => () => pool.slot(k).actor || null;
     ep.ram[kR].push({ t0: eO.t0, T: eO.T, it: new Follower(eO.it, sy.lagR), leader: lead(state.nazir, k3) });
-    ep.lamb[kL].push({ t0: eC1.t0, T: eC1.T, it: new Follower(eC1.it, sy.lagL[0]), leader: lead(state.comp, 2 * k3) });
-    ep.lamb[kL + 1].push({ t0: eC1.t0, T: eC1.T, it: new Follower(eC1.it, sy.lagL[1]), leader: lead(state.comp, 2 * k3) });
+    // the ewe (the chatat) and the lamb (the olah) on C1's rope
+    ep.ewe[k2].push({ t0: eC1.t0, T: eC1.T, it: new Follower(eC1.it, sy.lagL[0]), leader: lead(state.comp, 2 * k3) });
+    ep.lamb[k2].push({ t0: eC1.t0, T: eC1.T, it: new Follower(eC1.it, sy.lagL[1]), leader: lead(state.comp, 2 * k3) });
     // ---- the court (tracks on the same figures)
     const forced = new Map();
     for (const tr of B.tracks) {
@@ -402,8 +431,8 @@ function nazirites(state, P, seed, sim, ctx, book) {
       else if (tr.role === 'C1') forced.set(tr, 2 * k3);
       else if (tr.role === 'C2') forced.set(tr, 2 * k3 + 1);
       else if (tr.role === 'AR') forced.set(tr, kR);
-      else if (tr.role === 'AC') forced.set(tr, kL);
-      else if (tr.role === 'AO') forced.set(tr, kL + 1);
+      else if (tr.role === 'AC') forced.set(tr, k2);
+      else if (tr.role === 'AO') forced.set(tr, k2);
     }
     state.cast.assign(B, forced);
     // ---- the chamber
@@ -421,10 +450,12 @@ function nazirites(state, P, seed, sim, ctx, book) {
     return v;
   };
   const leadCb = (k, slot, s, e) => { const L = e.leader?.() || null; if (slot._lead !== L) { slot._lead = L; slot.actor?.setLead?.(L); } };
-  state.troupes.push(new Troupe(state.nazir, { plan: (k) => ep.nazir[k], legs: (e) => e.it }));
-  state.shaven.forEach((pool, k) => state.troupes.push(new Troupe(pool, { plan: () => ep.shaven[k], legs: (e) => e.it })));
+  // the waving's phase from its clock start: the kohen's wave_under beneath (g4/sets.js scriptWaving) shares it
+  const waveCb = (k, slot, s, e) => { if (s.pose === 'wave' && Number.isFinite(e.tW)) { const x = (P.tNow - e.tW) * 60 * WAVE_RATE; s.phase = x - Math.floor(x); } };
+  state.troupes.push(Object.assign(new Troupe(state.nazir, { plan: (k) => ep.nazir[k], legs: (e) => e.it }), { cb: waveCb }));
   state.troupes.push(new Troupe(state.comp, { plan: (k) => ep.comp[k], legs: (e) => e.it }));
   state.troupes.push(Object.assign(new Troupe(state.setLamb, { plan: (k) => ep.lamb[k], legs: (e) => e.it }), { cb: leadCb }));
+  state.troupes.push(Object.assign(new Troupe(state.setEwe, { plan: (k) => ep.ewe[k], legs: (e) => e.it }), { cb: leadCb }));
   state.troupes.push(Object.assign(new Troupe(state.setRam, { plan: (k) => ep.ram[k], legs: (e) => e.it }), { cb: leadCb }));
 }
 
@@ -448,7 +479,7 @@ function chamber(state, P, seed, sim, ctx, book, G, P5, B, i, k3, ep) {
   // ---- C1 with the meat: to the pot, the meat in, the fire lit
   const c1 = new Itin();
   c1.walkTo([sy.pMeatFoot, ...TO_NAZ.slice(1), [NAZ.tend - 2.0, pit[1] - 1.0, 6], tendC1], 1.0, { pose: 'carry_shoulder_walk', prop: 'lamb_carcass' });
-  c1.stand(1.0, 90, { pose: 'pour', prop: 'lamb_carcass' });
+  c1.stand(1.0, 90, { pose: 'pour', prop: 'lamb_carcass' });          // the meat into the pot on the pit
   const tPot = tA + sy.tMeatFoot + c1.T;               // the meat in the pot
   c1.stand(1.4, 90, { pose: 'stoke', prop: null });
   const tCooked = tPot + 24 + 6 * r(1);                  // ⚙ the foreleg boiled (compressed)
@@ -462,13 +493,14 @@ function chamber(state, P, seed, sim, ctx, book, G, P5, B, i, k3, ep) {
   nz.done();
   const tShaved = tSit + shave;
   ep.nazir[k3].push({ t0: tA + sy.tNazirFoot, T: nz.T, it: nz });
-  // C2: sets the basket down on the bench, shaves him (a razor: 'knife_flay' until people has one — requested)
+  // C2: sets the basket of matzot down on the bench (people's sal_matzot: ten challot and ten rekikin, Menachot 7:2,
+  // 76b) and shaves his head with a razor (the ta'ar, Bamidbar 6:5, 6:18 — people's razor) ⚙ who shaves
   const c2 = new Itin();
-  c2.walkTo([sy.pC2Foot, ...TO_NAZ.slice(1), [bench[0] - 1.1, bench[1] + 1.6, 6]], 1.0, { pose: 'carry_shoulder_walk', prop: 'loaves_todah' });
-  c2.stand(0.3, 180, { pose: 'kneel', phase: (q) => q, prop: 'loaves_todah' });
+  c2.walkTo([sy.pC2Foot, ...TO_NAZ.slice(1), [bench[0] - 1.1, bench[1] + 1.6, 6]], 1.0, { pose: 'carry_shoulder_walk', prop: 'sal_matzot' });
+  c2.stand(0.3, 180, { pose: 'kneel', phase: (q) => q, prop: 'sal_matzot' });
   const tBasket = tA + sy.tC2Foot + c2.T;
   c2.walkTo([[bench[0] - 1.1, bench[1] + 1.6, 6], [bench[0] + 0.3, bench[1] + 2.4, 6]], 0.8);
-  c2.stand(Math.max(0.5, tShaved - (tA + sy.tC2Foot + c2.T)), 180, { pose: 'semichah_high', prop: 'knife_flay' });
+  c2.stand(Math.max(0.5, tShaved - (tA + sy.tC2Foot + c2.T)), 180, { pose: 'semichah_high', prop: 'razor' });
   c2.stand(0.3, 180, {});
   // the shaven man: the hair and some broth under the pot once the pot has cooked a while (Nazir 6:8; Rambam Nezirut 8:2)
   const sh = new Itin();
@@ -504,7 +536,7 @@ function chamber(state, P, seed, sim, ctx, book, G, P5, B, i, k3, ep) {
     sh.stand(Math.max(0.05, tW - 0.1 - upIt.T - (tShaved + sh.T)), 80, { pose: 'stand' });
     sh.walkTo(up, 1.0);
     sh.stand(Math.max(0.1, tW - (tShaved + sh.T)), 270, { pose: 'stand' });
-    sh.stand(wave.sync.dur, 270, { pose: 'wave', prop: 'limb_foreleg', left: 'chavitin' });
+    sh.stand(wave.sync.dur, 270, { pose: 'wave', prop: 'limb_foreleg', left: 'chavitin', phase: (q, u) => { const x = (u * 60) * WAVE_RATE; return x - Math.floor(x); } });
     P.cues.push({ key: `naz-wave:${Math.round(tW)}`, at: tW + 0.3, pos: wave.sync.owner,
       text: { en: 'The kohen puts the cooked foreleg, a loaf and a wafer on the nazir\'s palms with the breast, the thigh and the eimurim, his own hands beneath, and waves them; now the nazir may drink wine (Nazir 6:9; Rambam MK 9:9)', he: 'וְנוֹתֵן עַל כַּפֵּי הַנָּזִיר וּמְנִיפָן' } });
     sh.stand(0.4, 270, { pose: 'bow', phase: (q) => q });
@@ -518,12 +550,13 @@ function chamber(state, P, seed, sim, ctx, book, G, P5, B, i, k3, ep) {
     it.walkTo([from, ...[...TO_NAZ].reverse().slice(1, -1), [393, 329, 6]], 1.0, { pose, prop });
     leave(it, { spur: 'en', cls: 0, pose, prop, prev });
   };
-  // C1 tends the pot till they go
+  // C1 tends the pot till they go; the meat to take home in an earthenware pot of the period's Jerusalem ware (people's
+  // clay_pot) ⚙ vessel
   c1.stand(Math.max(0.5, tHome - (tA + sy.tMeatFoot + c1.T)), 90, { pose: 'stand' });
-  c1.stand(0.5, 90, { pose: 'kneel', phase: (q) => q, prop: 'wine_jug' });
+  c1.stand(0.5, 90, { pose: 'kneel', phase: (q) => q, prop: 'clay_pot' });
   c2.walkTo([[bench[0] + 0.3, bench[1] + 2.4, 6], [bench[0] + 1.6, bench[1] + 2.4, 6]], 0.8);
   c2.stand(Math.max(0.3, tHome - 0.2 - (tA + sy.tC2Foot + c2.T)), 180, { pose: 'stand' });
-  c2.stand(0.3, 180, { pose: 'kneel', phase: (q) => 1 - q, prop: 'loaves_todah' });
+  c2.stand(0.3, 180, { pose: 'kneel', phase: (q) => 1 - q, prop: 'sal_matzot' });
   // the three go out one behind another, booked on the Mount from their clock start
   const goHome = (it, t0It, pose, prop, prev) => {
     it.mp = mpOf(book, t0It, WHO);
@@ -531,38 +564,50 @@ function chamber(state, P, seed, sim, ctx, book, G, P5, B, i, k3, ep) {
     it.done();
   };
   goHome(sh, tShaved, 'walk', null, null);
-  goHome(c1, tA + sy.tMeatFoot, 'carry_walk', 'wine_jug', sh.cols);
-  goHome(c2, tA + sy.tC2Foot, 'carry_shoulder_walk', 'loaves_todah', c1.cols);
-  ep.shaven[k3].push({ t0: tShaved, T: sh.T, it: sh });
+  goHome(c1, tA + sy.tMeatFoot, 'carry_walk', 'clay_pot', sh.cols);
+  goHome(c2, tA + sy.tC2Foot, 'carry_shoulder_walk', 'sal_matzot', c1.cols);
+  // the same man, shaven (the nazir's slot from the bench on; people's setShaven('head') — P.shaven)
+  ep.nazir[k3].push({ t0: tShaved, T: sh.T, it: sh, tW });
+  P.shaven.push([tShaved, tShaved + sh.T + 0.05, k3]);
   ep.comp[2 * k3].push({ t0: tA + sy.tMeatFoot, T: c1.T, it: c1 });
   ep.comp[2 * k3 + 1].push({ t0: tA + sy.tC2Foot, T: c2.T, it: c2 });
   // the basket on the bench while he is shaved (a free prop)
-  P.baskets.push({ k: k3, t0: tBasket + 0.15, t1: tHome - 0.2, at: basketAt });
+  P.free.push({ name: 'sal_matzot', t0: tBasket + 0.15, t1: tHome - 0.2, at: basketAt, h: 0 });
   return { fire: [tPot - 0.6, tHome + 0.5], wave };
 }
 
-/** the basket set down on the bench (one free prop per chamber place) */
-function poseBaskets(ctx, state, P, t) {
-  for (let k = 0; k < 3; k++) {
-    const b = P.baskets.find((x) => x.k === k && t >= x.t0 && t < x.t1);
-    let f = state.baskets[k];
-    if (b && f === undefined) {
+/** free props of the day's plan (P.free: { name, t0, t1, at, h }): the basket on the bench, the dough on the table —
+ *  one lazily spawned actor per item, shown in its window */
+function poseFree(ctx, state, P, t) {
+  for (let i = 0; i < P.free.length; i++) {
+    const b = P.free[i];
+    const want = within(t, b.t0, b.t1);
+    let f = state.free[i];
+    if (f && f.name !== b.name) { f.a?.dispose?.(); f = state.free[i] = undefined; }
+    if (want && f === undefined) {
       let a = null;
-      try { a = ctx.people?.spawnProp?.('loaves_todah', { seed: SEED + k }) || null; a?.setVisible?.(false); } catch { a = null; }
-      f = state.baskets[k] = a ? { a, on: false, key: '' } : null;
+      try { a = ctx.people?.spawnProp?.(b.name, { seed: SEED + i }) || null; a?.setVisible?.(false); } catch { a = null; }
+      f = state.free[i] = a ? { a, on: false, key: '', name: b.name } : null;
     }
     if (!f) continue;
-    if (b) {
-      const key = b.at.join(',');
-      if (f.key !== key) { f.key = key; f.a.setSite(b.at[0], b.at[1], b.at[2]); f.a.setHeading(0); }
+    if (want) {
+      const key = `${b.at.join(',')},${b.h}`;
+      if (f.key !== key) { f.key = key; f.a.setSite(b.at[0], b.at[1], b.at[2]); f.a.setHeading(b.h || 0); }
       if (!f.on) { f.on = true; f.a.setVisible(true); }
     } else if (f.on) { f.on = false; f.a.setVisible(false); }
   }
+  for (let i = P.free.length; i < state.free.length; i++) { const f = state.free[i]; if (f?.on) { f.on = false; f.a.setVisible(false); } }
 }
 
 // ------------------------------------------------------------------------------------------------ the Golah wheel
 function golah(state, P, seed, sim, book) {
   const [w0, w1] = P.W.golah;
+  // the operator at people's CRANK station: east of the wheel's plane facing it, south of the axle (the hub up to his
+  // right); the wheel's plane 2.1 amot east of the cistern's centre (courts/chambers.js golah) — read off the movable
+  const CR = P.ctx.people?.stations?.crank || CRANK_FALLBACK;
+  const wn = P.ctx.movables?.get?.(WHEEL);
+  const hub = wn ? w2m(wn.position) : { X: 93.0, Y: 386.0 };
+  const crankAt = [hub.X + 2.1 + CR.stand.eastOfWheel, hub.Y + CR.stand.fromAxle, 16];
   // one draw every CYCLE minutes: the bucket raised (the drum winds its rope — ≈ 3.8 turns for the 13 amot from the
   // water to the curb), emptied, lowered again ⚙
   const CYCLE = 6, RAISE = [0.3, 2.6], LOWER = [3.7, 4.8];
@@ -583,8 +628,8 @@ function golah(state, P, seed, sim, book) {
   const eps = [0, 1].map((k) => [booked(book, w0 + 0.3 * k, (it) => visit(it, {
     gate: 'ce', spur: 'nitzotz', v: 1.2,
     build: (it) => {
-      const S = k === 0 ? GOLAH.wheel : GOLAH.curb;
-      it.walkTo([[114.5, 396, 16], [104, 382, 16], ...GOLAH.door, S.at], 1.05);
+      const S = k === 0 ? { at: crankAt, face: CR.stand.heading } : GOLAH.curb;
+      it.walkTo([[114.5, 396, 16], [104, 382, 16], ...GOLAH.door, ...(k === 0 ? [[crankAt[0], crankAt[1] - 1.2, 16]] : []), S.at], 1.05);
       it.mark = it.T;
       // until the first cycle, at the post; then every cycle laid against its own start (no drift)
       it.stand(Math.max(0.2, t0 - (w0 + 0.3 * k)), S.face, { pose: 'stand' });
@@ -592,10 +637,11 @@ function golah(state, P, seed, sim, book) {
       const at = (c, x) => cyc0 + c * CYCLE + x;      // minutes into the itinerary of cycle c's moment x
       for (let c = 0; c < nCyc; c++) {
         if (k === 0) {
-          it.stand(at(c, RAISE[0] + 0.05) - it.T, S.face, { pose: 'stand' });
-          it.stand(at(c, RAISE[1]) - it.T, S.face, { pose: 'sweep' });           // hand over hand on the spokes ('crank' requested)
-          it.stand(at(c, LOWER[0]) - it.T, S.face, { pose: 'stand' });
-          it.stand(at(c, LOWER[1]) - it.T, S.face, { pose: 'raise_hands_low' }); // letting it run back, braking
+          // hand over hand on the spokes as the bucket comes up (people's crank, its phase from the wheel's angle — set
+          // per frame by the troupe's callback), holding the loaded wheel while the bucket is emptied, letting it run
+          // back hand over hand (the clip played backwards with the angle)
+          it.stand(at(c, RAISE[0]) - it.T, S.face, { pose: 'stand' });
+          it.stand(at(c, LOWER[1]) - it.T, S.face, { pose: 'crank', phase: CRANK_PH });
           it.stand(at(c + 1, 0) - it.T, S.face, { pose: 'stand' });
         } else {
           it.stand(at(c, RAISE[1]) - it.T, S.face, { pose: 'stand' });
@@ -612,7 +658,12 @@ function golah(state, P, seed, sim, book) {
       it.walkTo([S.at, ...[...GOLAH.door].reverse(), [104, 382, 16], [110, 396, 16]], 1.05);
     },
   }))]);
-  state.troupes.push(new Troupe(state.golah, { plan: (k) => eps[k], legs: (e) => e.it }));
+  // the crank's phase on the wheel's angle at this very t (people's CRANK.phaseAt), whatever the booking's rounding
+  const cb = (k, slot, s) => { if (s.pose === 'crank') s.phase = CR.phaseAt(P.wheelAngle(P.tNow)); };
+  state.troupes.push(Object.assign(new Troupe(state.golah, { plan: (k) => eps[k], legs: (e) => e.it }), { cb }));
+  // the lamp for the draws before full light ⚙
+  const sr = P.ctx.time?.zmanim?.sunrise ?? 356;
+  if (w0 < sr + 30) P.lamps.push([LAMPS.golah, w0, Math.min(w1, sr + 30)]);
 }
 
 // ------------------------------------------------------------------------------------------------ the Parvah
@@ -620,6 +671,7 @@ function golah(state, P, seed, sim, book) {
 // private-offerings' MOK_X) across the court on its walking graph to the Parvah, never over the Mount ⚙
 function parvah(state, P, seed, sim, ctx) {
   const [w0, w1] = P.W.parvah;
+  P.lamps.push([LAMPS.parvah, w0, w1]);            // the salting in the closed chamber, by its lamp ⚙
   const G = geoOf(ctx);
   const inWay = graphPts(G, 'MOK_X', 'S_PAR', {});
   const outWay = graphPts(G, 'S_PAR', 'MOK_X', {});
@@ -662,10 +714,11 @@ function garmu(state, P, seed, sim) {
   // half, baked in the showbread chamber's oven. Kohanim in the holy garments: they come out of Pinchas' chamber and
   // through the court and the Moked gate into the hall, never over the Mount ⚙
   const posts = [GARMU.oven, GARMU.kneaders[0], GARMU.kneaders[1], GARMU.shaper];
+  P.lamps.push([LAMPS.garmu, w0, w1]);             // "a lamp in the bakery" (world-4): lit for the Friday baking ⚙
   const planFn = (k) => {
     const S = posts[k];
     const it = new Itin();
-    const via = k === 0 ? [[214.0, 400.0, 16], GARMU.door, [217.0, 396.2, 16]] : k === 3 ? [[214.6, 402.6, 16]] : [[212.2, 402.8, 16]];
+    const via = k === 0 ? [[214.0, 400.0, 16], GARMU.door, [217.0, 396.2, 16], [217.6, 395.0, 16]] : k === 3 ? [[214.6, 402.6, 16]] : [[212.2, 402.8, 16]];
     it.walkTo([...TO_MOKED, ...via, S.at], 1.15);
     it.mark = it.T;
     const min = w1 - w0 - 0.5 * k;
@@ -729,8 +782,9 @@ function seals(state, P, seed, sim, book) {
           it.walkTo([SEALS.inside, SEALS.door, S.at], 0.8, { prop: 'bowl', pose: 'carry_walk' });
           workAt(it, Math.max(1, min - 2.6), S.at, S.face, [['carry', 'bowl', 3], ['point', 'bowl', 1], ['stand', 'bowl', 1]], seed, 'ac');
         } else {
-          // Yochanan counts out coin for each seal; a surplus to the Temple, a shortfall from his own (Shekalim 5:4)
-          workAt(it, min, S.at, S.face, [['kemitzah', 'bowl', 3], ['carry', 'bowl', 2], ['stand', null, 1]], seed, 'yo');
+          // Yochanan counts out coin for each seal; a surplus to the Temple, a shortfall from his own (Shekalim 5:4) —
+          // people's coins, on his open palm and in his fist
+          workAt(it, min, S.at, S.face, [['carry_limbs', 'coins', 3], ['kemitzah', null, 2], ['stand', 'coins', 1]], seed, 'yo');
         }
         passOut = it.T;
         it.walkTo([S.at, [S.at[0] - 1.2, S.at[1] + 2.2, 16], [207.5, 409, 16]], 1.0);

@@ -5,7 +5,10 @@
 //   cue(id, worldPos?, opts) → handle  one-shot; worldPos: Vector3 (world m) | [X,Y,Z] (site amot) | Object3D; omit = non-spatial
 //        opts: { gain, levelDb, delay (s), rate, variant, area: {min:[X,Y,Z], max:[X,Y,Z]} | [boxes], follow: Object3D, people,
 //                caption (false = no subtitle), psalm, song (+ week), section (0-2), style ('mishnah'|'sg1612'), fluteDay,
-//                steps, kind, offset (s into the buffer), captionHeading (false), catchUp (false) }
+//                steps, kind, offset (s into the buffer), captionHeading (false), catchUp (false), size ('pot-break') }
+//        song 'aromimcha' (= 'psalm-30', 'bikkurim', psalm 30): the Levites' song as the first fruits reach the court
+//        (Bikkurim 3:4), three sections cued back to back, verse captions as the daily psalms (render-audio-3)
+//        'pot-break': an earthenware pot broken on the pavement, the scouring (Lev 6:21; Zevachim 11:4; render-audio-3)
 //        handle: { stop(fade), setPosition(p), setGain(g), ended: Promise<bool>, duration }
 //   loop(id, worldPos?, opts) → { setGain(g, t), setPeople(n), setPosition(p), stop(fade), active }
 //        'choir': the section's buffer on its own clock (opts.offset); its verses captioned only with opts.caption: true
@@ -73,6 +76,11 @@ function concert(ctx, setting) {
       if (!S) { if (!warned.has(o.song)) { warned.add(o.song); console.warn(`[audio] unknown song "${o.song}" — the psalm of the day is sung`); } delete o.song; }
       else if (S.kind === 'psalm') { o.psalm = S.psalm; delete o.song; } else { o.song = id; delete o.psalm; delete o.weekday; }
       delete o.week; delete o.date;
+    } else if (o.psalm !== undefined && o.psalm !== null && !SONGS[`psalm-${o.psalm}`]) {
+      // a psalm that is not a daily one but a song of its own ({ psalm: 30 } = the bikkurim song): one cache entry with
+      // { song: 'aromimcha' }
+      const id = resolveSong(o.psalm);
+      if (id && SONGS[id].kind !== 'psalm') { o.song = id; delete o.psalm; delete o.weekday; }
     }
     // tempo 1 is the default: left out, so it is one cache entry with a cue that does not name it
     if (!(o.tempo > 0) || +o.tempo === 1) delete o.tempo; else o.tempo = +o.tempo;

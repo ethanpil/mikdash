@@ -37,13 +37,27 @@
 //   fist, that arm steady). The service clips are baked for the men's rigs only (man, elder), sit_floor and warm for all.
 //   Tzitzit hang plumb and a seated man's mantle sides hang from the pelvis (material.js, docs/decisions/people-3-fix.md).
 //   The sleepers' bedding covers are built ahead in idle time (props.js prewarmBedding, scheduled below).
+//   people-4 (docs/decisions/people-4.md): poses eat (all rigs), knead, crank (the Golah wheel), wave_under (the kohen's
+//   palms beneath the owner's in tenufah — give both the same phase, WAVE_UNDER.partner apart), wave_basket (the
+//   bikkurim basket waved by its rims: the basket chooses it for 'wave'), carry_stack(_walk) (the showbread stacks choose
+//   it for carry), carry_slain(_walk) (a slain carcass across the shoulders: chosen for carry_shoulder); roles metzora,
+//   nazir_shaven, mourner, menudeh; animals ewe, she_goat; Actor.setShaven('head'|'all'|false), Actor.setGarb('black'|
+//   'white'|null) (also spawn({ shaven, garb }), crowd({ garb }), Crowd.setGarb); setProp(null) empties both hands;
+//   props showbread_stack showbread_half bread_piece lamb_slain ewe_slain goat_slain she_goat_slain {ram,goat,ewe,
+//   she_goat}_hung carcass_flaying_{ram,goat,ewe,she_goat} carcass_hung_{ram,goat} hide_goat eimurim eimurim_goat
+//   sal_matzot razor clay_pot clay_pot_broken coins measure; grip class 'rims'; ctx.people.stations.{crank, waveUnder,
+//   knead, eat}.
+//   people-4-fix (docs/decisions/people-4-fix.md): Actor.setScale(s | null) and spawn({ scale }) / spawnAnimal(kind,
+//   { scale }) — the poses that meet a partner or a fixture are made at scale 1: the tenufah pair at ONE scale s
+//   (kohen.setScale(owner.scale)) WAVE_UNDER.partner·s apart; the operators of crank / windlass(_raise) / knead at 1. Prop
+//   dough (on the KNEAD surface). Roles mourner / menudeh draw the atifah (archetype 'mourner').
 // Rendering: GPU-instanced; every figure is skinned in the vertex shader from a baked animation atlas. Beyond
 // quality.maxFigures the next figures (up to 3× more) are drawn as LOD3 silhouettes that dither out at the cap.
 import { PRIORITY } from '../core/engine.js';
 import { PeopleSystem } from './system.js';
 import { ROLE_NAMES, ANIMAL_NAMES, ROLES } from './roles.js';
 import { PROP_NAMES, setPropMetals, prewarmBedding } from './props.js';
-import { HUMAN_CLIPS, MITRE_GRASP, STAFF, WINDLASS, WINDLASS_RAISE } from './clips.js';
+import { HUMAN_CLIPS, MITRE_GRASP, STAFF, WINDLASS, WINDLASS_RAISE, CRANK, WAVE_UNDER, KNEAD, EAT } from './clips.js';
 import { QUAD_CLIPS, BIRD_CLIPS } from './animal-clips.js';
 import { poseAlongPath } from './util.js';
 
@@ -112,7 +126,9 @@ export async function init(ctx) {
     // the fixtures' geometry the service poses assume (figure frame: metres, −z ahead, +x his right); the windlass
     // stations carry the wheel angle ↔ pose phase coupling (phaseAt) for lowering (windlass) and raising
     // (windlassRaise, pose windlass_raise) the kiyor; staff.strike.tip = where the blow lands
-    stations: { windlass: WINDLASS, windlassRaise: WINDLASS_RAISE, staff: STAFF, mitreGrasp: MITRE_GRASP },
+    // people-4: crank (the Golah wheel's hub, spokes and the wheel angle <-> phase coupling), waveUnder (the tenufah pair's
+    // spacing), knead (the working surface), eat (the bite's phase window)
+    stations: { windlass: WINDLASS, windlassRaise: WINDLASS_RAISE, staff: STAFF, mitreGrasp: MITRE_GRASP, crank: CRANK, waveUnder: WAVE_UNDER, knead: KNEAD, eat: EAT },
     animalPoses: Object.keys(QUAD_CLIPS),
     birdPoses: Object.keys(BIRD_CLIPS),
     get actors() { return [...sys.actors]; },

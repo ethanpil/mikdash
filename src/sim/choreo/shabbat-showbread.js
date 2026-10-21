@@ -16,7 +16,7 @@
 // The plan (g6/bread.js) is shared with shabbat-mishmar, which takes the eight and the bread from the division's start.
 // Every pose and prop is a pure function of (t, date); cues fire once in continuous play.
 import { runScripts, FreeProps } from './g2/lib.js';
-import { within, wrap, smooth, clamp } from '../lib/core.js';
+import { within, wrap, smooth, clamp, since, span } from '../lib/core.js';
 import { breadPlan, SEED_OUT, SEED_IN } from './g6/bread.js';
 import { say, aggadahOn } from './g6/common.js';
 
@@ -32,8 +32,17 @@ const TEXT = {
   burn: { en: 'Salted like every offering, the frankincense goes on the incense pile — built today of eight se\'ah of coals for it (Tamid 2:5; Rambam TuM 4:10); until it is burned the bread may not be eaten', he: 'וְהַלְּבוֹנָה טְעוּנָה מֶלַח' },
 };
 
+// the Shulchan's bread (world-4 / world-4-fix): the set on the table and the incoming set, each slide(f) (0 on the table,
+// 1 off it by its depth: the old to the south, the new from the north), show(bool), kanim(bool); its bowls of
+// frankincense are meshes of the set (':bazichin', ':levonah') shown or hidden here while they are in the bowl-men's hands
+// (a bowls(bool) on the movable is requested from world)
+const SHULCHAN = 'heichal.shulchan.bread', INCOMING = 'heichal.shulchan.bread.incoming';
+
 export default {
   id: 'shabbat-showbread',
+  // the kanim are out of the bread from Friday's pulling until after Shabbat (Menachot 11:6), so the module states the
+  // Shulchan's bread every day (`always`); its figures only on Shabbat around the change
+  always: true,
   lead: 8,          // the new bread is fetched from Beit HaMoked ~6 minutes before the change
   lag: 2,           // the eight hand over to shabbat-mishmar at the division's start (= the end of the bazichin)
   importance: 3,
@@ -47,6 +56,7 @@ export default {
       fx: { steam: null, puff: null, made: false },
       plan: null, planGen: -1, out: {}, fnsO: [], fnsI: [],
       fmt: (m) => ctx.time?.format?.(m) ?? '--',
+      sh: { main: sim.door(SHULCHAN), inc: sim.door(INCOMING), c: {} },
     };
     try { plan(ctx, sim, state); } catch (e) { console.warn(`[sim] ${sim.id} plan at init failed`, e); }
     return state;
@@ -54,6 +64,7 @@ export default {
 
   update(ctx, state, t, dt, sim) {
     const B = plan(ctx, sim, state);
+    shulchan(ctx, state, B, t);
     if (!B) { state.props.hideAll(); fxSet(state, 0, 0); return; }
     runScripts(ctx, state.O, B.swapO, t, state.out, state.fnsO);
     runScripts(ctx, state.I, B.swapI, t, state.out, state.fnsI);
@@ -62,7 +73,7 @@ export default {
     cues(ctx, state, sim, B);
   },
 
-  release(ctx, state) { state.props.hideAll(); fxSet(state, 0, 0); },
+  release(ctx, state) { state.props.hideAll(); fxSet(state, 0, 0); shulchanSet(ctx, state, DEFAULTS); },
 
   debug(s) {
     const B = s.plan, f = s.fmt;
@@ -139,4 +150,57 @@ function cues(ctx, state, sim, B) {
   if (aggadahOn(ctx)) say(ctx, state, sim, 'sb-warm', c.warm, at.gold, TEXT.warm, { id: 'bread-warm', dur: 10, range: NEAR });
   say(ctx, state, sim, 'sb-baz', c.baz, at.gold, TEXT.baz, { id: 'bazichin', dur: 7, range: 60 });
   say(ctx, state, sim, 'sb-burn', c.burn, at.pile, TEXT.burn, { id: 'bazichin-burn', dur: 8, range: 50 });
+}
+
+// ------------------------------------------------------------------------------------------------ the Shulchan's bread
+const DEFAULTS = { mainF: 0, mainShown: true, mainBowls: true, incF: 1, incShown: false, incBowls: true, kanim: true };
+const _sh = { ...DEFAULTS };
+/**
+ * The bread on the Shulchan at t: the set on the table until the change; the old bowls off it in the outgoing bowl-men's
+ * hands (B.t.bowlsOff); "these draw and those lay down, the handbreadth of this one beside the handbreadth of that"
+ * (Menachot 11:7): the old set slid off to the south as the incoming is slid on from the north over the slide, the old
+ * hidden once it is in the stack-men's hands; the new bowls set on (bowlsSet); then the sets swapped back (they are
+ * identical, so nothing visible changes). The kanim out from Friday after the afternoon service until after Shabbat
+ * (Menachot 11:6) ⚙ the hours. A pure function of (t, date).
+ */
+function shulchan(ctx, state, B, t) {
+  const S = _sh;
+  Object.assign(S, DEFAULTS);
+  const dt = ctx.time?.dayType, z = ctx.time?.zmanim || {};
+  if (dt === 'friday' && t >= (z.minchaKetana ?? 900) + 60) S.kanim = false;
+  if (dt === 'shabbat' && t < (z.tzeit ?? 1080) + 30) S.kanim = false;
+  const T = B?.t;
+  if (T && Number.isFinite(T.swapBack)) {
+    const s0 = T.slide[0], s1 = T.slide[1], back = T.swapBack;
+    if (within(t, T.bowlsOff, back)) S.mainBowls = false;
+    if (within(t, s0, back)) {
+      const k = within(t, s0, s1) ? clamp(since(t, s0) / (span(s0, s1) || 1)) : 1;
+      S.mainF = k; S.mainShown = k < 1;
+      S.incShown = true; S.incF = 1 - k; S.incBowls = within(t, T.bowlsSet, back);
+      S.kanim = false;
+    }
+  }
+  shulchanSet(ctx, state, S);
+}
+
+/** apply a state to the two bread sets (slides through the door contract; show / kanim / bowls change-cached) */
+function shulchanSet(ctx, state, S) {
+  const h = state.sh;
+  if (!h?.main?.exists) return;
+  h.main.set(S.mainF);
+  if (h.inc?.exists) h.inc.set(S.incF);
+  const c = h.c;
+  const ud = (id) => ctx.movables?.get?.(id)?.userData;
+  if (c.mainShown !== S.mainShown) { c.mainShown = S.mainShown; ud(SHULCHAN)?.show?.(S.mainShown); }
+  if (c.incShown !== S.incShown) { c.incShown = S.incShown; ud(INCOMING)?.show?.(S.incShown); }
+  if (c.kanim !== S.kanim) { c.kanim = S.kanim; ud(SHULCHAN)?.kanim?.(S.kanim); }
+  if (c.mainBowls !== S.mainBowls) { c.mainBowls = S.mainBowls; bowls(ctx, SHULCHAN, S.mainBowls); }
+  if (c.incBowls !== S.incBowls) { c.incBowls = S.incBowls; bowls(ctx, INCOMING, S.incBowls); }
+}
+
+/** a bread set's bowls of frankincense (its ':bazichin' and ':levonah' meshes) shown or hidden */
+function bowls(ctx, id, on) {
+  const node = ctx.movables?.get?.(id);
+  if (!node) return;
+  for (const m of node.children) if (/:(bazichin|levonah)$/.test(m.name)) m.visible = on;
 }

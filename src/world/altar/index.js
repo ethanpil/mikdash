@@ -131,6 +131,13 @@ function registerAnchors(A) {
   rp.positions.forEach(([X, Y, Z], i) => {
     const row = Math.floor(i / rp.cols), col = i % rp.cols, tamid = tamidOf([X, Y]);
     if (tamid) ringIndex[tamid] = i;
+    // Bilgah's ring (site.js params.bilgah): fixed, folded down and leaded — never used (Sukkah 5:8; Rashi 56a)
+    if (i === rp.bilgah?.index) {
+      add(`altar.ring.${i}`, [X, Y, Z], 270, `Ring ${i} — Bilgah's ring, fixed: folded down and leaded to its plate, never turned up (Sukkah 5:8, 56b)`,
+        { row, col, stand: [X + 1.2, Y, Z], bilgah: true, fixed: true });
+      add('altar.ring.bilgah', [X, Y, Z], 270, `Bilgah's fixed ring = altar.ring.${i} (Sukkah 5:8; Rashi Sukkah 56a)`, { ring: i, bilgah: true, fixed: true, stand: [X + 1.2, Y, Z] });
+      return;
+    }
     add(`altar.ring.${i}`, [X, Y, Z], 270,
       `Ring ${i} — row ${row} from the altar, column ${col} from the west${tamid ? ` — the ${tamid} tamid's ring (Tamid 4:1)` : ''}; head south, face west, the shochet east of it facing west`,
       { row, col, stand: [X + 1.2, Y, Z], ...(tamid ? { tamid } : {}) });

@@ -135,9 +135,11 @@ export const SETS = {
     kind: 'whitewash', tile: [4, 4], px: [512, 512], seed: 67,
     u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [1, 0.86, 0.04, 0.6], uC0: '#f3f1ea', uC1: '#c6c1b6', uC2: '#8f2a1b' },
   },
+  // the Even Shetiyah (world-4): pale Jerusalem limestone beside the Kodesh HaKodashim's gold, so lighter stone, fewer
+  // and shallower crevices, little patina or soil (it stands indoors) and a weaker baked cavity AO (0.55 -> 0.3)
   bedrock: {
-    kind: 'rock', tile: [4, 4], px: [576, 576], seed: 71,
-    u: { uP0: [0.04, 0.5, 0.5, 0.0], uP1: [0.15, 0.15, 0.88, 0], uC0: '#c2b394', uC1: '#b3a486', uC2: '#8e8576', uC3: '#7d5a42' },
+    kind: 'rock', tile: [4, 4], px: [576, 576], seed: 71, ao: [0.12, 0.03, 0.3],
+    u: { uP0: [0.04, 0.35, 0.35, 0.0], uP1: [0.05, 0.06, 0.88, 0], uC0: '#d9cdb2', uC1: '#cec2a6', uC2: '#aba294', uC3: '#8a6a52' },
   },
   terrain_rock: {
     kind: 'rock', tile: [8, 8], px: [576, 576], seed: 73,
@@ -336,9 +338,12 @@ export const SETS = {
     kind: 'metal', tile: [0.5, 0.5], px: [384, 384], seed: 313, metal: true, hRange: 0.0008,
     u: { uP0: [0.00003, 0.02, 0.000003, 0.066], uP1: [0, 0, 0, 0.01], uP2: [0.00015, 3.0, 0.012, 0], uC0: '#ffffff', uC1: '#ffffff', uC2: '#000000' },
   },
+  // world-4-fix: the film darker, even and mostly dielectric (cuprite brown: tarnish 0.88 → 1, uP3.x 0.4 → 0.7, uC1
+  // #4f3328 → #3d271f); before, the metallic film mirrored the court and baked as light salmon copper, not the "even
+  // brown oxide film" of its key
   copperworn: {
     kind: 'metal', tile: [0.5, 0.5], px: [384, 384], seed: 317, metal: true, hRange: 0.0015,
-    u: { uP0: [0.00035, 0.016, 0.00002, 0.34], uP1: [0.88, 0.12, 0.005, 0.04], uP2: [0.0003, 4.0, 0.03, 0.3], uP3: [0.4, 1, 0.7, 0], uC0: '#ffffff', uC1: '#4f3328', uC2: '#5f8f7c' },
+    u: { uP0: [0.00035, 0.016, 0.00002, 0.34], uP1: [1.0, 0.16, 0.005, 0.04], uP2: [0.0003, 4.0, 0.03, 0.3], uP3: [0.7, 1, 0.7, 0], uC0: '#ffffff', uC1: '#3d271f', uC2: '#5f8f7c' },
   },
   golddoor: {
     kind: 'metal', tile: [2, 2], px: [512, 512], seed: 331, metal: true, hRange: 0.004,

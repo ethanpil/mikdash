@@ -293,6 +293,13 @@ export function defineProbes(ctx) {
   const kod = box('heichal.kodesh');
   if (kod) {
     out.push({
+      // render-audio-3: its irradiance follows the great gate's share of the sky — √(V through the room's first opening
+      // here / at the probe), ≤ 2.5 (interiors-glsl.js) — for the share of the probe's light that came in as skylight (not
+      // the lamps, not a low Sun's beam landing beyond the probe — probes.js skyShare). Captures moved along the axis at d3
+      // and d9 (src/render/dev/kodesh-irr.mjs): 0.55–0.6 of the mid-room probe's irradiance 1 amah from the parochet, 0.65 at
+      // 6, 0.8 at 12, 1.2–1.3 at 28, 1.6–2.2 at 34, 1.9–2.8 by the gate; the square root of the gate's ratio gives 0.57,
+      // 0.65, 0.76, 1.45, 2.2, 2.5 (its plain ratio falls off as its inverse square: 0.33 … 8; the gold walls spread it)
+      irr: { mode: 'main', cap: 2.5 },
       id: 'kodesh', tiers: ['medium', 'high', 'ultra'], outdoor: false, far: 120, hide: HIDE_BEYOND_WALLS,
       pos: [(kod.min[0] + kod.max[0]) / 2, (kod.min[1] + kod.max[1]) / 2, kod.min[2] + eye],
       min: [...kod.min], max: [kod.max[0], kod.max[1], Math.max(kod.max[2], box('heichal.ceiling.kiyur')?.max[2] ?? kod.max[2] + 1)], margin: 0.3, shell: SHELL_ZONE,

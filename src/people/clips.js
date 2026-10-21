@@ -12,6 +12,7 @@
 import { Vector3, Quaternion, Matrix4 } from 'three';
 import { PoseBuilder, blendPose } from './pose.js';
 import { TAU, smooth, clamp, lerp } from './util.js';
+import { AMAH } from '../core/units.js';
 
 const sin = Math.sin, cos = Math.cos, abs = Math.abs;
 const V = (x, y, z) => new Vector3(x, y, z);
@@ -768,7 +769,8 @@ Object.assign(HUMAN_CLIPS, OFFERING_CLIPS);
 
 // ------------------------------------------------------------------------------------------- night, Moked and service poses
 // (docs/decisions/people-3.md) — the stations they assume are given in metres in the figure's frame (faces −z, +x its
-// right, origin on the floor between the feet); the sim places the figure so the station meets the fixture.
+// right, origin on the floor between the feet) at scale 1; the sim places the figure so the station meets the fixture
+// and gives it setScale(1) (an actor's seeded size scales the pose about its feet — people-4-fix).
 //   sit_floor  on the floor, sitting back on the heels, hands on the thighs ("he came and sat beside his brothers",
 //              Tamid 1:1)
 //   call       the crier, the hands on either side of the mouth like a funnel, chin up (Gevini, Yoma 20b)
@@ -813,6 +815,7 @@ export const STAFF = { len: 1.25, grip: 0.1, strike: { tip: [0.08, 0.2, -1.32], 
  * SOUTH of the axle line: the hub 0.75 m to his left. Each hand pulls a peg from 30° to −15° (0° = right of the hub,
  * 90° up); the wheel turns π/2 per pose cycle. His fists meet the pegs when wheel angle = spin0 + phase·π/2, i.e.
  * phase = phaseAt(angle) = ((angle − spin0) / (π/2)) mod 1 — drive the pose from the wheel (or the wheel from the pose).
+ * The hub is in metres at scale 1: give the operator setScale(1) (people-4-fix), as for WINDLASS_RAISE and CRANK.
  */
 export const WINDLASS = {
   hub: [-0.75, 1.248, -0.55], radius: 0.816, pegOut: 0.17, pegStep: Math.PI / 4,
@@ -1247,6 +1250,229 @@ function carryLambArms(P, r, ph, lift = 0) {
 }
 Object.assign(HUMAN_CLIPS, SERVICE_CLIPS);
 
+// ------------------------------------------------------------------------------------------- people-4 poses
+// (docs/decisions/people-4.md) — figure frame as above: metres, −z ahead, +x his right, origin on the floor.
+//   eat         a piece raised to the mouth and bitten, lowered, chewed (the showbread eaten standing in the court,
+//               Rambam MK 10:3; Sukkah 5:8): rest 0–0.1, up by 0.3, at the mouth 0.3–0.46 (the bite pulls away at
+//               ≈ 0.42), down by 0.64, chewing to 1. Right hand, grip 'palm' (bread_piece), the left arm at rest
+//   knead       kneading dough in a trough or on a table whose working surface is KNEAD.surface high, KNEAD.reach
+//               ahead: the heels of both hands push the dough forward and down (0–0.45), fold it back (0.45–0.75),
+//               press (0.75–1) — the meal offerings and the showbread (Menachot 5:1–2; Beit Garmu, Yoma 38a)
+//   crank       hand over hand on the hand-spokes of the Golah wheel (Middot 5:4; courts/chambers.js golah): CRANK
+//               gives the hub, the spokes' grip radius and the wheel angle <-> phase coupling (the wheel turns
+//               π/2 per cycle, a spoke a half cycle)
+//   wave_under  tenufah: the kohen's palms up beneath the owner's hands, moving with them (Menachot 61b "the kohen
+//               puts his hand beneath the owner's and waves"; Rambam MK 9:6). The owner faces him WAVE_UNDER.partner
+//               metres away in 'wave' (or 'wave' with the bikkurim basket — wave_basket); give both the SAME phase
+//   wave_basket the owner holding the bikkurim basket by its rims and waving it (Bikkurim 3:6 "he holds it by its
+//               rims and the kohen puts his hand beneath it and waves it"): the basket's bottom follows the path of
+//               the palms in 'wave', so the kohen's wave_under meets it. The basket chooses it for 'wave'
+//               (PROPS.basket.poses); grip class 'rims'
+//   carry_slain / carry_slain_walk  a slaughtered lamb or kid across the shoulders behind the neck, its legs held
+//               before the chest (the right fist the hind legs, the left the fore legs); the slain carcasses choose
+//               these for carry_shoulder(_walk) (grip 'shoulder')
+/** the working surface the knead pose assumes (m): its top KNEAD.surface above the floor, the dough KNEAD.reach ahead
+ *  (at scale 1: give the kneader setScale(1), or scale the surface with him); the 'dough' prop lies there */
+export const KNEAD = { surface: 0.78, reach: 0.42 };
+/** the eat pose: the bite at the lips at phase ≈ 0.36–0.42 */
+export const EAT = { bite: [0.3, 0.46], reach: 0.062 };   // reach: the piece's edge beyond the fist's centre (m)
+/** a loose fist holding a piece between thumb and fingers (the eat clip) */
+function openFist(P, r, c, thumb, fingers) { fist(P, r, 'r', c, thumb, fingers, { elbow: [0.35, -1, 0.2], curl: 64, icurl: 56, thumb: 34 }); }
+/**
+ * The Golah wheel seen by its operator (courts/chambers.js golah: hand-wheel r 2.1 amot on an axle 5.2 amot above the
+ * chamber floor, 8 hand-spokes out to r 2.65; the axle along site X, the wheel in the YZ plane at X = cistern + 2.1).
+ * The operator stands east of the wheel, facing it (heading 270), stand.eastOfWheel amot from its plane and
+ * stand.fromAxle amot from the axle line (− = south: the hub up to his right). A spoke at wheel angle φ (rotation.x of
+ * 'wheel:azarah.chamber.golah' + i·π/4; φ = 0 straight up, growing toward the south = his left) is at
+ * hub + radius·(−sin φ, cos φ, 0) in his frame. Each hand pulls a spoke from stroke[0] to stroke[1] (degrees of φ, the
+ * spokes on his side going down: the angle grows — the direction chambers-daily turns it to raise the bucket) over half
+ * a cycle while the other returns; phase = phaseAt(rotation) = ((rotation − spin0) / perCycle) mod 1.
+ * The hub is in metres at scale 1: give the operator setScale(1) (a levi's seeded ±5 % moves his fists 7–9 cm).
+ */
+export const CRANK = (() => {
+  const A = AMAH;
+  const st = { eastOfWheel: 0.84, fromAxle: -1.85, heading: 270 };
+  const stroke = [126, 171];
+  const spin0 = ((stroke[0] % 45) * Math.PI) / 180;
+  return {
+    hub: [-st.fromAxle * A, 5.2 * A, -st.eastOfWheel * A], radius: 2.42 * A, spokes: 8, stroke, spin0, perCycle: Math.PI / 2,
+    stand: st,
+    phaseAt(angle) { const p = (angle - spin0) / (Math.PI / 2); return p - Math.floor(p); },
+  };
+})();
+/** tenufah together (wave + wave_under, the same phase): the owner and the kohen face each other partner metres apart
+ *  (origin to origin, ≈ 1.55 amot); the kohen's palms drop metres below the owner's hands (under their backs).
+ *  Made at scale 1: the two must share ONE scale s — kohen.setScale(owner.scale) and partner·s apart, or both
+ *  setScale(1) — else his palms land in or a hand's breadth below the owner's (±5 % seeded sizes: up to ±11 cm) */
+export const WAVE_UNDER = { partner: 0.74, drop: 0.036 };
+/** the owner's palms in 'wave' (owner frame): wrist, and the palm's centre on it */
+function waveHands(r, ph) {
+  const d = r.dims, k = d.H / 1.67;
+  const fwd = ph < 0.5 ? sin(ph * 2 * TAU) : 0, up = ph >= 0.5 ? sin((ph - 0.5) * 2 * TAU) : 0;
+  const out = {};
+  for (const [s, sg] of [['r', 1], ['l', -1]]) {
+    const w = V(sg * 0.13 * k, d.H * (0.62 + 0.05 * up), -(0.3 + 0.09 * fwd) * k);
+    const f = palmUp(s).fingers.clone().normalize();
+    out[s] = { w, c: w.clone().addScaledVector(f, 0.075 * k) };
+  }
+  return { fwd, up, ...out };
+}
+/** the bikkurim basket held by its rims (wave_basket): the right fist's orientation (thumb along the rim, forward;
+ *  fingers in and down over it) — props.js seats the basket's 'rims' grip with it */
+export const RIMS_HAND = { thumb: V(0, 0.05, -1), fingers: V(-1, -0.7, 0), rimR: 0.196, rimY: 0.16, out: 0.006 };
+
+/** the slain lamb across the shoulders: the fists before the chest (figure frame, k = 1) — props.js aims the legs here */
+export const SLAIN_HANDS = { r: [0.105, 0.74, -0.16], l: [-0.105, 0.745, -0.16] };   // y in units of H
+function slainArms(P, r, lift = 0) {
+  const d = r.dims, k = d.H / 1.67;
+  for (const [s, sg] of [['r', 1], ['l', -1]]) {
+    const [x, y, z] = SLAIN_HANDS[s];
+    // a vertical grip on the legs held against the chest: palm toward the chest, thumb up
+    fist(P, r, s, V(x * k, d.H * y + lift, z * k), V(0, 1, 0.3), V(-sg, 0, -0.25), { elbow: [0.5, -1, 0.2], curl: 88 });
+  }
+}
+
+function stackArms(P, r, lift = 0) {
+  const d = r.dims, k = d.H / 1.67;
+  for (const [s, sg] of [['r', 1], ['l', -1]]) {
+    const h = palmUp(s);
+    openHand(P, s, V(sg * 0.15 * k, d.H * 0.56 + lift, -0.34 * k), h.thumb, h.fingers, { curl: 26, icurl: 20, thumb: 14, elbow: [0.5, -1, 0.7] });
+  }
+}
+
+export const PEOPLE4_CLIPS = {
+  eat: {
+    frames: 32, loop: true, rate: 0.2, grip: 'fist', hand: 'r',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67, hs = d.headS;
+      const up = smooth(0.1, 0.3, ph) * (1 - smooth(0.46, 0.64, ph));
+      const bite = smooth(0.36, 0.42, ph) * (1 - smooth(0.44, 0.5, ph));
+      // chewing: small nods of the head (the rig has no jaw bone)
+      const chew = ph > 0.44 ? Math.max(0, sin((ph - 0.44) * TAU * 6)) * (1 - smooth(0.92, 1, ph)) : 0;
+      stance(P, r, { lean: -1.5 * up, neck: 3 * up, head: -6 * up + 1.6 * chew - 2.5 * bite, hy: 2.5 * sin(ph * TAU) * (1 - up), hr: -2 * up });
+      breathe(P, ph);
+      armHang(P, 'l', { flex: 6, elbow: 14 });
+      // the lips' front (head bone frame) after the stance
+      const M = headPt(P, 0.004 * hs, 0.012 * hs, -0.112 * hs);
+      // the piece held between the thumb and the curled fingers, its broken edge out of the top of the fist (the fist's
+      // axis, props.js bread_piece 'fist'): at rest before the belly, the axis up; at the mouth the axis tipped back to
+      // the lips, the knuckles forward, the edge between the lips; the bite pulls it a little down and away
+      const t0 = V(0.05, 1, -0.1).normalize(), f0 = V(-0.35, 0, -1).normalize();
+      const t1 = V(-0.12, 0.72, 0.68).normalize(), f1 = V(-0.4, 0.25, -0.85).normalize();
+      const c0 = V(0.11 * k, d.H * 0.575, -0.23 * k);
+      const c1 = M.clone().addScaledVector(t1, -EAT.reach * k).add(V(0.006, -0.008 * bite, -0.012 - 0.018 * bite));
+      openFist(P, r, c0.lerp(c1, up), t0.lerp(t1, up).normalize(), f0.lerp(f1, up).normalize());
+    },
+  },
+  knead: {
+    frames: 24, loop: true, rate: 0.5,
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const push = smooth(0.02, 0.42, ph) * (1 - smooth(0.46, 0.72, ph));   // forward and down with the heels
+      const fold = smooth(0.46, 0.6, ph) * (1 - smooth(0.68, 0.8, ph));     // the fingers draw the far edge back
+      const press = smooth(0.78, 0.9, ph) * (1 - smooth(0.94, 1, ph));
+      stance(P, r, { dy: -0.02 * k, pz: 0.03 * k, pp: -8, lean: -14 - 8 * push, chest: -6 - 3 * push, head: -16, lz: 0.03 * k, rz: -0.03 * k });
+      const top = KNEAD.surface, z0 = -KNEAD.reach * k;
+      for (const [s, sg] of [['r', 1], ['l', -1]]) {
+        const h = palmDown(s);
+        const w = V(sg * (0.1 - 0.015 * push) * k, top + 0.06 - 0.028 * push - 0.018 * press + 0.025 * fold, z0 + (0.08 - 0.13 * push + 0.04 * fold) * k);
+        openHand(P, s, w, h.thumb, V(-sg * 0.08, -0.5 - 0.35 * fold, -1), { curl: 18 + 62 * fold, icurl: 14 + 58 * fold, thumb: 16 + 20 * fold, elbow: [0.7, -0.7, 0.4] });
+      }
+      breathe(P, ph);
+    },
+  },
+  crank: {
+    frames: 32, loop: true, rate: 0.25,
+    fn(P, r, ph) {
+      const W = CRANK, [hx, hy, hz] = W.hub, R = W.radius;
+      const [a0, a1] = W.stroke.map((x) => x * D2R);
+      const k = r.dims.H / 1.67;
+      const g = {};
+      let pull = 0, lowL = 0, lowR = 0;
+      // the left hand leads the stroke over phase 0–0.5, the right over 0.5–1; the hand not pulling goes back up clear
+      // of the spokes (off them toward him) to the next one
+      for (const [s, off] of [['l', 0], ['r', 0.5]]) {
+        const u = (ph + off) % 1;
+        let a, out = 0, curl = 86;
+        if (u < 0.5) { const q = u / 0.5; a = lerp(a0, a1, q); pull = Math.max(pull, Math.sin(Math.PI * q)); if (s === 'r') lowR = q; else lowL = q; } else {
+          const q = smooth(0, 1, (u - 0.5) / 0.5);
+          a = lerp(a1, a0, q); out = Math.sin(Math.PI * q); curl = 86 - 60 * Math.sin(Math.PI * Math.min(1, q * 1.15));
+        }
+        const rad = V(-Math.sin(a), Math.cos(a), 0);                    // hub → spoke, in his frame
+        const c = V(hx, hy, hz).addScaledVector(rad, R + 0.03 * out).add(V(0, 0, 0.045 + 0.1 * out));
+        g[s] = { c, rad, curl };
+      }
+      // he leans in and his body follows the pulling hand down toward the stroke's lower end on his right (the hub is up
+      // to his right): the hips shift right, the shoulders turn right and drop on that side; most for the left hand,
+      // which has to cross his body
+      // (continuous over the cycle: the shift for the left hand's stroke eases back across the hand-over at 0.5)
+      void lowL; void lowR;
+      const low = smooth(0.02, 0.30, ph) * (1 - smooth(0.44, 0.56, ph)) + 0.35 * smooth(0.62, 0.95, ph) * (1 - smooth(0.95, 1, ph));
+      stance(P, r, { px: 0.07 * k * low, dy: -0.03 * k * pull, lean: -8 - 5 * pull, chest: -3, pr: -3 * low, sr: -4 * low, cr: -6 * low, cy: -8 - 18 * low, sy: -6 * low, py: -4 - 4 * low, head: 4 - 6 * pull, hy: -4 + 10 * low, lz: -0.05 * k, rz: 0.06 * k, rx: 0.03 * k });
+      for (const s of ['l', 'r']) {
+        const h = g[s];
+        // the fist round the spoke: its axis along the spoke (the thumb toward the hub), the fingers over it from in front
+        fist(P, r, s, h.c, h.rad.clone().negate(), V(0, -0.15, -1), { elbow: s === 'l' ? [0.6, -1, 0.1] : [0.5, -1, 0.3] });
+        P.fingers(s, h.curl, h.curl * 0.92, 30 + 0.3 * (h.curl - 20));
+      }
+    },
+  },
+  wave_under: {
+    frames: 32, loop: true, rate: 0.4,
+    fn(P, r, ph) {
+      const k = r.dims.H / 1.67;
+      const o = waveHands(r, ph);
+      const D = WAVE_UNDER.partner;
+      // he leans back a little as the owner's hands come toward him, follows them out again
+      stance(P, r, { lean: -4 + 2.5 * o.fwd, chest: -2, head: -10 });
+      for (const [s, so] of [['r', 'l'], ['l', 'r']]) {        // the owner's left hand is on his right
+        const c = o[so].c;
+        // the owner's palm centre in his frame (facing each other), dropped under the back of the owner's hand
+        const pc = V(-c.x, c.y - WAVE_UNDER.drop, -D - c.z);
+        const h = palmUp(s);
+        const f = h.fingers.clone().normalize();
+        openHand(P, s, pc.addScaledVector(f, -0.075 * k), h.thumb, h.fingers, { curl: 22, icurl: 16, thumb: 12, elbow: [0.6, -1, 0.5] });
+      }
+      breathe(P, ph);
+    },
+  },
+  wave_basket: {
+    frames: 32, loop: true, rate: 0.4, grip: 'rims', hand: 'r',
+    fn(P, r, ph) {
+      const k = r.dims.H / 1.67;
+      const o = waveHands(r, ph);
+      stance(P, r, { lean: -3 - 3 * o.fwd, chest: -2 });
+      // the basket's bottom where the palms would be in 'wave', a little lower (the kohen's palms meet it there)
+      const bottom = o.r.c.clone().lerp(o.l.c, 0.5).add(V(0, -0.02 * k, 0));
+      const RH = RIMS_HAND;
+      for (const [s, sg] of [['r', 1], ['l', -1]]) {
+        const c = bottom.clone().add(V(sg * (RH.rimR + RH.out), RH.rimY, 0));
+        fist(P, r, s, c, RH.thumb, V(sg * RH.fingers.x, RH.fingers.y, RH.fingers.z), { elbow: [0.8, -1, 0.3], curl: 78 });
+      }
+    },
+  },
+  // the showbread's stack (props.js showbread_stack / showbread_half choose these for carry / carry_walk): held out on
+  // the forearms, palms up under its floor, leaning back a little against the weight, the head turned to see past it
+  carry_stack: {
+    frames: 16, loop: true, rate: 0.2, grip: 'tray',
+    fn(P, r, ph) { stance(P, r, { lean: 3, chest: 1, hy: 9, head: -3 }); stackArms(P, r); breathe(P, ph); },
+  },
+  carry_stack_walk: {
+    frames: 32, loop: true, stride: 'stride', grip: 'tray',
+    fn(P, r, ph) { walkBody(P, r, ph, { noArms: true }); P.add('spine', 3, 0, 0); P.add('head', -3, 9, 0); stackArms(P, r, 0.005 * cos(2 * TAU * ph)); },
+  },
+  carry_slain: {
+    frames: 16, loop: true, rate: 0.2, grip: 'shoulder',
+    fn(P, r, ph) { stance(P, r, { lean: -4, chest: -2, neck: 8, head: -4 }); slainArms(P, r); breathe(P, ph); },
+  },
+  carry_slain_walk: {
+    frames: 32, loop: true, stride: 'stride', grip: 'shoulder',
+    fn(P, r, ph) { walkBody(P, r, ph, { noArms: true }); P.add('spine', -4, 0, 0); P.add('neck', 8, 0, 0); P.add('head', -4, 0, 0); slainArms(P, r, 0.006 * cos(2 * TAU * ph)); },
+  },
+};
+Object.assign(SERVICE_CLIPS, PEOPLE4_CLIPS);
+Object.assign(HUMAN_CLIPS, PEOPLE4_CLIPS);
+
 // name aliases for the sim's convenience
 export const CLIP_ALIASES = {
   stand_still: 'stand', prostration: 'prostrate', kneel_down: 'kneel', lot: 'circle_lot', sleeping: 'sleep',
@@ -1254,8 +1480,9 @@ export const CLIP_ALIASES = {
   sit_ground: 'sit_floor', crier: 'call', muchni: 'windlass', sanctify: 'kiddush', nesech: 'pour_low',
   signal: 'wave_sudar', dress_lamp: 'tend_lamp', light_lamp: 'tend_lamp', immerse: 'bathe', tevilah: 'bathe',
   muchni_raise: 'windlass_raise', carry_wood: 'carry_log', carry_wood_walk: 'carry_log_walk',
+  achilah: 'eat', lash: 'knead', galgal: 'crank', tenufah_under: 'wave_under', wave_beneath: 'wave_under',
 };
 // service clips baked for every human rig (the rest only for the men's rigs that serve — SERVICE_RIGS)
 export const SERVICE_RIGS = new Set(['man', 'elder']);
-export const SERVICE_ANY = new Set(['sit_floor', 'warm']);
+export const SERVICE_ANY = new Set(['sit_floor', 'warm', 'eat']);
 export { handQ, fist };

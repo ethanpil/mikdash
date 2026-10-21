@@ -12,15 +12,14 @@
 //                              old together: who brings the limbs up from the ramp to the altar" (Tamid 5:2); those who did
 //                              not win are handed to the attendants (chazzanim), who take off their garments and lay them
 //                              in the niches marked with the vessels' names, leaving them the breeches (Tamid 5:3); the
-//                              attendants are staged as Levites ⚙ and the men change straight into their own clothes until a
-//                              breeches-only variant exists (requested).
+//                              attendants are staged as Levites ⚙; the men go out in the breeches (people's kohen_breeches).
 //   afternoon-lottery          new men draw for the afternoon incense; the morning's other tasks stand (Yoma 26a).
 //   afternoon-lottery-shabbat  the incoming mishmar draws the afternoon's tasks afresh, then the incense (Yoma 26a).
 // The kohanim stand in a circle (kuliyar), in the four garments, barefoot; the officer in its middle turns to each finger
 // as he counts. Every pose is a pure function of (t, date). ⚙ marks reconstruction (minutes, spots, counts).
-import { nightPlan, SEED } from './g1/plan.js';
+import { nightPlan, SEED, MITRE_GRASP, MITRE_REACH } from './g1/plan.js';
 import { makePools, stage, runCues, FreeProps, windowAmount } from './g1/stage.js';
-import { Track, lotHand, personAt, applyLeg } from './g1/util.js';
+import { Track, lotHand, personAt, applyLeg, ramp } from './g1/util.js';
 import { gazitPlaces, mokedPlaces, lotRadius } from './g1/places.js';
 import { rand, clamp } from '../lib/core.js';
 import { CUE_LEAD } from '../lib/cue.js';
@@ -55,7 +54,8 @@ export default {
     pools['young:k'] = sim.pool({ name: 'young:k', role: 'kohen', count: 8, seed: SEED.brothers, importance: 3 });
     pools['barkai:k'] = sim.pool({ name: 'barkai:k', role: 'kohen', count: 2, seed: SEED.barkai, importance: 3 });
     pools['gazit:k'] = sim.pool({ name: 'gazit:k', role: 'kohen', count: 20, seed: SEED.gazit, importance: 2 });
-    pools['gazit:off'] = sim.pool({ name: 'gazit:off', role: 'kohen_offduty', count: 20, seed: SEED.gazit, importance: 2 });
+    // those who did not win, left in the breeches alone (Tamid 5:3)
+    pools['gazit:br'] = sim.pool({ name: 'gazit:br', role: 'kohen_breeches', count: 20, seed: SEED.gazit, importance: 2 });
     // the attendants (chazzanim) of Tamid 5:3 ⚙ Levites
     pools['chazzan:levi'] = sim.pool({ name: 'chazzan:levi', role: 'levi', count: 3, seed: SEED.chazzan, importance: 2 });
     return { pools, G: gazitPlaces(ctx), M: mokedPlaces(ctx), wicket: sim.door('azarah.gate.moked.pishpash'), gz: null, gzGen: -1, gzG2: false, plan: null, cues: [], props: new FreeProps(ctx), fmt: (m) => ctx.time?.format?.(m) ?? '--', n: 0, out: {} };
@@ -131,7 +131,7 @@ function g2Plan(sim) {
 function gazitScenes(ctx, sim, state, g2) {
   const G = state.G;
   const ev = (id) => { const e = sim.schedule.byId(id); return e && Number.isFinite(e.t0) && Number.isFinite(e.t1) ? e : null; };
-  const out = { scenes: [], people: [], cues: [], props: [], wicket: [] };
+  const out = { scenes: [], people: [], cues: [], props: [], wicket: [], mitre: {} };
   const people = new Map();   // `${pool}:${idx}` -> person
   const person = (pool, idx) => {
     const k = `${pool}:${idx}`;
@@ -172,6 +172,7 @@ function gazitScenes(ctx, sim, state, g2) {
     const fromChav = chavitinWay(G, ctx);
     const counted = all.map((w, i) => ({ ...w, spot: spots.get(i) }));
     const draw = { tCall: S + CUE_LEAD, tUp: S + 0.65, tMitre: S + 0.95, tCount: [S + 1.3, S + 3.55], tWon: S + 3.65, tDown: S + 3.85 };
+    const trs = [];
     counted.forEach((w, i) => {
       const p = person(w.pool, w.idx);
       let tr;
@@ -192,6 +193,7 @@ function gazitScenes(ctx, sim, state, g2) {
         lingerAndGo(tr, w.spot, tDisp + 0.12 * i, [doorIn, doorway], i);
       }
       p.eps.push(tr.episode());
+      trs[i] = tr;
     });
     // the officer: from Beit HaMoked, where he waited after the inspection (g1/plan.js takes him there from the chavitin
     // chamber through the court), out by the wicket and along the court's north side under the Moked's wall ⚙; the call;
@@ -203,12 +205,12 @@ function gazitScenes(ctx, sim, state, g2) {
       tr.walk([[M.pish[0], M.pish[1], Zc], M.gateOut], { speed: SLOW });
       out.wicket.push([S - 4.75 - 0.05, tr.now() + 0.05]);
       tr.walk([[M.gateOut[0] - 1.2, 387.2, Zc], [200, 386.4, Zc], [181, 384.5, Zc], [156, 383.6, Zc], [99.2, 377, Zc], [G.b.max[0] + 3, G.eastY, Zc], doorway, doorIn, c], { speed: WALK });
-      officerDraw(tr, c, counted.map((w) => w.spot), draw, 0x2a);
+      out.mitre.second = bare(trs, officerDraw(tr, c, counted.map((w) => w.spot), draw, 0x2a));
       tr.until(tDisp + 0.12 * n + 0.2, { pose: 'stand', h: 90 });
       tr.walk([doorIn, doorway], { speed: SLOW });
       p.eps.push(tr.episode());
     }
-    out.cues.push(...drawCues('second', draw, TEXT.call2, TEXT.won2, c));
+    out.cues.push(...drawCues('second', draw, TEXT.call2, TEXT.won2, c, out.mitre.second));
     out.scenes.push({ id: 'second', t0: S, n });
   }
 
@@ -283,12 +285,13 @@ function gazitScenes(ctx, sim, state, g2) {
       if (!won) {
         const ni = G.niche(i), t0 = serve.get(i) ?? tr.now() + 0.2;
         tr.until(t0, { pose: 'stand', h: ni.h });
-        // stripped of the four garments (the change to his own clothes is shown at the bend: a breeches-only figure is
-        // requested), then out in his own clothes by the east door ⚙
+        // stripped of their garments, "they left on them only the breeches" (Tamid 5:3): he bends as the tunic, sash and
+        // mitre come off and stands in the breeches alone (people's kohen_breeches - the change at the bend unseen), then
+        // goes out by the east door to put on his own clothes ⚙ (where is not said)
         tr.hold(0.16, { h: ni.h, pose: 'bow', phase: (l, d) => 0.5 * clamp(l / d) });
-        tr.hold(0.16, { h: ni.h, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'off' });
-        tr.until(Math.max(tr.now() + 0.3, E + 0.4 + 0.08 * i), { h: 90, pose: 'stand', role: 'off' });
-        tr.walk([[ni.at[0] + 1.5, c[1] + (ni.at[1] < c[1] ? -2.5 : 2.5), Z], doorIn, doorway], { speed: SLOW, role: 'off' });
+        tr.hold(0.16, { h: ni.h, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'br' });
+        tr.until(Math.max(tr.now() + 0.3, E + 0.4 + 0.08 * i), { h: 90, pose: 'stand', role: 'br' });
+        tr.walk([[ni.at[0] + 1.5, c[1] + (ni.at[1] < c[1] ? -2.5 : 2.5), Z], doorIn, doorway], { speed: SLOW, role: 'br' });
       }
       p.eps.push(tr.episode());
     }
@@ -297,13 +300,14 @@ function gazitScenes(ctx, sim, state, g2) {
       const tr = inPlace ? new Track(S - 0.3, c, 90, 'lot', 'k') : new Track(S - 2.9, doorIn, 270, 'lot', 'k');
       if (!inPlace) tr.walk([c], { speed: SLOW });
       const spots = Array.from({ length: N }, (_, i) => spotOf(N, i, r));
-      officerDraw(tr, c, spots, drawA, 0x3a, spots.map((_, i) => isNew(i) || winners3.has(i)));
-      officerDraw(tr, c, spots, drawB, 0x4a);
+      const trs = tracks.map((x) => x.tr);
+      out.mitre.third = bare(trs, officerDraw(tr, c, spots, drawA, 0x3a, spots.map((_, i) => isNew(i) || winners3.has(i))));
+      out.mitre.fourth = bare(trs, officerDraw(tr, c, spots, drawB, 0x4a));
       tr.until(E + 0.3, { pose: 'stand', h: 90 });
       tr.walk([doorIn, doorway], { speed: SLOW });
       p.eps.push(tr.episode());
     }
-    out.cues.push(...drawCues('third', drawA, TEXT.call3, TEXT.won3, c), ...drawCues('fourth', drawB, TEXT.call4, null, c));
+    out.cues.push(...drawCues('third', drawA, TEXT.call3, TEXT.won3, c, out.mitre.third), ...drawCues('fourth', drawB, TEXT.call4, null, c, out.mitre.fourth));
     out.cues.push({ key: `strip:${Math.round(S * 10)}`, t: S + 4.75, caption: TEXT.strip, at: c, range: 35, owner: 'lot' });
     out.scenes.push({ id: 'third-fourth', t0: S, n: N });
   }
@@ -320,10 +324,12 @@ function gazitScenes(ctx, sim, state, g2) {
       : { tCall: S + CUE_LEAD, tUp: S + 0.7, tMitre: S + 1.0, tCount: [S + 1.35, S + 2.9], tWon: S + 3.0, tDown: S + 3.2 };
     const drawB = shabbat ? { tCall: S + 4.1, tUp: S + 4.3, tMitre: S + 4.55, tCount: [S + 4.9, S + 6.0], tWon: S + 6.1, tDown: S + 6.3 } : null;
     const tGo = (shabbat ? S + 7.2 : S + 4.2);
+    const trs = [];
     for (let i = 0; i < N; i++) {
       const spot = spotOf(N, i, r);
       const p = person('gazit', i);
       const tr = new Track(S - 2.7 + 0.1 * i, doorIn, 270, 'lot', 'k');
+      trs[i] = tr;
       tr.walk([spot.at], { speed: SLOW });
       if (shabbat) { circleDraw(tr, spot, drawA, i, true); circleDraw(tr, spot, drawB, i, isNew(i)); } else circleDraw(tr, spot, drawA, i, isNew(i));
       lingerAndGo(tr, spot, Math.min(tGo + 0.13 * i, E + 1.2), [doorIn, doorway], i);
@@ -334,13 +340,16 @@ function gazitScenes(ctx, sim, state, g2) {
       const tr = new Track(S - 3.0, doorIn, 270, 'lot', 'k');
       tr.walk([c], { speed: SLOW });
       const spots = Array.from({ length: N }, (_, i) => spotOf(N, i, r));
-      if (shabbat) { officerDraw(tr, c, spots, drawA, 0x5a); officerDraw(tr, c, spots, drawB, 0x6a, spots.map((_, i) => isNew(i))); } else officerDraw(tr, c, spots, drawA, 0x5a, spots.map((_, i) => isNew(i)));
+      if (shabbat) {
+        out.mitre.pmA = bare(trs, officerDraw(tr, c, spots, drawA, 0x5a));
+        out.mitre.pmB = bare(trs, officerDraw(tr, c, spots, drawB, 0x6a, spots.map((_, i) => isNew(i))));
+      } else out.mitre.pmA = bare(trs, officerDraw(tr, c, spots, drawA, 0x5a, spots.map((_, i) => isNew(i))));
       tr.until(Math.min(tGo + 0.13 * N + 0.2, E + 2.6), { pose: 'stand', h: 90 });
       tr.walk([doorIn, doorway], { speed: SLOW });
       p.eps.push(tr.episode());
     }
-    if (shabbat) out.cues.push(...drawCues('pm-a', drawA, TEXT.callShabbat, TEXT.won2, c), ...drawCues('pm-b', drawB, TEXT.callPm, TEXT.wonPm, c));
-    else out.cues.push(...drawCues('pm', drawA, TEXT.callPm, TEXT.wonPm, c));
+    if (shabbat) out.cues.push(...drawCues('pm-a', drawA, TEXT.callShabbat, TEXT.won2, c, out.mitre.pmA), ...drawCues('pm-b', drawB, TEXT.callPm, TEXT.wonPm, c, out.mitre.pmB));
+    else out.cues.push(...drawCues('pm', drawA, TEXT.callPm, TEXT.wonPm, c, out.mitre.pmA));
     out.scenes.push({ id: Lp.id, t0: S, n: N });
   }
   return out;
@@ -365,22 +374,48 @@ function circleDraw(tr, spot, D, i, takesPart) {
   else tr.until(D.tDown + off, { pose: 'stand', h: spot.h });
 }
 
-/** the officer in the middle: the call, the mitre lifted from the first man, the count round the raised fingers */
+/**
+ * The officer in the middle: the call; the mitre lifted from the head of the first man who holds out his fingers - he
+ * steps in before him, his crown MITRE_REACH ahead (people's lift_mitre; Yoma 25a) - and back to the middle with it in
+ * his left hand; the count round the raised fingers; the mitre put back on that man's head ⚙ before they go to serve.
+ * Returns { j (the man's index in spots), tOff, tOn } (his head bare between).
+ */
 function officerDraw(tr, c, spots, D, seed, part = null) {
-  tr.until(D.tCall - 0.05, { pose: 'stand', face: spots[0].at });
-  tr.until(D.tMitre - 0.05, { pose: 'stand', face: spots[0].at });
-  tr.hold(0.3, { face: spots[0].at, pose: 'point' });                 // the mitre (Yoma 25a)
   const seq = [];
   const who = spots.map((_, i) => i).filter((i) => !part || part[i]);
+  const j0 = who[0], tgt = spots[j0];
+  const toC = Math.hypot(c[0] - tgt.at[0], c[1] - tgt.at[1]) || 1;
+  const before = [tgt.at[0] + ((c[0] - tgt.at[0]) / toC) * MITRE_REACH, tgt.at[1] + ((c[1] - tgt.at[1]) / toC) * MITRE_REACH, c[2]];
+  const hT = (tgt.h + 180) % 360;                                     // facing him
+  const MI = [null, 'migbaat'];
+  tr.until(D.tCall - 0.05, { pose: 'stand', face: tgt.at });
+  tr.until(D.tMitre - 0.12, { pose: 'stand', face: tgt.at });
+  tr.walk([before], { until: D.tMitre - 0.09 });
+  tr.hold(0.03, { h: hT, pose: 'lift_mitre', phase: ramp(0, MITRE_GRASP) });
+  const tOff = tr.now();
+  tr.hold(0.05, { h: hT, pose: 'lift_mitre', phase: ramp(MITRE_GRASP, 1), prop: 'migbaat' });
+  tr.walk([c], { until: Math.max(tr.now() + 0.03, D.tCount[0] - 0.08), prop: 'migbaat' });
   const fingers = who.map((i) => 1 + (rand(seed, 'f', i) < 0.3 ? 1 : 0));
   // the number named: a little over one round of the fingers ⚙
   const total = fingers.reduce((a, b) => a + b, 0);
   const named = total + 1 + Math.floor(rand(seed, 'n') * Math.max(1, total * 0.6));
   for (let k = 0; seq.length < named; k++) { const j = k % who.length; for (let f = 0; f < fingers[j] && seq.length < named; f++) seq.push(who[j]); }
   const dt = Math.max(0.02, (D.tCount[1] - D.tCount[0]) / seq.length);
-  tr.until(D.tCount[0], { pose: 'stand', face: spots[0].at });
-  for (const j of seq) tr.hold(dt, { face: spots[j].at, pose: 'point' });
-  tr.until(D.tDown + 0.1, { pose: 'stand' });
+  tr.until(D.tCount[0], { pose: 'stand', face: tgt.at, props: MI });
+  for (const j of seq) tr.hold(dt, { face: spots[j].at, pose: 'point', props: MI });
+  tr.until(D.tDown + 0.1, { pose: 'stand', props: MI });
+  tr.walk([before], { until: D.tDown + 0.14, prop: 'migbaat' });
+  tr.hold(0.05, { h: hT, pose: 'lift_mitre', phase: ramp(1, MITRE_GRASP), prop: 'migbaat' });
+  const tOn = tr.now();
+  tr.hold(0.03, { h: hT, pose: 'lift_mitre', phase: ramp(MITRE_GRASP, 0) });
+  tr.walk([c], { until: tr.now() + 0.04 });
+  return { j: j0, tOff, tOn };
+}
+
+/** the man whose mitre was lifted: his head bare between tOff and tOn (g1/util.js Track.mark -> applyLeg) */
+function bare(trs, m) {
+  if (m && trs[m.j]) trs[m.j].mark(m.tOff, m.tOn);
+  return m;
 }
 
 /** after the draw: at ease in the circle (a seeded turn), then out by the east door at tGo */
@@ -390,11 +425,11 @@ function lingerAndGo(tr, spot, tGo, door, i) {
   tr.walk(door, { speed: SLOW });
 }
 
-function drawCues(tag, D, call, won, c) {
+function drawCues(tag, D, call, won, c, m) {
   const k = (x) => `${tag}:${Math.round(x * 10)}`;
   const out = [
     { key: `call-${k(D.tCall)}`, t: D.tCall, caption: call, at: c, range: 40, owner: 'lot', duration: 9 },
-    { key: `mitre-${k(D.tMitre)}`, t: D.tMitre + 0.1, caption: TEXT.mitre, at: c, range: 40, owner: 'lot' },
+    { key: `mitre-${k(D.tMitre)}`, t: m ? m.tOff + 0.02 : D.tMitre + 0.1, caption: TEXT.mitre, at: c, range: 40, owner: 'lot' },
   ];
   if (won) out.push({ key: `won-${k(D.tWon)}`, t: D.tWon, caption: won, at: c, range: 40, owner: 'lot', duration: 7 });
   return out;

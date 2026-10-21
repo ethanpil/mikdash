@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Offline checks of the Levites' song (node, no browser):
-//   node src/audio/dev/songs-test.mjs [--render N] [--tier low|medium|high] [--wav DIR] [--write-cal | --check-cal all]
+//   node src/audio/dev/songs-test.mjs [--render N | --song ID] [--tier low|medium|high] [--wav DIR] [--write-cal | --check-cal all]
+//   (--song ID renders that song's three sections instead of N picked by length)
 // 0. the choir's precomputed level calibration (synth/choir-cal.js) against a fresh one (--write-cal regenerates it;
 //    by default only the four tiers' plain choirs are checked, --check-cal all checks every entry);
 // 1. texts: every song's three sections cover its verses once, in order; each verse has Hebrew, English and syllables;
@@ -12,7 +13,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SONGS, sectionVerses, sectionRefs, songId, shabbatSong } from '../songs.js';
+import { SONGS, sectionVerses, sectionRefs, songId, shabbatSong, songHeading } from '../songs.js';
 import { HEB } from '../songs-text.js';
 import { libationTimeline, sectionTiming, sectionLyrics, D_SET, SET_BLASTS } from '../timeline.js';
 import { synthesize, TIER_CHOIR } from '../synth/index.js';
@@ -51,7 +52,7 @@ const check = (ok, msg) => { if (!ok) fails.push(msg); };
 }
 
 // ---- 1. texts
-const CH = { 'Ps 24': 10, 'Ps 48': 15, 'Ps 82': 8, 'Ps 94': 23, 'Ps 81': 17, 'Ps 93': 5, 'Ps 92': 16 };
+const CH = { 'Ps 24': 10, 'Ps 48': 15, 'Ps 82': 8, 'Ps 94': 23, 'Ps 81': 17, 'Ps 93': 5, 'Ps 92': 16, 'Ps 30': 13 };
 const seen = {};
 for (const [id, S] of Object.entries(SONGS)) {
   const refs = [0, 1, 2].flatMap((k) => sectionRefs(id, k));
@@ -116,10 +117,19 @@ for (const id of Object.keys(SONGS)) for (const k of [0, 1, 2]) {
   check(songId({ song: 'haazinu' }) === 'haazinu-1' && songId({ song: 'haazinu', week: 4, date }) === 'haazinu-5', 'song cycle: week 0 by default, an explicit week wins');
   check(sectionTiming({ psalm: 48, tempo: 1.2 }, 0).duration < sectionTiming({ psalm: 48 }, 0).duration - 3, 'tempo does not change the timing');
 }
+// the bikkurim song (render-audio-3): asked for by id, as Psalm 30 or by its occasion; its own heading; not a daily psalm
+{
+  const ok = ['aromimcha', 'psalm-30', 'bikkurim', 30, '30'].every((s) => songId({ song: s }) === 'aromimcha') && songId({ psalm: 30 }) === 'aromimcha';
+  check(ok, 'the bikkurim song is not found by its aliases');
+  const hd = songHeading('aromimcha', 1);
+  check(/Bikkurim 3:4/.test(hd.en) && /Psalm 30:5–8/.test(hd.en) && /בִּכּוּרִים/.test(hd.he), `bikkurim heading: ${hd.en}`);
+  check(SONGS.aromimcha.kind !== 'psalm' && songId({ weekday: 0 }) === 'psalm-24', 'the bikkurim song must not be a daily psalm');
+}
 
 // ---- 3. renders
 const all = Object.keys(SONGS).flatMap((id) => [0, 1, 2].map((k) => ({ id, k, d: sectionTiming({ song: id }, k).duration }))).sort((a, b) => a.d - b.d);
-const pick = N <= 0 ? [] : N === 1 ? [all[all.length - 1]] : Array.from({ length: N }, (_, i) => all[Math.round((i * (all.length - 1)) / (N - 1))]);
+const only = arg('--song', null);
+const pick = only ? [0, 1, 2].map((k) => ({ id: songId({ song: only }), k })) : N <= 0 ? [] : N === 1 ? [all[all.length - 1]] : Array.from({ length: N }, (_, i) => all[Math.round((i * (all.length - 1)) / (N - 1))]);
 const SR = { low: 32000, medium: 32000, high: 48000, ultra: 48000 }[tier];
 const env = (x, sr, win = 0.05) => {
   const w = Math.round(win * sr), out = [];

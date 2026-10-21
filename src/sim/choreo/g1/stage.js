@@ -9,11 +9,19 @@ import { SEED } from './plan.js';
 export const POOLS = {
   'young:off': { role: 'kohen_offduty', count: 4, seed: SEED.brothers },
   'young:k': { role: 'kohen', count: 4, seed: SEED.brothers },
+  'young:bath': { role: 'kohen_bathing', count: 4, seed: SEED.brothers },
   'keri:off': { role: 'kohen_offduty', count: 1, seed: SEED.keri },
   'keri:k': { role: 'kohen', count: 1, seed: SEED.keri },
-  'slab:off': { role: 'kohen_offduty', count: 1, seed: SEED.winner },
-  'slab:k': { role: 'kohen', count: 1, seed: SEED.winner },
-  'elders:elder': { role: 'elder', count: 6, seed: SEED.elders },
+  'keri:bath': { role: 'kohen_bathing', count: 1, seed: SEED.keri },
+  // the slab kohen works the muchni's wheel at dawn (terumat-hadeshen): a man of the windlass's size, scale 1 in every
+  // module (people-4-fix: an operator at a fixture whose geometry is in metres)
+  'slab:off': { role: 'kohen_offduty', count: 1, seed: SEED.winner, scale: 1 },
+  'slab:k': { role: 'kohen', count: 1, seed: SEED.winner, scale: 1 },
+  'slab:bath': { role: 'kohen_bathing', count: 1, seed: SEED.winner, scale: 1 },
+  // the elders of the beit av (Tamid 1:1): kohen_elder (asleep on the ledges in their own clothes on their folded
+  // garments); eoff = the same men awake in their own clothes (kohen_elder_offduty)
+  'elders:elder': { role: 'kohen_elder', count: 6, seed: SEED.elders },
+  'elders:eoff': { role: 'kohen_elder_offduty', count: 6, seed: SEED.elders },
   'levite:guard': { role: 'guard_levi', count: 1, seed: SEED.levite, prop: null },
   'officer:k': { role: 'kohen', count: 1, seed: SEED.officer },
   'gevini:levi': { role: 'levi', count: 1, seed: SEED.gevini },
@@ -23,7 +31,7 @@ export function makePools(sim, keys, importance = 2, extra = {}) {
   const pools = {};
   for (const k of keys) {
     const s = POOLS[k];
-    pools[k] = sim.pool({ name: k, role: s.role, count: s.count, seed: s.seed, importance: extra[k]?.importance ?? importance, prop: extra[k]?.prop ?? s.prop });
+    pools[k] = sim.pool({ name: k, role: s.role, count: s.count, seed: s.seed, importance: extra[k]?.importance ?? importance, prop: extra[k]?.prop ?? s.prop, scale: s.scale });
   }
   return pools;
 }

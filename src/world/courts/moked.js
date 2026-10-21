@@ -6,7 +6,7 @@
 // its mikveh, fire and privy (Tamid 1:1; Middot 1:9). Fire 'courts.moked.lambs.lamp' (lamb chamber, 'service').
 import { B, gridSolid, lathe, sweep, Mesher } from './lib/geo.js';
 import { shell, flight, spiral, lamp, lampStand, wallLamp, starFire, slabRingGeometry, SLAB_RING } from './lib/parts.js';
-import { classify } from './masonry.js';
+import { classify, WALL, WALL_IN } from './masonry.js';
 import { leafGeometry, meshOf, Object3D, finishLocal, boxAt } from './lib/kit.js';
 import { AMAH, m2w } from '../../core/units.js';
 import { TorusGeometry, CylinderGeometry, BufferAttribute, DynamicDrawUsage } from 'three';
@@ -43,7 +43,7 @@ function hall(C) {
     const p = [f.center[0] + (f.axis === 0 ? f.dir * 0.01 : 0), f.center[1] + (f.axis === 1 ? f.dir * 0.01 : 0)];
     const inside = p[0] > i.min[0] && p[0] < i.max[0] && p[1] > i.min[1] && p[1] < i.max[1];
     if (inside) return 'ashlar_plain';
-    return p[1] < 398 ? 'herodian_wall_inner' : 'herodian_wall';
+    return p[1] < 398 ? WALL_IN : WALL;
   }), true, true);
   // the corner slabs carrying the dome over the square (springing at the walls' head) ⚙
   const { c, R } = geom(C);
@@ -359,9 +359,30 @@ function cornerChambers(C) {
       C.doorSingle(id, 'cedarSmall', [hingeX, face + out * 0.2, Z], [west ? 1 : -1, 0], [0, out], 1.5, 6.5, { open: 1, label: e.name.en });
     }
     if (key === 'showbread') {
-      // Beit Garmu's bakery (Yoma 38a): a domed oven and a kneading table ⚙
-      C.kit.geo(lathe([[0, 0], [1.3, 0], [1.3, 0.8], [1.15, 1.5], [0.8, 2.0], [0.35, 2.25], [0, 2.3]], [(b.min[0] + b.max[0]) / 2 + 0.6, b.min[1] + 1.6, Z], C.d >= 2 ? 18 : 10), C.kit.mat('terracotta', 'plaster'), { collide: true });
-      C.kit.m('cedar', true, true).box([b.min[0] + 0.6, b.max[1] - 2.2, Z], [b.max[0] - 0.6, b.max[1] - 1.2, Z + 1.7]);
+      // Beit Garmu's bakery (Yoma 38a): a domed oven and a kneading table ⚙. world-4: the room inside the inner walls is
+      // 4½ × 5½, so the oven (r 1) stands in the far corner from the door and the table along the south wall, leaving
+      // the door's approach clear and standing room at the table (the old full-width table blocked the doorway, with
+      // 0.34 m behind it). Stand spots as anchors: 'courts.moked.showbread.knead' (at the table, facing it) and
+      // 'courts.moked.showbread.oven' (before the oven's mouth). A lamp on the west wall over the table,
+      // 'courts.moked.showbread.lamp' ('service', dark until the sim lights it).
+      const ix0 = west ? b.min[0] : xw[1], ix1 = west ? xw[0] : b.max[0];      // the room inside its inner walls
+      const iy0 = south ? b.min[1] : yw[1], iy1 = south ? yw[0] : b.max[1];
+      const doorEnd = south ? iy1 : iy0, far = south ? iy0 : iy1, inward = south ? -1 : 1;   // the door's wall, the far wall
+      const ovC = [west ? ix0 + 1.15 : ix1 - 1.15, doorEnd + inward * 1.15];               // the corner beside the door ⚙
+      const ovMouth = [ovC[0], ovC[1] + inward * 1.0];
+      C.kit.geo(lathe([[0, 0], [1.0, 0], [1.0, 0.6], [0.88, 1.15], [0.62, 1.55], [0.27, 1.75], [0, 1.8]], [ovC[0], ovC[1], Z], C.d >= 2 ? 18 : 10), C.kit.mat('terracotta', 'plaster'), { collide: true });
+      // its mouth toward the room: a dark opening on the dome (a dark iron plate a hair proud of the clay; the batch's iron) ⚙
+      const mo = C.kit.m('iron', false, true), my = ovC[1] + inward * 0.99;
+      mo.box([ovC[0] - 0.22, Math.min(my, my + inward * 0.03), Z + 0.15], [ovC[0] + 0.22, Math.max(my, my + inward * 0.03), Z + 0.62]);
+      // the kneading table against the far wall, on the side away from the oven: 2 × 1.4, 1.7 high
+      const tx0 = west ? ix1 - 0.1 - 2.0 : ix0 + 0.1, tx1 = tx0 + 2.0;
+      const ty0 = south ? far + 0.1 : far - 1.5, ty1 = ty0 + 1.4;
+      C.kit.m('cedar', true, true).box([tx0, ty0, Z], [tx1, ty1, Z + 1.7]);
+      const kneadAt = [(tx0 + tx1) / 2, south ? ty1 + 0.55 : ty0 - 0.55, Z];
+      C.anchor('courts.moked.showbread.knead', kneadAt, south ? 180 : 0, 'Beit Garmu — at the kneading table (Menachot 11:1)', { table: [[tx0, ty0, Z], [tx1, ty1, Z + 1.7]] });
+      C.anchor('courts.moked.showbread.oven', [ovMouth[0], ovMouth[1] + inward * 0.45, Z], south ? 0 : 180, 'Beit Garmu — before the oven (Yoma 38a)', { oven: [ovC[0], ovC[1], Z], radius: 1 });
+      const lx = west ? ix1 : ix0;
+      wallLamp(C, 'courts.moked.showbread.lamp', lx, (ty0 + ty1) / 2, Z + 3.6, [west ? -1 : 1, 0], { schedule: 'service', intensity: 0 });
     }
     if (key === 'altar-stones') {
       // the stones of the altar defiled by the Greek kings, stored away (Middot 1:6) — whitewashed field-stones
@@ -387,7 +408,7 @@ function gates(C) {
   const w = 5 - 0.02, h = 20, t = 0.4;
   const set = C.leafSet('goldLeaf', w, h);
   const local0 = gb.max[0] - pk.max[0], local1 = gb.max[0] - pk.min[0];   // the wicket along the east leaf from its hinge
-  const eastGeo = leafGeometry(w, h, t, 'gate', C.d, [[local0, 0, local1, pk.max[2] - pk.min[2]]]);
+  const eastGeo = leafGeometry(w, h, t, 'gate', C.d, [[local0, 0, local1, pk.max[2] - pk.min[2]]], { astragal: true });
   const east = new Object3D();
   east.name = 'courts:moked-east-leaf';
   const eastMesh = meshOf(C.kit, eastGeo, 'gold_plate', 'courts:moked-east-leaf-mesh');

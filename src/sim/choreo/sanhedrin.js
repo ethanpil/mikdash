@@ -23,9 +23,11 @@ import { headingTo } from '../lib/path.js';
 const SEED = 0x5a4e;
 const CAPTION_RANGE = 25;
 const N = 71;
-// the Gazit's benches as built (courts/chambers.js amphitheatre): centre, the tiers' inner radii and tops (amot above
-// the floor), open toward the chol door (west)
-const GZ = { c: [53, 381], Z: 16, rIn: [4.6, 5.7, 6.8, 7.9], tz: [0.9, 1.5, 2.1, 2.7], seat: 1.0 };
+// the Gazit's benches as built (courts/chambers.js amphitheatre; world-4: risers of one amah, so a judge sitting on a
+// tier has his feet on the tier below — people's 'sit' assumes a 1-amah seat): centre, the tiers' inner radii and tops
+// (amot above the floor), open toward the chol door (west); the Nasi's seat 0.35 over the first tier with a footstool of
+// 0.35 before it. Read from the anchor courts.gazit.benches at init; these are its values.
+const GZ = { c: [53, 381], Z: 16, rIn: [4.6, 5.7, 6.8, 7.9], tz: [1, 2, 3, 4], seat: 1.0, footstool: 0.35 };
 const DOOR_IN = [46, 383.5, 16], DOOR_OUT = [46, 379, 16];
 const SCRIBES = [{ at: [51.25, 378.0, 16], face: 75 }, { at: [51.25, 384.0, 16], face: 105 }];
 const CANDIDATE = [48.6, 381.0, 16];
@@ -40,6 +42,10 @@ export default {
     sim.setBounds([-200, 230, -30], [440, 470, 40]);
     const gz = ctx.elOpt?.('azarah.chamber.gazit')?.params?.stations?.sanhedrin;
     if (gz) { GZ.c = [gz[0], GZ.c[1]]; }
+    const bn = ctx.anchors?.get?.('courts.gazit.benches');
+    if (Array.isArray(bn?.tz) && bn.tz.length === 4) GZ.tz = bn.tz.slice();
+    if (Array.isArray(bn?.rIn) && bn.rIn.length === 4) GZ.rIn = bn.rIn.slice();
+    if (Number.isFinite(bn?.footstool)) GZ.footstool = bn.footstool;
     return {
       judges: sim.pool({ name: 'judges', role: 'sanhedrin', count: N, seed: SEED + 1, importance: 2, prop: null }),
       scribes: sim.pool({ name: 'scribes', role: 'israelite', count: 2, seed: SEED + 2, importance: 2, prop: null }),
@@ -116,9 +122,10 @@ function gazitSeats() {
     const X = GZ.c[0] + s.rs * Math.cos(s.a), Y = GZ.c[1] + s.rs * Math.sin(s.a);
     const top = GZ.Z + (s.nasi ? GZ.tz[0] + 0.35 : GZ.tz[s.k]);
     const face = headingTo(X, Y, GZ.c[0], GZ.c[1]);
-    // where he stands to sit: a pace in front, on the bench below (the floor before tier 0)
-    const rf = (s.k === 0 ? GZ.rIn[0] - 0.55 : GZ.rIn[s.k] - 0.55);
-    const zf = s.k === 0 ? GZ.Z : GZ.Z + GZ.tz[s.k - 1];
+    // where he stands to sit: a pace in front, on the bench below (the floor before tier 0); the Nasi on his footstool
+    // (world-4: rIn[0] − 0.75 … − 0.05, its top 0.35)
+    const rf = s.nasi ? GZ.rIn[0] - 0.4 : (s.k === 0 ? GZ.rIn[0] - 0.55 : GZ.rIn[s.k] - 0.55);
+    const zf = s.nasi ? GZ.Z + GZ.footstool : s.k === 0 ? GZ.Z : GZ.Z + GZ.tz[s.k - 1];
     return { ...s, sit: [X, Y, top - GZ.seat], stand: [GZ.c[0] + rf * Math.cos(s.a), GZ.c[1] + rf * Math.sin(s.a), zf], face };
   });
 }

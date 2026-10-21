@@ -13,6 +13,10 @@
 //   crowd (X 205–245, Y 120–146): Israelites and women (pose via &crowd=stand|prostrate|bow|kneel|walk — a walking
 //          region crowd flows along its headings and wraps inside the region); a small flock of lambs
 // URL helpers: &pphase=0.5 fixes every one-shot phase; &crowdn=N crowd size.
+import { Mesh, TorusGeometry, BoxGeometry, CylinderGeometry, MeshStandardMaterial, Group } from 'three';
+import { m2w, headingToYaw, AMAH } from '../core/units.js';
+import { CRANK, KNEAD, WAVE_UNDER } from './clips.js';
+
 export function buildDemo(ctx) {
   const P = ctx.people;
   const q = ctx.params.raw;
@@ -44,8 +48,11 @@ export function buildDemo(ctx) {
     return;
   }
 
+  // &rows=p4 — only the people-4 rows (docs/decisions/people-4.md), from Y 103, for close inspection
+  if (q.get('rows') === 'p4') { ctx.people.demo = people4Rows(P, one, 103); return; }
+
   // row A — every role
-  const roles = ['kohen', 'segan', 'kohen_gadol', 'kohen_gadol_white', 'levi', 'guard_levi', 'levi_boy', 'israelite', 'nazir', 'woman', 'elder', 'sanhedrin', 'child', 'kohen_offduty'];
+  const roles =['kohen', 'segan', 'kohen_gadol', 'kohen_gadol_white', 'levi', 'guard_levi', 'levi_boy', 'israelite', 'nazir', 'woman', 'elder', 'sanhedrin', 'child', 'kohen_offduty'];
   roles.forEach((role, i) => {
     const a = P.spawn({ role, seed: 100 + i });
     a.setSite(245.2 + i * 1.6, 103).setHeading(180);
@@ -124,9 +131,10 @@ export function buildDemo(ctx) {
   });
 
   serviceRows(P, one);
+  people4Rows(P, one, 157);
 
   // row P — every prop, free-standing (hung carcasses at hook height)
-  const HUNG = new Set(['lamb_hung', 'carcass_flaying', 'carcass_hung']);
+  const HUNG = new Set(['lamb_hung', 'carcass_flaying', 'carcass_hung', ...P.props.filter((n) => /_hung$|^carcass_flaying_|^carcass_hung_/.test(n))]);
   P.props.forEach((name, i) => {
     const p = P.spawnProp(name);
     p?.setSite(247.5 + i * 0.58, 99.3, HUNG.has(name) ? 4.2 : undefined).setHeading(180 + (i % 2) * 20);
@@ -203,4 +211,126 @@ function serviceRows(P, one) {
   X += 6;
   ['limb_charred', 'limb_head_charred', 'limb_foreleg_charred', 'limb_oketz_charred', 'limb_chazeh_charred', 'limb_gerah_charred', 'limb_dofen_charred', 'lamb_dead']
     .forEach((name, i) => P.spawnProp(name)?.setSite(X + i * 0.7, Y).setHeading(170 + i * 15));
+}
+
+/**
+ * rows J–L (from Y0; Y0 = 157 in the full lineup, 103 with &rows=p4): the people-4 additions (docs/decisions/people-4.md)
+ *   J: eating, kneading, the Golah crank, tenufah together (wave + wave_under, the same phase), the bikkurim basket waved
+ *      by its rims with the kohen's hands beneath, the slain lamb across the shoulders and in the arms, the showbread
+ *      stacks, the eimurim, the nazir's basket, the isaron poured, a razor, coins
+ *   K: the nazir and the same man shaven (nazir_shaven, same seed), the metzora and the same man shaven all over, the
+ *      mourner and the one under a ban in black, an Israelite in white and in black
+ *   L: the ewe and the she-goat; the hung, flaying and flayed carcasses of the ram, the goat, the ewe and the she-goat at
+ *      hook height; the new free props
+ * &p4=walk walks the walking variants; &pphase fixes the phases (the wave pairs always share one). The wave pairs share
+ * one scale too, and the kneader and the crank operator are at scale 1 (people-4-fix; &p4seeded leaves each wave pair
+ * at its own seeded sizes). With &p4fix the dough lies on the kneading table.
+ */
+function people4Rows(P, one, Y0) {
+  const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+  const scene = globalThis.__mikdash?.scene;
+  // &p4fix: what the poses assume — a kneading table (KNEAD) and the Golah wheel's spokes (CRANK) at the phase shown
+  const fixtures = (kx, cx, Y, ph) => {
+    if (!scene) return;
+    const mat = new MeshStandardMaterial({ color: 0x8a6a48, roughness: 0.8 });
+    const table = new Mesh(new BoxGeometry(0.9, 0.05, 0.5), mat);
+    table.position.copy(m2w(kx, Y - (KNEAD.reach + 0.05) / AMAH, (KNEAD.surface - 0.025) / AMAH));
+    scene.add(table);
+    const W = CRANK, g = new Group();
+    g.position.copy(m2w(cx, Y, 0));
+    g.rotation.y = headingToYaw(180);
+    const hub = new Group();
+    hub.position.set(W.hub[0], W.hub[1], W.hub[2]);
+    hub.rotation.z = W.spin0 + ph * W.perCycle;   // φ grows toward his left (+z rotation of his up axis toward −x)
+    const rim = new Mesh(new TorusGeometry(2.1 * AMAH, 0.06 * AMAH, 6, 32), mat);
+    hub.add(rim);
+    for (let i = 0; i < 8; i++) {
+      const sp = new Mesh(new BoxGeometry(0.05, 2.65 * AMAH, 0.05), mat);
+      sp.geometry.translate(0, 2.65 * AMAH / 2, 0);
+      sp.rotation.z = i * Math.PI / 4;
+      hub.add(sp);
+    }
+    hub.add(new Mesh(new CylinderGeometry(0.08, 0.08, 0.3, 10).rotateX(Math.PI / 2), mat));
+    g.add(hub);
+    scene.add(g);
+  };
+  const walk = q.get('p4') === 'walk';
+  const out = { actors: [] };
+  const put = (role, X, Y, h, pose, prop, hand, ph, seed) => {
+    const a = P.spawn({ role, seed: seed ?? Math.round(X * 13 + Y * 7) });
+    a.setSite(X, Y).setHeading(h);
+    if (Array.isArray(prop)) a.setProps(prop[0], prop[1]); else if (prop) a.setProp(prop, hand || 'right');
+    a.setPose(pose, ph != null ? one(ph) : undefined);
+    out.actors.push(a);
+    return a;
+  };
+  // row J — the poses
+  let Y = Y0, X = 243;
+  const step = (d = 2.4) => (X += d);
+  put('kohen', X, Y, 180, 'eat', 'bread_piece', 'right', 0.38); step();
+  put('kohen', X, Y, 180, 'eat', 'bread_piece', 'right', 0.8); step();
+  // the fixtures' poses at scale 1 (their geometry is in metres): the kneader at his table with the dough on it
+  put('kohen', X, Y, 180, 'knead', null, null, 0.3).setScale(1);   // (its table: &p4fix)
+  if (q.has('p4fix')) P.spawnProp('dough')?.setSite(X, Y - KNEAD.reach / AMAH, KNEAD.surface / AMAH).setHeading(180);
+  step();
+  const crankPh = 0.25;
+  put('levi', X, Y, 180, 'crank', null, null, crankPh).setScale(1);
+  if (q.has('p4fix')) fixtures(X - 2.4, X, Y, crankPh);
+  step(2.8);
+  // tenufah: the owner (west) and the kohen facing him at ONE scale s (the owner's), WAVE_UNDER.partner·s apart, the same
+  // phase; &p4seeded leaves each at his own seeded size (the mismatch the rule avoids)
+  const wph = 0.12;
+  const pair = (prop, hand) => {
+    const o = put('israelite', X, Y, 90, 'wave', prop, hand, wph);
+    const k = put('kohen', X, Y, 270, 'wave_under', null, null, wph);
+    if (!q.has('p4seeded')) k.setScale(o.scale);
+    const D = WAVE_UNDER.partner * o.scale / AMAH;
+    o.setSite(X - D / 2, Y); k.setSite(X + D / 2, Y);
+  };
+  pair(['limb_chazeh', 'limb']); step(3.2);
+  // the bikkurim: the basket held by its rims and waved, the kohen's hands beneath it
+  pair('basket', 'right'); step(3.2);
+  put('kohen', X, Y, 180, walk ? 'carry_shoulder_walk' : 'carry_shoulder', 'lamb_slain'); step();
+  put('kohen', X, Y, 180, walk ? 'carry_shoulder_walk' : 'carry_shoulder', 'goat_slain'); step();
+  put('kohen', X, Y, 180, walk ? 'carry_lamb_walk' : 'carry_lamb', 'lamb_slain'); step(2.6);
+  put('kohen', X, Y, 180, walk ? 'carry_walk' : 'carry', 'showbread_stack'); step(2.6);
+  put('kohen_gadol', X, Y, 180, 'carry', 'showbread_half'); step(2.6);
+  put('kohen', X, Y, 180, walk ? 'carry_walk' : 'carry', 'eimurim'); step();
+  put('nazir', X, Y, 180, walk ? 'carry_walk' : 'carry', 'sal_matzot'); step();
+  put('kohen', X, Y, 180, 'pour_low', 'measure', 'right', 0.45); step();
+  put('nazir', X, Y, 180, 'stand', 'razor'); step();
+  put('israelite', X, Y, 180, 'kemitzah', 'coins', 'left'); step();
+  put('kohen', X, Y, 180, 'melikah', 'bread_piece', 'left'); step();
+  put('israelite', X, Y, 180, 'carry', 'clay_pot');
+  // row K — the shaven, the metzora, mourners and garments
+  Y = Y0 + 6; X = 245;
+  put('nazir', X, Y, 180, 'stand', null, null, null, 4242); step(1.7);
+  put('nazir_shaven', X, Y, 180, 'stand', null, null, null, 4242); step(1.7);
+  put('nazir', X, Y, 180, 'stand', null, null, null, 4343).setShaven('head'); step(1.7);
+  put('metzora', X, Y, 180, 'stand', null, null, null, 5151); step(1.7);
+  put('metzora', X, Y, 180, 'stand', null, null, null, 5151).setShaven('all'); step(1.7);
+  put('mourner', X, Y, 180, walk ? 'walk' : 'stand'); step(1.7);
+  put('menudeh', X, Y, 180, 'stand'); step(1.7);
+  put('mourner', X, Y, 180, 'stand').setGarb('white'); step(1.7);
+  put('israelite', X, Y, 180, 'stand', null, null, null, 6161).setGarb('white'); step(1.7);
+  put('israelite', X, Y, 180, 'stand', null, null, null, 6161).setGarb('black'); step(1.7);
+  put('israelite', X, Y, 180, 'stand', null, null, null, 6161);
+  // row L — the chatat's females and the carcasses by kind; the new free props
+  Y = Y0 + 12; X = 245;
+  for (const [kind, pose] of [['ewe', 'stand'], ['she_goat', 'stand'], ['ewe', 'bound'], ['she_goat', 'stand_halter'], ['lamb', 'stand'], ['goat', 'stand']]) {
+    const a = P.spawnAnimal(kind, { seed: Math.round(X * 3) });
+    a.setSite(X, Y).setHeading(250).setPose(pose);
+    out.actors.push(a);
+    step(1.9);
+  }
+  for (const name of ['ram_hung', 'goat_hung', 'ewe_hung', 'she_goat_hung', 'carcass_flaying_ram', 'carcass_flaying_goat', 'carcass_flaying_ewe', 'carcass_flaying_she_goat', 'carcass_flaying', 'carcass_hung_ram', 'carcass_hung_goat', 'carcass_hung']) {
+    P.spawnProp(name)?.setSite(X, Y, 4.2).setHeading(160);
+    step(name.startsWith('ram') || name.endsWith('_ram') ? 1.9 : 1.6);
+  }
+  for (const [name, dx] of [['hide_goat', 1.2], ['hide', 1.4], ['lamb_slain', 1.6], ['goat_slain', 1.6], ['showbread_stack', 1.3], ['showbread_half', 1.1], ['eimurim', 0.9], ['eimurim_goat', 0.9],
+    ['sal_matzot', 1], ['clay_pot', 0.7], ['clay_pot_broken', 0.9], ['measure', 0.6], ['coins', 0.5], ['razor', 0.5], ['bread_piece', 0.5], ['dough', 0.7]]) {
+    P.spawnProp(name)?.setSite(X, Y).setHeading(170);
+    step(dx);
+  }
+  return out;
 }

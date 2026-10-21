@@ -10,6 +10,9 @@
 //   ctx.fx.attachTorch(object3D, opts)    -> handle; opts { offset:[x,y,z] local m, size, intensity, kind }
 //   ctx.fx.smokeColumn({ pos, height, width, density, kind:'wood'|'incense', rise }) -> handle
 //   ctx.fx.remove(handle | id)
+//   ctx.fx.emissionScale                  scene units per cd/m² of fire emission as fx's own flames, embers and beds use
+//                                         it (env.preExposure × fireScale × local fire adaptation × flame-core gain):
+//                                         for emissive materials that glow with the fires (materials' embers)
 //
 // Rendering: four instanced draw calls total (flames, halos, embers, smoke) in a separate scene (`fx.scene`)
 // that render/ draws AFTER ambient occlusion (so AO never darkens flames) with soft depth intersection.

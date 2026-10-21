@@ -5,7 +5,7 @@
 // (fires 'courts.kelim.lamp-w' / '-s', schedule 'service'; Rambam BhB 8:12).
 import { B, gridSolid, lathe } from './lib/geo.js';
 import { shell, flight, spiral, wallLamp } from './lib/parts.js';
-import { classify } from './masonry.js';
+import { classify, WALL_IN } from './masonry.js';
 
 export function buildAzarah(C) {
   const Z_AZ = C.datums.azarah;
@@ -62,8 +62,12 @@ function waterGate(C) {
   const perTurn = 15, nSteps = Math.round((zr - Z_AZ) / 0.5);
   spiral(C, { c: sc, r1: sr - 0.05, z0: Z_AZ, z1: zr, perTurn, a0: Math.PI / 2 - nSteps * (2 * Math.PI / perTurn), mat: 'marble_white', newelMat: 'marble_white',
     topRect: [sc[0] - sr, sc[1] - sr, sc[0] + sr, sc[1] + sr] });
-  // a parapet (10 tefachim ⚙) on the landing's open south edge, from the mikveh's corner to the newel
-  C.kit.m('ashlar_plain', true, true).box([sc[0] - sr, sc[1], zr], [sc[0] - 0.45, sc[1] + 0.3, zr + 10 / 6]);
+  // the ma'akeh on the roof's open edges: site.js's ROOF_PARAPET_H, 10 tefachim (Devarim 22:8), read from the landing's
+  // parapet box (world-4: the terrace's two parapets were 2 amot)
+  const lp = hse.params.roofStair?.asBuilt?.landing?.parapet;
+  const parH = lp ? lp.max[2] - zr : 10 / 6;
+  // a parapet on the landing's open south edge, from the mikveh's corner to the newel
+  C.kit.m('ashlar_plain', true, true).box([sc[0] - sr, sc[1], zr], [sc[0] - 0.45, sc[1] + 0.3, zr + parH]);
   // ---- the roof terrace: Beit Avtinas (aliyah on the gate: Tamid 1:1; Rambam BhB 8:5) and the mikveh (Yoma 31a)
   const av = C.el('azarah.beit-avtinas').box;
   const walk = [hb.max[1] - 2.0, hb.max[1] - 0.4];              // the walkway along the court edge ⚙
@@ -78,10 +82,10 @@ function waterGate(C) {
   // its door: a cedar leaf opening in (Middot 2:3 — every opening there had doors) ⚙
   C.doorSingle('azarah.beit-avtinas', 'cedarSmall', [av.max[0] - 0.2, walk[0] - 0.2, av.min[2]], [0, 1], [-1, 0], walk[1] - 0.05 - (walk[0] - 0.2), 6.5, { open: 1, label: 'Beit Avtinas' });
   avtinasInterior(C, av);
-  // terrace parapets (ma'akeh) along both edges
+  // terrace parapets (ma'akeh) along both edges, 10 tefachim
   const par = C.kit.m('ashlar_plain', true, true);
-  par.box([av.max[0], hb.max[1] - 0.4, zr], [hb.max[0], hb.max[1], zr + 2]);
-  par.box([av.max[0], hb.min[1], zr], [hb.max[0], hb.min[1] + 0.4, zr + 2]);
+  par.box([av.max[0], hb.max[1] - 0.4, zr], [hb.max[0], hb.max[1], zr + parH]);
+  par.box([av.max[0], hb.min[1], zr], [hb.max[0], hb.min[1] + 0.4, zr + parH]);
   // the KG's first-immersion mikveh: water at gate head + 3 = the En-Eitam head (Yoma 31a); tank narrowed to keep
   // the walk to Beit Avtinas open ⚙
   const mk = C.el('azarah.mikveh.mayim-roof'), mb = mk.box, wz = mk.params.waterSurfaceZ;
@@ -99,7 +103,7 @@ function waterGate(C) {
   C.kit.m('water', false, false).box([tin.min[0], tin.min[1], wz], [tin.max[0], tin.max[1], wz], 'Z');
   // the linen sheet spread between him and the people (Yoma 3:4; site params.screen): on poles on the court-side
   // parapet, 'curtain:azarah.mikveh.mayim-roof.screen' — rolled to the poles except for his Yom Kippur immersion
-  const sx0 = mb.min[0] - 1.8, sx1 = tank.max[0] + 0.4, sy = hb.max[1] - 0.2, sz = zr + 2;
+  const sx0 = mb.min[0] - 1.8, sx1 = tank.max[0] + 0.4, sy = hb.max[1] - 0.2, sz = zr + parH;
   const pole = C.kit.m('cedar_v', false, true);
   for (const x of [sx0, sx1]) pole.box([x - 0.12, sy - 0.12, sz], [x + 0.12, sy + 0.12, sz + 4.9]);
   C.screen('azarah.mikveh.mayim-roof.screen', [sx0, sy, sz + 0.2], [1, 0], sx1 - sx0, 4.5, "The Kohen Gadol's linen sheet (Water Gate roof)");
@@ -141,8 +145,8 @@ function nitzotz(C) {
   ];
   // the newel stair stands in a thin stone turret in the exedra's NE corner, entered by a doorway at its foot ⚙
   const tt = 0.5, qx0 = sc[0] - sr - 0.05, qy0 = sc[1] - sr - 0.05;
-  adds.push(B(qx0 - tt, qy0 - tt, Z_AZ, qx0, yB - t, zr - 0.6, { side: 'herodian_wall_inner' }),
-    B(qx0 - tt, qy0 - tt, Z_AZ, x1 - t, qy0, zr - 0.6, { side: 'herodian_wall_inner' }));
+  adds.push(B(qx0 - tt, qy0 - tt, Z_AZ, qx0, yB - t, zr - 0.6, { side: WALL_IN }),
+    B(qx0 - tt, qy0 - tt, Z_AZ, x1 - t, qy0, zr - 0.6, { side: WALL_IN }));
   const td = [qx0 + 0.2, qx0 + 1.8];
   const subs = [
     { ...B(g.min[0], yB - t - 0.01, g.min[2], g.max[0], yB + 0.01, g.max[2] - 0.6), mat: 'marble_white' },

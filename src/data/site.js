@@ -1117,7 +1117,14 @@ add('altar.rings', { en: 'The 24 rings (taba\'ot)', he: 'טבעות', kind: 'fix
   fc: { band: 'explicit', distanceFromAltar: 'explicit', rowsByCols: 'locked', eastWestExtent: 'reconstruction' },
   p: { rows: RING_ROWS, cols: RING_COLS, positions: ringYs.flatMap((Y) => ringXs.map((X) => [r6(X), r6(Y), Z_AZ])),
     tamidMorning: { ring: [r6(ringXs[1]), r6(ringYs[0]), Z_AZ], note: 'NW corner, second ring (Tamid 4:1) ⚙ reading' },
-    tamidAfternoon: { ring: [r6(ringXs[2]), r6(ringYs[0]), Z_AZ], note: 'NE corner, second ring' }, binding: 'head south, face west; shochet east facing west (Tamid 4:1)' } });
+    tamidAfternoon: { ring: [r6(ringXs[2]), r6(ringYs[0]), Z_AZ], note: 'NE corner, second ring' }, binding: 'head south, face west; shochet east facing west (Tamid 4:1)',
+    // Bilgah's ring (added by world-4): "its ring fixed" (Sukkah 5:8; 56b) — the 24 rings stood "against the 24
+    // mishmarot", each turned up for the neck and back down into the floor, "and Bilgah's is fixed and does not turn"
+    // (Rashi 56a). Which ring was whose is not recorded: mishmar n ↔ positions[n − 1] in this list's order (row by row
+    // from the altar, west → east) ⚙; Bilgah is the 15th mishmar (Divrei HaYamim I 24:14) → index 14, clear of both
+    // tamid rings. build-altar draws it folded down and leaded to its plate.
+    bilgah: { index: 14, mishmar: 15, ring: [r6(ringXs[14 % RING_COLS]), r6(ringYs[Math.floor(14 / RING_COLS)]), Z_AZ], state: 'fixed folded down (leaded)',
+      sources: ['Sukkah 5:8', 'Sukkah 56b', 'Rashi Sukkah 56a', 'Divrei HaYamim I 24:14'], confidence: 'reconstruction' } } });
 const tableXs = Array.from({ length: MARBLE_TABLES }, (_, i) => ALT_X0 + (i + 0.5) * ALTAR / MARBLE_TABLES);
 add('altar.marble-tables', { en: 'The eight marble tables', he: 'שמונה שלחנות של שיש', kind: 'fixture',
   b: [ALT_X0, Y_RINGS_N, Z_AZ, ALT_X0 + ALTAR, Y_TABLES_N, Z_AZ + 1.5], src: ['Shekalim 6:4', 'Middot 3:5', 'Middot 5:2', 'Rambam BhB 5:14', 'Tamid 3:5'], c: 'reconstruction',
@@ -1928,7 +1935,11 @@ export function runChecks() {
   check('Shushan on the axis', (E('mount.gate.shushan').box.min[1] + E('mount.gate.shushan').box.max[1]) / 2 === AXIS_Y);
   check('Kiponus mid-west', (E('mount.gate.kiponus').box.min[1] + E('mount.gate.kiponus').box.max[1]) / 2 === MOUNT / 2);
   eq('ta\'im cells', E('heichal.taim.north').params.cells.length + E('heichal.taim.south').params.cells.length + E('heichal.taim.west').params.cells.length, 38);
-  eq('rings', E('altar.rings').params.positions.length, 24); eq('marble tables', E('altar.marble-tables').params.tables.length, 8); eq('nanasin', E('altar.nanasin').params.pillars.length, 8);
+  eq('rings', E('altar.rings').params.positions.length, 24);
+  { const rp = E('altar.rings').params, bi = rp.bilgah?.index, bp = rp.positions[bi] || [];   // Bilgah's fixed ring
+    check("Bilgah's ring is one of the 24 and not a tamid ring", !!rp.bilgah && bp[0] === rp.bilgah.ring[0] && bp[1] === rp.bilgah.ring[1]
+      && ![rp.tamidMorning.ring, rp.tamidAfternoon.ring].some((t) => t[0] === bp[0] && t[1] === bp[1])); }
+  eq('marble tables', E('altar.marble-tables').params.tables.length, 8); eq('nanasin', E('altar.nanasin').params.pillars.length, 8);
   eq('soreg breaches', E('mount.soreg.breaches').params.stations.length, 13);
   for (const [s, n] of Object.entries(PROSTRATIONS_BY_SIDE)) eq(`breaches on ${s}`, E('mount.soreg.breaches').params.stations.filter((b) => b.side === s).length, n);
   eq('mikveh surface on the Water Gate = En Eitam head (+23 over the Azarah)', E('azarah.mikveh.mayim-roof').box.max[2], Z_AZ + 23);

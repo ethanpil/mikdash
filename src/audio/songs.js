@@ -14,6 +14,10 @@
 // week's unit (Rashi on RH 31a: "Az yashir" to "Mi chamocha", "Mi chamocha" to the end of the song, the Song of the
 // Well; Ha'azinu in Rambam's six, Tefillah 13:5 — the synagogue division the Gemara equates with the musaf's) in three
 // sense units of about equal length.
+//
+// Also the bikkurim song, Psalm 30 ('aromimcha'): "they reached the court, and the Levites spoke in song: 'I will exalt
+// You, O Lord, for You have drawn me up…'" (Bikkurim 3:4; Rambam Bikkurim 4:17 quotes the verse and "etc."). Not a
+// concert: its three sections are only how it is cued (sense breaks 4|5, 8|9); a choreography sings them back to back.
 import { HEB } from './songs-text.js';
 
 /** English, by verse key. */
@@ -186,6 +190,21 @@ export const EN = {
   'Dt 32:41': 'when I whet My flashing sword and My hand takes hold of judgment, I will return vengeance to My foes and repay those who hate Me.',
   'Dt 32:42': 'I will make My arrows drunk with blood, and My sword shall devour flesh — with the blood of the slain and the captive, from the head of the enemy\'s leaders.',
   'Dt 32:43': 'Sing aloud, O nations, of His people, for He will avenge the blood of His servants; He will return vengeance to His foes, and atone for His land, His people.',
+
+  // the bikkurim song (Bikkurim 3:4)
+  'Ps 30:1': 'A psalm, a song for the dedication of the House, of David.',
+  'Ps 30:2': 'I will exalt You, O Lord, for You have drawn me up, and have not let my enemies rejoice over me.',
+  'Ps 30:3': 'O Lord my God, I cried out to You, and You healed me.',
+  'Ps 30:4': 'O Lord, You brought my soul up from the grave; You kept me alive, that I should not go down to the pit.',
+  'Ps 30:5': 'Sing to the Lord, you His devoted ones, and give thanks at the remembrance of His holiness.',
+  'Ps 30:6': 'For His anger is but a moment, life is in His favor; weeping may stay the night, but in the morning there is a song of joy.',
+  'Ps 30:7': 'And I had said in my ease: I shall never be moved.',
+  'Ps 30:8': 'O Lord, by Your favor You made my mountain stand firm; You hid Your face, and I was terrified.',
+  'Ps 30:9': 'To You, O Lord, I call, and to the Lord I plead:',
+  'Ps 30:10': 'What gain is there in my blood, in my going down to the pit? Will the dust praise You? Will it tell of Your faithfulness?',
+  'Ps 30:11': 'Hear, O Lord, and be gracious to me; O Lord, be my helper.',
+  'Ps 30:12': 'You have turned my mourning into dancing for me; You have loosed my sackcloth and girded me with joy,',
+  'Ps 30:13': 'so that my glory may sing praise to You and not be silent; O Lord my God, I will thank You forever.',
 };
 
 const BOOK = {
@@ -219,7 +238,13 @@ export const SONGS = {
   'haazinu-4': song('Dt 32', [[19, 21], [22, 25], [26, 28]], { en: 'Ha\'azinu, section 4 of 6: "The Lord saw and spurned"', he: 'וַיַּרְא ה׳ וַיִּנְאָץ' }, { when: 'musaf', week: 3 }),
   'haazinu-5': song('Dt 32', [[29, 31], [32, 35], [36, 39]], { en: 'Ha\'azinu, section 5 of 6: "Were they wise"', he: 'לוּ חָכְמוּ' }, { when: 'musaf', week: 4 }),
   'haazinu-6': song('Dt 32', [[40, 41], [42, 42], [43, 43]], { en: 'Ha\'azinu, section 6 of 6: "For I lift up My hand to heaven"', he: 'כִּי אֶשָּׂא אֶל שָׁמַיִם' }, { when: 'musaf', week: 5 }),
+  // the first fruits reach the court (Bikkurim 3:4): the whole psalm ⚙ (the Mishnah quotes its second verse, Rambam
+  // Bikkurim 4:17 adds "etc."); not one of the daily psalms, so a 'song' (music.js PSALMS and the sim's PSALM_DUR list
+  // the daily seven)
+  aromimcha: song('Ps 30', [[1, 4], [5, 8], [9, 13]], { en: 'Psalm 30, "I will exalt You, O Lord"', he: 'אֲרוֹמִמְךָ ה׳' }, { when: 'bikkurim', psalm: 30 }),
 };
+/** other names a song is asked for by: the bikkurim song as Psalm 30 or by its occasion */
+export const SONG_ALIAS = { 'psalm-30': 'aromimcha', bikkurim: 'aromimcha' };
 export const PSALM_DAYS = [24, 48, 82, 94, 81, 93, 92];   // Tamid 7:4 (Sunday … Shabbat)
 export const SHIRAH_CYCLE = ['az-yashir', 'mi-chamocha', 'az-yashir-yisrael'];
 export const HAAZINU_CYCLE = ['haazinu-1', 'haazinu-2', 'haazinu-3', 'haazinu-4', 'haazinu-5', 'haazinu-6'];
@@ -233,6 +258,7 @@ export function resolveSong(song, week = 0) {
   const wk = Number.isInteger(week) ? week : 0;
   if (s === 'haazinu') s = HAAZINU_CYCLE[((wk % 6) + 6) % 6];
   if (s === 'shirah' || s === 'afternoon') s = SHIRAH_CYCLE[((wk % 3) + 3) % 3];
+  s = SONG_ALIAS[s] || s;
   return SONGS[s] ? s : null;
 }
 
@@ -245,6 +271,7 @@ export function songId(o = {}) {
   const s = resolveSong(o.song, Number.isInteger(o.week) ? o.week : o.date ? shabbatWeek(o.date) : 0);
   if (s) return s;
   if (SONGS[`psalm-${o.psalm}`]) return `psalm-${o.psalm}`;
+  if (SONGS[SONG_ALIAS[`psalm-${o.psalm}`]]) return SONG_ALIAS[`psalm-${o.psalm}`]; // { psalm: 30 }: the bikkurim song
   if (Number.isInteger(o.weekday) && PSALM_DAYS[o.weekday]) return `psalm-${PSALM_DAYS[o.weekday]}`;
   return 'psalm-48';
 }
@@ -297,6 +324,12 @@ export function songHeading(id, section = 0, style) {
     return {
       en: `The Levites sing the song of the day — Psalm ${S.psalm}, "${S.incipit.en}" (part ${k + 1} of 3: ${range}; Tamid 7:3–4)${lens}`,
       he: `שִׁיר שֶׁל יוֹם — ${S.title.he}, פֶּרֶק ${PART_HE[k]}`,
+    };
+  }
+  if (S.when === 'bikkurim') {
+    return {
+      en: `The first fruits reach the court, and the Levites sing ${S.title.en} (part ${k + 1} of 3: ${range}; Bikkurim 3:4)${lens}`,
+      he: `שִׁירַת הַבִּכּוּרִים — תְּהִלִּים ${gematria(S.psalm)}, ${S.title.he}, פֶּרֶק ${PART_HE[k]}`,
     };
   }
   const svc = S.when === 'musaf' ? 'Shabbat musaf' : 'Shabbat afternoon';

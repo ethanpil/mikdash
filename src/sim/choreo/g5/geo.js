@@ -144,7 +144,9 @@ export function buildGeo(ctx) {
   // west of him facing east, 1.3 amot apart so the kohen's hands are beneath the owner's (Menachot 61b); each reaches
   // his place from his own side; the late bikkurim basket south of them ⚙
   const tp = S.tenufah.pos;
-  const wave = (y) => ({ owner: [tp[0] + 0.65, y, D16], kohen: [tp[0] - 0.65, y, D16], ownerIn: [tp[0] + 2.8, y, D16], kohenIn: [tp[0] - 3.1, y, D16] });
+  // the owner and the kohen facing each other people's WAVE_UNDER.partner apart (0.74 m origin to origin, both at scale 1)
+  const hw = (ctx.people?.stations?.waveUnder?.partner ?? 0.74) / (ctx.units?.AMAH || 0.48) / 2;
+  const wave = (y) => ({ owner: [tp[0] + hw, y, D16], kohen: [tp[0] - hw, y, D16], ownerIn: [tp[0] + 2.8, y, D16], kohenIn: [tp[0] - 3.1, y, D16] });
   S.wave = [0, 1, 2, 3, 4, 5].map((l) => wave(tp[1] + (l - 2.5) * 1.7));
   S.waveBik = wave(tp[1] - 6.0);
   // where the crops and feathers land (Zevachim 6:5): the ash place east of the ramp

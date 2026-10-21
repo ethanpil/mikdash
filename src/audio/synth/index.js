@@ -6,7 +6,7 @@
 // mixer's per-cue levels are meaningful; loops are cross-faded seamless, sparse ones normalised like cues.
 import { Rng, Biquad, hash, finish, loopify, secs, toDb, db, analyze } from './dsp.js';
 import { trumpets, cymbal, kinnorPhrase, nevelPhrase, chalilPhrase, bells } from './instruments.js';
-import { gateBoom, greatGateOpen, magrefah, muchni, knock, footsteps, keys, crowdProstrate } from './foley.js';
+import { gateBoom, greatGateOpen, magrefah, muchni, knock, footsteps, keys, crowdProstrate, potBreak } from './foley.js';
 import { barkai, gevini, shalomCall, grinderChant, bleat, babble } from './calls.js';
 import { fire, torch, water, wind, insects, dovesCue, dovesBed, sheepBed } from './nature.js';
 import { renderPsalm, choirCalibration, PSALM_BY_DAY } from './music.js';
@@ -63,6 +63,8 @@ export const CUES = {
   'crowd-prostrate': (sr, r, o) => mono(crowdProstrate(sr, r, o)),
   footsteps: (sr, r, o) => mono(footsteps(sr, r, o)),
   keys: (sr, r, o) => mono(keys(sr, r, o)),
+  // render-audio-3: the scouring's earthenware pot, broken (Lev 6:21; Zevachim 11:4)
+  'pot-break': (sr, r, o) => mono(potBreak(sr, r, o)),
 };
 
 /**

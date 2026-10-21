@@ -67,13 +67,27 @@ export function installCascadeBiasChunk() {
 				shadowWorldPosition = worldPosition + vec4( shadowWorldNormal * ( directionalLightShadows[ i ].shadowNormalBias * ${SLOPE} ), 0 );
 			}`);
   chunkPatched = true;
-  // front faces into the sun / moon shadow maps (orthographic shadow cameras only; not the people's own depth material)
+  // front faces into the sun / moon shadow maps (orthographic shadow cameras only; not the people's own depth material,
+  // nor a depth-only shadow proxy — frontFaces below)
   const proto = Object3D.prototype, prev = proto.onBeforeShadow;
   proto.onBeforeShadow = function (renderer, object, camera, shadowCamera, geometry, depthMaterial, group) {
-    if (shadowCamera?.isOrthographicCamera && depthMaterial?.side === BackSide && !object.customDepthMaterial) depthMaterial.side = DoubleSide;
+    if (shadowCamera?.isOrthographicCamera && depthMaterial?.side === BackSide && !object.customDepthMaterial && frontFaces(object, group)) depthMaterial.side = DoubleSide;
     return prev.call(this, renderer, object, camera, shadowCamera, geometry, depthMaterial, group);
   };
   return true;
+}
+
+/**
+ * render-audio-3: which casters draw their front faces too. Not a depth-only shadow proxy (colorWrite false: the
+ * terrain's coarse caster grid, sunk 0.6 m under the ground it stands for — world/terrain), nor a material that chose
+ * its own shadowSide. Drawn with its sunlit top, the proxy's coarse chords stood above the finer visible ground across
+ * the terraces' concave steps: a false ≈10 m shadow and concentric acne rings round it (`at=924,197&look=90,4&t=d3`,
+ * high; materials-2-fix). By its back faces alone (three's default) a heightfield still casts its ridges' shadows (the
+ * slopes facing away from the light) and never its own lit side. Its contact edges are nothing the front faces are for.
+ */
+function frontFaces(object, group) {
+  const m = Array.isArray(object.material) ? object.material[group?.materialIndex ?? 0] : object.material;
+  return !m || (m.colorWrite !== false && (m.shadowSide === null || m.shadowSide === undefined));
 }
 
 /**

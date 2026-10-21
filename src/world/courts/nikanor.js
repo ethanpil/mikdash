@@ -1,8 +1,9 @@
 // Sha'ar Nikanor (Middot 1:4, 2:3, 2:6; Yoma 38a; lock #14), its two wickets and the flanking chambers of
 // Pinchas HaMalbish and the chavitin bakers (Middot 1:4; Rambam BhB 5:17); Ezrat Yisrael, the 1-amah step and the
 // duchan (Middot 2:6; Rambam BhB 6:3; lock #10).
-import { B, Mesher, wedge, lathe } from './lib/geo.js';
-import { shell } from './lib/parts.js';
+import { B, Mesher, wedge, lathe, gridSolid } from './lib/geo.js';
+import { shell, starFire, wallLamp } from './lib/parts.js';
+import { classify } from './masonry.js';
 
 export function buildNikanor(C) {
   const g = C.el('azarah.gate.nikanor').box;
@@ -61,12 +62,31 @@ function vestments(C, r, north) {
   if (C.d >= 1) for (let i = 0; i < 4; i++) linen.box([r.min[0] + 3.5 + i * 1.1, (r.min[1] + r.max[1]) / 2 - 0.6, z + 1.7], [r.min[0] + 4.3 + i * 1.1, (r.min[1] + r.max[1]) / 2 + 0.6, z + 1.95]);
 }
 
-/** the chavitin bakers (Middot 1:4): a hearth with the flat griddle (machavat) and a kneading table ⚙ */
+/**
+ * The chavitin bakers (Middot 1:4): a stone hearth with the flat iron griddle (machavat) on it and a kneading table ⚙.
+ * The hearth is a firebox (world-4): a fire chamber with its mouth toward the room, the griddle over a hole in its top
+ * slab; fire 'courts.chavitin.hearth' (kind 'hearth', 'service': dark until the sim lights it for the bakers) and an
+ * oil lamp on the far wall, 'courts.chavitin.lamp' ('service') — the bakers work before dawn (Tamid 1:3).
+ */
 function chavitinBakery(C, r, north) {
   const z = r.min[2];
-  const stone = C.kit.m('ashlar_plain', true, true);
   const yb = north ? r.max[1] - 2 : r.min[1];
-  stone.box([r.min[0] + 1, yb, z], [r.min[0] + 4.5, yb + 2, z + 1.6]);
-  C.kit.geo(lathe([[0, 0], [1.1, 0], [1.15, 0.12], [1.05, 0.12], [0, 0.05]], [r.min[0] + 2.75, yb + 1, z + 1.6], 16), 'iron', { collide: false });
+  const out = north ? -1 : 1;                                   // the hearth's front faces the room
+  const x0 = r.min[0] + 1, x1 = r.min[0] + 4.5, y0 = yb, y1 = yb + 2, zt = z + 1.6;
+  const cx = (x0 + x1) / 2, cyy = (y0 + y1) / 2;
+  const front = out > 0 ? y1 : y0;
+  // the chamber (0.3-amah walls, a 0.35 top slab, its floor raised 0.2), the mouth in the front, the hole under the griddle
+  const chamber = B(x0 + 0.3, Math.min(y0, y1) + 0.3, z + 0.2, x1 - 0.3, Math.max(y0, y1) - 0.3, zt - 0.35, { mat: 'ashlar_plain', floor: 'ashlar_plain' });
+  const mouth = B(cx - 0.6, out > 0 ? front - 0.31 : front - 0.01, z + 0.2, cx + 0.6, out > 0 ? front + 0.01 : front + 0.31, z + 0.95, { mat: 'ashlar_plain' });
+  const hole = B(cx - 0.8, cyy - 0.7, zt - 0.36, cx + 0.8, cyy + 0.7, zt + 0.01, { mat: 'ashlar_plain' });
+  C.kit.solid(gridSolid([B(x0, y0, z, x1, y1, zt, { top: 'ashlar_plain', side: 'ashlar_plain' })], [chamber, mouth, hole], classify), true, true);
+  C.kit.geo(lathe([[0, 0], [1.1, 0], [1.15, 0.12], [1.05, 0.12], [0, 0.05]], [cx, cyy, zt], 16), 'iron', { collide: false });
+  // embers and a few split sticks on the chamber floor, fed in at the mouth ⚙
+  C.kit.geo(lathe([[0, 0.01], [0.75, 0.01], [0.6, 0.06], [0, 0.08]], [cx, cyy, z + 0.2], 12), 'ash', { collide: false, castShadow: false });
+  starFire(C, [cx, cyy], z + 0.25, z + 0.3, 0.7, 4, 17, 0.09);
+  C.ctx.addFire({ id: 'courts.chavitin.hearth', kind: 'hearth', pos: [cx, cyy, z + 0.28], size: 0.4, intensity: 0, schedule: 'service', smoke: false });
   C.kit.m('cedar', true, true).box([r.max[0] - 4.5, (r.min[1] + r.max[1]) / 2 - 1, z], [r.max[0] - 1, (r.min[1] + r.max[1]) / 2 + 1, z + 1.7]);
+  // the lamp: on the wall facing the hearth, between the door and the wicket
+  const wy = north ? r.min[1] : r.max[1];
+  wallLamp(C, 'courts.chavitin.lamp', (r.min[0] + r.max[0]) / 2 - 0.5, wy, z + 4.2, [0, north ? 1 : -1], { schedule: 'service', intensity: 0 });
 }

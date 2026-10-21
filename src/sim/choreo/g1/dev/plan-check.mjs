@@ -120,7 +120,7 @@ function check(which, opts) {
   for (const [name, p] of people) for (const e of p.eps) {
     let u = e.S;
     for (const l of e.legs) {
-      if (l.kind === 'hold' && ['sleep', 'lie', 'kneel'].includes(l.pose) && l.dur >= 0.3 && inHall(l.at) && l.owner !== 'none') {
+      if (l.kind === 'hold' && ['sleep', 'lie', 'kneel', 'sit_floor'].includes(l.pose) && l.dur >= 0.3 && inHall(l.at) && l.owner !== 'none') {
         const pose = l.pose === 'lie' && p.pool === 'elders' ? 'lie_bare' : l.pose;
         rest.push({ name, pose, at: l.at, h: l.h, t0: u, t1: u + l.dur, fp: footprint(pose, l.at, l.h), body: footprint(pose, l.at, l.h, 'body') });
       }
@@ -136,7 +136,7 @@ function check(which, opts) {
     for (const p of F.pts) if (!K.floor(p[0], p[1])) issues.push(`floor: ${s.name} ${s.pose} at ${s.at.map((v) => v.toFixed(2))} corner ${p.map((v) => v.toFixed(2))} off the chol floor`);
     const dh = ptPoly(s.body.pts, M.hearth), dhd = Math.hypot(F.head[0] - M.hearth[0], F.head[1] - M.hearth[1]);
     if (dh < K.bodyR) issues.push(`hearth: ${s.name} ${s.pose} body ${dh.toFixed(2)} < ${K.bodyR}`);
-    if (s.pose !== 'kneel' && dhd < K.headR) issues.push(`hearth: ${s.name} head ${dhd.toFixed(2)} < ${K.headR}`);
+    if (s.pose !== 'kneel' && s.pose !== 'sit_floor' && dhd < K.headR) issues.push(`hearth: ${s.name} head ${dhd.toFixed(2)} < ${K.headR}`);
     for (const hg of K.leaves) { const d = ptPoly(F.pts, hg); if (d < K.leafR) issues.push(`leaf: ${s.name} ${s.pose} ${d.toFixed(2)} from a chel-door hinge (< ${K.leafR})`); }
     const dl = ptPoly(F.pts, K.lamp);
     if (dl < K.lampR) issues.push(`lamp: ${s.name} ${dl.toFixed(2)}`);
@@ -266,7 +266,7 @@ function drawMap(P, rest, t) {
       let hit = 0;
       for (const s of Q) if (inside(s.fp.pts, [x, y])) { hit++; c = s.name.replace(/^elders/, 'e').replace('winner', 'W')[s.name.startsWith('y') ? 1 : 0]; }
       if (hit > 1) c = '!';
-      for (const s of Q) if (s.pose !== 'kneel' && Math.hypot(x - s.fp.head[0], y - s.fp.head[1]) < 0.3) c = '@';
+      for (const s of Q) if (s.pose !== 'kneel' && s.pose !== 'sit_floor' && Math.hypot(x - s.fp.head[0], y - s.fp.head[1]) < 0.3) c = '@';
       row += c;
     }
     rows.push(`${y.toFixed(2)} ${row}`);

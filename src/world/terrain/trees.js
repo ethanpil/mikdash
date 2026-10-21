@@ -168,9 +168,11 @@ export function buildTrees(ctx, T, detail, feat = {}) {
     if (key === foliageKey) im.setColorAt(0, new Color(1, 1, 1));       // allocate instanceColor up front (one program)
     return im;
   };
-  const trunks = mk(farTrunk, 'timber_rough', list.length, 'terrain:olive-trunks');
+  // olive bark on the trunks (world-4: they had the altar firewood's walnut bark, timber_rough)
+  const trunkKey = ctx.mats.has?.('olive_bark') ? 'olive_bark' : 'timber_rough';
+  const trunks = mk(farTrunk, trunkKey, list.length, 'terrain:olive-trunks');
   const crowns = mk(farCrown, foliageKey, list.length, 'terrain:olive-crowns');
-  const nTrunks = NEAR_MAX ? mk(nearTrunk, 'timber_rough', NEAR_MAX, 'terrain:olive-trunks-near') : null;
+  const nTrunks = NEAR_MAX ? mk(nearTrunk, trunkKey, NEAR_MAX, 'terrain:olive-trunks-near') : null;
   const nCrowns = NEAR_MAX ? mk(nearCrown, foliageKey, NEAR_MAX, 'terrain:olive-crowns-near') : null;
   const mtx = new Matrix4(), q = new Quaternion(), s = new Vector3(), p = new Vector3(), up = new Vector3(0, 1, 0), col = new Color();
   // olive: grey-green with a silvery bias; garden trees (fig, pomegranate): deeper, warmer green. With the neutral

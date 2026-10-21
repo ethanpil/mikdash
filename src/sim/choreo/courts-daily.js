@@ -15,13 +15,13 @@
 //                        afternoon service until midnight; a cook at the hearth ('altar.kitchen.fire', which this
 //                        module lights). On Friday after sunset nothing is cooked.
 //   scouring             before midnight (weekdays): a copper pot scoured with hot water and rinsed in cold, an
-//                        earthenware one broken, in the court (Zevachim 11:7).
+//                        earthenware one broken, in the court (Lev 6:21; Zevachim 11:4, 11:7).
 // Determinism: every figure runs episodes planned once per date (g4/lib.js Troupe); its pose is a pure function of
 // (t, date, seed). Arrivals and departures are through the Chuldah tunnels and over Kiponus' bridge (the Mount),
 // through the door of Pinchas' chamber (the kohanim by day) and Beit HaMoked's wicket (the kohanim at night).
 import { clamp, smooth, rand, since, within, wrap } from '../lib/core.js';
 import { crossed } from '../lib/cue.js';
-import { AMAH } from '../../core/units.js';
+import { AMAH, w2m } from '../../core/units.js';
 import { Itin, Troupe, Route, daySeed, tierCount, win, hm, observerNear, norm, arrivals } from './g4/lib.js';
 import { LOOP, GATES, BREACHES, NCOL, COL_DX, visit, walkLoop, enterGate, fwd, back, sOf, exitAfter, entryBefore, syncBreaches, fitAt, buildFrom, release, mpOf, SPEEDS, L as LOOP_L } from './g4/mount.js';
 import { g4Book } from './g4/book.js';
@@ -74,15 +74,17 @@ export default {
       levites: P('gatekeepers', 'guard_levi', 8, 1),
       circMen: P('circuit-men', 'israelite', 36, 2),
       circWomen: P('circuit-women', 'woman', 18, 3),
-      // three different men in the day, each with his head wrapped (the mourner's atifah ⚙): a pool seed whose three
-      // figures all draw the head-cloth (people roles.js gives it to 30 % of Israelites)
-      mourner: P('mourner', 'israelite', 3, 139, 2),
+      // the mourner and the one under a ban (Middot 2:2): people's roles mourner / menudeh — the head wrapped as the
+      // atifah down to the beard, a fold over the mouth (Moed Katan 24a; Rambam Avel 5:19), dressed in black (people-4)
+      mourner: P('mourner', 'mourner', 3, 139, 2),
+      menudeh: P('menudeh', 'menudeh', 3, 141, 2),
       greeters: P('greeters', 'israelite', 4, 5, 2),
       enWomen: P('en-women', 'woman', 20, 6),
       enMen: P('en-men', 'israelite', 6, 7),
       meal: P('meal', 'kohen', 12, 8),
       cook: P('cook', 'kohen', 1, 9),
       plan: null, planGen: -1, troupes: [],
+      sherds: undefined, sherdsOn: false,
       pish: sim.door(PISH),
       kfLevel: -1,
       fmt: (m) => ctx.time?.format?.(m) ?? hm(m),
@@ -104,10 +106,11 @@ export default {
     for (const x of P.pishPass) { const d = t - x; if (d > -0.12 && d < 0.16) pw = Math.max(pw, smooth(-0.12, -0.06, d) * (1 - smooth(0.1, 0.16, d))); }
     if (pw > 0) state.pish.set(pw);
     kitchenFire(state, sim, t, P);
+    sherds(ctx, state, P, t);
     cues(ctx, state, sim, t, P);
   },
 
-  release(ctx, state) { state.kfLevel = 0; },
+  release(ctx, state) { state.kfLevel = 0; if (state.sherdsOn) { state.sherds?.setVisible(false); state.sherdsOn = false; } },
 
   debug(s) {
     const P = s.plan;
@@ -245,7 +248,8 @@ function circuit(state, P, seed, sim, book) {
       if (ge) { gEps[i].push(ge); P.greets.push({ ...g, ban, key: `greet:${Math.round(g.at * 10)}` }); }
     });
   }
-  out.push(new Troupe(state.mourner, { plan: (k) => mEps[k], legs: (e) => e.it }));
+  out.push(new Troupe(state.mourner, { plan: (k) => mEps[k].filter((m) => !m.ban), legs: (e) => e.it }));
+  out.push(new Troupe(state.menudeh, { plan: (k) => mEps[k].filter((m) => m.ban), legs: (e) => e.it }));
   out.push(new Troupe(state.greeters, { plan: (k) => gEps[k].sort((a, b) => a.t0 - b.t0), legs: (e) => e.it }));
   // ---- the stream
   // the gates: most come up by the Chuldah passages, the western the more used ⚙ (Middot 1:3 names both "for entry and
@@ -377,6 +381,8 @@ function courtVisitors(state, P, seed, sim, book) {
   const [w0, w1] = P.W.women;
   const metz = P.metzora && Number.isFinite(P.metzora.t0) ? [P.metzora.t0 - 5, P.metzora.t1 + 5] : null;
   const f = Math.max(0.5, sim.crowdScale);
+  // no money is handled on Shabbat (muktzeh): the chests are visited on weekdays and Fridays only
+  const coins = P.dayType !== 'shabbat' && shofarot(sim.ctx).length === 13;
   // women's parties (1–3) and men (alone or two) who go on up into Ezrat Yisrael ⚙ rates
   const wT = arrivals(seed, 'enw', w0 + 0.5, w1 - 30, (t) => 0.3 * f * rhythm(t, w0, w1), 0.3 * f);
   const mT = arrivals(seed, 'enm', w0 + 0.5, w1 - 25, (t) => 0.1 * f * rhythm(t, w0, w1), 0.1 * f);
@@ -392,7 +398,7 @@ function courtVisitors(state, P, seed, sim, book) {
   let kept = 0;
   for (const c of cand) {
     const { t, i } = c;
-    let spots, n, stay, talk = false, chashaim = false, inEY = false, cls;
+    let spots, n, stay, talk = false, chashaim = false, inEY = false, cls, shofar = null;
     if (!c.men) {
       const r = rand(seed, 'enwk', i);
       n = r < 0.45 ? 1 : r < 0.82 ? 2 : 3;
@@ -403,6 +409,8 @@ function courtVisitors(state, P, seed, sim, book) {
       if (q == null) continue;
       talk = n > 1 && rand(seed, 'talk', i) < 0.4;
       chashaim = n === 1 && rand(seed, 'ch', i) < 0.18;
+      // a woman alone puts money into one of the chests (Shekalim 6:5 — the kinnin's, the gozlei olah's, the gifts') ⚙
+      if (n === 1 && !chashaim && coins && rand(seed, 'sho', i) < 0.32) shofar = 'w';
       spots = Array.from({ length: n }, (_, j) => placeOf(EN_CLUSTERS[q], j, talk));
       spots.cluster = q;
       cls = 0;
@@ -422,6 +430,7 @@ function courtVisitors(state, P, seed, sim, book) {
         if (q == null) continue;
         spots = [0, 1].slice(0, n).map((j) => placeOf(EN_CLUSTERS[q], j, false));
         spots.cluster = q;
+        if (coins && rand(seed, 'shm', i) < 0.45) shofar = 'm';     // the shekel, wood, frankincense, a gift ⚙
       }
       cls = rand(seed, 'enmc', i) < 0.5 ? 1 : 2;
     }
@@ -430,7 +439,7 @@ function courtVisitors(state, P, seed, sim, book) {
     const members = [];
     let lead = null;
     for (let j = 0; j < n; j++) {
-      const e = { k: i * 3 + j, i, cls, v: SPEEDS[cls], stay, spot: spots[j], talk, chashaim, men: c.men, inEY, tag };
+      const e = { k: i * 3 + j, i, cls, v: SPEEDS[cls], stay, spot: spots[j], talk, chashaim, men: c.men, inEY, tag, shofar: j === 0 && shofar ? chestFor(sim.ctx, shofar, spots[j], seed, i) : null };
       if (j === 0) {
         lead = buildFrom(book, WHO, t, (mp) => enItin(e, seed, mp, null));
         members.push({ pool, t0: lead.t0, T: lead.it.T, it: lead.it });
@@ -478,13 +487,21 @@ function enItin(e, seed, mp, prev) {
         it.walkTo(down, v);
         return;
       }
-      const a = [sp[0], sp[1], 6], b = e.chashaim ? CHASHAIM : a;
+      const a = [sp[0], sp[1], 6], b = e.chashaim ? CHASHAIM : e.shofar ? e.shofar.stand : a;
       const dIn = Math.hypot(a[0] - EN_IN[0], a[1] - EN_IN[1]), dAB = Math.hypot(b[0] - a[0], b[1] - a[1]) * 2, dOut = Math.hypot(EN_OUT[0] - a[0], EN_OUT[1] - a[1]);
       const walkMin = ((dIn + dAB + dOut) * AMAH) / v / 60;
       const still = Math.max(4, stay - walkMin);
       it.walkTo([EN_IN, [a[0] + 4, a[1] + (a[1] < 330.5 ? 2 : -2), 6], a], v);
       if (e.talk) talkAt(it, still, face, seed, tag, k);
-      else prayAt(it, still * (e.chashaim ? 0.9 : 1), face, seed, tag, k, i, e.men);
+      else prayAt(it, still * (e.chashaim || e.shofar ? 0.9 : 1), face, seed, tag, k, i, e.men);
+      if (e.shofar) {
+        // the coins into the chest's narrow horn (Shekalim 6:5; people's coins in his fist, poured in at its mouth)
+        it.walkTo([a, b], v);
+        it.stand(0.08, e.shofar.face, { pose: 'stand', prop: 'coins' });
+        it.stand(0.14, e.shofar.face, { pose: 'pour', phase: (q) => q, prop: 'coins' });
+        it.stand(Math.max(0.05, still * 0.1 - 0.22), e.shofar.face, { pose: 'stand' });
+        it.walkTo([b, a], v);
+      }
       if (e.chashaim) {
         // a gift left in secret at Lishkat Chasha'im (Shekalim 5:6), on the way out
         it.walkTo([a, b], v);
@@ -673,10 +690,15 @@ function scourAt(it, k, from, sc, P, e0, seed) {
     let left = dur, n = 0;
     while (left > 0.05 && n < 300) { const d = Math.min(left, 1.2 + 2 * rand(seed, "sp", n)); it.stand(d, S.face, { pose: n % 2 ? 'stand' : 'pour', prop: 'wine_jug', turn: n === 0 }); left -= d; n++; }
   } else {
+    // the earthenware pot (people's clay_pot, the period's Jerusalem cooking ware) thrown down and broken (Lev 6:21 —
+    // in a holy place, Zevachim 11:4), its sherds swept up (clay_pot_broken where it fell, until swept) ⚙ who, how
     const tb = Math.max(0.3, P.breakAt - (e0 + it.T));
-    it.stand(Math.max(0.2, tb - 0.25), S.face, { pose: 'carry', prop: 'wine_jug' });
-    it.stand(0.25, S.face, { pose: 'toss', phase: (q) => q, prop: 'wine_jug', turn: false });
+    it.stand(Math.max(0.2, tb - 0.25), S.face, { pose: 'carry', prop: 'clay_pot' });
+    it.stand(0.25, S.face, { pose: 'toss', phase: (q) => q, prop: 'clay_pot', turn: false });
+    const tSweep = it.T;
     it.stand(Math.max(0.2, dur - tb), S.face + 180, { pose: 'sweep', prop: null });
+    const a = (S.face * Math.PI) / 180;
+    P.sherds = { t0: P.breakAt, t1: e0 + tSweep + Math.max(0.2, dur - tb) * 0.85, at: [S.at[0] + Math.sin(a) * 0.9, S.at[1] + Math.cos(a) * 0.9, 16], h: S.face };
   }
 }
 
@@ -729,9 +751,50 @@ function cues(ctx, state, sim, t, P) {
   }
   if (P.keyBreak && Number.isFinite(P.breakAt) && crossed(state, P.breakAt)) {
     sim.cueAt(P.keyBreak, P.breakAt, () => {
+      // the sound of the pot breaking (audio's 'pot-break', render-audio-3)
+      sim.sound('pot-break', P.sherds?.at || [235.9, 293.3, 16]);
       if (observerNear(ctx, [BASIN[0], BASIN[1], 16], CAPTION_RANGE)) {
-        sim.caption({ en: 'An earthenware pot in which a sin-offering was cooked is broken; a copper one is scoured with hot water and rinsed with cold (Zevachim 11:7)', he: 'כְּלִי חֶרֶס יִשָּׁבֵר — וְאִם בִּכְלִי נְחֹשֶׁת, וּמֹרַק וְשֻׁטַּף' }, { id: 'scouring', duration: 6 });
+        sim.caption({ en: 'An earthenware pot in which a sin-offering was cooked is broken (Lev 6:21; Zevachim 11:4); a copper one is scoured with hot water and rinsed with cold (Zevachim 11:7)', he: 'כְּלִי חֶרֶס יִשָּׁבֵר — וְאִם בִּכְלִי נְחֹשֶׁת, וּמֹרַק וְשֻׁטַּף' }, { id: 'scouring', duration: 6 });
       }
     });
   }
+}
+
+// ------------------------------------------------------------------------------------------------ the shofarot
+/** the thirteen chests in Ezrat Nashim (world-4 anchors courts.en.shofar.1…13: the stand point outside the ring, facing
+ *  the chest; Shekalim 6:5 order) — site [X, Y, Z] and heading, cached per world */
+let SHOFAROT = null;
+function shofarot(ctx) {
+  if (SHOFAROT && SHOFAROT.ctx === ctx) return SHOFAROT.list;
+  const list = [];
+  for (let n = 1; n <= 13; n++) {
+    const a = ctx.anchors?.get?.(`courts.en.shofar.${n}`);
+    if (!a?.pos) continue;
+    const p = w2m(a.pos);
+    list.push({ n, stand: [p.X, p.Y, 6], face: a.heading ?? 0 });
+  }
+  SHOFAROT = { ctx, list };
+  return list;
+}
+// which chests: a woman — the kinnin (3), the gozlei olah (4), the gifts (8–13); a man — the shekels (1, 2), the wood (5),
+// the frankincense (6), the gold for the kaporet (7), the gifts (8–13) ⚙ who gave to which
+const CHESTS = { w: [3, 4, 8, 9, 10, 11, 12, 13], m: [1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13] };
+/** one of the three of a visitor's chests nearest his place (its stand on his side of the ring: a straight way there) */
+function chestFor(ctx, who, spot, seed, i) {
+  const list = shofarot(ctx).filter((c) => CHESTS[who].includes(c.n));
+  if (!list.length) return null;
+  list.sort((p, q) => Math.hypot(p.stand[0] - spot[0], p.stand[1] - spot[1]) - Math.hypot(q.stand[0] - spot[0], q.stand[1] - spot[1]));
+  return list[Math.min(list.length - 1, Math.floor(rand(seed, 'chest', who, i) * 3))];
+}
+
+/** the sherds of the broken pot where it fell, until they are swept up (P.sherds) */
+function sherds(ctx, state, P, t) {
+  const S = P.sherds;
+  const want = !!S && within(t, S.t0, S.t1);
+  if (want && state.sherds === undefined) {
+    try { state.sherds = ctx.people?.spawnProp?.('clay_pot_broken', { seed: SEED + 77 }) || null; state.sherds?.setVisible(false); } catch { state.sherds = null; }
+  }
+  if (!state.sherds) return;
+  if (want && state.sherdsAt !== S) { state.sherdsAt = S; state.sherds.setSite(S.at[0], S.at[1], S.at[2]); state.sherds.setHeading(S.h); }
+  if (want !== state.sherdsOn) { state.sherdsOn = want; state.sherds.setVisible(want); }
 }

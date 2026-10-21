@@ -160,12 +160,13 @@ function concertKohanim(ctx, P, W, D, c) {
   const pourAt = A.pourStand;
   // after the pour the pourer and the segan go down; the trumpeters stay by Ben Arza for the later sets ⚙
   const pourDone = cym0 + 0.75;
-  // "he bent to pour" (Tamid 7:3): a stoop over the cups, then the jug tilted, the wine running as the cymbal sounds.
-  // One pose at a time: the bow's stoop, then 'pour' from its raised arm (no bent-pour pose yet — requested) ⚙
+  // "he bent to pour" (Tamid 7:3 שחה לנסך): people's pour_low — down over the cups, the jug tipped over its lip as the
+  // cymbal sounds (its 0.32–0.5 tilt ends at cym0), held while the wine runs, righted, up ⚙ seconds
   const bendAndPour = (S) => {
-    S.act(sec(1.6), { pose: 'bow', phase: [0, 0.4], heading: 180 });
-    S.act(sec(0.6), { pose: 'bow', phase: 0.4, heading: 180 });
-    S.act(sec(3.4), { pose: 'pour', phase: [0.12, 1], heading: 180 });
+    S.act(sec(2.2), { pose: 'pour_low', phase: [0, 0.3], heading: 180 });
+    S.act(sec(1.8), { pose: 'pour_low', phase: [0.3, 0.5], heading: 180 });
+    S.act(sec(1.4), { pose: 'pour_low', phase: [0.5, 0.62], heading: 180 });
+    S.act(sec(2.0), { pose: 'pour_low', phase: [0.62, 1], heading: 180 });
   };
 
   // ---- the trumpeters: wait by the tables, up on the table of the fats, the first set, to Ben Arza, the other two sets
@@ -243,12 +244,9 @@ function concertKohanim(ctx, P, W, D, c) {
       S.walk([[R.west + 1.0, R.foot + 0.6, AZ], [R.west + 1.0, R.head - 0.8, A.ZT], [R.west + 1.0, R.head + 0.8, A.ZT], [A.wk.W + 2.6, A.wk.S + 0.9, A.ZT], A.seganAt], { speed: 0.88, props: ['sudar', 'sudar'] });
     }
     S.until(cym0 - sec(3.2), { pose: 'stand', heading: 70, sway: 3, seed: SEED + 241, props: ['sudar', 'sudar'] });
-    // the signal: the cloth in his raised right hand, lifted and dropped (the 'torch' arm holds it up, hanging from the
-    // fist; the 'wave' pose would lay the sudarin flat on his palms) ⚙
-    for (let k = 0; k < 5; k++) {
-      S.act(sec(0.9), { pose: 'torch', phase: 0.25, heading: 70 });
-      S.act(sec(0.7), { pose: 'stand', heading: 70 });
-    }
+    // "the segan waved the sudarin" (Tamid 7:3): one swung high from over his right shoulder, out to the side and back,
+    // the other hanging from his left hand (people's wave_sudar) — Ben Arza strikes the cymbal on the signal ⚙ swings
+    S.act(sec(8.3), { pose: 'wave_sudar', phase: { cycle: 1 / 0.6 }, heading: 70, props: ['sudar', 'sudar'] });
     S.until(pourDone + 0.05, { pose: 'stand', heading: 70, sway: 3, seed: SEED + 242 });
     S.walk([[A.wk.W + 2.6, A.wk.S + 0.9, A.ZT], [R.west + 1.0, R.head + 0.8, A.ZT], [R.west + 1.0, R.head - 0.8, A.ZT], [R.west + 1.0, R.foot + 0.6, AZ], [R.west + 1.0, R.foot - 1.4, AZ],
       [207.5, 275.6, AZ], [203.4, 279.5, AZ], [203.4, 296.0, AZ], [200.4, 302.0, AZ], P.way.sw, P.way.apronS, P.way.apronN, ...[...P.way.gazitToApron].reverse().slice(1), P.doors.gazit], { speed: 1.05 });

@@ -197,7 +197,8 @@ export class MeshBuilder {
    * default world x / z). opts: seg, arc [a0, a1] radians (θ measured from +ax toward +az),
    * weights(p, ringIndex, θ), radial(θ, ringIndex, ring) → radius multiplier, shade(θ, j) → colour mult,
    * capA / capB: 'flat' | 'dome' | null, uvMode: 'arc' (default) | 'x' (u = lateral x — used by clavi),
-   * lift(θ, j, ring) → extra y (m) per vertex (rings that rise toward the back, e.g. a collar).
+   * lift(θ, j, ring) → extra y (m) per vertex (rings that rise toward the back, e.g. a collar),
+   * thMap(θ, j, ring, i) → the angle vertex i of ring j is placed at (radial, lift, shade and uv keep θ).
    */
   tube(rings, opts = {}) {
     const seg = opts.seg || 16;
@@ -212,12 +213,14 @@ export class MeshBuilder {
     const g = this.grid(seg, n - 1, (i, j) => {
       const R = rings[j];
       const th = a0 + (a1 - a0) * (i / seg);
+      // thMap(θ, j, ring, i) → the angle the vertex is placed at (cloth parted at a rent); the pattern stays with the cloth
+      const thp = opts.thMap ? opts.thMap(th, j, R, i) : th;
       const ax = R.ax || X, az = R.az || Z;
       const m = opts.radial ? opts.radial(th, j, R) : 1;
-      const p = R.c.clone().addScaledVector(ax, Math.cos(th) * R.rx * m).addScaledVector(az, Math.sin(th) * R.rz * m);
+      const p = R.c.clone().addScaledVector(ax, Math.cos(thp) * R.rx * m).addScaledVector(az, Math.sin(thp) * R.rz * m);
       if (opts.lift) p.y += opts.lift(th, j, R);
       const ravg = (R.rx + R.rz) / 2;
-      const u = opts.uvMode === 'x' ? p.x : th * ravg;
+      const u = opts.uvMode === 'x' ? (thp === th ? p.x : R.c.x + (ax.x * Math.cos(th) * R.rx + az.x * Math.sin(th) * R.rz) * m) : th * ravg;
       return {
         p, u, v: -vs[j] + (opts.v0 || 0),
         w: opts.weights ? (q) => opts.weights(q, j, th) : opts.bone ?? 0,

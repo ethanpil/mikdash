@@ -32,7 +32,11 @@ export const N_SIDE = 15;                 // men in each group at the division (
 export const SEED_KG = G3_POOLS.kg.seed;
 export const SEED_KGK = 0x6b6b;
 export const N_KGK = 12;                  // six places, each kept by two men in turn (shifts) ⚙
-const STACK = 'loaves_todah';             // stand-in for a stack of six showbread loaves (requested: 'showbread_stack')
+// people's showbread_stack (six loaves, no kanim — they are pulled before Shabbat, Menachot 11:6), showbread_half (the
+// Kohen Gadol's three — Yoma 17b; Rambam TuM 4:14), bread_piece (a share broken off a loaf, eaten from the hand)
+const STACK = 'showbread_stack';
+const HALF = 'showbread_half';
+const PIECE = 'bread_piece';
 const BOWL = 'bazach';                    // a bowl (bazach) of frankincense
 const CARRY = 1.0;                        // m/s with the bread ⚙
 const HAND = 0.12;                        // min: the Kohen Gadol's man receiving his half from a group's leader ⚙
@@ -78,7 +82,9 @@ function build(ctx, sim) {
   const xW = sh.min[0] + 0.08, xE = sh.max[0] - 0.08;
   const N = { F: [[xW, sh.max[1] + 0.55, ZH], [xE, sh.max[1] + 0.55, ZH]], B: [[sh.min[0] - 0.95, sh.max[1] + 1.35, ZH], [sh.max[0] + 0.8, sh.max[1] + 1.45, ZH]], S: [[sh.min[0] - 1.3, sh.max[1] + 0.3, ZH], [sh.max[0] + 1.3, sh.max[1] + 0.3, ZH]] };
   const S = { F: [[xW, sh.min[1] - 0.5, ZH], [xE, sh.min[1] - 0.5, ZH]], B: [[xW, sh.min[1] - 2.0, ZH], [xE, sh.min[1] - 2.0, ZH]], S: [[sh.min[0] - 1.45, sh.min[1] - 1.2, ZH], [sh.max[0] + 1.45, sh.min[1] - 1.4, ZH]] };
-  const DRAW = 0.8;                                           // amot the old stacks are drawn out to the south ⚙
+  // amot the old stacks are drawn out to the south: the Shulchan's bread movable slides by its own depth plus the horns
+  // (world-4-fix: 0.616 m), and the men's hands go with it ⚙
+  const DRAW = 0.616 / 0.48;
   const stackX = [H.sxW, H.sxE];
   // the Ulam tables (against the Heichal's front wall): stand east of them / beside them ⚙
   const mt = H.marble, gt = H.gold;
@@ -94,8 +100,9 @@ function build(ctx, sim) {
   const gC = [(gt.min[0] + gt.max[0]) / 2, (gt.min[1] + gt.max[1]) / 2];
   const gFace = gSpots.map((p) => ((Math.atan2(gC[0] - p[0], gC[1] - p[1]) * 57.2958) + 360) % 360);
   const onTable = (b, k) => [b.min[0] + (b.max[0] - b.min[0]) * [0.27, 0.73, 0.27, 0.73][k], (b.min[1] + b.max[1]) / 2 + [0.05, -0.05, 0.05, -0.05][k], b.max[2] + 0.005];
-  // the bowls on top of the stacks on the Ulam tables: a stand-in tray's height ⚙
-  const bowlOn = (b, k) => { const p = onTable(b, k - 2); return [p[0], p[1], p[2] + 0.17]; };
+  // the bowls on top of the stacks on the Ulam tables ⚙: a stack of six loaves is 6 × 2½ tefachim high (people's
+  // showbread_stack, Menachot 11:4–5 — no kanim on Shabbat)
+  const bowlOn = (b, k) => { const p = onTable(b, k - 2); return [p[0], p[1], p[2] + 2.5]; };
 
   // ================================================================== the incoming: the new bread brought in
   const items = { swap: [], div: [] };
@@ -163,28 +170,32 @@ function build(ctx, sim) {
 
   // ================================================================== the change (Menachot 11:7) ⚙ minutes
   const tLift = T + 0.6, tSlide = [T + 1.45, T + 2.25], tBowlsOn = T + 2.75, tOut = T + 3.05;
+  const tBowlsOff = [], tBowlsSet = [];
   // the outgoing bowl-men lift the bowls off the stacks and step aside
   for (let j = 0; j < 2; j++) {
     const s = O[2 + j], ph = [BOWL, null];
     s.act(0.12, { pose: 'bow', phase: [0, 0.42], heading: 0 });
+    tBowlsOff[j] = s.now();
     s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: 0, props: ph });
     s.shift(S.S[j], 0.18, { pose: 'walk', heading: 0, props: ph });
     s.until(tOut + 0.1 * j, { pose: 'stand', heading: j ? 330 : 30, props: ph });
   }
-  // the outgoing stack-men step up, take hold, draw the old stacks out to the south
+  // the outgoing stack-men step up, take hold, draw the old stacks out to the south — the bread on the table is the
+  // world's movable (heichal.shulchan.bread slide, shabbat-showbread.js) while it slides; in their hands once it is off
   for (let j = 0; j < 2; j++) {
     const s = O[j];
     s.until(tLift + 0.46, { pose: 'stand', heading: 0, sway: 3, seed: SEED_OUT + 5 + j });
     s.shift(S.F[j], 0.2, { pose: 'walk', heading: 0 });
     s.until(tSlide[0], { pose: 'semichah', heading: 0 });
-    s.shift([S.F[j][0], S.F[j][1] - DRAW, ZH], tSlide[1] - tSlide[0], { pose: 'carry', heading: 0, props: [STACK, null] });
+    s.shift([S.F[j][0], S.F[j][1] - DRAW, ZH], tSlide[1] - tSlide[0], { pose: 'carry', heading: 0, props: null });
     s.until(tOut + 0.12 * j, { pose: 'carry', heading: 0, props: [STACK, null] });
   }
-  // the incoming stack-men slide the new stacks on, from the north, as the old come off
+  // the incoming stack-men slide the new stacks on, from the north, as the old come off (the movable
+  // heichal.shulchan.bread.incoming from the moment they set it to the table's edge)
   for (let j = 0; j < 2; j++) {
     const s = I[j];
     s.until(tSlide[0], { pose: 'carry', heading: 180, props: [STACK, null] });
-    s.shift([N.F[j][0], N.F[j][1] - 0.3, ZH], tSlide[1] - tSlide[0], { pose: 'carry', heading: 180, props: [STACK, null] });
+    s.shift([N.F[j][0], N.F[j][1] - 0.3, ZH], tSlide[1] - tSlide[0], { pose: 'carry', heading: 180, props: null });
     s.act(0.12, { pose: 'bow', phase: [0.15, 0.4], heading: 180 });
     s.shift(N.S[j], 0.2, { pose: 'walk', heading: 180 });
     s.until(tOut + 0.25 + 0.08 * j, { pose: 'stand', heading: j ? 210 : 150 });
@@ -195,6 +206,7 @@ function build(ctx, sim) {
     s.until(tSlide[1] + 0.36, { pose: 'stand', heading: 180, props: ph });
     s.shift([stackX[j] + (j ? 0.15 : -0.15), N.F[j][1], ZH], 0.2, { pose: 'walk', heading: 180, props: ph });
     s.act(0.12, { pose: 'bow', phase: [0, 0.38], heading: 180, props: ph });
+    tBowlsSet[j] = s.now();
     s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: 180 });
     s.until(tOut + 0.2 + 0.08 * j, { pose: 'stand', heading: 180 });
   }
@@ -399,28 +411,37 @@ function build(ctx, sim) {
     // his kohanim, come up on the open side, takes it from the leader (kgMeal: receive over HAND); the leader keeps the
     // rest for the watch ⚙
     const tHand = handAt ? start : NaN;
-    if (handAt) L.until(tHand + HAND + 0.1, { pose: 'carry', face: handAt, props: [STACK, null] });
+    // the watch's three loaves once the Kohen Gadol's half has gone to his man (people's showbread_half), from the split
+    const OWN = [handAt ? HALF : STACK, null];
+    if (handAt) {
+      L.until(tHand + HAND, { pose: 'carry', face: handAt, props: [STACK, null] });
+      L.until(tHand + HAND + 0.1, { pose: 'carry', face: handAt, props: OWN });
+    }
     const tStart = handAt ? tHand + HAND + 0.25 : start;
-    L.until(tStart, { pose: 'carry', face: c, props: [STACK, null] });
+    L.until(tStart, { pose: 'carry', face: c, props: OWN });
     const tEndShares = tStart + turn * order.length;
     for (let n = 0; n < order.length; n++) {
       const i = order[n], sp = spots[i - 1], s = scripts[i];
       const tT = tStart + turn * n;
-      L.until(tT + 0.08, { pose: 'carry', face: sp, props: [STACK, null] });
-      L.act(0.14, { pose: 'carry', face: sp, props: [STACK, null] });
+      L.until(tT + 0.08, { pose: 'carry', face: sp, props: OWN });
+      L.act(0.14, { pose: 'carry', face: sp, props: OWN });
       const near = [ld[0] + (sp[0] - ld[0]) * 0.42, ld[1] + (sp[1] - ld[1]) * 0.42, Z];
       s.until(tT - 0.02, { pose: 'stand', face: ld, sway: 9, seed: seed + 100 + i });
       s.walk([near], { speed: SPEED.slow });
       s.act(0.16, { pose: 'kemitzah', phase: [0, 1], face: ld });
-      s.walk([sp], { speed: SPEED.slow });
-      s.act(0.08, { pose: 'stand', heading: hOf(sp, ld) });
+      // his share in his hand (people's bread_piece)
+      s.walk([sp], { speed: SPEED.slow, props: [PIECE, null] });
+      s.act(0.08, { pose: 'stand', heading: hOf(sp, ld), props: [PIECE, null] });
+      ate.add(s);
     }
     // the leader takes his own last and the watch's bread is gone ⚙
     const tGone = tEndShares + 0.1;
-    L.until(tGone, { pose: 'carry', face: c, props: [STACK, null] });
-    L.act(0.16, { pose: 'kemitzah', phase: [0, 1], face: c });
+    L.until(tGone, { pose: 'carry', face: c, props: OWN });
+    L.act(0.16, { pose: 'kemitzah', phase: [0, 1], face: c, props: [PIECE, null] });
+    ate.add(L);
     return { start: tStart, end: tEndShares, tHand, tSplit: tHand + HAND, tGone };
   };
+  const ate = new Set();       // those with a share in hand: they eat it where they stand
   const eatW = evWin(sim, 'showbread-eaten', sr);
   // where the Kohen Gadol's two men stand to take his half: on each horseshoe's open (east) side, by its leader ⚙
   const handAt = eatW ? { N: [lead.N[0] + 1.2, lead.N[1] - 0.6, Z], S: [lead.S[0] + 1.2, lead.S[1] + 0.6, Z] } : null;
@@ -432,6 +453,8 @@ function build(ctx, sim) {
     for (let i = 0; i < N_SIDE; i++) {
       const s = scripts[i];
       const tGo = tFrom + 0.22 * i + 0.4 * ((i * 5) % 3);
+      // the share eaten standing, by hand (Rambam MK 10:3; BhB 7:6 — people's eat with the bread piece)
+      if (ate.has(s)) eatLoop(s, c, tGo - 2.6, (k0, k1, k2, k3) => rand(seed + 7, k0, k1, k2, k3), `d${i}`);
       s.until(Math.max(s.now(), tGo - 2.6), { pose: 'stand', face: c, sway: 14, seed: seed + 300 + i });
       s.until(Math.max(s.now(), tGo), { pose: 'stand', heading: (hOf(s.cur, c) + 40 * (((i * 7) % 3) - 1) + 360) % 360, sway: 16, seed: seed + 400 + i });
       s.walk(route(i), { speed: SPEED.walk * (0.9 + 0.1 * ((i * 3) % 4) / 3) });
@@ -454,6 +477,9 @@ function build(ctx, sim) {
     t: {
       bringLeave: tLeaveI, newOnMarble: Math.min(...tPlaceNew), takeNew: tTakeNew, lift: tLift, slide: tSlide, bowlsOn: tBowlsOn, out: tOut,
       oldOnGold: Math.min(...tPlaceOld), touch: tTouch, takeBaz: tTakeBaz, pour: tPour, takeOld: tTakeOld, startN, startS, endN, endS,
+      // the Shulchan's bread movables (shabbat-showbread.js): the old bowls off the table from bowlsOff, the new set on
+      // from bowlsSet; the sets swapped back (identical) at swapBack, when all is settled
+      bowlsOff: Math.min(...tBowlsOff), bowlsSet: Math.max(...tBowlsSet), swapBack: Math.max(...tBowlsSet) + 0.4,
       // the Kohen Gadol's half off each stack (NaN without showbread-eaten): receive from tHand, held by his man from
       // tSplit; the leader's own share (his stack gone) at tGone
       hand: { N: { t: hand.N.tHand, split: hand.N.tSplit, gone: hand.N.tGone }, S: { t: hand.S.tHand, split: hand.S.tSplit, gone: hand.S.tGone } },
@@ -490,8 +516,8 @@ function kgMeal({ eat, D0, D1, P, gz, gazitToApron, apronToGazit, lead, handAt, 
   // same way on the side nearer the altar ⚙
   const inWay = (k) => [...gazitToApron, [P.apronX + 0.3, 338.8 + 0.25 * (k % 2), Z], [205, 340.0 + 0.25 * (k % 2), Z], [232.0, 340.3, Z], [238.8, 338.6, Z], [O[0] + 0.2, O[1] + 0.6, Z]];
   const outWay = (k) => [[O[0] - 0.4, O[1], Z], [238.3, 336.6, Z], [233.6, 339.5, Z], [205, 339.4 - 0.25 * (k % 2), Z], [P.apronX - 0.3, 338.4, Z], ...apronToGazit];
-  // a stack of his loaves (G6's stand-in); a piece of one is eaten from the hands (eatLoop: no bread-piece prop yet)
-  const STACKP = [STACK, null];
+  // his half of each watch's loaves (people's showbread_half: three loaves); pieces of them eaten from the hand
+  const STACKP = [HALF, null];
   const R0 = (k0, k1, k2, k3) => rand(SEED_KGK, k0, k1, k2, k3);
 
   // ---- the Kohen Gadol and his two bearers: out of the Gazit before the division, in file
@@ -573,19 +599,21 @@ function kgMeal({ eat, D0, D1, P, gz, gazitToApron, apronToGazit, lead, handAt, 
 }
 
 /**
- * A man eating his portion where he stands until `until` (Script S): now and then a short while breaking morsels off
- * the piece in his hands, then a longer while at ease, talking (stand, idle turning) ⚙. c: whom he faces (the Kohen
- * Gadol; the horseshoe's mouth for him). The breaking is people's 'melikah' hands looped slowly (the left palm up, the
- * right fingers nipping over it, the head bent to them): the hands stay together at the chest, so the missing piece
- * reads far less than an empty two-handed 'carry'. There is no bread-piece prop or hand-to-mouth clip yet (requested).
+ * A man eating his portion where he stands until `until` (Script S): a morsel broken off the piece (people's 'melikah',
+ * the bread on his palm), raised to his mouth and eaten (people's 'eat': bitten, lowered, chewed — the bread piece in his
+ * fist), then a longer while at ease, talking, the piece in his hand (stand, idle turning) ⚙ rhythm. c: whom he faces
+ * (the Kohen Gadol; the horseshoe's mouth for him). The last of it eaten, his hand is empty.
  */
 function eatLoop(S, c, until, R0, key) {
   const sd = (n, k) => (Math.imul(n + 1, 2654435761) ^ (key.length * 97 + k)) >>> 0;
+  const BP = [PIECE, null];
   for (let n = 0; n < 400 && S.now() < until - 0.6; n++) {
-    const eat = Math.min(until - S.now() - 0.1, 0.3 + 0.5 * R0('ea', key, n));
-    if (eat > 0.05) S.act(eat, { pose: 'melikah', phase: { cycle: 2.6 + 1.8 * R0('ec', key, n), off: R0('eo', key, n) }, face: c, sway: 5, seed: sd(n, 1) });
+    const brk = Math.min(until - S.now() - 0.1, 0.12 + 0.15 * R0('eb', key, n));
+    if (brk > 0.05) S.act(brk, { pose: 'melikah', phase: { cycle: 2.6 + 1.8 * R0('ec', key, n), off: R0('eo', key, n) }, face: c, sway: 5, seed: sd(n, 1), props: BP });
+    const eat = Math.min(until - S.now() - 0.1, 0.25 + 0.35 * R0('ea', key, n));
+    if (eat > 0.05) S.act(eat, { pose: 'eat', phase: { cycle: 5, off: R0('ef', key, n) }, face: c, sway: 4, seed: sd(n, 3), props: BP });
     const ease = Math.min(until - S.now() - 0.05, 1.0 + 2.5 * R0('es', key, n));
-    if (ease > 0.05) S.act(ease, { pose: 'stand', face: c, sway: 18, seed: sd(n, 2) });
+    if (ease > 0.05) S.act(ease, { pose: 'stand', face: c, sway: 18, seed: sd(n, 2), props: BP });
   }
-  S.until(Math.max(S.now(), until), { pose: 'stand', face: c, sway: 10, seed: sd(0, 3) });
+  S.until(Math.max(S.now(), until), { pose: 'stand', face: c, sway: 10, seed: sd(0, 3), props: null });
 }

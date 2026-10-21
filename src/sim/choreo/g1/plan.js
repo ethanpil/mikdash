@@ -12,8 +12,15 @@
 // Sources: Middot 1:6–9; Tamid 1:1–3; Rambam BhB 8:5–7, 8:11–12; Yoma 22a, 25a. Minutes and spots: reconstruction ⚙.
 import { wrap, span, rand, clamp } from '../../lib/core.js';
 import { CUE_LEAD } from '../../lib/cue.js';
-import { Track, SitePath, downHoldUp, lotHand, win, hTo } from './util.js';
+import { Track, SitePath, downHoldUp, lotHand, win, hTo, cycles, ramp } from './util.js';
 import { mokedPlaces, altarPlaces, gazitPlaces } from './places.js';
+import { AMAH } from '../../../core/units.js';
+
+/** people's station geometry (src/people/clips.js, figure frame at scale 1, metres → amot here) */
+export const MITRE_GRASP = 0.33;                    // ctx.people.stations.mitreGrasp: lift_mitre's grasp phase
+export const MITRE_REACH = 0.5 / AMAH;              // lift_mitre: the crown 0.5 m before the officer
+const LOCK_REACH = 0.5 / AMAH;                      // lock: the door face 0.5 m ahead
+const KNOCK_REACH = 0.47 / AMAH;                    // knock: the door 0.47 m ahead
 
 export const SEED = {
   winner: 0x7468,      // = terumat-hadeshen's 'winner' pool seed (G2): the slab kohen, who wins the first lottery
@@ -89,7 +96,7 @@ function build(ctx, sim) {
   const T = times(ctx, sim);
   const M = mokedPlaces(ctx), A = altarPlaces(ctx), G = gazitPlaces(ctx);
   const ar = ctx.elOpt('azarah.achsadra-route')?.params?.routes || null;
-  const P = { ctx, T, M, A, G, ar, people: {}, cues: [], props: [], doors: { chel: [], pish: [], nw: [], night: null }, fire: null, stairLog: [] };
+  const P = { ctx, T, M, A, G, ar, people: {}, cues: [], props: [], doors: { chel: [], pish: [], nw: [], night: null }, fire: null, stairLog: [], slab: [], keysWin: [] };
   const Z = M.Z, cx = M.cx, ky = M.ky;
 
   // ---- the floor (⚙): four mats and three seats laid against the figures' real footprints (floorPlan below); who lies
@@ -203,7 +210,7 @@ function build(ctx, sim) {
       if (!sp) {
         tr.until(ALTAR.y0hand, { owner: 'none' });     // on the altar (altar-night) until he comes in by the wicket
         tr.at(M.gateIn, 0);
-      } else if (sp.pose === 'kneel') sitUp(tr, rise[key], sp, key);
+      } else if (sp.pose === 'sit_floor') sitUp(tr, rise[key], sp, key);
       else tr.until(rise[key], { pose: sp.pose, h: sp.h });
       immersion(tr, P, M, key, SMALL[key]);
       waitAndTurn(tr, P, T, key);
@@ -273,25 +280,29 @@ function floorPlan(M) {
       C: { pose: 'sleep', at: [cx + 3.65, ky + 3.15, Z], h: 270 },
     },
     seats: {
-      K1: { pose: 'kneel', at: [cx + 5.9, ky + 2.5, Z], h: 270 },
-      K2: { pose: 'kneel', at: [cx + 5.9, ky + 0.95, Z], h: 270 },
+      K1: { pose: 'sit_floor', at: [cx + 5.9, ky + 2.5, Z], h: 270 },
+      K2: { pose: 'sit_floor', at: [cx + 5.9, ky + 0.95, Z], h: 270 },
     },
   };
 }
 
-/** sitting up on his knees, back on his heels (a floor-sitting pose is requested), shifting now and then, until t ⚙ */
+/**
+ * sitting on the floor, back on his heels, hands on his thighs ("he came and sat beside his brothers", Tamid 1:1 —
+ * people's sit_floor), turning a little now and then; now and then up on his knees a moment, shifting his weight ⚙;
+ * until t
+ */
 function sitUp(tr, t, sp, key) {
   let k = 0;
   while (tr.now() < t - 0.6) {
     const s0 = Math.round(tr.now());
     const seg = Math.min(t - tr.now() - 0.35, 4 + 6 * rand(0x6a1b, key, s0, k));
-    tr.hold(seg, { at: sp.at, h: (sp.h + 20 * (rand(0x6a1b, key, s0, 'h') - 0.5) + 360) % 360, turn: 0.08, pose: 'kneel', phase: 0.5 });
+    tr.hold(seg, { at: sp.at, h: (sp.h + 20 * (rand(0x6a1b, key, s0, 'h') - 0.5) + 360) % 360, turn: 0.08, pose: 'sit_floor' });
     if (t - tr.now() > 0.5 && rand(0x6a1b, key, k, 's') < 0.4) {
       tr.hold(0.14, { pose: 'kneel', phase: (l, d) => 0.5 - 0.17 * Math.sin(Math.PI * clamp(l / d)) });   // shifts his weight
     }
     k++;
   }
-  tr.until(t, { at: sp.at, h: sp.h, turn: 0.08, pose: 'kneel', phase: 0.5 });
+  tr.until(t, { at: sp.at, h: sp.h, turn: 0.08, pose: 'sit_floor' });
 }
 
 /** standing about (a slow turn now and then) until t */
@@ -348,7 +359,7 @@ function descend(tr, P, M, key, from) {
   const role = from ? 'off' : 'k';
   if (from) {
     // up from the mat (or from sitting) onto his knees, the garments taken from beside him, up on his feet
-    if (P.place(from).pose === 'kneel') tr.hold(0.1, { pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d) });
+    if (P.place(from).pose === 'sit_floor') tr.hold(0.1, { pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d) });
     else tr.hold(0.14, { pose: 'kneel', phase: downHoldUp(0.04, 0.05) });
     tr.hold(0.04, { pose: 'stand', prop: garments });
     tr.walk(P.ways.toStair[from], { speed: SLOW, prop: garments });
@@ -383,27 +394,29 @@ function immersion(tr, P, M, key, from) {
   const S = P.imm, K = M.mikveh, a = S.a[key], sp = immSpot(P, M, key);
   descend(tr, P, M, key, from);
   if (tr.now() < a - 0.02) tr.until(a, { h: 0, pose: 'stand', prop: from ? 'folded_garments' : null, role: from ? 'off' : 'k' });
+  // his clothes off by the mikveh — the holy garments laid on the stone (in from the altar) or the folded bundle with
+  // his own clothes — and the linen sheet wrapped about him (people's kohen_bathing; Yoma 3:3) ⚙ the change unseen
   if (!from) {
-    // in from the altar in the holy garments: he takes them off first ⚙ (the change itself unseen)
     tr.hold(0.14, { h: 0, pose: 'kneel', phase: downHoldUp(0.04, 0, true), role: 'k' });
-    tr.hold(0.12, { h: 0, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'off' });
+    tr.hold(0.12, { h: 0, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'bath' });
   } else {
     tr.hold(0.1, { h: 0, pose: 'bow', phase: (l, d) => 0.5 * clamp(l / d), prop: 'folded_garments', role: 'off' });
-    tr.hold(0.08, { h: 0, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'off' });
+    tr.hold(0.08, { h: 0, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'bath' });
   }
   const tLaid = tr.now() - 0.07;
   // the mikveh: down its steps from the east into the deep part, immerse, come up (Yoma 31a: an amah by an amah by 3)
-  tr.walk([[K.edge[0], sp.spot[1] + 0.3, M.zF], K.edge, K.top, K.step, K.deep], { speed: MIKVEH, role: 'off' });
-  tr.hold(0.16, { h: 270, pose: 'kneel', phase: downHoldUp(0.05, 0.06), role: 'off' });
-  tr.walk([K.step, K.top, K.edge, [K.edge[0], sp.spot[1] + 0.3, M.zF], sp.spot], { speed: MIKVEH, role: 'off' });
-  // "he came up, dried himself and warmed himself before the fire" (Tamid 1:1): by his garments, then at the fire
-  dawdle(tr, a + S.LAY + S.D, 0, key, 'off');
-  tr.walk([sp.exit, sp.fire], { speed: SLOW, role: 'off' });
+  tr.walk([[K.edge[0], sp.spot[1] + 0.3, M.zF], K.edge, K.top, K.step, K.deep], { speed: MIKVEH, role: 'bath' });
+  tr.hold(0.16, { h: 270, pose: 'bathe', phase: ramp(0, 1), role: 'bath' });
+  tr.walk([K.step, K.top, K.edge, [K.edge[0], sp.spot[1] + 0.3, M.zF], sp.spot], { speed: MIKVEH, role: 'bath' });
+  // "he came up, dried himself and warmed himself before the fire" (Tamid 1:1): in the sheet by his garments, then
+  // his hands to the fire (people's 'warm')
+  dawdle(tr, a + S.LAY + S.D, 0, key, 'bath');
+  tr.walk([sp.exit, sp.fire], { speed: SLOW, role: 'bath' });
   const back = tr.walkMin([sp.exit, sp.spot], SLOW);
-  tr.until(a + S.LAY + S.D + S.F - back, { face: M.medurah, pose: 'stand', role: 'off' });
-  tr.walk([sp.exit, sp.spot], { speed: SLOW, role: 'off' });
-  // the four garments (Yoma 7:5): he kneels in his own clothes by them and rises dressed ⚙ (the change itself unseen)
-  tr.hold(0.16, { h: 0, pose: 'kneel', phase: downHoldUp(0.05, 0, true), role: 'off' });
+  tr.until(a + S.LAY + S.D + S.F - back, { face: M.medurah, pose: 'warm', role: 'bath' });
+  tr.walk([sp.exit, sp.spot], { speed: SLOW, role: 'bath' });
+  // the four garments (Yoma 7:5): he kneels by them in the sheet and rises dressed ⚙ (the change itself unseen)
+  tr.hold(0.16, { h: 0, pose: 'kneel', phase: downHoldUp(0.05, 0, true), role: 'bath' });
   const tDressed = tr.now();
   tr.hold(0.16, { h: 0, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'k' });
   P.props.push({ name: 'folded_garments', at: sp.laid, h: 90, show: [tLaid, tDressed], owner: 'moked' });
@@ -431,12 +444,24 @@ function waitAndTurn(tr, P, T, key) {
  * lifts one man's mitre and counts the fingers round from him; where the count ends, he has won. Weekdays: then two of
  * them light the torches at the hearth (Tamid 1:3). Legs owned by the lotteries module.
  */
+/**
+ * The first lottery's minutes ⚙ from its start F: the officer goes behind the first man of the count (L.go → L.reach),
+ * grasps his mitre (→ L.grasp: people's MITRE_GRASP; the man's headgear off from here), lifts it (→ L.lifted), back to his
+ * place (→ L.back), counts (F + 1.07 … 2.57), and after the winner is named puts it back on his head (L.ret0 → L.on:
+ * headgear on; → L.done) — no kohen serves without the mitznefet (Zevachim 17b) ⚙ — and is back at his place by L.home.
+ */
+export function lot1Times(F) {
+  return { go: F + 0.55, reach: F + 0.58, grasp: F + 0.61, lifted: F + 0.66, back: F + 0.7, ret0: F + 2.72, ret1: F + 2.76, on: F + 2.81, done: F + 2.84, home: F + 2.88 };
+}
+
 function firstLottery(tr, P, T, M, key) {
   const F = T.first[0], c = P.circle[key], k = P.countOrder.indexOf(key);
   const off = 0.015 * k + 0.02 * rand(SEED.officer, 'lot', k);
   tr.set({ owner: 'lot', role: 'k' });
   tr.until(F + 0.55 + off, { pose: 'stand', h: c.h });
   tr.until(F + 2.85 + off, { pose: 'circle_lot', phase: lotHand(0.07, 0.1), h: c.h });
+  // the count starts with the man whose mitre the officer lifts (Yoma 25a): his head bare until it is put back
+  if (key === P.countOrder[0]) { const L = lot1Times(F); tr.mark(L.grasp, L.on); }
   const bearer = P.insp.torch && (P.insp.torch.east === key || P.insp.torch.west === key);
   if (bearer) {
     const lightAt = M.byHearth(c.ang, 2.05);
@@ -451,21 +476,36 @@ function firstLottery(tr, P, T, M, key) {
 
 /** the officer's lottery: the call, the mitre, the count (one turn of his head per finger), the winner announced */
 function officerLottery(tr, P, T, M) {
-  const F = T.first[0];
+  const F = T.first[0], L = lot1Times(F);
   tr.set({ owner: 'lot', role: 'k' });
   tr.until(F + 0.45, { pose: 'stand', face: M.hearth });
-  const first = P.circle[P.countOrder[0]].at;
-  tr.until(F + 0.75, { pose: 'stand', face: first });
-  tr.hold(0.32, { face: first, pose: 'point' });                    // the mitre lifted from his head (Yoma 25a)
-  // the fingers held out: one or two each (Yoma 22a); the count named runs three rounds and ends on the winner
+  const fc = P.circle[P.countOrder[0]], first = fc.at;
+  // behind the first man, outside the circle and facing the hearth as he does: his crown MITRE_REACH before the officer
+  const behind = M.byHearth(fc.ang, 2.75 + MITRE_REACH), home = P.officerSpot;
+  const MI = [null, 'migbaat'];
+  tr.until(L.go, { pose: 'stand', face: first });
+  tr.walk([behind], { until: L.reach, speed: 0.85 });
+  // he takes the mitre from his head (Yoma 25a): people's lift_mitre — reach, grasp at MITRE_GRASP, raise, at the chest
+  tr.hold(L.grasp - L.reach, { h: fc.h, pose: 'lift_mitre', phase: ramp(0, MITRE_GRASP) });
+  tr.hold(L.lifted - L.grasp, { h: fc.h, pose: 'lift_mitre', phase: ramp(MITRE_GRASP, 1), prop: 'migbaat' });
+  tr.walk([home], { until: L.back, prop: 'migbaat' });
+  tr.until(F + 1.07, { pose: 'stand', face: first, props: MI });
+  // the fingers held out: one or two each (Yoma 22a); the count named runs three rounds and ends on the winner — the
+  // mitre in his left hand while he points ⚙
   const fingers = P.countOrder.map((k, i) => 1 + (rand(SEED.officer, 'f', i) < 0.35 ? 1 : 0));
   const seq = [];
   for (let r = 0; r < 3; r++) P.countOrder.forEach((k, i) => { for (let f = 0; f < fingers[i]; f++) seq.push(k); });
   for (let i = 0; i < P.countOrder.length; i++) { const k = P.countOrder[i]; for (let f = 0; f < fingers[i]; f++) seq.push(k); if (k === 'winner') break; }
   const dt = (2.62 - 1.12) / seq.length;
-  for (const k of seq) tr.hold(dt, { face: P.circle[k].at, pose: 'point' });
+  for (const k of seq) tr.hold(dt, { face: P.circle[k].at, pose: 'point', props: MI });
+  tr.until(L.ret0, { pose: 'stand', face: P.circle.winner.at, props: MI });
+  // the mitre put back on his head ⚙ (lift_mitre played back), before anyone goes to serve
+  tr.walk([behind], { until: L.ret1, prop: 'migbaat' });
+  tr.hold(L.on - L.ret1, { h: fc.h, pose: 'lift_mitre', phase: ramp(1, MITRE_GRASP), prop: 'migbaat' });
+  tr.hold(L.done - L.on, { h: fc.h, pose: 'lift_mitre', phase: ramp(MITRE_GRASP, 0) });
+  tr.walk([home], { until: L.home, speed: 0.85 });
   tr.until(F + 4.3, { pose: 'stand', face: P.circle.winner.at });
-  P.lot1 = { tCall: F + 0.5, tMitre: F + 0.82, tWon: F + 2.68, count: seq.length, fingers };
+  P.lot1 = { tCall: F + 0.5, tMitre: L.grasp, tBack: L.on, tWon: F + 2.68, count: seq.length, fingers, target: P.countOrder[0] };
   // round the east of the circle to the keys slab: he will take the key (Tamid 1:3)
   const S = M.slab, Z = M.Z;
   tr.walk([[M.cx + 3.85, M.hearth[1] + 2.4, Z], [M.cx + 4.7, M.hearth[1] - 1.3, Z], [S[0] + 2.4, S[1] - 1.35, Z], [S[0], S[1] - 0.65, Z]], { until: T.insp[0], speed: SLOW });
@@ -548,7 +588,7 @@ function meeting(P, T, M) {
   const d = P.ctx.elOpt('azarah.chamber.chavitin')?.params?.door;
   P.chavitinDoor = d ? [d.x, (d.y[0] + d.y[1]) / 2, d.z?.[0] ?? 13.5] : [248, 319.5, 13.5];
   P.cues.push({ key: `insp-key:${Math.round(I * 10)}`, t: I + CUE_LEAD, id: 'keys', at: [M.slab[0], M.slab[1], M.Z + 1], caption: T.torches ? CAP.key : CAP.keyShabbat, range: 40, owner: 'insp' });
-  P.cues.push({ key: `insp-wicket:${Math.round(I * 10)}`, t: R.tUnlock, id: 'keys', at: [M.pish[0], M.pish[1], M.Z + 1.5], owner: 'insp' });
+  P.cues.push({ key: `insp-wicket:${Math.round(I * 10)}`, t: R.tUnlock - 0.12, id: 'keys', at: [M.pish[0], M.pish[1], M.Z + 1.5], owner: 'insp' });
   P.cues.push({ key: `insp-split:${Math.round(I * 10)}`, t: I + 1.5, caption: CAP.split, at: [M.gateOut[0], M.gateOut[1], 16], range: 60, owner: 'insp' });
   P.cues.push({ key: `insp-shalom:${Math.round(t * 10)}`, t, id: 'shalom-call', at: [officerAt[0], officerAt[1] - 1.5, 19], opts: { variant: 'all-well', caption: false }, caption: CAP.allWell, range: 70, owner: 'insp' });
   P.cues.push({ key: `insp-bakers:${Math.round(t * 10)}`, t: P.meet.tGiveW + 0.45, caption: CAP.bakers, at: P.chavitinDoor, range: 60, owner: 'insp' });
@@ -590,14 +630,25 @@ function inspection(tr, P, T, M, key) {
 function officerInspection(tr, P, T, M) {
   const R = P.insp, Z = M.Z;
   tr.set({ owner: 'insp', role: 'k' });
-  // he takes the key — the slab lifted by its ring (Middot 1:9; Tamid 1:3)
+  // he takes the key — the slab lifted by its ring (Middot 1:9; Tamid 1:3): the wicket's key alone off the chain
+  // (world: setKeys(7) — the wicket key is the last of the eight) ⚙
   tr.hold(0.1, { h: 0, pose: 'kneel', phase: downHoldUp(0.06, 0, true) });
+  const k0 = tr.now();
   tr.hold(0.12, { h: 0, pose: 'hold_legs' });
+  const kw = [tr.now() + 0.01, NaN, 7];
+  P.keysWin.push(kw);
   tr.hold(0.08, { h: 0, pose: 'hold_legs', prop: 'keys' });
+  slabLift(P, k0 + 0.01, tr.now() + 0.06);
   tr.hold(0.08, { h: 0, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), prop: 'keys' });
-  tr.walk([[M.gateIn[0] - 0.4, M.ky - 2, Z], M.gateIn], { speed: SLOW, prop: 'keys' });
-  tr.until(R.tUnlock - 0.12, { h: 180, pose: 'stand', prop: 'keys' });
-  tr.hold(0.22, { h: 180, pose: 'point', prop: 'keys' });
+  // the wicket in the Moked gate's east leaf (it swings into the hall): before it, its face LOCK_REACH ahead, the key
+  // turned (people's 'lock'); a step back while it swings open
+  const ml = mokedLeaf(P.ctx), pk = P.ctx.elOpt('azarah.gate.moked')?.params?.pishpash?.box;
+  const unlockAt = [(pk ? pk.max[0] - 0.25 : M.pish[0] + 0.75) + 0.25, ml.y + LOCK_REACH, Z];
+  tr.walk([[M.gateIn[0] - 0.4, M.ky - 2, Z], M.gateIn, unlockAt], { speed: SLOW, prop: 'keys' });
+  tr.until(R.tUnlock - 0.16, { h: 180, pose: 'stand', prop: 'keys' });
+  tr.hold(0.12, { h: 180, pose: 'lock', phase: ramp(0, 1), prop: 'keys' });
+  tr.walk([M.gateIn], { until: R.pishOpen[0] - 0.01, prop: 'keys' });
+  tr.hold(0.06, { h: 180, pose: 'stand', prop: 'keys' });
   tr.walk([[M.pish[0], M.pish[1], Z], M.gateOut], { until: P.comp.east.t0 - 0.01 });
   tr.hold(0.01);
   tr.follow(P.comp.east, 0, { pose: 'walk', idle: 'stand' });
@@ -638,6 +689,16 @@ function officerInspection(tr, P, T, M) {
   tr.walk([[M.pish[0], M.pish[1], Z], M.gateIn], { speed: SLOW });
   R.pishBack = [tPish - 0.12, tr.now() + 0.05];
   R.pishWins = [R.pishOpen, R.pishBack];
+  // the wicket's key hung back on the chain under the slab ⚙ (the Mishnah says only that he took it)
+  const kneelAt = [M.slab[0], M.slab[1] - 0.65, Z];
+  tr.walk([[M.gateIn[0] - 0.4, M.ky - 2, Z], kneelAt], { speed: SLOW });
+  tr.hold(0.1, { h: 0, pose: 'kneel', phase: downHoldUp(0.06, 0, true) });
+  const r0 = tr.now();
+  tr.hold(0.14, { h: 0, pose: 'hold_legs' });
+  kw[1] = tr.now();
+  tr.hold(0.1, { h: 0, pose: 'hold_legs' });
+  slabLift(P, r0 + 0.01, tr.now());
+  tr.hold(0.1, { h: 0, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d) });
   // inside the wicket, a little aside, until he leaves for the Gazit; then back at the wicket facing it
   const wait = [M.gateIn[0] - 1.3, M.gateIn[1] + 1.6, Z];
   tr.walk([wait], { speed: SLOW });
@@ -675,7 +736,7 @@ function eveningYoung(P, T, M, G, key, plan, hand) {
   tr.hold(0.05, { h: sp.h, pose: 'kneel', phase: 0.5, role: 'off' });
   tr.set({ role: 'off' });
   if (key === 'y4' && T.keri) keri(tr, P, M, T, sp);
-  else if (sp.pose === 'kneel' && plan[1]) {
+  else if (sp.pose === 'sit_floor' && plan[1]) {
     // sitting up by the hearth (Friday night) until a mat is free, then to it
     sitUp(tr, Math.max(tr.now() + 0.2, (P.keriLeftA ?? DAY - 3) + 0.35), sp, key);
     tr.hold(0.1, { pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d) });
@@ -684,7 +745,7 @@ function eveningYoung(P, T, M, G, key, plan, hand) {
     tr.hold(0.04, { h: m.h });
     tr.hold(0.2, { h: m.h, pose: 'kneel', phase: downHoldUp(0.06, 0, true) });
     tr.until(DAY, { pose: m.pose, h: m.h, at: m.at });
-  } else if (sp.pose === 'kneel') sitUp(tr, DAY, sp, key);
+  } else if (sp.pose === 'sit_floor') sitUp(tr, DAY, sp, key);
   else tr.until(DAY, { pose: sp.pose, h: sp.h, at: sp.at });
   return tr.episode();
 }
@@ -708,14 +769,26 @@ function keri(tr, P, M, T, sp) {
   const t0 = tr.now();
   keriDown(tr, P, M, P);
   tr.walk(M.passage.slice(1), { speed: 0.5 });                             // slowly, by the lamps
-  tr.walk([[M.passageEnd[0] + 1.2, M.passageEnd[1] + 2.0, zF], [K.edge[0] + 1.4, K.my - 0.6, zF], K.edge, K.top, K.step, K.deep], { speed: SLOW });
-  tr.hold(0.16, { h: 270, pose: 'kneel', phase: downHoldUp(0.05, 0.06) });
+  // his own clothes off by the mikveh, the linen sheet about him ⚙ (the change unseen); down into it and immerse
+  const clothes = [K.edge[0] + 1.4, K.my - 0.6, zF];
+  tr.walk([[M.passageEnd[0] + 1.2, M.passageEnd[1] + 2.0, zF], clothes], { speed: SLOW });
+  tr.hold(0.1, { face: K.edge, pose: 'bow', phase: (l, d) => 0.5 * clamp(l / d) });
+  tr.hold(0.08, { face: K.edge, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'bath' });
+  tr.set({ role: 'bath' });
+  tr.walk([K.edge, K.top, K.step, K.deep], { speed: SLOW });
+  tr.hold(0.16, { h: 270, pose: 'bathe', phase: ramp(0, 1) });
   tr.walk([K.step, K.top, K.edge], { speed: MIKVEH });
-  // dried and warmed before the fire (Tamid 1:1)
-  tr.walk([[K.edge[0] + 2.3, K.my + 3.0, zF], M.keriFire], { speed: SLOW });
-  const back = [[M.passageEnd[0], M.passageEnd[1] + 1.2, zF], M.passageEnd, [M.passage[0][0], M.passage[0][1], zF]];
-  const ret = tr.walkMin(back, 0.5);
-  dawdle(tr, Math.max(tr.now() + 0.5, w1 - ret), hTo(M.keriFire, M.medurah), 'y4', 'off');
+  // dried and warmed before the fire (Tamid 1:1): his hands to it (people's 'warm'); then he dresses by the mikveh
+  const toFire = [[K.edge[0] + 2.3, K.my + 3.0, zF], M.keriFire];
+  tr.walk(toFire, { speed: SLOW });
+  const toClothes = [toFire[0], clothes];
+  const back = [[M.passageEnd[0] + 1.2, M.passageEnd[1] + 2.0, zF], [M.passageEnd[0], M.passageEnd[1] + 1.2, zF], M.passageEnd, [M.passage[0][0], M.passage[0][1], zF]];
+  const ret = tr.walkMin(toClothes, SLOW) + 0.3 + (new Track(0, clothes, 0)).walkMin(back, 0.5);
+  tr.until(Math.max(tr.now() + 0.5, w1 - ret), { face: M.medurah, pose: 'warm' });
+  tr.walk(toClothes, { speed: SLOW });
+  tr.hold(0.14, { face: K.edge, pose: 'kneel', phase: downHoldUp(0.05, 0, true) });
+  tr.hold(0.16, { face: K.edge, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'off' });
+  tr.set({ role: 'off' });
   keriBack(tr, P, M, P, back);
   P.keriSpan = [t0, tr.now()];
   P.cues.push({ key: `keri:${Math.round(T.keri[0] * 10)}`, t: Math.max(T.keri[0] + CUE_LEAD, t0 + 0.3), caption: CAP.keri, at: M.passage[0], range: 60, owner: 'moked' });
@@ -784,33 +857,51 @@ function lockingKohen(P, T, M, G, slabLie) {
   const kneelAt = [M.slab[0], M.slab[1] - 0.65, Z];
   const tr = new Track(L0 - 2.4, G.eastIn, 90, 'moked', 'off');
   tr.walk([...northLane(G, M), [M.cx + 0.4, M.pish[1] + 3, Z], [M.cx + 0.2, M.ky - 2.5, Z], kneelAt], { until: L0 + 0.25 });
-  // down on his knees; both hands to the slab's ring, the slab raised; the keys from the chain beneath it (a 'reach'
-  // pose kneeling and leaning to the floor; the slab itself is static geometry — a movable is requested) ⚙
+  // down on his knees; both hands to the slab's ring, the slab raised (world: azarah.moked.keys-slab lift(f)); the keys
+  // taken from the chain beneath it (setKeys(false)). The slab stays open while he goes to lock: "he finished locking,
+  // returned the keys to the chain and the tablet to its place" (Middot 1:9) — laid back fully open (world's lift 1,
+  // 80°) so it stands by itself; one window from here to after the keys are back (below)
   tr.hold(0.12, { h: 0, pose: 'kneel', phase: downHoldUp(0.06, 0, true) });
+  const t0 = tr.now();
   tr.hold(0.24, { h: 0, pose: 'hold_legs' });
+  P.keysWin.push([tr.now() + 0.01, NaN, false]);
+  const kw = P.keysWin[P.keysWin.length - 1];
   tr.hold(0.16, { h: 0, pose: 'hold_legs', prop: 'keys' });
+  tr.hold(0.08, { h: 0, pose: 'hold_legs', prop: 'keys' });
   tr.hold(0.06, { h: 0, pose: 'kneel', phase: 0.5, prop: 'keys' });
   tr.hold(0.12, { h: 0, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), prop: 'keys' });
   P.cues.push({ key: `lock-keys:${Math.round(L0 * 10)}`, t: L0 + 0.6, id: 'keys', at: [M.slab[0], M.slab[1], Z + 1], caption: CAP.lockKeys, range: 45, owner: 'moked' });
-  // to the Korban gate, inside the court (gates.js shuts its leaves at closeKorban … + 0.45)
+  // to the Korban gate, inside the court; once gates.js has swung its leaves shut (closeKorban … + 0.45) he steps into
+  // the gateway, the leaves' inner face LOCK_REACH before him, and turns the key at their meeting from within (Middot 1:9;
+  // people's 'lock') ⚙
   const kg = [161.5, 396.2, 16];
-  const tLockK = T.closeKorban + 0.55;
+  const kl = korbanLeaf(P.ctx);
+  const lockK = [kl.x - 0.25, kl.y - LOCK_REACH, 16];
   tr.walk([[M.cx + 1.4, M.ky - 6, Z], [M.cx + 1.4, M.pish[1] - 1.5, Z], [196, 385.5, 16], [168, 393.2, 16], kg], { speed: SLOW, prop: 'keys' });
-  tr.until(tLockK - 0.15, { h: 15, pose: 'stand', prop: 'keys' });
-  tr.hold(0.3, { h: 15, pose: 'point', prop: 'keys' });          // the key turned in the lock ⚙ (a 'lock' gesture is requested)
-  P.cues.push({ key: `lock-korban:${Math.round(tLockK * 10)}`, t: tLockK, id: 'keys', at: [kg[0], kg[1] + 2, 17], owner: 'moked' });
-  // back inside the Moked gate before it shuts, and he locks it from within
-  tr.walk([[168, 393.2, 16], [196, 385.5, 16], [M.cx - 0.6, M.pish[1] - 1.5, Z], [M.cx - 0.6, M.pish[1] + 2.6, Z], [M.cx + 0.55, M.pish[1] + 2.0, Z]], { speed: WALK, prop: 'keys' });
-  const tLockM = T.closeMoked + 0.6;
-  tr.until(tLockM - 0.1, { h: 200, pose: 'stand', prop: 'keys' });
-  tr.hold(0.3, { h: 200, pose: 'point', prop: 'keys' });         // at the leaves' meeting, from within
-  P.cues.push({ key: `lock-moked:${Math.round(tLockM * 10)}`, t: tLockM, id: 'keys', at: [M.cx, M.pish[1] + 1, 17], owner: 'moked' });
+  tr.until(T.closeKorban + 0.47, { h: 15, pose: 'stand', prop: 'keys' });
+  tr.walk([[kg[0] - 0.25, 398.4, 16], lockK], { speed: SLOW, prop: 'keys' });
+  tr.hold(0.02, { h: 0, pose: 'stand', prop: 'keys' });
+  const tLockK = tr.now() + 0.035;
+  tr.hold(0.1, { h: 0, pose: 'lock', phase: ramp(0, 1), prop: 'keys' });
+  P.cues.push({ key: `lock-korban:${Math.round(tLockK * 10)}`, t: tLockK, id: 'keys', at: [kl.x, kl.y, 17], owner: 'moked' });
+  // back inside the Moked gate before it shuts; then, its leaves shut, into its gateway: the lock from within
+  tr.walk([[kg[0] - 0.25, 398.4, 16], [168, 393.2, 16], [196, 385.5, 16], [M.cx - 0.6, M.pish[1] - 1.5, Z], [M.cx - 0.6, M.pish[1] + 2.6, Z], [M.cx + 0.55, M.pish[1] + 2.0, Z]], { speed: WALK, prop: 'keys' });
+  const ml = mokedLeaf(P.ctx);
+  const lockM = [ml.x + 0.25, ml.y + LOCK_REACH, Z];
+  tr.until(T.closeMoked + 0.47, { h: 200, pose: 'stand', prop: 'keys' });
+  tr.walk([lockM], { speed: SLOW, prop: 'keys' });
+  tr.hold(0.02, { h: 180, pose: 'stand', prop: 'keys' });
+  const tLockM = tr.now() + 0.035;
+  tr.hold(0.1, { h: 180, pose: 'lock', phase: ramp(0, 1), prop: 'keys' });
+  P.cues.push({ key: `lock-moked:${Math.round(tLockM * 10)}`, t: tLockM, id: 'keys', at: [ml.x, ml.y, 17], owner: 'moked' });
   // the keys back on the chain, the slab in its place
-  tr.walk([[M.cx - 0.3, M.ky - 2.5, Z], kneelAt], { speed: SLOW, prop: 'keys' });
+  tr.walk([[M.cx + 0.55, M.pish[1] + 2.0, Z], [M.cx - 0.3, M.ky - 2.5, Z], kneelAt], { speed: SLOW, prop: 'keys' });
   tr.hold(0.12, { h: 0, pose: 'kneel', phase: downHoldUp(0.06, 0, true), prop: 'keys' });
   tr.hold(0.18, { h: 0, pose: 'hold_legs', prop: 'keys' });
   const tBack = tr.now();
+  kw[1] = tBack;
   tr.hold(0.24, { h: 0, pose: 'hold_legs' });
+  slabLift(P, t0 + 0.03, tBack + 0.1, 1);
   tr.hold(0.06, { h: 0, pose: 'kneel', phase: 0.5 });
   P.cues.push({ key: `lock-back:${Math.round(tBack * 10)}`, t: tBack + 0.05, id: 'keys', at: [M.slab[0], M.slab[1], Z + 1], caption: CAP.lockBack, range: 45, owner: 'moked' });
   tr.hold(0.12, { h: 0, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d) });
@@ -820,6 +911,27 @@ function lockingKohen(P, T, M, G, slabLie) {
   tr.until(DAY, { at: slabLie.at, h: slabLie.h, pose: 'lie' });
   P.lock = { tLockK, tLockM, tBack };
   return tr.episode();
+}
+
+/**
+ * The keys slab raised by its ring (world: 'azarah.moked.keys-slab' lift(f), 0 in place … 1 = 80°): up from t0 over
+ * 0.1 min to SLAB_UP (or `up`), held, down over the 0.08 min ending at t1 (Middot 1:9) ⚙ — the windows P.slab
+ * ([t0, up at, down from, t1, level?]), applied by moked-night.
+ */
+const SLAB_UP = 0.75;
+function slabLift(P, t0, t1, up = undefined) { P.slab.push([t0, t0 + 0.1, t1 - 0.08, t1, up]); }
+
+/** the Korban gate's leaves when shut (courts' door: hinged at its outer face, swinging into the court): where they
+ *  meet, and the inner (court) face — site.js azarah.gate.korban; the leaves 0.25 amah inside its outer face ⚙ */
+function korbanLeaf(ctx) {
+  const b = ctx.elOpt('azarah.gate.korban')?.box || { min: [156.5, 398, 16], max: [166.5, 403, 36] };
+  return { x: (b.min[0] + b.max[0]) / 2, y: b.max[1] - 0.51 };
+}
+/** the Moked gate's leaves when shut (hinged 0.25 inside its court face, swinging into the hall): their meeting, and
+ *  the hall face (courts/moked.js gates) */
+function mokedLeaf(ctx) {
+  const b = ctx.elOpt('azarah.gate.moked')?.box || { min: [205.75, 390, 16], max: [215.75, 392, 36] };
+  return { x: (b.min[0] + b.max[0]) / 2, y: b.min[1] + 0.51 };
 }
 
 // --------------------------------------------------------------------------------------------------- the elders
@@ -837,32 +949,37 @@ function elderEps(P, T, M, G, e, i) {
   const eps = [];
   // ---- small hours: asleep; two of the west side open the chel door at the knock; all go out when the gates open
   {
+    // (role 'elder' = kohen_elder: lying, people draws him in his own clothes on his folded garments on the ledge,
+    // covered by his own mantle; 'eoff' = kohen_elder_offduty, the same man awake in his own clothes - Tamid 1:1)
     const tr = new Track(0, lieAt, 180, 'moked', 'elder');
     if (i === 0 || i === 2) {
       const k = i === 0 ? 0 : 1;
       tr.until(T.knock[0] + 0.5 + 0.06 * k, { pose: 'lie' });
-      tr.hold(0.08, { at: kneelAt, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d) });
+      tr.hold(0.08, { at: kneelAt, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'eoff' });
       const leaf = [M.cx + (k ? 1.7 : -2.7), M.door.min[1] - 1.15, Z];
-      tr.walk([...[...climb].reverse().slice(1), front, H.KW, H.WW, H.W2, H.NW2, H.HNW, leaf], { speed: ELDER * 1.4 });
-      tr.until(T.knock[0] + 1.6, { h: 0, pose: 'stand' });
-      tr.walk([H.HNW, H.NW2, H.W2, H.WW, H.KW, front, ...climb], { speed: ELDER });
-      tr.hold(0.08, { at: kneelAt, h: 180, pose: 'kneel', phase: downHoldUp(0.03, 0, true) });
+      tr.walk([...[...climb].reverse().slice(1), front, H.KW, H.WW, H.W2, H.NW2, H.HNW, leaf], { speed: ELDER * 1.4, role: 'eoff' });
+      tr.until(T.knock[0] + 1.6, { h: 0, pose: 'stand', role: 'eoff' });
+      tr.walk([H.HNW, H.NW2, H.W2, H.WW, H.KW, front, ...climb], { speed: ELDER, role: 'eoff' });
+      tr.hold(0.08, { at: kneelAt, h: 180, pose: 'kneel', phase: downHoldUp(0.03, 0, true), role: 'eoff' });
     }
     const tOut = T.mokedGateOpen + 0.3 + 0.25 * i;
     tr.until(tOut, { at: lieAt, h: 180, pose: 'lie' });
-    tr.hold(0.12, { at: kneelAt, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d) });
-    // out through the Moked gate and along the north side to Lishkat HaGazit (⚙ where they go)
+    tr.hold(0.12, { at: kneelAt, pose: 'kneel', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), role: 'eoff', prop: 'folded_garments' });
+    // out through the Moked gate with their folded garments and along the north side to Lishkat HaGazit (⚙ where they go)
     tr.walk([...[...climb].reverse().slice(1), front, west ? H.KW : H.KE, [M.cx - 0.6 + 0.4 * e.side, M.pish[1] + 2.5, Z], [M.cx - 0.6 + 0.4 * e.side, M.pish[1] - 4, 16],
-      ...[...northLane(G, M)].reverse().slice(1), G.eastIn], { speed: ELDER });
+      ...[...northLane(G, M)].reverse().slice(1), G.eastIn], { speed: ELDER, role: 'eoff', prop: 'folded_garments' });
     eps.push(tr.episode());
   }
   // ---- evening: from the Gazit's door along the north side, in through the Moked gate while it is open, onto the ledge
   {
     const t0 = T.lock[0] - 3.3 + 0.45 * i;
+    // in the four garments from the day's service; on his knees he takes them off and folds them, and lies down on them
+    // in his own clothes (Tamid 1:1) - the change at the kneel unseen ⚙
     const tr = new Track(t0, G.eastIn, 90, 'moked', 'elder');
     tr.walk([...northLane(G, M), [M.cx - 0.3, M.pish[1] + 3.2, Z], west ? H.KW : H.KE, front, ...climb], { speed: ELDER });
     tr.hold(0.06, { h: 180 });
     tr.hold(0.25, { at: kneelAt, h: 180, pose: 'kneel', phase: downHoldUp(0.08, 0, true) });
+    tr.hold(0.04, { at: kneelAt, h: 180, pose: 'kneel', phase: 0.5, role: 'eoff' });
     tr.until(DAY, { at: lieAt, h: 180, pose: 'lie' });
     eps.push(tr.episode());
   }
@@ -905,14 +1022,16 @@ function leviteEps(P, T, M) {
 function officerEps(P, T, M) {
   const f = M.flight, Z = M.Z;
   const fx = (f.min[0] + f.max[0]) / 2;
-  const atDoor = [fx, M.door.max[1] + 0.55, Z];
-  const pts = [[176.2, 418.6, 0], [186.6, 418.8, 0], [187.6, 426.6, 0], [203.4, 431.4, 0], [fx, f.max[1] + 1.3, 0], [fx, f.max[1] - 0.2, 0.2], [fx, f.min[1] + 0.6, Z], atDoor];
+  // on the flight's top tread, the leaves' outer face KNOCK_REACH before him (people's 'knock': three raps, a pause)
+  const atDoor = [fx, M.door.max[1] + KNOCK_REACH, Z];
+  const pts = [[176.2, 418.6, 0], [186.6, 418.8, 0], [187.6, 426.6, 0], [203.4, 431.4, 0], [fx, f.max[1] + 1.3, 0], [fx, f.max[1] - 0.2, 0.2], atDoor];
   const tKnock = T.knock[0] + CUE_LEAD;
   const tr = new Track(0, [175.6, 421.6, 0], 180, 'moked', 'k');
   tr.until(tKnock - 0.12 - tr.walkMin(pts, WALK), { owner: 'none' });
   tr.walk(pts, { speed: WALK });
-  tr.until(tKnock - 0.07, { h: 180, pose: 'stand' });
-  tr.hold(0.22, { h: 180, pose: 'point' });
+  tr.until(tKnock - 0.04, { h: 180, pose: 'stand' });
+  tr.hold(0.1, { h: 180, pose: 'knock', phase: cycles(3) });       // "the officer comes and knocks on them" (Tamid 1:2)
+  tr.hold(0.12, { h: 180, pose: 'stand' });
   P.cues.push({ key: `knock:${Math.round(tKnock * 10)}`, t: tKnock, id: 'knock', at: [fx, M.door.max[1], Z + 3], caption: CAP.knock, range: 30, owner: 'moked' });
   tr.until(T.knock[0] + 1.02, { h: 180, pose: 'stand' });
   tr.walk([[fx, M.door.min[1] - 0.8, Z], P.officerSpot], { speed: SLOW });
@@ -947,7 +1066,7 @@ function geviniEps(P, T, ctx) {
   tr.until(tCall - 0.35 - tr.walkMin(route, 1.0), { owner: 'none' });
   tr.walk(route, { speed: 1.0 });
   tr.until(tCall - 0.04, { h: 90, pose: 'stand' });
-  tr.hold(0.16, { h: 90, pose: 'sing' });                      // the call ⚙ pose (a crier's 'call' is requested)
+  tr.hold(0.16, { h: 90, pose: 'call', phase: cycles(2) });    // the hands cupped round the mouth (people's 'call') ⚙
   P.cues.push({ key: `gevini:${Math.round(tCall * 10)}`, t: tCall, id: 'gevini', at: [stand[0], stand[1], zTop + 3.4], opts: { caption: false }, caption: CAP.gevini, range: 400, owner: 'moked' });
   tr.until(T.gev[1] + 0.25, { h: 90, pose: 'stand' });
   tr.walk([head, foot, outside, inside], { speed: 1.0 });

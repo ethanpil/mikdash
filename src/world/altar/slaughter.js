@@ -37,6 +37,27 @@ export function buildSlaughter(A) {
     parts.push(tStaple.clone().translate(X * AMAH, (Z + 0.012) * AMAH, -(Y + ringR - 0.05) * AMAH));
     parts.push(plate.clone().translate(X * AMAH, (Z + 0.01) * AMAH, -(Y + ringR - 0.05) * AMAH));
   }
+  // Bilgah's ring, "fixed" (Sukkah 5:8; 56b): "the rings were turned up to take the neck and turned back down into the
+  // floor; Bilgah's is fixed and does not turn" (Rashi 56a). It lies folded down like the others, and lead is run over
+  // its staple and over its far arc onto a second footing plate, so it can never be raised ⚙ (site.js altar.rings
+  // params.bilgah: which ring is the 15th mishmar's)
+  const bil = rings.bilgah;
+  if (bil?.ring) {
+    const [X, Y, Z] = bil.ring;
+    const lead = [];
+    parts.push(plate.clone().translate(X * AMAH, (Z + 0.01) * AMAH, -(Y - ringR - 0.05) * AMAH));
+    // a puddle of lead: a low, flattened cap, stretched along the ring's arc (local metres, centre on the floor)
+    const puddle = (cx, cy, rx, ry, h) => {
+      const g = lathe([[0, 0], [1, 0], [0.97, 0.25], [0.82, 0.62], [0.55, 0.88], [0.25, 0.98], [0, 1]], [0, 0, 0], d >= 2 ? 14 : 10);
+      g.scale(rx, h, ry);
+      g.translate(cx * AMAH, (Z + 0.004) * AMAH, -cy * AMAH);
+      return g;
+    };
+    // (the ring's tube stands 0.07 over the floor: each run buries its arc and slopes off to the plate's edges)
+    lead.push(puddle(X, Y + ringR - 0.05, 0.19, 0.14, 0.11));          // over the staple: the hinge run fast
+    lead.push(puddle(X, Y - ringR - 0.05, 0.17, 0.12, 0.1));           // over the far arc, onto its own plate
+    B.geo(applyWorldUV(mergeGeometries(lead.map((g) => (g.index ? g.toNonIndexed() : g)), false)), A.mat('lead', IRON), { collide: false, cast: false });
+  }
   B.geo(applyWorldUV(mergeGeometries(parts.map((g) => (g.index ? g.toNonIndexed() : g)), false)), IRON, { collide: false, cast: d >= 2 });
 
   // ---------------------------------------------------------------- the eight marble tables

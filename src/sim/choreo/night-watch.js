@@ -40,7 +40,12 @@ const DOOR_PASS = [-0.17, -0.12, 0.12, 0.17]; // minutes round a pass: the Moked
 const CLOAK_FIRE = 'sim.night-watch.cloak';
 // the incident, as fractions of his visit (from the unanswered greeting to the event's end): blows, the guard up, the
 // torch put to his garment, the fire out, the officer moves on (1) ⚙
-const INC = { strike: [0.04, 0.12], wake: 0.12, bearer: [0.16, 0.62], fire: [0.2, 0.26, 0.55, 0.7] };
+const INC = { strike: [0.04, 0.12], wake: 0.12, back: [0.12, 0.15], bearer: [0.16, 0.62], fire: [0.2, 0.26, 0.55, 0.7] };
+const STRIKE_SEC = 2.4;            // seconds a blow takes (people's 'strike': raised, down, held, back to the staff) ⚙
+// people's STAFF.strike.tip: where the staff's tip lands, in the striker's frame (m, x his right, −z ahead) — on the
+// sleeper's trunk; the sleeper ('sleep': origin at the feet, the body along his right, head 1.46 m away — g1/places.js
+// FOOT) is struck at his hip, 2.2 amot along his body and 0.2 toward the way he faces ⚙
+const STRIKE_TIP = { ahead: 1.32 / AMAH, right: 0.08 / AMAH }, HIP = { r: 2.2, f: 0.2 };
 // the gates the Levites come in by and leave by (Middot 1:3: Tadi "served for nothing")
 const EXITS = ['mount.gate.kiponus', 'mount.gate.shushan', 'mount.gate.chuldah-w', 'mount.gate.chuldah-e'];
 
@@ -112,9 +117,24 @@ export default {
     state.patrol = O;
     if (O) {
       const o = state.officer.slot(0);
-      let pose = O.walking ? 'walk' : 'stand', ph = O.walking ? phaseFor(ctx, o, 'walk', O.d) : undefined;
-      if (O.incident && O.u > INC.strike[0] && O.u < INC.strike[1]) { pose = 'throw'; ph = (O.u * L(P) * 5) % 1; } // the staff ⚙ pose
-      o.placeNear(O.X, O.Y, O.Z).heading(O.heading).pose(pose, ph).show();
+      // his staff in his hand (Middot 1:2): planted at each post (people's 'staff'), passed along as he walks
+      // ('staff_walk', stride-matched)
+      let pose = O.walking ? 'staff_walk' : 'staff', ph = O.walking ? phaseFor(ctx, o, 'staff_walk', O.d) : undefined;
+      let X = O.X, Y = O.Y, Z = O.Z, hd = O.heading;
+      if (O.incident && incPost && O.u < INC.back[1]) {
+        // "if he found him asleep, he struck him with his staff": a step to where the blow lands on the sleeper (people's
+        // STAFF.strike.tip), three blows, then back before the post
+        const S = strikeSpot(ctx, state, incPost, O);
+        const k = O.u < INC.strike[1] ? smooth(0, INC.strike[0] - 0.005, O.u) : 1 - smooth(INC.back[0], INC.back[1], O.u);
+        X += (S.X - X) * k; Y += (S.Y - Y) * k; Z += (S.Z - Z) * k;
+        if (k > 0.98) hd = S.h; else if (k > 0.02) hd = headingTo(O.X, O.Y, S.X, S.Y);
+        if (O.u > INC.strike[0] && O.u < INC.strike[1]) {
+          const sec = (O.u - INC.strike[0]) * L(P) * 60, per = ((INC.strike[1] - INC.strike[0]) * L(P) * 60) / 3;
+          pose = 'strike'; ph = Math.min(1, (sec % per) / STRIKE_SEC);
+        } else pose = k > 0.02 && k < 0.98 ? 'staff_walk' : 'staff';
+        if (pose === 'staff_walk') ph = phaseFor(ctx, o, 'staff_walk', Math.hypot(X - O.X, Y - O.Y) * AMAH);
+      }
+      o.placeNear(X, Y, Z).heading(hd).pose(pose, ph).prop('staff').show();
       if (!shabbatNight) {
         // no light in hand on Shabbat night — by analogy with the dawn inspection (Rambam BhB 8:12) ⚙
         const R = state.route, bw = O.walking && !O.gate;
@@ -359,7 +379,7 @@ function guards(ctx, state, sim, t, P, O, incPost) {
     if (gp && sOff < wm && within(t, t1, tEnd)) { walkGuard(ctx, state, g, gp, gp.len - (sOff / wm) * gp.len, true); continue; }
     if (asleep && p === incPost) {
       // asleep at his post, on the ground (Middot 1:2), along the court's wall, clear of the post's lamp stand ⚙
-      g.placeNear(p.X, p.Y, p.Z).heading(p.Y < (ctx.site?.axisY ?? 330.5) ? 180 : 0).pose('sleep').show();
+      g.placeNear(p.X, p.Y, p.Z).heading(sleeperHeading(ctx, p)).pose('sleep').show();
       continue;
     }
     let X = p.X, Y = p.Y;
@@ -443,6 +463,23 @@ function exitOf(ctx, p) {
     if (d < bd) { bd = d; best = { X, Y, Z: b.min[2], id }; }
   }
   return best;
+}
+
+/** where the guard lies asleep at his post (his 'sleep' heading: along the court's wall) */
+function sleeperHeading(ctx, p) { return p.Y < (ctx.site?.axisY ?? 330.5) ? 180 : 0; }
+
+/** the officer's spot and heading for the blow: the staff's tip (STRIKE_TIP) on the sleeper's hip, approached from
+ *  where he stopped before the post (cached per post) */
+function strikeSpot(ctx, state, p, O) {
+  if (state.strike?.post === p) return state.strike;
+  const hs = (sleeperHeading(ctx, p) * Math.PI) / 180;
+  const T = [p.X + Math.cos(hs) * HIP.r + Math.sin(hs) * HIP.f, p.Y - Math.sin(hs) * HIP.r + Math.cos(hs) * HIP.f];   // right = (cos h, −sin h)
+  const st = standOf(ctx, p);
+  const h = headingTo(st.X, st.Y, T[0], T[1]), a = (h * Math.PI) / 180;
+  const X = T[0] - Math.sin(a) * STRIKE_TIP.ahead - Math.cos(a) * STRIKE_TIP.right;
+  const Y = T[1] - Math.cos(a) * STRIKE_TIP.ahead + Math.sin(a) * STRIKE_TIP.right;
+  state.strike = { post: p, X, Y, Z: floorZ(ctx, X, Y, p.Z) ?? p.Z, h };
+  return state.strike;
 }
 
 /** the officer stops in front of the guard, on the floor nearest the post */

@@ -69,7 +69,9 @@ export default {
     const state = {
       impure: P('impure', 'israelite', 6, 1),
       head: P('head-of-maamad', 'elder', 1, 2, 2),
-      metzora: P('metzora', 'israelite', 1, 3, 2),
+      // the healed metzora on his eighth day: he shaved all his hair on the seventh — head, beard and brows (Vayikra 14:9)
+      // — and is no longer bound by 13:45 (people-4: an Israelite with setShaven('all'), not the declared 'metzora' role)
+      metzora: sim.pool({ name: 'metzora', role: 'israelite', count: 1, seed: SEED + 3, importance: 2, shaven: 'all' }),
       mk: P('metzora-kohanim', 'kohen', 3, 4, 2),
       lamb: sim.pool({ name: 'asham', animal: 'lamb', count: 1, seed: SEED + 5, importance: 2 }),
       women: P('mothers', 'woman', 6, 6),
@@ -78,6 +80,8 @@ export default {
       // the metzora's chatat and olah: the kohanim, the lambs, his agent who brings them (g4/sets.js)
       setK: P('metzora-set-kohanim', 'kohen', 12, 9, 2),
       setLamb: sim.pool({ name: 'metzora-set-lambs', animal: 'lamb', count: 2, seed: SEED + 10, importance: 2 }),
+      // his chatat is a ewe lamb (Vayikra 14:10)
+      setEwe: sim.pool({ name: 'metzora-set-ewes', animal: 'ewe', count: 1, seed: SEED + 13, importance: 2 }),
       agent: P('metzora-agent', 'israelite', 2, 11),
       hung: null,
       plan: null, planGen: -1, troupes: [],
@@ -85,7 +89,7 @@ export default {
       s: {}, s2: {},
     };
     try { state.hung = ctx.people?.spawnProp?.('lamb_hung', { seed: SEED }) || null; state.hung?.setVisible(false); } catch { state.hung = null; }
-    state.cast = new SetCast(ctx, { kohen: state.setK, lamb: state.setLamb, israelite: state.agent });
+    state.cast = new SetCast(ctx, { kohen: state.setK, lamb: state.setLamb, ewe: state.setEwe, israelite: state.agent });
     try { state.offSource = ctx.schedule?.addSource?.(setsSource(ctx, 'g4-metzora', () => plan(ctx, state, sim).sets)); } catch (e) { console.warn('[sim:g4] source failed', e); }
     return state;
   },
@@ -312,7 +316,8 @@ function metzora(state, P, seed, sim, ctx) {
   // the flaying place below it (g5/geo.js lanes) ⚙
   const L6 = geoOf(ctx).lanes[1];
   M.hook = L6.hook;
-  KA.walkTo([...TO_HOOK.slice(0, -1), [L6.flayer[0] + 1.2, L6.flayer[1] - 0.6, 16], L6.flayer], 0.85, { pose: 'carry_shoulder_walk', prop: 'lamb_carcass' });
+  // the slain lamb in his arms to the hook (people's lamb_slain in carry_lamb)
+  KA.walkTo([...TO_HOOK.slice(0, -1), [L6.flayer[0] + 1.2, L6.flayer[1] - 0.6, 16], L6.flayer], 0.85, { pose: 'carry_lamb_walk', prop: 'lamb_slain' });
   const aHang = KA.T;
   KA.stand(0.4, 0, { pose: 'raise_hands' });
   const aFlay = KA.T;

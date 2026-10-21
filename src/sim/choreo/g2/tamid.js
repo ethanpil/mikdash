@@ -19,6 +19,7 @@
 // exact; legs over stairs (the Ulam's steps, the duchan) query the floor.
 import { Script, jit, SPEED, wrap, since, walkMin, seedFrom } from './lib.js';
 import { rampUp, rampDown, circuit } from './places.js';
+import { AMAH } from '../../../core/units.js';
 
 /** crew slots: slaughterer (also flays ⚙), receiver/thrower, the six limb-winners, flour, chavitin, wine, two log bearers */
 export const CREW = { S: 0, R: 1, L: [2, 3, 4, 5, 6, 7], F: 8, C: 9, WN: 10, LOGS: [11, 12] };
@@ -146,7 +147,8 @@ export function buildTamid(ctx, P, cfg) {
   const FLAYH = 36;
   const tbl = P.slaughter.tables[cfg.rinseTable];
   const tblC = tbl ? [(tbl.min[0] + tbl.max[0]) / 2, (tbl.min[1] + tbl.max[1]) / 2, tbl.max[2]] : [hook[0], 373.5, 17.5];
-  const tblStand = [tblC[0], (tbl ? tbl.max[1] : 374.25) + 0.85, Z];
+  // before the table, its edge 0.25 m ahead (people's 'rinse': hands on a table 1½ amot high)
+  const tblStand = [tblC[0], (tbl ? tbl.max[1] : 374.25) + 0.25 / AMAH + 0.02, Z];
   const VT = vesselTable(P);
   const gapX = hook[0] - 2;             // the lane between the marble tables and between the pillars ⚙
   const carriers = cfg.carriers?.length === 9 ? cfg.carriers : CARRIERS_FALLBACK;
@@ -426,7 +428,8 @@ export function buildTamid(ctx, P, cfg) {
       s.act(0.3, { pose: 'carry', face: [hook[0], hook[1]], props: ['entrails_bazach', null] });
       s.walk([[gapX + 2.2, 377.6, Z], tblStand], { speed: SPEED.slow, pose: 'carry_walk', props: ['entrails_bazach', null] });
       t.rinse = [s.now(), cut.row - 0.5];
-      s.until(cut.row - 0.5, { pose: 'kemitzah', heading: 180 });
+      // the innards worked on the table with both hands (people's 'rinse'; Tamid 4:2 "rinsed them")
+      s.until(cut.row - 0.5, { pose: 'rinse', phase: { cycle: 2 }, heading: 180 });
       s.act(0.15, { pose: 'carry', heading: 180, props: ['entrails_bazach', null] });
       s.walk([[gapX + 2.2, 377.6, Z], ra], { speed: SPEED.slow, pose: 'carry_walk', props: ['entrails_bazach', null] });
       props = ['entrails_bazach', null];
@@ -438,10 +441,15 @@ export function buildTamid(ctx, P, cfg) {
   // ------------------------------------------------------------------------------------------------ the flayer
   S.until(cut.carry - 0.15, { pose: 'stand', face: lambSpot, sway: 6, seed: SEED + 80 });
   S.act(0.15, { pose: 'bow', phase: [0, 0.45], face: lambSpot });
-  // the dead lamb lifted from the ring and carried to the hook ⚙ (a carried-lamb prop is requested)
+  // the slain lamb lifted from the ring into his arms, its back against him, the head hanging (people's lamb_slain in
+  // carry_lamb — the cut across the throat, the fleece dark with blood about it) and carried to the hook ⚙
   const carryPath = [[ring[0] + 0.6, ring[1] + 3.0, Z], [gapX, 371, Z], [gapX, 376.0, Z], [hookStand[0] - 0.4, hookStand[1] - 0.4, Z], hookStand];
+  const SLAIN = ['lamb_slain', null];
   t.lift = S.now();
-  S.walk(carryPath, { speed: 0.75, pose: 'carry_walk' });
+  S.act(0.06, { pose: 'carry_lamb', face: lambSpot, props: SLAIN });
+  S.walk(carryPath, { speed: 0.75, pose: 'carry_lamb_walk', props: SLAIN });
+  // in his arms until the moment it hangs (lamb_hung shows from cut.hang: never a moment with no lamb)
+  S.until(cut.hang, { pose: 'carry_lamb', heading: FLAYH, props: SLAIN });
   // "he pierced it at the hock and hung it by it" (Tamid 4:2)
   S.until(cut.hang + 0.15, { pose: 'flay', heading: FLAYH });
   // the flaying knife from the marble table, where he laid it ready ⚙
@@ -467,19 +475,10 @@ export function buildTamid(ctx, P, cfg) {
   const atTable = (name, a, b) => { if (Number.isFinite(a) && Number.isFinite(b) && b > a) items.push({ name, show: [a, b], keys: [{ t: a, X: VT[name][0], Y: VT[name][1], Z: VT[name][2], h: 90 }] }); };
   atTable('knife_flay', tLayKF, tTakeKF);
   atTable('knife', tKnifeDown, tKnifePick);
-  // the lamb carried in front of his chest ⚙
+  // the lamb at the ring until he lifts it (then the carried prop, then the hook's states)
   {
     lamb.until(cut.carry, { pose: 'bound', phase: 0, heading: 180 });
     lamb.until(t.lift, { pose: 'bound', phase: 0, heading: 180 });
-    const lifted = [];
-    let prev = lambSpot;
-    for (const p of carryPath) {
-      const L = Math.hypot(p[0] - prev[0], p[1] - prev[1]) || 1;
-      lifted.push([p[0] + ((p[0] - prev[0]) / L) * 0.95, p[1] + ((p[1] - prev[1]) / L) * 0.95, Z + 1.5]);
-      prev = p;
-    }
-    lamb.walk(lifted, { speed: 0.75, pose: 'bound' });
-    lamb.until(cut.hang, { pose: 'bound', phase: 0, heading: 90 });
   }
   // the hook's states (free props, origin at the hook)
   const atHook = (tk) => [{ t: tk, X: hook[0], Y: hook[1], Z: hook[2], h: 0 }];
@@ -490,7 +489,8 @@ export function buildTamid(ctx, P, cfg) {
   const hideAt = [hook[0] + 1.7, hook[1] - 0.95, Z + 0.02];
   t.hidePick = cut.row + 0.5;
   items.push({ name: 'hide', show: [cut.hide, t.hidePick], keys: [{ t: cut.hide, X: hideAt[0], Y: hideAt[1], Z: hideAt[2], h: 80 }] });
-  if (t.rinse) items.push({ name: 'entrails_bazach', show: [t.rinse[0], t.rinse[1]], keys: [{ t: t.rinse[0], X: tblC[0], Y: tblC[1], Z: tblC[2], h: 0 }] });
+  // the innards spread on the marble table while they are rinsed (people's 'entrails') ⚙
+  if (t.rinse) items.push({ name: 'entrails', show: [t.rinse[0], t.rinse[1]], keys: [{ t: t.rinse[0], X: tblC[0], Y: tblC[1] + 0.25, Z: tblC[2], h: 0 }] });
 
   // the receiver takes the hide to the Parvah ⚙ — round the south of the Ulam (its block reaches Y 280.5)
   Rr.until(t.hidePick - 0.35, { pose: 'stand', face: [hook[0], hook[1]], sway: 8, seed: SEED + 90 });

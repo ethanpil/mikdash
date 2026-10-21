@@ -6,7 +6,7 @@ import { Group, Mesh, BoxGeometry, Vector3 } from 'three';
 import { AMAH, m2w } from '../../core/units.js';
 import { mergeGeometries, applyWorldUV } from '../geom.js';
 import { siteDir, worldQuad } from './kit.js';
-import { wallDesc } from './walls.js';
+import { wallDesc, wallKeys } from './walls.js';
 
 const GATES = ['mount.gate.shushan', 'mount.gate.kiponus', 'mount.gate.tadi', 'mount.gate.chuldah-w', 'mount.gate.chuldah-e'];
 const SIDE_OF = { 'mount.gate.shushan': 'east', 'mount.gate.kiponus': 'west', 'mount.gate.tadi': 'north', 'mount.gate.chuldah-w': 'south', 'mount.gate.chuldah-e': 'south' };
@@ -166,14 +166,14 @@ export function buildShushanChamber(ctx, kit, detail) {
   const zw = zc + 0.05;                                         // walls run into the roof slab (no light leak at the joint)
   // walls: east (relief face), north, south — full; west with a door
   const door = { y0: (y0 + y1) / 2 - 1, y1: (y0 + y1) / 2 + 1, z1: z0 + 4.2 };
-  const ext = 'herodian_wall', inn = 'plaster';
+  const { ext, inner: WALL_IN } = wallKeys(ctx), inn = 'plaster';
   kit.faces([x1 - wt, y0, z0], [x1, y1, zw], { e: ext, w: inn });
   kit.faces([x0, y0, z0], [x1, y0 + wt, zw], { s: ext, n: inn, w: ext });
   kit.faces([x0, y1 - wt, z0], [x1, y1, zw], { n: ext, s: inn, w: ext });
   // west wall pieces round the door
-  kit.faces([x0, y0 + wt, z0], [x0 + wt, door.y0, zw], { w: 'herodian_wall_inner', e: inn, n: 'herodian_wall_inner' });
-  kit.faces([x0, door.y1, z0], [x0 + wt, y1 - wt, zw], { w: 'herodian_wall_inner', e: inn, s: 'herodian_wall_inner' });
-  kit.faces([x0, door.y0, door.z1], [x0 + wt, door.y1, zw], { w: 'herodian_wall_inner', e: inn, b: 'ashlar_plain' });
+  kit.faces([x0, y0 + wt, z0], [x0 + wt, door.y0, zw], { w: WALL_IN, e: inn, n: WALL_IN });
+  kit.faces([x0, door.y1, z0], [x0 + wt, y1 - wt, zw], { w: WALL_IN, e: inn, s: WALL_IN });
+  kit.faces([x0, door.y0, door.z1], [x0 + wt, door.y1, zw], { w: WALL_IN, e: inn, b: 'ashlar_plain' });
   // roof slab with a plain projecting edge, ceiling of cedar boards
   kit.faces([x0 - 0.3, y0 - 0.3, zc], [x1 + 0.3, y1 + 0.3, z1], { t: 'roof_tile', e: 'ashlar_plain', w: 'ashlar_plain', n: 'ashlar_plain', s: 'ashlar_plain', b: 'ashlar_plain' });
   kit.quad([[x0 + wt, y0 + wt, zc - 0.01], [x1 - wt, y0 + wt, zc - 0.01], [x1 - wt, y1 - wt, zc - 0.01], [x0 + wt, y1 - wt, zc - 0.01]], [0, 0, -1], 'cedar', { collide: false });

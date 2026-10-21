@@ -14,6 +14,9 @@ const MAX_BY_DETAIL = [1100, 2200, 3200, 4200];
 export function buildCity(ctx, T, kit, detail) {
   const A = AMAH;
   const m = (meters) => meters / A;
+  // the houses' rubble walls and rolled-earth roofs (world-4: they borrowed terrain_rock and ash)
+  const has = (k) => ctx.mats?.has?.(k);
+  const RUBBLE = has('house_rubble') ? 'house_rubble' : 'terrain_rock', EARTH = has('roof_earth') ? 'roof_earth' : 'ash';
   const { plan, fp } = T;
   const rand = rng((ctx.params?.seed ?? 5786) * 13 + 1);
   const R = (ctx.quality?.drawDistance || 4000) / A;
@@ -104,8 +107,8 @@ export function buildCity(ctx, T, kit, detail) {
     }
     // walls: dressed stone or lime-washed along the streets (seen up close); mostly rubble elsewhere (darker from afar) ⚙
     const onStreet = frontSide >= 0 || streets.some((st) => (distToPolyline(st.pts, h.corners[0][0], h.corners[0][1]).d - st.half) * A < 40);
-    const wallKey = onStreet ? (h.wall < 0.75 ? 'ashlar_plain' : 'plaster') : (h.wall < 0.55 ? 'terrain_rock' : h.wall < 0.9 ? 'ashlar_plain' : 'plaster');
-    const roofKey = h.roof < 0.8 ? 'ash' : 'roof_tile';                // rolled earth roofs, some limed ⚙
+    const wallKey = onStreet ? (h.wall < 0.75 ? 'ashlar_plain' : 'plaster') : (h.wall < 0.55 ? RUBBLE : h.wall < 0.9 ? 'ashlar_plain' : 'plaster');
+    const roofKey = h.roof < 0.8 ? EARTH : 'roof_tile';                // rolled earth roofs, some limed ⚙
     prism(kit, h.corners, z0, wallTop, wallKey, detail, false, holes);
     kit.quad(h.corners.map(([X, Y]) => [X, Y, zTop]), [0, 0, 1], roofKey, { castShadow: false });
     if (parapet) {
@@ -144,9 +147,9 @@ export function buildCity(ctx, T, kit, detail) {
         const L = (p, q, f) => [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f];
         const p0 = L(a, b, f0), p1 = L(a, b, f1), q0 = L(ai, bi, f0), q1 = L(ai, bi, f1);
         const dx = b[0] - a[0], dy = b[1] - a[1];
-        kit.quad([[...p0, z0], [...p1, z0], [...p1, zt], [...p0, zt]], [dy, -dx, 0], 'terrain_rock', { castShadow: detail >= 2 });
-        kit.quad([[...q0, z0], [...q1, z0], [...q1, zt], [...q0, zt]], [-dy, dx, 0], 'terrain_rock', { collide: false, castShadow: false });
-        kit.quad([[...p0, zt], [...p1, zt], [...q1, zt], [...q0, zt]], [0, 0, 1], 'terrain_rock', { collide: false, castShadow: false });
+        kit.quad([[...p0, z0], [...p1, z0], [...p1, zt], [...p0, zt]], [dy, -dx, 0], RUBBLE, { castShadow: detail >= 2 });
+        kit.quad([[...q0, z0], [...q1, z0], [...q1, zt], [...q0, zt]], [-dy, dx, 0], RUBBLE, { collide: false, castShadow: false });
+        kit.quad([[...p0, zt], [...p1, zt], [...q1, zt], [...q0, zt]], [0, 0, 1], RUBBLE, { collide: false, castShadow: false });
       }
     }
   }

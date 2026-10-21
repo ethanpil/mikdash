@@ -4,6 +4,7 @@
 import { B, lathe, latheLocal } from './lib/geo.js';
 import { shell, logAt, starFire } from './lib/parts.js';
 import { placeAt } from './lib/kit.js';
+import { STATIONS } from '../../data/offerings.js';
 
 export function buildEzratNashim(C) {
   steps15(C);
@@ -12,6 +13,93 @@ export function buildEzratNashim(C) {
   chashaim(C);
   musicCellars(C);
   eastGate(C);
+  shofarot(C);
+}
+
+// ------------------------------------------------------------------------------------- the thirteen shofarot
+// "Thirteen shofarot were in the Mikdash, and written on them: new shekels, old shekels, kinnin, gozlei olah, wood,
+// frankincense, gold for the kaporet, and six for nedavah" (Shekalim 6:5–6). Shofarot: "chests whose mouth is narrow
+// above, like a shofar whose mouth is narrow above and goes widening" (Bartenura, Shekalim 2:1) — so nothing could be
+// drawn out. Their place is not given ("in the courts", report Part VI); offerings.js puts the kinnin chest in Ezrat
+// Nashim by the steps (STATIONS['kinnin-chest'], where the yoledet may put in her money — Eruvin 32a, Kelim 1:8), and
+// the thirteen stand together there: a ring in the Mishnah's order, so that the chests Shekalim 7:1–2 has money found
+// "between" stand side by side — shekels and nedavah (the ring closes the six nedavah on the new shekels), wood and
+// frankincense, kinnin and gozlei olah ⚙ (ring, size, cedar chest with a bronze horn). Clear of the metzora's way to
+// his chamber and the Levites' way from the north music cellar (sim), and of the women's places (courts-daily).
+// Static stone-court furniture in batches the courts already draw (cedar, cedar_v, iron, copper_worn — no draw calls
+// added); anchors 'courts.en.shofar.<1-13>'. The labels follow the Sages where R' Yehudah differs (Shekalim 6:5); the
+// minimum gifts are Shekalim 6:6 (as Menachot 13:3–4).
+export const SHOFAROT = [
+  ['tiklin-chadatin', 'New shekels (tiklin chadatin): the half-shekel of this year'],
+  ['tiklin-atikin', 'Old shekels (tiklin atikin): one who did not give last year gives for the coming one'],
+  ['kinnin', 'Kinnin: bird pairs — one chatat, one olah (the Sages)'],
+  ['gozlei-olah', "Gozlei olah: birds that are all olot (the Sages; R' Yehudah: young pigeons)"],
+  ['etzim', 'Wood (etzim): not less than two gizrin'],
+  ['levonah', 'Frankincense (levonah): not less than a handful'],
+  ['zahav', 'Gold for the kaporet: not less than a gold dinar'],
+  ...[1, 2, 3, 4, 5, 6].map((k) => [`nedavah-${k}`, `Nedavah ${k} of 6: free-will offerings — olot, the flesh to God, the hides to the kohanim`]),
+];
+function shofarot(C) {
+  const st = STATIONS['kinnin-chest']?.at || [285, 348, 6];
+  const N = SHOFAROT.length, R = 2.6;                      // 1.26 amot apart round the ring, each chest facing its centre
+  const k0 = SHOFAROT.findIndex(([id]) => id === 'kinnin');
+  // the ring's centre lies south by east of the kinnin chest (−76°): the farthest from both of the metzora's legs past
+  // it (1.15 amot from a chest's corner to either) ⚙
+  const dir = [Math.cos(-76 * Math.PI / 180), Math.sin(-76 * Math.PI / 180)];
+  const c = [st[0] + R * dir[0], st[1] + R * dir[1]], z = st[2];
+  const a0 = Math.atan2(-dir[1], -dir[0]);                  // the kinnin chest's angle round the centre
+  const wood = C.kit.m('cedar', true, true), lid = C.kit.m('cedar', false, true), panel = C.kit.m('cedar_v', false, true);
+  const iron = C.kit.m('iron', false, false);
+  // the horn: hammered copper darkened by handling, its rim rubbed bright by the coins (copper_worn — the polished
+  // 'copper' read as the same salmon as the cedar; review)
+  const HORN = C.kit.mat('copper_worn', 'copper');
+  const horn = [[0, 0], [0.34, 0], [0.32, 0.06], [0.24, 0.2], [0.17, 0.38], [0.125, 0.58], [0.1, 0.78], [0.105, 0.84], [0.125, 0.88],
+    [0.11, 0.905], [0.07, 0.89], [0.065, 0.75], [0, 0.75]];
+  const seg = [8, 12, 16, 20][C.d] || 12;
+  const H = 0.41;                                            // the body's half-width
+  for (let i = 0; i < N; i++) {
+    // counter-clockwise from the kinnin chest in the Mishnah's order
+    const a = a0 + ((i - k0) * 2 * Math.PI) / N;
+    const x = c[0] + R * Math.cos(a), y = c[1] + R * Math.sin(a);
+    const X = i === k0 ? st[0] : x, Y = i === k0 ? st[1] : y;
+    // the chest's own frame: +u out of the ring (the giver's side, the front), v along the ring, zc over the floor
+    const ca = Math.cos(a), sa = Math.sin(a);
+    const at = (u, v, zc) => [X + u * ca - v * sa, Y + u * sa + v * ca, z + zc];
+    wood.boxRot(at(0, 0, 0.06), [0.9, 0.9, 0.12], a);
+    wood.boxRot(at(0, 0, 0.71), [2 * H, 2 * H, 1.18], a);
+    // the lid: a board overhanging the body 0.07 all round (its lip), a smaller board on it (z 1.30 … 1.40)
+    lid.boxRot(at(0, 0, 1.33), [0.96, 0.96, 0.06], a);
+    lid.boxRot(at(0, 0, 1.38), [0.88, 0.88, 0.04], a);
+    // the label: "written on them" (Shekalim 6:5) — a framed field on the front, the frame 2 etzba'ot proud; the
+    // writing is not drawn (no text textures) ⚙
+    panel.boxRot(at(H + 0.002, 0, 0.67), [0.008, 0.54, 0.38], a);
+    for (const s of [-1, 1]) {
+      lid.boxRot(at(H + 0.005, 0, 0.67 + s * 0.2075), [0.03, 0.61, 0.035], a);
+      lid.boxRot(at(H + 0.005, s * 0.2875, 0.67), [0.03, 0.035, 0.38], a);
+    }
+    // iron: corner angles and two bands round the body; on the front a hasp from the lid over a staple, with its lock;
+    // two strap hinges at the back ⚙
+    for (const [u, v] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) iron.boxRot(at(u * H, v * H, 0.71), [0.07, 0.07, 1.16], a);
+    for (const zc of [0.305, 1.195]) iron.boxRot(at(0, 0, zc), [0.845, 0.845, 0.05], a);
+    iron.boxRot(at(0.486, 0, 1.33), [0.012, 0.07, 0.06], a);          // over the lid's lip
+    iron.boxRot(at(0.445, 0, 1.294), [0.082, 0.07, 0.012], a);        // under it, back to the body
+    iron.boxRot(at(0.43, 0, 1.17), [0.012, 0.07, 0.26], a);           // down the face, over the band
+    iron.boxRot(at(0.448, 0, 1.075), [0.03, 0.025, 0.03], a);         // the staple through its slot
+    iron.boxRot(at(0.456, 0, 1.0), [0.035, 0.08, 0.075], a);          // the lock hanging from it
+    for (const v of [-0.24, 0.24]) {
+      iron.boxRot(at(-0.36, v, 1.406), [0.16, 0.055, 0.012], a);      // along the top board
+      iron.boxRot(at(-0.446, v, 1.38), [0.012, 0.055, 0.04], a);      // down its edge
+      iron.boxRot(at(-0.46, v, 1.366), [0.04, 0.055, 0.012], a);      // across the lip
+      iron.boxRot(at(-0.486, v, 1.33), [0.012, 0.055, 0.06], a);      // down the lip
+      iron.boxRot(at(-0.426, v, 1.21), [0.012, 0.055, 0.16], a);      // the leaf on the body
+    }
+    C.kit.geo(lathe(horn, [X, Y, z + 1.4], seg), HORN, { collide: false });
+    const [id, what] = SHOFAROT[i];
+    // the anchor: where one stands to put money in, on the ring's outside, facing the chest
+    const sx = X + Math.cos(a) * 1.1, sy = Y + Math.sin(a) * 1.1;
+    const head = (Math.atan2(X - sx, Y - sy) * 180) / Math.PI;
+    C.anchor(`courts.en.shofar.${i + 1}`, [sx, sy, z], (head + 360) % 360, `Shofar ${i + 1} of 13 — ${what} (Shekalim 6:5–6)`, { chest: [X, Y, z + 2.3], label_id: id });
+  }
 }
 
 // ------------------------------------------------------------------------------------- the fifteen steps
@@ -258,12 +346,13 @@ function naziritesKitchen(C, r) {
       const a = (k * 2 * Math.PI) / 3 + i * 0.7;
       sup.boxRot([px + Math.cos(a) * 0.62, y + Math.sin(a) * 0.62, zb + 0.475], [0.42, 0.34, 0.95], a);
     }
-    C.kit.geo(lathe(potProf, [px, y, potZ], C.d >= 2 ? 16 : 10), 'copper', { collide: false });
-    if (i === 1) {
-      // sticks pushed in between the stones; the fire burns while they cook — by day (their shelamim are brought by day)
-      starFire(C, [px, y], zb + 0.06, zb + 0.2, 0.85, 3, 7, 0.1);
-      C.ctx.addFire({ id: 'courts.en.nazirites.hearth', kind: 'hearth', pos: [px, y, zb + 0.08], size: 0.3, intensity: 0.75, schedule: 'day', smoke: true });
-    }
+    C.kit.geo(lathe(potProf, [px, y, potZ], C.d >= 2 ? 16 : 10), C.kit.mat('copper_worn', 'copper'), { collide: false });
+    // sticks pushed in between the stones under every pot; each set of offerings cooks at its own pit (Nazir 6:8–9).
+    // The middle pit keeps its id and schedule ('courts.en.nazirites.hearth', 'day' — the sim states its level all day);
+    // the others (world-4) are 'courts.en.nazirites.hearth.0' (Y 275) and '.2' (Y 289): 'service', dark until a set cooks
+    starFire(C, [px, y], zb + 0.06, zb + 0.2, 0.85, 3, [17, 7, 27][i] ?? 7, 0.1);
+    if (i === 1) C.ctx.addFire({ id: 'courts.en.nazirites.hearth', kind: 'hearth', pos: [px, y, zb + 0.08], size: 0.3, intensity: 0.75, schedule: 'day', smoke: true });
+    else C.ctx.addFire({ id: `courts.en.nazirites.hearth.${i}`, kind: 'hearth', pos: [px, y, zb + 0.08], size: 0.3, intensity: 0, schedule: 'service', smoke: true });
   });
   // a table for the shaving and stone benches
   stone.box([r.min[0] + 14, r.min[1] + 16, z], [r.min[0] + 18, r.min[1] + 18, z + 1.6]);

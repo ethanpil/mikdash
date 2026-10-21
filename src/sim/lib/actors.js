@@ -24,6 +24,9 @@ export class Slot {
     this._heading = NaN;
     this._pose = null; this._phase = NaN;
     this._prop = undefined; this._hand = null;
+    // people-3/4 looks (change-cached like the rest): the priestly headgear on (people's default), hair grown, the
+    // role's garb, the seeded size (null)
+    this._hg = true; this._shave = pool.spec?.shaven ?? false; this._garb = pool.spec?.garb ?? null; this._scale = pool.spec?.scale ?? null;
   }
   get ctx() { return this.pool.sim.ctx; }
 
@@ -80,6 +83,38 @@ export class Slot {
     return this;
   }
   show(b = true) { this.want = !!b; return this; }
+  /** the priestly headgear on / off (Actor.setHeadgear — the officer lifts one man's mitre, Yoma 25a) */
+  headgear(on = true) {
+    const v = !!on;
+    if (v === this._hg) return this;
+    this._hg = v;
+    this.ensure().setHeadgear?.(v);
+    return this;
+  }
+  /** the hair shaved: 'head' | 'all' | false (Actor.setShaven — the nazir, Bamidbar 6:18; the metzora, Vayikra 14:9) */
+  shaven(mode = false) {
+    const v = mode || false;
+    if (v === this._shave) return this;
+    this._shave = v;
+    this.ensure().setShaven?.(v);
+    return this;
+  }
+  /** the garments in 'black' | 'white' | null = the role's own (Actor.setGarb — mourners, Middot 2:2) */
+  garb(name = null) {
+    const v = name || null;
+    if (v === this._garb) return this;
+    this._garb = v;
+    this.ensure().setGarb?.(v);
+    return this;
+  }
+  /** the figure's size: a number (0.8–1.2) | null = its seeded size (Actor.setScale — operators at a fixture at 1) */
+  scale(s = null) {
+    const v = Number.isFinite(s) ? s : null;
+    if (v === this._scale) return this;
+    this._scale = v;
+    this.ensure().setScale?.(v);
+    return this;
+  }
 
   ensure() {
     if (this.actor) return this.actor;
@@ -99,7 +134,8 @@ export class Slot {
 
 export class ActorPool {
   /**
-   * spec: { role (person role) | animal (kind), count, seed, importance (1..3), name, prop, hand, pose }
+   * spec: { role (person role) | animal (kind), count, seed, importance (1..3), name, prop, hand, pose,
+   *         scale? (a fixed size, e.g. 1 for an operator at a fixture), shaven? ('head' | 'all'), garb? ('black' | 'white') }
    * Figures are spawned eagerly by warm() (choreo init) so the first visible frame does not hitch.
    */
   constructor(sim, spec) {
@@ -117,7 +153,8 @@ export class ActorPool {
     const seed = ((s.seed ?? 1) * 7919 + i * 104729) >>> 0;
     let a = null;
     if (people) {
-      a = s.animal ? people.spawnAnimal(s.animal, { seed }) : people.spawn({ role: s.role || 'israelite', seed });
+      a = s.animal ? people.spawnAnimal(s.animal, { seed, ...(Number.isFinite(s.scale) ? { scale: s.scale } : {}) })
+        : people.spawn({ role: s.role || 'israelite', seed, ...(Number.isFinite(s.scale) ? { scale: s.scale } : {}), ...(s.shaven ? { shaven: s.shaven } : {}), ...(s.garb ? { garb: s.garb } : {}) });
       if (a && s.prop !== undefined) a.setProp(s.prop, s.hand || 'right');
       if (a && s.pose) a.setPose(s.pose);
     }
@@ -138,7 +175,8 @@ export class ActorPool {
 function nullActor() {
   const o = { position: new Vector3(), updateMatrixWorld() {} };
   const a = {
-    object3D: o, setVisible() { return a; }, setHeading() { return a; }, setPose() { return a; }, setProp() { return a; },
+    object3D: o, setVisible() { return a; }, setHeading() { return a; }, setPose() { return a; }, setProp() { return a; }, setProps() { return a; },
+    setHeadgear() { return a; }, setShaven() { return a; }, setGarb() { return a; }, setScale() { return a; },
     setSite(X, Y, Z) { m2w(X, Y, Number.isFinite(Z) ? Z : 0, o.position); return a; }, setPosition(v) { o.position.copy(v); return a; }, dispose() {},
   };
   return a;

@@ -102,7 +102,7 @@ export const SPEC = {
     },
   },
   herodian_wall_inner: {
-    set: 'herodian_inner', macro: MAC.wall, block: [0.06, 0.05, 0.03], detail: DET.stone, flat: ['#ddd6c6', 0.55, 0],
+    set: 'herodian_inner', macro: MAC.wall, block: [0.06, 0.05, 0.03], detail: DET.stone, flat: ['#ddd6c6', 0.65, 0],
     info: {
       en: 'Same marble coursing with plain fine-dressed faces (no drafted margins) — inner/court faces, close-range facades',
       sources: ['Bava Batra 4a'], confidence: 'reconstruction', note: 'face finish of inner faces unattested',
@@ -165,7 +165,8 @@ export const SPEC = {
     info: { en: 'Lime plaster (sid)', sources: ['Part VII §21'], confidence: 'reconstruction' },
   },
   bedrock: {
-    set: 'bedrock', macro: MAC.ground, detail: DET.stone, flat: ['#b9a98c', 0.95, 0],
+    // MAC.stone (world-4): the ground preset's warm-brown tint (0.4) darkened the Even Shetiyah against the gold floor
+    set: 'bedrock', macro: MAC.stone, detail: DET.stone, flat: ['#d2c6ab', 0.95, 0],
     info: { en: 'Bare bedrock — the Even Shetiyah, rising 3 etzba\'ot above the floor', sources: ['Yoma 5:2, 53b', 'Part V §13.8'], confidence: 'derived' },
   },
   terrain_soil: {
@@ -397,7 +398,7 @@ export const SPEC = {
     info: { en: 'Hemp rope (laid strands)', sources: [], confidence: 'reconstruction' },
   },
   copper_worn: {
-    set: 'copperworn', color: '#f6c6aa', metal: 1, macro: MAC.metal, detail: DET.metal, flat: ['#8a5a40', 0.4, 1],
+    set: 'copperworn', color: '#f6c6aa', metal: 1, macro: MAC.metal, detail: DET.metal, flat: ['#6b4535', 0.45, 1],
     info: { en: 'Working kitchen copper — hammered, an even brown oxide film rubbed bright along the ridges between the hammer dishes', sources: ['Zevachim 11:7–8 (copper pots scoured)'], confidence: 'reconstruction' },
   },
   gold_polished: {
@@ -428,7 +429,7 @@ export const SPEC = {
     },
   },
   herodian_wall_inner_courses: {
-    set: 'herodian_inner_c', macro: MAC.wall, block: [0.06, 0.05, 0.03], detail: DET.stone, flat: ['#ddd6c6', 0.55, 0],
+    set: 'herodian_inner_c', macro: MAC.wall, block: [0.06, 0.05, 0.03], detail: DET.stone, flat: ['#ddd6c6', 0.65, 0],
     info: { en: 'herodian_wall_inner on the same course table as herodian_wall_courses', sources: ['Bava Batra 4a'], confidence: 'reconstruction' },
   },
   // bark of one species per log (Tamid 2:3: fig, walnut and oil-tree, never olive or vine) and the olive groves' trunks
@@ -444,6 +445,13 @@ export const SPEC = {
   olive_bark: {
     set: 'bark_olive', outdoor: true, macro: MAC.wood, detail: DET.wood, flat: ['#77736a', 0.86, 0],
     info: { en: 'Old olive trunks — grey bark, twisted fissures at a slant, lichen (the groves; olive wood is never firewood for the altar)', sources: ['regional vegetation', 'Tamid 2:3'], confidence: 'reconstruction' },
+  },
+  // ----------------------------------------------------------------- world-4 keys
+  // weathered lead run into iron work (Bilgah's ring leaded fast to its plate): the silver set's maps (white albedo,
+  // tarnish) tinted to lead's dull blue-grey and roughened — no new texture set and the same shader program as silver
+  lead: {
+    set: 'silver', color: '#6c7075', metal: 1, rough: 3.6, macro: MAC.metal, detail: DET.metal, flat: ['#6c7075', 0.7, 1],
+    info: { en: 'Lead, weathered dull grey — run molten into a joint to fix iron fast (Bilgah\'s ring, Sukkah 5:8)', sources: ['Sukkah 5:8', 'Rashi Sukkah 56a'], confidence: 'reconstruction' },
   },
 };
 

@@ -222,11 +222,21 @@ export function quadsLocal(list) {
  * holes: [[x0, y0, x1, y1]] amot cut-outs (a wicket in the leaf).
  * Detail ≥ 1: stiles and rails stand 0.14 proud with a chamfer down to each sunk panel (the edges catch raking light);
  * bronze panels carry a domed boss. Detail ≥ 2: nail-head rows on the gold leaves' rails.
+ * o.astragal (a leaf of a PAIR): a meeting astragal on the +z face of the meeting stile, lapping ASTRAGAL.lap past the
+ * leaf's free edge over its fellow (whose +z face is the other side, so each face of the joint is covered): the
+ * 0.04-amah joint between the leaves no longer shows light through it (world-4, as the Mount gates have).
  */
-export function leafGeometry(w, h, t, style, detail, holes = []) {
+export const ASTRAGAL = { w: 0.08, lap: 0.12, t: 0.06 };
+export function leafGeometry(w, h, t, style, detail, holes = [], o = {}) {
   const A = AMAH, parts = [];
   // the core: a slab (minus holes, as a set of strips)
   const slab = (x0, y0, x1, y1, z0, z1) => parts.push(boxAt(x0 * A, y0 * A, z0 * A, x1 * A, y1 * A, z1 * A));
+  // the astragal sits on the stile's face (the panelled frame stands 0.14 proud from detail 1)
+  const astragal = () => {
+    if (!o.astragal) return;
+    const z0 = t / 2 + (style !== 'plank' && detail >= 1 ? 0.14 : 0);
+    slab(w - ASTRAGAL.w, 0.03, w + ASTRAGAL.lap, h - 0.03, z0, z0 + ASTRAGAL.t);
+  };
   if (!holes.length) slab(0, 0, w, h, -t / 2, t / 2);
   else {
     // split the leaf around a single rectangular hole: left, right, below, above
@@ -261,6 +271,7 @@ export function leafGeometry(w, h, t, style, detail, holes = []) {
         }
       }
     }
+    astragal();
     return finishLocal(parts);
   }
   // panelled leaf: a raised frame (stiles + rails) on both faces, sunk panels between
@@ -333,6 +344,7 @@ export function leafGeometry(w, h, t, style, detail, holes = []) {
     }
     if (quads.length) parts.push(quadsLocal(quads));
   }
+  astragal();
   return finishLocal(parts);
 }
 

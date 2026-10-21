@@ -7,7 +7,10 @@
 //     shown twice; appearances and vanishings listed with where they happen (doors / gates / interiors);
 //  3. cues once: continuous play at 120x through the evening and the small hours — every planned cue in the played span
 //     fires exactly once, none fires on jumps;
-//  4. cost: the G1 modules' update time per frame while playing.
+//  4. cost: the G1 modules' update time per frame while playing;
+//  6. adopted assets (choreo-adopt): Gevini's call, the knock, the mitre lifted and put back (headgear), the lock at the
+//     gates, the keys slab and keys, the elders as kohen_elder, the immersions in the wrap (bathe), sitting on the floor,
+//     the breeches at the niches, charred limbs on the pile, the Ish Har HaBayit's staff and strike.
 // Run: node src/sim/dev/run.mjs --q low --script src/sim/dev/tests/g1-night.js "t=n3"
 const rt = ctx.schedule.runtime, time = ctx.time;
 const IDS = ['moked-night', 'altar-night', 'lotteries', 'torch-inspection'];
@@ -24,12 +27,14 @@ function snap() {
     for (const p of e.pools) for (const s of p.slots) {
       if (!s.want) continue;
       const o = s.actor?.object3D;
-      figs.push(`${id}/${p.name}#${s.index} ${o ? `${r3(o.position.x)},${r3(o.position.y)},${r3(o.position.z)}` : '-'} h${r3(s._heading)} ${s._pose}${Number.isNaN(s._phase) ? '' : '@' + r3(s._phase)} ${s._prop || ''}${s._p2r !== undefined ? `[${s._p2r},${s._p2l}]` : ''} drawn:${s.actor?.prop?.name || ''}/${s.actor?.prop2?.name || ''}`);
+      figs.push(`${id}/${p.name}#${s.index} ${o ? `${r3(o.position.x)},${r3(o.position.y)},${r3(o.position.z)}` : '-'} h${r3(s._heading)} ${s._pose}${Number.isNaN(s._phase) ? '' : '@' + r3(s._phase)} ${s._prop || ''}${s._p2r !== undefined ? `[${s._p2r},${s._p2l}]` : ''} drawn:${s.actor?.prop?.name || ''}/${s.actor?.prop2?.name || ''}${s._hg ? '' : ' bare'}`);
     }
   }
   const props = [];
   for (const id of IDS) for (const L of E[id].state?.props?.live || []) if (L.vis) props.push(`${id}:${L.name}@${L.it?.at?.map((v) => r3(v)).join(',')}`);
   const doors = ['azarah.moked.door-chel', 'azarah.gate.moked.pishpash', 'azarah.moked.chamber.tevilah-descent', 'azarah.moked.chamber.altar-stones'].map((d) => `${d}=${r3(ctx.movables.get(`door:${d}`)?.userData?.openAmount ?? -1)}`);
+  const slab = ctx.movables.get('azarah.moked.keys-slab')?.userData;
+  if (slab) doors.push(`slab=${r3(slab.amount ?? -1)} keys=${(slab.keysOn || []).length}`);
   // the great pile's fire where altar-night owns it ([sunset, muchni − 0.5]); terumat-hadeshen drives it after that
   const fx = ctx.fx?.fires?.get?.('altar.maarachah.great');
   const fw = E['altar-night'].state?.fireWin?.w;
@@ -195,5 +200,84 @@ res.cost.simTotal = { ms: r3(rt.stats.ms), peak: r3(rt.stats.msPeak) };
     }
   }
   res.mokedRoute = { legs: segs.length, waypoints: [...new Set(segs.flat().map((s) => `${s.X.toFixed(2)},${s.Y.toFixed(2)}`))], hearthClear: r3(hearth), bodyClear: r3(body), nearest: near, ok: segs.length >= 4 && hearth > 0.3 && body > 0.3 };
+}
+
+// ---- 6. the adopted assets (choreo-adopt), on the weekday
+{
+  time.setDate(DATES.weekday); await frames(3);
+  const Pl = nightPlan(ctx, E['moked-night'].sim), T = Pl.T;
+  const A = {};
+  const ok = (k, v, info) => { A[k] = v ? true : `FAIL ${info ?? ''}`; };
+  const slots = (id, pool) => (E[id].pools.find((p) => p.name === pool)?.slots || []).filter((s) => s.want);
+  const any = (id, pool, f) => slots(id, pool).some(f);
+  const seeAt = async (t) => { time.set(W(t)); await frames(3); };
+  const nwE = rt.choreo('night-watch');
+  // Gevini's call; the officer's knock
+  await seeAt(Pl.gevini.tCall + 0.03);
+  ok('gevini call', any('moked-night', 'gevini:levi', (s) => s._pose === 'call'), slots('moked-night', 'gevini:levi').map((s) => s._pose).join());
+  await seeAt(T.knock[0] + 0.52);
+  ok('officer knock', any('moked-night', 'officer:k', (s) => s._pose === 'knock'), slots('moked-night', 'officer:k').map((s) => s._pose).join());
+  // the mitre: lifted from the first man of the count, in the officer's hand during the count, back on before the torches
+  const L1 = Pl.lot1, tgtPool = L1.target === 'winner' ? 'slab:k' : 'young:k', tgtIdx = L1.target === 'winner' ? 0 : +L1.target[1];
+  const tgt = () => E.lotteries.pools.find((p) => p.name === tgtPool)?.slots[tgtIdx];
+  await seeAt(T.first[0] + 0.6);
+  ok('lift_mitre pose', any('lotteries', 'officer:k', (s) => s._pose === 'lift_mitre'), slots('lotteries', 'officer:k').map((s) => s._pose).join());
+  await seeAt(T.first[0] + 1.5);
+  ok('mitre off (count)', tgt()?.want && tgt()._hg === false && tgt().actor?.headgear === false, `${tgt()?.want} ${tgt()?._hg}`);
+  ok('migbaat in hand', any('lotteries', 'officer:k', (s) => s.actor?.prop2?.name === 'migbaat' || s.actor?.prop?.name === 'migbaat'));
+  await seeAt(T.first[0] + 3.0);
+  ok('mitre back on', tgt()?.want && tgt()._hg === true && tgt().actor?.headgear === true, `${tgt()?._hg}`);
+  // the locking: the keys slab raised, the keys off the chain, the lock turned at the Korban and Moked gates
+  const slab = ctx.movables.get('azarah.moked.keys-slab')?.userData;
+  const w0 = Pl.slab[0];
+  await seeAt((w0[1] + w0[2]) / 2);
+  ok('slab lifted (locking)', slab && slab.amount > 0.5, slab?.amount);
+  await seeAt(Pl.keysWin[0][0] + 0.5);
+  ok('keys taken (locking)', slab && (slab.keysOn || []).length === 0, (slab?.keysOn || []).length);
+  await seeAt(Pl.lock.tLockK);
+  ok('lock (Korban gate)', any('moked-night', 'slab:off', (s) => s._pose === 'lock'), slots('moked-night', 'slab:off').map((s) => s._pose).join());
+  // the tablet out of its place until the keys are back (Middot 1:9 "returned the keys … and the tablet to its place")
+  ok('slab open while he locks', slab && slab.amount > 0.95, slab?.amount);
+  await seeAt(Pl.lock.tLockM);
+  ok('lock (Moked gate)', any('moked-night', 'slab:off', (s) => s._pose === 'lock'));
+  await seeAt(Pl.lock.tBack + 1);
+  ok('keys back, slab down', slab && slab.keys === true && slab.amount < 0.01, `${slab?.keys} ${slab?.amount}`);
+  const kd = Pl.keysWin.find((w) => w[2] === 7);
+  if (kd) { await seeAt(kd[0] + 0.3); ok('wicket key taken (dawn)', slab && (slab.keysOn || []).length === 7, (slab?.keysOn || []).length); }
+  await seeAt(Pl.insp.tUnlock - 0.1);
+  ok('wicket unlocked (lock pose)', any('torch-inspection', 'officer:k', (s) => s._pose === 'lock'), slots('torch-inspection', 'officer:k').map((s) => s._pose).join());
+  // the elders asleep as kohen_elder on the ledges
+  await seeAt(60);
+  ok('elders kohen_elder lie', slots('moked-night', 'elders:elder').length === 6 && slots('moked-night', 'elders:elder').every((s) => s._pose === 'lie' && s.actor?.role === 'kohen_elder'), slots('moked-night', 'elders:elder').map((s) => `${s._pose}/${s.actor?.role}`).join());
+  // the immersions in the wrap; the impure kohen sitting on the floor
+  let bathe = false, wrap = false;
+  for (let t = T.imm[0]; t < T.imm[1] && !bathe; t += 0.03) {
+    await seeAt(t);
+    for (const pn of ['young:bath', 'slab:bath']) for (const s of slots('moked-night', pn)) { wrap = true; if (s._pose === 'bathe') bathe = true; }
+  }
+  ok('immersion in the wrap', wrap); ok('bathe pose', bathe);
+  if (T.keri) { await seeAt(T.keri[1] + 6); ok('keri sit_floor', any('moked-night', 'keri:off', (s) => s._pose === 'sit_floor' || s._pose === 'kneel'), slots('moked-night', 'keri:off').map((s) => s._pose).join()); }
+  // charred limbs on the pile in the small hours
+  await seeAt(90);
+  const ch = (E['altar-night'].state?.props?.live || []).filter((L) => L.vis && /_charred$/.test(L.name || ''));
+  ok('charred limbs on the pile', ch.length > 0, ch.length);
+  // the breeches at the niches (Tamid 5:3)
+  const l34 = ctx.schedule.byId('third-fourth-lottery');
+  if (l34) { await seeAt(l34.t1 + 0.6); ok('breeches after the lottery', slots('lotteries', 'gazit:br').length > 0, slots('lotteries', 'gazit:br').length); }
+  // the Ish Har HaBayit's staff; the strike on the sleeping guard
+  const sg = ctx.schedule.byId('sleeping-guard'), ih = ctx.schedule.byId('ish-har-habayit');
+  if (ih) {
+    await seeAt(ih.t0 + 30);
+    const o = nwE.state.officer.slot(0);
+    ok('staff in hand', o.want && o._prop === 'staff' && /^staff/.test(o._pose), `${o._prop} ${o._pose}`);
+  }
+  if (sg) {
+    const Ln = W(sg.t1 - sg.t0 - 0.5);
+    await seeAt(sg.t0 + 0.5 + Ln * 0.07);
+    const o = nwE.state.officer.slot(0);
+    ok('strike', o._pose === 'strike', o._pose);
+  }
+  res.adopt = A;
+  res.adoptOk = Object.values(A).every((v) => v === true);
 }
 return res;

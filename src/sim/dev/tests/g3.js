@@ -9,7 +9,10 @@
 //   5. the audio durations the staging is timed by (g3/plan.js) against the synth (src/audio/synth);
 //   6. Shabbat: the Kohen Gadol, the musaf's concert, shabbat-musaf still running after the date change, the afternoon's
 //      Song at the Sea captions (no Psalm 92 caption);
-//   7. the song is alive: every half minute of each song window shows the Levites playing / singing or a set.
+//   7. the song is alive: every half minute of each song window shows the Levites playing / singing or a set;
+//   8. adopted assets (choreo-adopt): the wine poured with pour_low at the cymbal, the segan's wave_sudar with the two
+//      sudarin, the Menorah dressed (tend_lamp, the kuz in his left hand) and lit with the taper, the kaf covered and
+//      held by its handle, the coals emptied with pour_low, and on Shabbat the psachter turned over the coals.
 // run: node src/sim/dev/run.mjs --q low --script src/sim/dev/tests/g3.js "t=sunrise+40"
 const rt = ctx.schedule.runtime;
 const E = rt.choreo('ketoret-morning');
@@ -244,9 +247,38 @@ const doorway = {};
   doorway.owner = Object.fromEntries([3, 4].map((k) => [k, (j1.get(k) || []).map((x) => x.id).join(',')]));
 }
 
+// ---- 8. the adopted assets
+const adopt = {};
+{
+  const ok = (k, v, info) => { adopt[k] = v ? true : `FAIL ${info ?? ''}`; };
+  const slotsW = () => E.pools.flatMap((p) => p.slots.filter((x) => x.want));
+  const go = async (t) => { ctx.time.set(((t % 1440) + 1440) % 1440); await frames(2); };
+  const find = async (t0, t1, step, pred) => { for (let t = t0; t <= t1 + 1e-9; t += step) { await go(t); const x = slotsW().find(pred); if (x) return x; } return null; };
+  const D = E.state.plan, W = D.W;
+  const am = D.libs.find((l) => l.key === 'am')?.T;
+  if (am) {
+    ok('wine pour_low at the cymbal', await find(am.cym[0] - 0.05, am.cym[0] + 0.03, 0.02, (x) => x._pose === 'pour_low' && x._g3r === 'wine_jug'));
+    ok('segan wave_sudar (two sudarin)', await find(am.cym[0] - 0.04, am.cym[0] + 0.04, 0.02, (x) => x._pose === 'wave_sudar' && x._g3r === 'sudar' && x._g3l === 'sudar'));
+  } else ok('wine pour_low at the cymbal', false, 'no morning libation');
+  const lo = D.lampOut.filter(Number.isFinite);
+  ok('Menorah dressed (tend_lamp, kuz)', lo.length && await find(Math.min(...lo) - 0.2, Math.min(...lo), 0.03, (x) => x._pose === 'tend_lamp' && x._g3l === 'kuz'));
+  const ll = D.lampLight.filter(Number.isFinite);
+  ok('Menorah lit (tend_lamp, taper)', ll.length && await find(Math.min(...ll) - 0.2, Math.min(...ll), 0.03, (x) => x._pose === 'tend_lamp' && x._g3r === 'taper'));
+  const kw = (D.props.kaf_covered || [])[0];
+  ok('kaf_covered by its handle', kw && await find(kw.t1 + 0.12, kw.t1 + 1.5, 0.1, (x) => x._g3r === 'kaf_covered' && (x._pose === 'walk' || x._pose === 'stand')));
+  ok('coals emptied (pour_low)', await find(W.CP[0], W.CP[1] + 3, 0.04, (x) => x._pose === 'pour_low' && x._g3r === 'machtah_silver'));
+  // Shabbat: the psachter turned over the coals
+  ctx.time.setDate('2026-11-07'); await frames(3);
+  const D2 = E.state.plan;
+  const inv = (D2.props.psachter_inverted || [])[0];
+  if (inv) { await go(inv.t0 + 0.5); ok('psachter turned over (Shabbat)', E.state.props.items.some((it) => it.name === 'psachter_inverted' && it.vis)); } else ok('psachter turned over (Shabbat)', false, 'no window');
+  ctx.time.setDate('2026-11-02'); await frames(3);
+}
+
 cost.sort((a, b) => a - b);
 const pct = (p) => +(cost[Math.min(cost.length - 1, Math.floor(p * cost.length))] || 0).toFixed(3);
 return {
+  adopt, adoptOk: Object.values(adopt).every((v) => v === true),
   doorway,
   deterministic: diffs.length === 0, diffs: diffs.slice(0, 6), summary,
   cues: { sounds: count, libations: libs, at1x, loops1x, choirLoops: loops.length, hushes, captions: caps.map((c) => `${ctx.time.format(c.t)} ${c.id}`), captionDoubles: capDup.slice(0, 5), keys: keysFired, multi, doubles: dup.slice(0, 5), jumpCalls, jumpCaps, jumpLibs },

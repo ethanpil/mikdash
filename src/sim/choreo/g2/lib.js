@@ -179,7 +179,7 @@ export function evalScript(S, t, out, phaseFor) {
     out.X = st.a[0] + (st.b[0] - st.a[0]) * k; out.Y = st.a[1] + (st.b[1] - st.a[1]) * k; out.Z = st.a[2] + (st.b[2] - st.a[2]) * k;
     out.h = st.h;
     out.pose = st.pose;
-    out.ph = st.phase != null ? phaseOf(st.phase, k, u - st.u0) : (phaseFor && /walk|run/.test(st.pose) ? phaseFor(st.pose, st.dist0 + k * st.L) : undefined);
+    out.ph = st.phase != null ? phaseOf(st.phase, k, u - st.u0, t) : (phaseFor && /walk|run/.test(st.pose) ? phaseFor(st.pose, st.dist0 + k * st.L) : undefined);
     return out;
   }
   // act
@@ -189,14 +189,16 @@ export function evalScript(S, t, out, phaseFor) {
   const el = u - st.u0;
   out.h = st.turn > 0 && el < st.turn ? lerpH(st.hIn, h, smooth(0, st.turn, el)) : ((h % 360) + 360) % 360;
   out.pose = st.pose;
-  out.ph = phaseOf(st.phase, k, el);
+  out.ph = phaseOf(st.phase, k, el, t);
   return out;
 }
 
-/** phase spec: null → undefined (animated by people); number → held; [a, b] → a..b over the step; { cycle: s, off } → loop */
-function phaseOf(spec, k, elMin) {
+/** phase spec: null → undefined (animated by people); number → held; [a, b] → a..b over the step; { cycle: s, off } → loop;
+ *  a function of the clock t (minutes) → its value (a pose driven by a fixture: the muchni's wheel) */
+function phaseOf(spec, k, elMin, t) {
   if (spec == null) return undefined;
   if (typeof spec === 'number') return spec;
+  if (typeof spec === 'function') return spec(t);
   if (Array.isArray(spec)) return spec[0] + (spec[1] - spec[0]) * k;
   if (spec.cycle) { const p = (elMin * 60) / spec.cycle + (spec.off || 0); return p - Math.floor(p); }
   return undefined;

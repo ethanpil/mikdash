@@ -123,20 +123,20 @@ export function buildAfternoon(ctx, P, W, D, m) {
   I.walk([[tableE[0], A.onSilver(3)[1], AZ]], { speed: 0.8 });
   I.act(0.07, { pose: 'bow', phase: [0, 0.4], heading: 270 });
   const tKafUp = I.now();
-  I.act(0.06, { pose: 'bow', phase: [0.7, 1], props: ['kaf', null] });
-  I.walk([[207.0, 283.6, AZ], [203.4, 284.5, AZ], [203.4, 296.0, AZ], [202.4, 299.2, AZ]], { speed: 0.95, pose: 'carry_walk' });
-  I.until(tGoldTaken + 0.04, { pose: 'carry', face: A.ledge, sway: 8, seed: SEED + 3 });
-  I.walkBy(Math.max(I.now() + 0.15, k0 + 0.3), [[200.6, 302.4, AZ], way.sw, [198.6, 319.4, AZ], [199.4, 323.6, AZ]], { pose: 'carry_walk' });
+  I.act(0.06, { pose: 'bow', phase: [0.7, 1], props: ['kaf_covered', null] });   // Tamid 5:4: covered, by its handle
+  I.walk([[207.0, 283.6, AZ], [203.4, 284.5, AZ], [203.4, 296.0, AZ], [202.4, 299.2, AZ]], { speed: 0.95, pose: 'walk' });
+  I.until(tGoldTaken + 0.04, { pose: 'stand', face: A.ledge, sway: 8, seed: SEED + 3 });
+  I.walkBy(Math.max(I.now() + 0.15, k0 + 0.3), [[200.6, 302.4, AZ], way.sw, [198.6, 319.4, AZ], [199.4, 323.6, AZ]], { pose: 'walk' });
   F.walk(toTable.map((p, i) => (i > 4 ? [p[0] + 0.8, p[1] + 0.6, p[2]] : p)), { speed: 1.15 });
   F.walk([[204.6, 289.0, AZ], [204.5, 298.6, AZ]], { speed: 0.95 });
   F.until(tGoldTaken + 0.08, { pose: 'stand', face: A.ledge, sway: 10, seed: SEED + 4 });
   F.walkBy(Math.max(F.now() + 0.15, k0 + 0.33), [[201.4, 303.0, AZ], [199.9, 309.6, AZ], [197.2, 318.8, AZ], [195.8, 322.4, AZ]]);
   const t = { enter: k0 + 1.45, give: k0 + 1.95, pour: k0 + 2.19, warn: k0 + 2.35, out: k0 + 2.49, hakter: k0 + 2.8, withdraw: k0 + 2.97, burn: k0 + 3.6 };
   const iAt = H.goldEast, fAt = [H.goldEast[0] + 0.5, H.goldEast[1] + 1.9, HE];
-  I.until(t.enter, { pose: 'carry', heading: 270, sway: 4, seed: SEED + 5 });
-  I.walk([...upSteps(P, 323.6, 330.2), ...intoKodesh(P, 330.2), iAt], { speed: WALK, pose: 'carry_walk' });
-  I.until(t.give, { pose: 'carry', heading: 270 });
-  I.act(0.1, { pose: 'carry', face: fAt });
+  I.until(t.enter, { pose: 'stand', heading: 270, sway: 4, seed: SEED + 5 });
+  I.walk([...upSteps(P, 323.6, 330.2), ...intoKodesh(P, 330.2), iAt], { speed: WALK, pose: 'walk' });
+  I.until(t.give, { pose: 'stand', heading: 270 });
+  I.act(0.1, { pose: 'stand', face: fAt });
   const tKafDown = layIncense(I, t, iAt, fAt, H);
   const tBurn = t.burn + 0.08;
   I.shift([137.9, 330.2, HE], 0.07, { pose: 'stand', heading: 270 });
@@ -144,10 +144,10 @@ export function buildAfternoon(ctx, P, W, D, m) {
   I.shift([iAt[0] + 1.0, iAt[1] - 0.5, HE], 0.07, { heading: 220 });
   I.act(0.06, { pose: 'bow', phase: [0, 0.42] });
   const tKafUp2 = I.now();
-  I.act(0.05, { pose: 'bow', phase: [0.7, 1], props: ['kaf', null] });
+  I.act(0.05, { pose: 'bow', phase: [0.7, 1], props: ['kaf_covered', null] });
   const tIOut = I.now();
-  I.walk([[150, 329.4, HE], ...outOfKodesh(P, 322.4), [topX - 0.6, 321.6, HE], [steps.foot, 321.2, AZ], [P.apronX, 320.9, AZ], way.sw, [200.6, 302.4, AZ], P.south[4]], { speed: 1.0, pose: 'carry_walk' });
-  I.act(0.05, { pose: 'carry', heading: 20 });
+  I.walk([[150, 329.4, HE], ...outOfKodesh(P, 322.4), [topX - 0.6, 321.6, HE], [steps.foot, 321.2, AZ], [P.apronX, 320.9, AZ], way.sw, [200.6, 302.4, AZ], P.south[4]], { speed: 1.0, pose: 'walk' });
+  I.act(0.05, { pose: 'stand', heading: 20 });
   F.until(t.enter + 0.05, { pose: 'stand', heading: 270 });
   F.walk([...upSteps(P, 322.4, 331.4), ...intoKodesh(P, 331.4), fAt], { speed: WALK });
   F.until(t.give + 0.08, { pose: 'stand', face: iAt });
@@ -166,7 +166,7 @@ export function buildAfternoon(ctx, P, W, D, m) {
   Pp.act(0.05, { pose: 'carry', heading: 20 });
   add(D, 'servers', SRV.I2, I);
   add(D, 'servers', SRV.F2, F);
-  win(D, 'kaf', m.vessels.kaf, tKafUp, A.onSilver(3), 90);
+  win(D, 'kaf_covered', m.vessels.kaf, tKafUp, A.onSilver(3), 90);
   win(D, 'kaf', tKafDown, tKafUp2, [iAt[0] - 0.2, iAt[1] - 1.1, HE], 90);
   const Mm = Script.from(k0 - 2.6, P.doors.gazit, 90, 'M-pm');
   Mm.walk([...fromGazit, [200.9, 338.4, AZ]], { speed: WALK });
@@ -192,8 +192,9 @@ export function buildAfternoon(ctx, P, W, D, m) {
 
   // ---- after: the vessels back on the silver table; out by the south chambers
   const back = (S, k, tGo) => {
-    S.until(tGo, { pose: 'carry', heading: 20, sway: 5, seed: SEED + 20 + k });
-    S.walk([[203.4, 296.0, AZ], [203.4, 284.0, AZ], [207.0, 283.6, AZ], [tableE[0], A.onSilver(k)[1], AZ]], { speed: 1.0, pose: 'carry_walk' });
+    const [hp, wp] = S === I ? ['stand', 'walk'] : ['carry', 'carry_walk'];
+    S.until(tGo, { pose: hp, heading: 20, sway: 5, seed: SEED + 20 + k });
+    S.walk([[203.4, 296.0, AZ], [203.4, 284.0, AZ], [207.0, 283.6, AZ], [tableE[0], A.onSilver(k)[1], AZ]], { speed: 1.0, pose: wp });
     S.act(0.06, { pose: 'bow', phase: [0, 0.4], heading: 270 });
     const tDown = S.now();
     S.act(0.05, { pose: 'bow', phase: [0.7, 1], props: null });
@@ -210,7 +211,7 @@ export function buildAfternoon(ctx, P, W, D, m) {
   F.walk(exitSouth, { speed: WALK });
   F.hide(F.now() + 0.01);
   win(D, 'machtah_gold', tGoldBack, W.LK[0], A.onSilver(2), 90);
-  win(D, 'kaf', tKafBack, W.LK[0], A.onSilver(3), 90);
+  win(D, 'kaf_covered', tKafBack, W.LK[0], A.onSilver(3), 90);
 
   // ---- the lighting: the Menorah's man (weekday: the morning's; Shabbat: the incoming watch's) from the western lamp
   const lit = sab ? ['servers', SRV.B2] : ['clearing', 1];
@@ -220,17 +221,19 @@ export function buildAfternoon(ctx, P, W, D, m) {
   B.walk([[P.apronX + 0.4, 339.6, AZ], [steps.foot, 335.0, AZ], ...upSteps(P, 335.0, 331.0).slice(1), ...intoKodesh(P, 330.6), [143, 328.6, HE], H.stoneFoot], { speed: WALK });
   B.shift(H.stoneTop, 0.07, { heading: 180 });
   const nm = H.nerMaaravi;
+  // a taper lit at the western lamp, left burning since the morning (Tamid 6:1), and each lamp lit from it (people's
+  // tend_lamp with the taper: a splinter with a linen wick, its small flame) ⚙ the tool
   B.act(0.06, { pose: 'stand', face: H.lamp(nm) });
-  B.act(0.14, { pose: 'point', face: H.lamp(nm) });            // a light taken from the western lamp ⚙
+  B.act(0.14, { pose: 'tend_lamp', phase: { cycle: 1 / 0.3 }, face: H.lamp(nm), props: ['taper', null] });
   const order = [];
   for (let d = 1; d < H.nLamps; d++) { if (nm - d >= 0) order.push(nm - d); if (nm + d < H.nLamps) order.push(nm + d); }
   for (const i of order) {
     const L = H.lamp(i);
     B.act(0.05, { pose: 'stand', face: L });
-    B.act(0.22, { pose: 'point', face: L });
+    B.act(0.22, { pose: 'tend_lamp', phase: { cycle: 1 / 0.3 }, face: L });
     D.lampLight[i] = B.now() - 0.08;
   }
-  B.act(0.05, { pose: 'stand', heading: 0 });
+  B.act(0.05, { pose: 'stand', heading: 0, props: null });
   B.shift(H.stoneFoot, 0.07, { heading: 0 });
   B.walk([[137.8, 328.4, HE]], { speed: 0.9 });
   B.act(0.05, { pose: 'stand', heading: 270 });

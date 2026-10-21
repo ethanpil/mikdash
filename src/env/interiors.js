@@ -9,6 +9,7 @@
 //                                      the room's apertures only (what reaches it from a light outside the room)
 //     occlusion(a, b) -> 0..1           // light between two points (same volume 1, else V(a)·V(b))
 //     openness(vol) -> 0..1             // how open a room is to the outside (its most open aperture; 1 outdoors)
+//     mainVisibility(worldPos, out?) -> { V, vol }  // the sky through the room's main (first) opening, by the shader's cheap form
 //     fireRecord(pos) -> index          // the fire occluder record of a fire's light (render-env-2), -1 none
 //     fireRadius(size) -> m             // the flames' radius the occluders' penumbra uses
 //     fireVisibility(rec, L, P, rad)    // that record's analytic occlusion between a fire and a point (CPU mirror)
@@ -346,6 +347,28 @@ export function createInteriors(ctx, opts = {}) {
     return out;
   }
 
+  /**
+   * render-audio-3: the share of the sky a point sees through its room's MAIN (first) opening, by the shader's own cheap
+   * form (interiors-glsl.js mkAperture → mkVm; openness and brightness beyond quantised as packed), so that a ratio of the
+   * two is like for like. → { V, vol } (V 0: outdoors, or that opening shut)
+   */
+  const _mv = { V: 1, vol: null, s: 0 };
+  function mainVisibility(p, out = { V: 0, vol: null }) {
+    at(p, _mv);
+    out.vol = _mv.vol; out.V = 0;
+    const a = _mv.vol?.apertures[0];
+    if (!a) return out;
+    const w = (u8(a.openness) / 255) * (u8(a.beyond) / 255);
+    const c = a.centre, d = [c.x - p.x, c.y - p.y, c.z - p.z];
+    const h = d[a.axis] * a.sign;
+    if (!(w > 0) || h <= 0) return out;
+    const o = a.axis === 0 ? [1, 2] : a.axis === 1 ? [0, 2] : [0, 1];
+    const ex = Math.max(Math.abs(d[o[0]]) - a.hx, 0), ey = Math.max(Math.abs(d[o[1]]) - a.hy, 0);
+    const h2 = h * h, k = h2 / (h2 + ex * ex + ey * ey);
+    out.V = (1 - h / Math.sqrt(h2 + (4 * a.hx * a.hy) / Math.PI)) * k * Math.sqrt(k) * w;
+    return out;
+  }
+
   /** how open a room is to the outside: its most open aperture (doors, curtains), 1 outdoors */
   function openness(v) {
     if (!v) return 1;
@@ -649,6 +672,7 @@ export function createInteriors(ctx, opts = {}) {
   return {
     volumes,
     at,
+    mainVisibility,
     occlusion,
     openness,
     fireRecord,

@@ -5,7 +5,11 @@
 // Priestly dress per report Part VIII §34. Levites: NO Mishnaic uniform — plain light garments (flagged).
 import { Color } from 'three';
 
-const pal = (skin, hair, ga, gb, stripe) => [...skin, ...hair, ...ga, ...gb, ...stripe].map((h) => new Color(h));
+// palette: skin ×2, hair ×2, garment A ×4, garment B ×4, stripe ×2 — then the garment colours chosen by Actor.setGarb /
+// a role's `garb`: black (A, B) and white (A, B) at 14–17 (tint index 4 = black, 5 = white; material.js pPalette)
+export const GARB = { black: 4, white: 5 };
+const GARB_COL = ['#2a2622', '#1f1c1a', '#ece8dd', '#f2efe7'];
+const pal = (skin, hair, ga, gb, stripe) => [...skin, ...hair, ...ga, ...gb, ...stripe, ...GARB_COL].map((h) => new Color(h));
 const SKIN = ['#c89c78', '#86593a'];
 const HAIR = ['#1c1611', '#a69f95'];
 const LINEN = ['#efeadf', '#f2eee5', '#ebe5d9', '#f0ece2'];
@@ -25,6 +29,16 @@ export const ARCHETYPES = {
   },
   israelite: {
     rig: 'man', recipe: 'israelite',
+    palette: pal(SKIN, HAIR, ['#dccfb3', '#c6af8a', '#b09572', '#d2c2a2'], ['#d4c7ac', '#ad9878', '#87705a', '#bfb093'], ['#5a2c23', '#4a3328']),
+  },
+  // a metzora as Vayikra 13:45 describes him: the tunic rent at the breast, the hair let grow (Rashi; Moed Katan 15a)
+  metzora: {
+    rig: 'man', recipe: 'metzora',
+    palette: pal(SKIN, HAIR, ['#cbbd9f', '#b39c79', '#a08867', '#c2b293'], ['#c4b79b', '#9d8a6c', '#7d6a55', '#b0a286'], ['#5a2c23', '#4a3328']),
+  },
+  // the mourner and the menudeh: the Israelite with the head-cloth wound as the atifah (human.js wrapDrape; people-4-fix)
+  mourner: {
+    rig: 'man', recipe: 'mourner',
     palette: pal(SKIN, HAIR, ['#dccfb3', '#c6af8a', '#b09572', '#d2c2a2'], ['#d4c7ac', '#ad9878', '#87705a', '#bfb093'], ['#5a2c23', '#4a3328']),
   },
   nazir: {
@@ -78,6 +92,20 @@ export const ROLES = {
   levi_boy: { arch: 'boy', grey: [0, 0], scale: [0.92, 1.06] },
   israelite: { arch: 'israelite', mantle: 0.85, headcloth: 0.3, grey: [0, 0.45], scale: [0.94, 1.05] },
   nazir: { arch: 'nazir', mantle: 0.8, grey: [0, 0.2], scale: [0.95, 1.04] },
+  // the same man shaven (the same seed gives the same face, skin, build and garments as 'nazir'): his head shaved in the
+  // nazirites' chamber at the end of his term (Bamidbar 6:18; Middot 2:5); Actor.setShaven toggles it on one actor
+  nazir_shaven: { arch: 'nazir', mantle: 0.8, grey: [0, 0.2], scale: [0.95, 1.04], shaven: 'head' },
+  // the metzora of Vayikra 13:45 (torn garments, the hair let grow); on his seventh day he shaves all his hair — head,
+  // beard and brows (Vayikra 14:9): setShaven('all'), as he comes to Sha'ar Nikanor on the eighth
+  metzora: { arch: 'metzora', mantle: 0.6, headcloth: 0, grey: [0, 0.5], scale: [0.94, 1.04] },
+  // the mourner and the one under a ban who go round Har HaBayit to the left (Middot 2:2): wrapped (atifah — the mourner's,
+  // Moed Katan 15a; left open there for the menudeh, wrapped here as in G4) round the head and the sides of the face to the
+  // beard, a fold over the mouth (Moed Katan 24a; Rambam Avel 5:19 — the 'mourner' archetype) and dressed in black — the period's mourning
+  // dress (Josephus, War 2.1: Archelaus put on white after his seven
+  // days; Bava Metzia 59b: R' Akiva "dressed in black and wrapped himself in black" to tell R' Eliezer of the ban);
+  // setGarb('white') / crowd garb for the other option
+  mourner: { arch: 'mourner', mantle: 1, headcloth: 1, grey: [0, 0.5], scale: [0.94, 1.05], garb: 'black' },
+  menudeh: { arch: 'mourner', mantle: 1, headcloth: 1, grey: [0, 0.5], scale: [0.94, 1.05], garb: 'black' },
   woman: { arch: 'woman', grey: [0, 0.4], scale: [0.95, 1.05] },
   elder: { arch: 'elder', mantle: 1, headcloth: 0.35, grey: [0.55, 1], scale: [0.96, 1.03] },
   sanhedrin: { arch: 'elder', mantle: 1, headcloth: 1, grey: [0.45, 1], scale: [0.97, 1.03] },
@@ -93,6 +121,10 @@ export const ANIMALS = {
   lamb: { rig: 'lamb', build: 'sheep', palette: pal(['#5a4a46', '#3a302e'], ['#e8dfd0', '#c9bba4'], ['#efe7d6', '#e6dcc8', '#f2ecdf', '#ddd1bb'], SHEEP_FACE, ['#2a2420', '#3a302a']) },
   ram: { rig: 'ram', build: 'sheep', horns: true, palette: pal(['#5a4a46', '#3a302e'], ['#e0d6c4', '#bfae94'], ['#e8e0cf', '#ddd3bf', '#ebe4d6', '#d6cab3'], SHEEP_FACE, ['#2a2420', '#3a302a']) },
   goat: { rig: 'goat', build: 'goat', palette: pal(['#2e2626', '#211c1c'], ['#2a2420', '#1a1614'], ['#1c1917', '#232020', '#151312', '#2b2624'], ['#1c1917', '#2a2422', '#151312', '#4a3a2e'], ['#1a1614', '#2a2420']) },
+  // the individual's chatat (Vayikra 4:28, 4:32): a she-goat (se'irat izim) or a ewe lamb (kivsah) — female (an udder, no
+  // scrotum); the ewe lamb polled (the breed's ewes are hornless, reconstruction), the she-goat's horns and beard smaller
+  ewe: { rig: 'lamb', build: 'sheep', female: true, polled: true, palette: pal(['#5a4a46', '#3a302e'], ['#e8dfd0', '#c9bba4'], ['#efe7d6', '#e6dcc8', '#f2ecdf', '#ddd1bb'], SHEEP_FACE, ['#2a2420', '#3a302a']) },
+  she_goat: { rig: 'goat', build: 'goat', female: true, hornScale: 0.55, beardScale: 0.55, palette: pal(['#2e2626', '#211c1c'], ['#2a2420', '#1a1614'], ['#1c1917', '#232020', '#151312', '#2b2624'], ['#1c1917', '#2a2422', '#151312', '#4a3a2e'], ['#1a1614', '#2a2420']) },
   bull: { rig: 'bull', build: 'bull', palette: pal(['#3a3030', '#2a2222'], ['#7a4a2e', '#5e3722'], ['#7a4528', '#6b3b22', '#8a5534', '#5c331e'], ['#4e2c18', '#3e2414', '#5e3820', '#2e1c12'], ['#2a2420', '#3a302a']) },
   // birds: the young pigeon (ben yonah) and the turtledove (tor) — Vayikra 1:14, 5:7, 12:8
   dove: { rig: 'dove', build: 'dove', kind: 'pigeon', palette: pal(['#b0545a', '#9a4a50'], ['#6f7680', '#646b75'], ['#8f97a3', '#868e9a', '#9aa1ab', '#7f8793'], ['#9ba2ac', '#8f97a1', '#a5abb3', '#87909b'], ['#3f5e52', '#55456a']) },

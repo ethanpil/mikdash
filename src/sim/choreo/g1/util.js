@@ -75,6 +75,10 @@ export const downHoldUp = (tDown = 0.05, tUp = 0.05, keepDown = false) => (local
 };
 /** a single action over its whole leg (toss, pour, throw) */
 export const ramp = (a = 0, b = 1) => (local, dur) => lerp(a, b, clamp(local / (dur || 1)));
+/** a looping clip played n whole cycles over the leg (knock, call, lock: a deterministic loop) */
+export const cycles = (n = 1) => (local, dur) => { const p = n * clamp(local / (dur || 1)); return p - Math.floor(p); };
+/** a phase curve shifted: the part of fn(local, total) that starts `shift` minutes into it (a leg split in two) */
+export const shifted = (fn, shift, total) => (typeof fn === 'function' ? (local) => fn(local + shift, total) : fn);
 /** circle_lot: hand forward at tUp, held, down over the leg's last tDown */
 export const lotHand = (tUp = 0.06, tDown = 0.08, lower = true) => (local, dur) => {
   if (local < tUp) return 0.3 * (local / tUp);
@@ -152,6 +156,9 @@ export function applyLeg(ctx, slot, leg, local) {
     }
     slot.prop(leg.prop ?? null, leg.hand || 'right');
   }
+  // the mitre lifted off his head for the count (Yoma 25a): leg.bare = [from, to] local minutes of the leg
+  const b = leg.bare;
+  slot.headgear(!(b && local >= b[0] && local < b[1]));
   slot.show();
 }
 
@@ -225,6 +232,19 @@ export class Track {
     const q = tl.path.sample(Math.max(0, tl.L - off), {});
     this.cur = [q.X, q.Y, Number.isFinite(q.Z) ? q.Z : this.cur[2]];
     this.h = q.heading ?? this.h;
+    return this;
+  }
+  /**
+   * Mark the legs laid so far that overlap the absolute window [t0, t1) with leg[key] = [from, to] in the leg's own
+   * minutes (applyLeg reads `bare`: the headgear off then). Call after the window's legs are laid.
+   */
+  mark(t0, t1, key = 'bare') {
+    let s = this.S;
+    for (const leg of this.legs) {
+      const e = s + leg.dur;
+      if (e > t0 && s < t1) leg[key] = [Math.max(0, t0 - s), Math.min(leg.dur, t1 - s) + (e <= t1 ? 1e-6 : 0)];
+      s = e;
+    }
     return this;
   }
   /** minutes a walk through points would take at speed */

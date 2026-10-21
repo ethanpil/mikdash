@@ -8,7 +8,11 @@
 //   4. watchable rows — the circuit's and the sets' rows in "Happening now" carry a view;
 //   5. cues — continuous play at 120× through the morning and the evening: every planned cue key fires exactly once,
 //      none on jumps;
-//   6. cost — per-frame update time of the five modules at 1× at busy hours, the observer at the scenes.
+//   6. cost — per-frame update time of the five modules at 1× at busy hours, the observer at the scenes;
+//   7. adopted assets (choreo-adopt) — the Golah wheel's crank on its angle, the chavitin kneaded (dough on the table),
+//      the builder's hearth and lamps lit, the nazir shaven on the same figure (razor, sal_matzot, clay pot), the
+//      kohen's wave_under beneath the nazir's wave in one phase, the ewe chatat, the metzora shaven all, the mourner and
+//      menudeh roles, the broken pot's sherds, coins into the shofarot, the judges seated a tier above their feet.
 // Run: node src/sim/dev/run.mjs --q low --script src/sim/dev/tests/g4.js "t=d3"
 const rt = ctx.schedule.runtime;
 const IDS = ['courts-daily', 'nikanor-stations', 'sanhedrin', 'chambers-daily', 'beit-avtinas'];
@@ -23,8 +27,10 @@ const snap = () => {
     figs.push(`${e.id}/${p.name}#${s.index} ${r3(o.x)},${r3(o.y)},${r3(o.z)} h${r3(s._heading)} ${s._pose}${Number.isNaN(s._phase) ? '' : '@' + r3(s._phase)} ${s._prop || ''}${s._p2 ? '+' + s._p2 : ''}`);
   }
   const st = (id) => rt.choreo(id)?.state || {};
+  for (const e of E) for (const p of e.pools) for (const s of p.slots) if (s.shown && (s._shave || s._scale != null)) figs.push(`${e.id}/${p.name}#${s.index} shave:${s._shave} scale:${s._scale}`);
   // the fires as the runtime's shared board applied them (every G4 want, and private-offerings' on the kitchen hearth)
-  const fires = ['altar.kitchen.fire', 'courts.en.nazirites.hearth', 'sim.chambers.nazirites.0', 'sim.chambers.nazirites.2', 'sim.chambers.chavitin']
+  const fires = ['altar.kitchen.fire', 'courts.en.nazirites.hearth', 'courts.en.nazirites.hearth.0', 'courts.en.nazirites.hearth.2', 'courts.chavitin.hearth',
+    'courts.chavitin.lamp', 'courts.golah.lamp', 'courts.parvah.lamp', 'courts.moked.showbread.lamp']
     .map((id) => `${id}=${r3(Math.max(0, rt.fires.state(id)?.value ?? 0))}`);   // (not yet on the board = its level 0)
   const wheel = ctx.movables?.get?.('wheel:azarah.chamber.golah')?.userData?.angle;
   const doors = ['door:azarah.gate.moked.pishpash', 'door:azarah.moked.door-chel'].map((id) => { const n = ctx.movables?.get?.(id); return `${id}=${r3(+(n?.userData?.openAmount ?? 0))}`; });
@@ -228,6 +234,112 @@ out.cost = cost;
     setIds: (ctx.schedule.dynamic?.(M ? M.t0 + 33 : ctx.time.t) || []).map((ev) => ev.id).filter((id) => !id.startsWith('offering:')).slice(0, 6),
   };
   out.metzoraCorners.ok = !!P5 && !!PN && (!M || (out.metzoraCorners.bookedExactly.sw === true && out.metzoraCorners.bookedExactly.ne === true));
+}
+// ---------------------------------------------------------------------------------------------- 7. adopted assets
+{
+  const A = {};
+  const ok = (k, v, info) => { A[k] = v ? true : `FAIL ${info ?? ''}`; };
+  const go = async (t) => { ctx.time.set(((t % 1440) + 1440) % 1440); await frames(2); };
+  const wantSlots = (e, pool) => (e.pools.find((p) => p.name === pool)?.slots || []).filter((x) => x.want);
+  const st = ctx.people?.stations;
+  ctx.time.setDate('2026-11-02'); await frames(3);
+  const P = ch.state.plan;
+  // the Golah wheel: the operator's crank on the wheel's angle
+  const gw = P.W.golah;
+  if (gw) {
+    let n = 0, worst = 0;
+    for (let t = gw[0] + 3; t < gw[0] + 30 && n < 6; t += 0.37) {
+      await go(t);
+      const sl = wantSlots(ch, 'golah-levites').find((x) => x._pose === 'crank');
+      if (sl) { n++; const d = Math.abs(sl._phase - st.crank.phaseAt(ctx.movables.get('wheel:azarah.chamber.golah').userData.angle)); worst = Math.max(worst, Math.min(d, 1 - d)); }
+    }
+    ok('crank on the Golah wheel', n >= 3 && worst < 0.02, `n ${n} worst ${worst.toFixed(3)}`);
+  }
+  // the chavitin: kneaded at the table, the dough on it; the builder's hearth and lamp lit
+  const cw = P.W.chav;
+  if (cw) {
+    let kn = false;
+    for (let t = cw[0] + 1; t < cw[0] + 20 && !kn; t += 0.5) { await go(t); kn = wantSlots(ch, 'chavitin-bakers').some((x) => x._pose === 'knead'); }
+    ok('knead (chavitin)', kn);
+    ok('dough on the table', ch.state.free.some((f) => f?.on && f.name === 'dough'));
+    ok('chavitin hearth + lamp lit', (rt.fires.state('courts.chavitin.hearth')?.value ?? 0) > 0.2 && (rt.fires.state('courts.chavitin.lamp')?.value ?? 0) > 0.5,
+      `${rt.fires.state('courts.chavitin.hearth')?.value} ${rt.fires.state('courts.chavitin.lamp')?.value}`);
+  }
+  // the nazir: shaven on the same figure after the razor; the waving pair in one phase
+  let nz = null;
+  for (const d of ['2026-11-02', '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-08', '2026-11-09']) {
+    ctx.time.setDate(d); await frames(3);
+    if (ch.state.plan.naz.length) { nz = ch.state.plan; break; }
+  }
+  if (nz) {
+    const w = nz.shaven[0];
+    await go(w[0] - 2);
+    const sl = ch.state.nazir.slot(w[2]);
+    const before = sl.actor?.shaven;
+    const razor = wantSlots(ch, 'nazir-companions').some((x) => x._prop === 'razor');
+    await go(w[0] + 1);
+    ok('nazir shaven after the razor (same figure)', before === false && sl.actor?.shaven === 'head', `${before} ${sl.actor?.shaven}`);
+    ok('razor in hand while shaving', razor);
+    const wv = nz.naz[0].wave;
+    if (wv) {
+      const tW = wv.s + wv.sync.tW;
+      await go(tW + 1.1);
+      const owner = wantSlots(ch, 'nazirites').find((x) => x._pose === 'wave'), kohen = wantSlots(ch, 'set-kohanim').find((x) => x._pose === 'wave_under');
+      const d = owner && kohen ? Math.abs(owner._phase - kohen._phase) : 1;
+      const dist = owner && kohen ? owner.actor.object3D.position.distanceTo(kohen.actor.object3D.position) : 0;
+      ok('wave_under beneath the nazir, one phase, partner apart', owner && kohen && Math.min(d, 1 - d) < 0.02 && Math.abs(dist - st.waveUnder.partner) < 0.03 && kohen.actor.scale === 1 && owner.actor.scale === 1,
+        `${owner?._phase} ${kohen?._phase} dist ${dist.toFixed(3)}`);
+    }
+    ok('ewe chatat', ch.state.setEwe.slots.some((x) => x.actor && x.actor.animal === 'ewe'));
+    // the party waits by its ring off G5's corridors (choreo-adopt-fix): no private-offerings walker passes within
+    // 0.85 amah of the nazir, his companions or his animals while they stand in the court (plan level, every 0.01 min)
+    const { segAt, sampleSeg } = await import('/src/sim/choreo/g5/track.js');
+    const P5 = rt.choreo('private-offerings')?.state?.plan;
+    if (P5?.ok) {
+      const walkers = P5.tracks.filter((tr) => tr.slot >= 0 && !['lamb', 'ram', 'goat', 'ewe', 'she_goat', 'bull'].includes(tr.pool));
+      const q0 = {}, q1 = {};
+      let hits = 0;
+      const where = [];
+      for (const z of nz.naz) for (const tr of z.set.tracks) {
+        if (!['O', 'C1', 'C2', 'AC', 'AO', 'AR'].includes(tr.role)) continue;
+        for (const sg of tr.segs) {
+          if (sg.kind !== 0 || sg.Z > 17.5 || !(sg.t1 - sg.t0 > 0.02)) continue;
+          for (let x = sg.t0; x < sg.t1; x += 0.01) for (const wk of walkers) {
+            if (wk.t0 > x || wk.t1 < x) continue;
+            const k = segAt(wk.segs, x);
+            if (k < 0 || wk.segs[k].kind !== 1) continue;
+            const q = sampleSeg(wk.segs[k], x, q0, q1);
+            if (Math.abs(q.Z - sg.Z) < 2 && Math.hypot(q.X - sg.X, q.Y - sg.Y) < 0.85) { hits++; if (where.length < 4) where.push(`${ctx.time.format(x)} ${tr.role}@${sg.X.toFixed(1)},${sg.Y.toFixed(1)}`); }
+          }
+        }
+      }
+      ok('nazir party off G5 corridors', hits === 0, `${(hits * 0.6).toFixed(1)} s ${where.join('; ')}`);
+    }
+  } else ok('nazir shaven after the razor (same figure)', false, 'no nazir in the dates tried');
+  // the metzora shaven all; the mourner and the menudeh
+  ok('metzora shaven all', ns.state.metzora.slot(0).ensure().shaven === 'all', ns.state.metzora.slot(0).actor?.shaven);
+  ok('mourner / menudeh roles', cd.state.mourner.slot(0).ensure().role === 'mourner' && cd.state.menudeh.slot(0).ensure().role === 'menudeh');
+  // the scouring: the pot broken, its sherds where it fell
+  ctx.time.setDate('2026-11-02'); await frames(3);
+  const CP = cd.state.plan;
+  if (CP.sherds) { await go(CP.sherds.t0 + 0.2); ok('sherds of the broken pot', cd.state.sherdsOn); }
+  // coins into the shofarot (a weekday)
+  let coins = false;
+  for (let t = ctx.time.parse('sunrise+60'); t < ctx.time.parse('d10') && !coins; t += 1) {
+    await go(t);
+    coins = ['en-women', 'en-men'].some((pn) => wantSlots(cd, pn).some((x) => x._prop === 'coins'));
+  }
+  ok('coins into a shofar', coins);
+  // the judges: seated with their feet on the tier below (the risers of one amah)
+  const sw = rt.choreo('sanhedrin');
+  const W2 = sw?.events?.[0];
+  if (sw) {
+    const gzEv = ctx.schedule.byId('sanhedrin-session') || ctx.schedule.events.find((ev) => ev.choreo === 'sanhedrin');
+    if (gzEv) { await go(gzEv.t0 + 5); const seated = wantSlots(sw, 'judges').filter((x) => x._pose === 'sit'); ok('judges seated', seated.length > 10, seated.length); }
+  }
+  void W2;
+  out.adopt = A;
+  out.adoptOk = Object.values(A).every((v) => v === true);
 }
 // the plans' build time for a fresh date (all four Mount modules, warm code)
 const tp0 = performance.now();

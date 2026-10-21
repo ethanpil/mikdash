@@ -1,5 +1,6 @@
 // Mechanical and human foley: gates and their bolts, the magrefah, Ben Katin's muchni, the knock at the
-// Moked, barefoot kohanim on stone, the keys and chains, thousands prostrating, the Beit Avtinas pestle.
+// Moked, barefoot kohanim on stone, the keys and chains, thousands prostrating, the Beit Avtinas pestle, an earthenware
+// pot broken at the scouring.
 // Techniques: modal synthesis for struck wood/metal/stone, stick-slip impulse trains through structural
 // resonances for creaks and groans, granular noise for cloth and grit.
 import { Biquad, OnePole, SVF, Brown, TAU, clamp, secs, modes, burst, addInto, resonate, smooth01 } from './dsp.js';
@@ -247,6 +248,63 @@ export function crowdProstrate(sr, rng, o = {}) {
     ex[i] = (bp.bp + bp2.bp * 0.5) * e;
   }
   addInto(out, ex, 0, 0.35);
+  return out;
+}
+
+/**
+ * An earthenware pot dashed on the court's stone pavement and broken — the scouring: "an earthenware vessel in which
+ * [a sin-offering] was cooked shall be broken" (Lev 6:21), in a holy place (Zevachim 11:4; 11:5 for one taken outside
+ * the curtains), as the copper ones are scoured and rinsed (11:7). Fired clay is lossy (loss factor ~0.01–0.02): its
+ * shell rings for tens of milliseconds, not seconds. The hit: the pot's body knocks (a few damped shell modes, 0.4–2.3 kHz) with a
+ * thud of the floor and the air in its mouth; the fractures run in a burst of clicks; then three to six large sherds
+ * bounce and settle on the stone (each its own small-plate modes, 1–6 kHz, shorter for the smaller pieces, hits closing
+ * up by the restitution), many small bits skitter over about a second, and one sherd slides to rest.
+ * o.size: the pot's size (0.6 small … 1.4 large cauldron; default 1).
+ */
+export function potBreak(sr, rng, o = {}) {
+  const size = clamp(o.size ?? 1, 0.5, 1.6);
+  const out = new Float32Array(secs(2.6, sr));
+  const t0 = 0.012;
+  // the body's knock (lower for a larger pot) and the floor's thud
+  const f0 = rng.uni(430, 520) / size;
+  impact(out, sr, rng, t0, { modes: [{ f: f0, a: 1, t60: 0.06 }, { f: f0 * rng.uni(1.75, 1.95), a: 0.8, t60: 0.045 }, { f: f0 * rng.uni(2.9, 3.3), a: 0.6, t60: 0.035 }, { f: f0 * rng.uni(4.4, 5), a: 0.4, t60: 0.025 }], gain: 0.55, spread: 0.03, noise: { dur: 0.03, decay: 0.006, lp: 2600, gain: 0.9 } });
+  addInto(out, burst(rng, sr, 0.07, 0.014, 260 / Math.sqrt(size)), t0 * sr, 0.8);
+  // the fractures: a dense, bright cluster of clicks within ~10 ms (kept below the knock: as single-sample spikes they
+  // set the buffer's peak, and the −1 dBFS cap then held the whole cue ~8 dB under its level)
+  for (let k = 0; k < 16; k++) {
+    const b = burst(rng, sr, 0.005, 0.0012);
+    new Biquad('highpass', rng.uni(1500, 3000), 0.7, 0, sr).run(b);
+    addInto(out, b, (t0 + 0.0015 + Math.abs(rng.gauss()) * 0.007) * sr, 0.22 * rng.uni(0.4, 1));
+  }
+  // the large sherds: thrown up a little, then a bounce sequence each (restitution ≈ 0.45–0.6 in time, energy falling)
+  const big = rng.int(3, 6);
+  for (let s = 0; s < big; s++) {
+    const piece = rng.uni(0.45, 1) * size; // relative size of the sherd
+    const f1 = rng.uni(1100, 1900) / piece;
+    const modesS = [1, rng.uni(1.6, 1.85), rng.uni(2.6, 3.0), rng.uni(3.9, 4.5)]
+      .map((r, j) => ({ f: f1 * r, a: [1, 0.7, 0.45, 0.3][j], t60: clamp(55 / (f1 * r) * (0.8 + 0.4 * piece), 0.012, 0.07) }));
+    let at = t0 + rng.uni(0.07, 0.24), dt = rng.uni(0.07, 0.15), g = rng.uni(0.45, 0.85) * Math.sqrt(piece);
+    for (let b = 0; b < 7 && g > 0.04 && at < 2.2; b++) {
+      impact(out, sr, rng, at, { modes: modesS, gain: 0.22 * g, spread: 0.02, noise: { dur: 0.006, decay: 0.0012, gain: 0.3 * g, hp: 1800 } });
+      at += dt; dt *= rng.uni(0.45, 0.62); g *= rng.uni(0.45, 0.65);
+    }
+    // it rocks to rest: a few quick ticks
+    for (let r = 0; r < 3; r++) impact(out, sr, rng, at + r * rng.uni(0.012, 0.025), { modes: modesS.slice(1), gain: 0.04 * g, spread: 0.02 });
+  }
+  // the small bits: Poisson ticks, dense at first and thinning (τ ≈ 0.3 s), high and short
+  for (let t = t0 + 0.02; t < 1.6; t += rng.exp(240 * Math.exp(-(t - t0) / 0.3) + 4)) {
+    const f = rng.uni(2600, 7500);
+    impact(out, sr, rng, t, { modes: [{ f, a: 1, t60: rng.uni(0.008, 0.025) }, { f: f * rng.uni(1.7, 2.4), a: 0.5, t60: 0.01 }], gain: 0.05 * rng.uni(0.2, 1) * Math.exp(-(t - t0) / 0.45) });
+  }
+  // one sherd slides over the stone to rest
+  const len = rng.uni(0.22, 0.38);
+  const slide = friction(sr, rng.fork(5), len, (t) => 900 - 1600 * t, (t) => 0.18 * (1 - t / len), [{ f: rng.uni(1800, 2400), q: 5, g: 1 }, { f: rng.uni(3400, 4200), q: 6, g: 0.6 }, { f: 5600, q: 5, g: 0.35 }], { slipLen: 0.0005, jitter: 0.3 });
+  addInto(out, slide, secs(t0 + rng.uni(0.3, 0.5), sr), 0.45);
+  // the hit's spikes last a millisecond or two (the ear integrates over tens): a soft clip (× 2.5 into tanh) lets the
+  // cue reach its level under the −1 dBFS peak cap, which otherwise held it ~9 dB under (K-weighted loudest 400 ms)
+  let pk = 0;
+  for (let i = 0; i < out.length; i++) pk = Math.max(pk, Math.abs(out[i]));
+  if (pk > 0) { const k = 2.5, nk = Math.tanh(k); for (let i = 0; i < out.length; i++) out[i] = Math.tanh((k * out[i]) / pk) / nk; }
   return out;
 }
 

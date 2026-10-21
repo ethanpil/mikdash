@@ -14,6 +14,8 @@
 //   pillow_side / pillow_back — on the floor under the head of a figure sleeping on its side / lying on its
 //              back (attached to the root; the natural frame stays world-aligned, origin on the floor).
 //   free     — standing/lying on its own (no bone).
+//   palm / pour / rims — hand classes like fist with their own seating: on the open palm; upright for tipping over the
+//              lip (pour_low); a basket held by its rims (wave_basket). A prop without one falls back to its fist grip.
 import { Vector3, Matrix4, Euler, Quaternion, Color } from 'three';
 import { MeshBuilder, PAT, CLS } from './builder.js';
 import { gripOffset, HUMAN_CLIPS } from './clips.js';
@@ -22,7 +24,7 @@ import { clothCage, clothSkin } from './cloth.js';
 import { RECIPES } from './human.js';
 import { MAX_BONES } from './rig.js';
 import { DEG, smooth, lerp } from './util.js';
-import { STAFF } from './clips.js';
+import { STAFF, handQ, RIMS_HAND, SLAIN_HANDS } from './clips.js';
 import { AMAH } from '../core/units.js';
 import { buildAnimalGeometry, quadHeadFrame } from './animals.js';
 import { getRig } from './rig.js';
@@ -58,6 +60,7 @@ const MAT = {
   flour: { color: '#f1ebdf', rough: 0.97, metal: 0, pat: PAT.FLOUR },
   bread: { color: '#d8a866', rough: 0.8, metal: 0, pat: PAT.BREAD },
   salt: { color: '#efede6', rough: 0.5, metal: 0, pat: PAT.SALT },
+  clay: { color: '#9c5f3d', rough: 0.88, metal: 0, pat: PAT.FLOUR },   // unglazed earthenware (the flour's matte grain)
 };
 
 /** override metal tints from the world material library (ctx.mats) so props match the architecture */
@@ -136,6 +139,19 @@ function slab(B, c, size, opts = {}) {
   });
 }
 
+/** slab() with its poles closed: the superellipsoid's exponent blows the ellipsoid's tiny pole rings up into a square
+ *  hole on the top and bottom faces (≈ 13 % of the side at round 0.32); collapse each ring onto its centre (people-4) */
+function slabC(B, c, size, opts = {}) {
+  const nu = opts.nu || 16, nv = opts.nv || 8;
+  const g = slab(B, c, size, opts);
+  for (const j of [0, nv]) {
+    let x = 0, y = 0, z = 0;
+    for (let i = 0; i <= nu; i++) { const k = g.id(i, j) * 3; x += B.pos[k]; y += B.pos[k + 1]; z += B.pos[k + 2]; }
+    x /= nu + 1; y /= nu + 1; z /= nu + 1;
+    for (let i = 0; i <= nu; i++) { const k = g.id(i, j) * 3; B.pos[k] = x; B.pos[k + 1] = y; B.pos[k + 2] = z; }
+  }
+  return g;
+}
 const basis = (x, y, z) => new Matrix4().makeBasis(V(...x), V(...y), V(...z));
 // vessels carried upright on both palms ('tray' without a grip of their own)
 const VESSELS = new Set(['teni', 'kuz', 'flask', 'kaf', 'bazach', 'mizrak_gold', 'mizrak_silver', 'bowl', 'machtah_silver', 'machtah_gold', 'machtah_gold_yk', 'lot']);
@@ -1089,8 +1105,8 @@ function hungPose(P, rig) {
   P.root(-hock.x, -hock.y, -hock.z, -90, 0, 0);
 }
 
-function lambHung(B, lod) {
-  if (!bakeAnimal(B, 'lamb', lod, hungPose, { tint: [0.3, 0.3, 0.2, 0.3] })) return;
+function lambHung(B, lod, kind = 'lamb') {
+  if (!bakeAnimal(B, kind, lod, hungPose, { tint: [0.3, 0.3, 0.2, 0.3] })) return;
   hookRing(B);
 }
 /** the iron hook's ring through the hock (the hook itself is part of the slaughterhouse fixtures) */
@@ -1103,21 +1119,23 @@ function hookRing(B) {
 
 /** the flayed carcass hanging by the left hind leg (head and lower legs already off, belly opened) */
 function carcassHungBody(B, lod, o = {}) {
-  // body hanging along −y from the rump at the top; back toward −z
-  const L = 0.6;
+  // body hanging along −y from the rump at the top; back toward −z. By kind (CARCASS): a ram longer and fuller, a goat
+  // longer and slimmer, leaner (redder under a thinner fell) and without the fat tail
+  const K = CARCASS[o.kind || 'lamb'] || CARCASS.lamb, sl = K.L, sw = K.W;
+  const L = 0.6 * sl;
   const N = sg(lod, 22, 8);
   const rings = [];
   for (let j = 0; j <= N; j++) {
     const t = j / N; // 0 rump (top) → 1 neck (bottom)
-    const y = -0.16 - t * L;
+    const y = -0.16 * sl - t * L;
     const chest = smooth(0.45, 0.75, t) * (1 - smooth(0.9, 1, t));
     const rz = 0.075 + 0.04 * chest + 0.015 * (1 - smooth(0.05, 0.3, t));
     const rx = 0.07 + 0.03 * chest + 0.02 * (1 - smooth(0.05, 0.3, t));
     const end = Math.min(t, 1 - t);
     const tap = 0.55 + 0.45 * smooth(0, 0.12, end);
-    rings.push({ c: V(0, y, 0), rx: rx * tap, rz: rz * tap, ax: V(1, 0, 0), az: V(0, 0, -1), t });
+    rings.push({ c: V(0, y, 0), rx: rx * tap * sw, rz: rz * tap * sw, ax: V(1, 0, 0), az: V(0, 0, -1), t });
   }
-  S(B, 'fell');
+  S(B, 'fell', K.lean ? { color: '#cf9f8c' } : {});
   B.tube(rings, { seg: sg(lod, 20, 10), bone: 0,
     radial: lod === 0 ? (th, j, R) => 1 + 0.02 * Math.abs(Math.cos(th)) * smooth(0.42, 0.52, R.t) * (1 - smooth(0.82, 0.92, R.t)) * (0.5 + 0.5 * Math.cos(j * Math.PI)) + 0.05 * Math.max(0, Math.sin(th)) ** 16 : null,
     shade: (th, j) => (o.opened && Math.sin(th) < -0.93 ? 0.35 : 1) });
@@ -1126,36 +1144,58 @@ function carcassHungBody(B, lod, o = {}) {
   const f = rings[rings.length - 1];
   B.ellipsoid(f.c.clone().add(V(0, -0.002, 0)), [f.rx * 0.98, 0.006, f.rz * 0.98], { nu: sg(lod, 12, 6), nv: 3, bone: 0 });
   // the left hind leg up to the hook, the right hind leg out, the fore leg stumps; the fat tail on the rump
+  const P3 = (x, y, z) => V(x * sw, y * sl, z * sw);
   S(B, 'sinew');
-  curve(B, [V(-0.04, -0.17, 0.0), V(-0.035, -0.08, 0.0), V(-0.025, 0.0, 0.0), V(-0.02, 0.04, 0)], [0.05, 0.03, 0.017, 0.014], sg(lod, 10, 6));
-  curve(B, [V(0.045, -0.17, 0.0), V(0.09, -0.12, -0.04), V(0.15, -0.1, -0.06)], [0.05, 0.032, 0.016], sg(lod, 10, 6));
-  S(B, 'bone'); B.ellipsoid(V(0.155, -0.1, -0.06), [0.012, 0.012, 0.012], { nu: 6, nv: 4, bone: 0 });
+  curve(B, [P3(-0.04, -0.17, 0.0), P3(-0.035, -0.08, 0.0), V(-0.025 * sw, 0.0, 0.0), V(-0.02, 0.04, 0)], [0.05 * sw, 0.03 * sw, 0.017 * sw, 0.014], sg(lod, 10, 6));
+  curve(B, [P3(0.045, -0.17, 0.0), P3(0.09, -0.12, -0.04), P3(0.15, -0.1, -0.06)], [0.05 * sw, 0.032 * sw, 0.016 * sw], sg(lod, 10, 6));
+  S(B, 'bone'); B.ellipsoid(P3(0.155, -0.1, -0.06), [0.012, 0.012, 0.012], { nu: 6, nv: 4, bone: 0 });
   S(B, 'sinew');
-  for (const s of [-1, 1]) curve(B, [V(s * 0.05, -0.62, 0.0), V(s * 0.06, -0.69, 0.02), V(s * 0.06, -0.74, 0.03)], [0.035, 0.022, 0.016], sg(lod, 8, 5));
-  S(B, 'fat');
-  B.ellipsoid(V(0, -0.16, 0.06), [0.075, 0.09, 0.035], { nu: sg(lod, 12, 6), nv: sg(lod, 6, 4), bone: 0 });
+  const yF = -0.16 * sl - L * 0.77;
+  for (const s of [-1, 1]) curve(B, [V(s * 0.05 * sw, yF, 0.0), V(s * 0.06 * sw, yF - 0.07 * sl, 0.02), V(s * 0.06 * sw, yF - 0.12 * sl, 0.03)], [0.035 * sw, 0.022 * sw, 0.016 * sw], sg(lod, 8, 5));
+  if (K.alyah > 0) {
+    S(B, 'fat');
+    B.ellipsoid(V(0, -0.16 * sl, 0.06 * sw), [0.075 * K.alyah, 0.09 * K.alyah, 0.035 * K.alyah], { nu: sg(lod, 12, 6), nv: sg(lod, 6, 4), bone: 0 });
+  } else {
+    // a goat's short tail, flayed: a thin stub of sinew on the rump
+    S(B, 'sinew');
+    curve(B, [V(0, -0.15 * sl, 0.06 * sw), V(0, -0.1 * sl, 0.075 * sw), V(0, -0.06 * sl, 0.08 * sw)], [0.016, 0.012, 0.007], sg(lod, 6, 4), { capB: 'dome' });
+  }
   hookRing(B);
   return rings;
 }
 
 /** half-way through the flaying (Tamid 4:2 "he flays downward until he reaches the breast"): the rear flayed, the
  *  fleece turned inside-out and hanging round the fore quarters, the head still on */
-function carcassFlaying(B, lod) {
-  carcassHungBody(B, lod);
-  // the peeled hide hangs as a skirt from the chest, fleece outside, the pale inner face showing at the rolled edge
-  const top = -0.42, bot = -0.86;
+function carcassFlaying(B, lod, kind = 'lamb') {
+  const K = CARCASS[kind] || CARCASS.lamb, sl = K.L, sw = K.W;
+  const goat = kind === 'goat' || kind === 'she_goat';
+  carcassHungBody(B, lod, { kind });
+  // the peeled hide hangs as a skirt from the chest: peeled downward from the hind legs it is turned inside out, so the
+  // pale flesh side is outside and the fleece (or the goat's hair) inside, showing only as the roll at its free edge
+  // (people-4-fix: the layers were the wrong way round)
+  const top = -0.42 * sl, bot = -0.86 * sl;
   const n = sg(lod, 22, 10), m = sg(lod, 6, 3);
+  const coat = () => (goat ? S(B, 'coatProp', { color: '#1c1917', rough: 0.72 }) : S(B, 'fleeceProp'));
+  const at = (i, s, k) => {
+    const a = (i / n) * Math.PI * 2, r = (0.13 + 0.06 * s) * sw * k * (1 + 0.08 * Math.sin(a * 5 + s * 2));
+    return V(Math.cos(a) * r, lerp(top, bot, s) - 0.03 * Math.sin(a * 3) * s, -Math.sin(a) * r * 0.9);
+  };
   for (const inner of [false, true]) {
-    S(B, inner ? 'hide' : 'fleeceProp');
-    B.grid(n, m, (i, j) => {
-      const a = (i / n) * Math.PI * 2, s = j / m;
-      const r = (0.13 + 0.06 * s) * (inner ? 0.94 : 1) * (1 + 0.08 * Math.sin(a * 5 + s * 2));
-      return { p: V(Math.cos(a) * r, lerp(top, bot, s) - 0.03 * Math.sin(a * 3) * s, -Math.sin(a) * r * 0.9), u: a * 0.15, v: s * 0.4, w: 0 };
-    }, { inside: V(0, (top + bot) / 2, 0), invert: inner });
+    if (inner) coat(); else S(B, 'hide');
+    B.grid(n, m, (i, j) => ({ p: at(i, j / m, inner ? 0.94 : 1), u: (i / n) * 0.95, v: (j / m) * 0.4, w: 0, shade: inner ? 0.8 : 0.92 + 0.08 * Math.sin(i * 1.7 + j) }),
+      { inside: V(0, (top + bot) / 2, 0), invert: inner });
   }
-  // the head, still on, hanging below
-  S(B, 'coatProp');
-  B.ellipsoid(V(0, -0.98, -0.02), [0.05, 0.11, 0.055], { nu: sg(lod, 12, 6), nv: sg(lod, 8, 4), bone: 0 });
+  // the free edge rolled: the fleece / hair turned up round the hem of the skirt
+  coat();
+  const rho = (goat ? 0.009 : 0.013) * sw;
+  const roll = [];
+  for (let i = 0; i <= n; i++) {
+    const e = at(i % n, 1, 0.97), out = V(e.x, 0, e.z).normalize();
+    roll.push(e.addScaledVector(out, rho * 0.7).add(V(0, rho * 0.4, 0)));
+  }
+  curve(B, roll, roll.map((_, i) => rho * (1 + 0.15 * Math.sin(i * 2.3))), sg(lod, 6, 4));
+  // the head, still on, hanging below the hide: baked from the live animal (its horns, ears and face)
+  hangingHead(B, lod, kind, V(0, bot - 0.02 * sl, -0.01));
 }
 
 /** the hide after flaying: the fleece spread, folded once, the pale inner face showing at the fold */
@@ -1567,11 +1607,11 @@ function branchBundle(B, lod) {
 /** the slaughtered lamb, limp, unflayed (carried to the hook in the arms — Tamid 4:2; or laid down). Baked from the
  *  live rig: on its left side, the head hanging, legs dangling (carried) or lying out on the floor (free). Natural
  *  frame: the trunk across x (head toward −x), back toward +z, the origin under the middle of the trunk. */
-function lambDead(B, lod, cls) {
+function lambDead(B, lod, cls, o = {}) {
   const carried = cls !== 'free';
   const droop = carried ? 62 : 18;
   const base = B.count;
-  const res = bakeAnimal(B, 'lamb', lod, (P) => {
+  const res = bakeAnimal(B, o.kind || 'lamb', lod, (P) => {
     // lamb x → +y, lamb y → +z, lamb z → +x: lying on its left side, back toward +z, head toward −x
     P.setQ(P.i('root'), new Quaternion().setFromRotationMatrix(basis([0, 1, 0], [0, 0, 1], [1, 0, 0])));
     for (const s of ['l', 'r']) {
@@ -1589,6 +1629,7 @@ function lambDead(B, lod, cls) {
   }, { tint: [0.3, 0.3, 0.4, 0.4] });
   if (!res) return;
   const { P, rig } = res;
+  if (o.wound) throatWound(B, lod, P, rig);
   const mid = P.worldPos('pelvis').lerp(P.worldPos('chest'), 0.5);
   const barrel = Math.abs(P.worldPos('pelvis').x - P.worldPos('chest').x) * 0.5 + 0.04;
   let bottom = Infinity, back = -Infinity;
@@ -1695,6 +1736,537 @@ for (const k of ['limb', 'limb_head', 'limb_foreleg', 'limb_oketz', 'limb_chazeh
   const src = PROPS[k] || OFFERING_PROPS[k];
   SERVICE_PROPS[`${k}_charred`] = { ...src, flesh: true, build: charred(src.build) };
 }
+// ---------------------------------------------------------------------------------------------- people-4 props
+// (docs/decisions/people-4.md)
+const TEF = AMAH / 6, ETZ = TEF / 4;
+const hashN = (i, s = 0) => { const x = Math.sin(i * 12.9898 + s * 78.233 + 4.1) * 43758.5453; return x - Math.floor(x); };
+const SHOWBREAD = '#e2bc86';    // an unleavened loaf baked in its mould: pale gold, browned at the edges (reconstruction)
+
+/**
+ * One loaf of the lechem hapanim, as world/heichal/vessels.js lays them on the Shulchan: a "breached box" (R' Chanina,
+ * Menachot 94b) — 10 × 5 tefachim, the 10 folded into a 5-tefach floor and two walls of 2½ (R' Yehudah, Menachot 11:5 /
+ * 96a), open at both ends; the walls lean out a little and dip toward the middle; four 7-etzba horns rise from the walls'
+ * ends and curl outward (Menachot 11:4; the seven etzba'ot are the horns' own height). Natural frame: the floor's
+ * underside at y0, centred; the walls at ±x, the open ends toward ±z.
+ */
+function showbreadLoaf(B, lod, y0, seed) {
+  const W = 5 * TEF, L = 5 * TEF, hw = 10 * ETZ, tw = 1.25 * ETZ;
+  const lean = 0.35 * ETZ * (0.7 + 0.6 * hashN(seed, 1));
+  const sag = 0.35 * ETZ * (0.6 + 0.8 * hashN(seed, 2));
+  const nu = sg(lod, 14, 7), nv = sg(lod, 6, 3);
+  // the crust browned along the edges and the walls' tops, paler on the broad faces
+  const crust = (l, h) => 0.88 + 0.12 * (1 - smooth(0.6, 1, Math.max(Math.abs(l.x) / h[0], Math.abs(l.y) / h[1], Math.abs(l.z) / h[2])));
+  S(B, 'bread', { color: SHOWBREAD });
+  slabC(B, V(0, y0 + tw / 2, 0), [W, tw, L], { round: 0.32, nu, nv, shade: (l) => crust(l, [W / 2, tw / 2, L / 2]) });
+  for (const s of [-1, 1]) {
+    const m = new Matrix4().makeRotationZ(-s * Math.atan2(lean, hw));
+    slabC(B, V(s * (W / 2 - tw / 2 + lean / 2), y0 + hw / 2, 0), [tw, hw, L * 0.996], {
+      round: 0.32, nu: nv + 2, nv: nu, xf: m, shade: (l) => crust(l, [tw / 2, hw / 2, L / 2]),
+      // the wall's top dips toward the middle (lifted out of the mould soft)
+      deform: (l) => { const q = [l.x / (tw / 2), l.y / (hw / 2), l.z / (L / 2)].map((t) => Math.sign(t) * Math.abs(t) ** 0.32); l.set(q[0] * tw / 2, q[1] * hw / 2, q[2] * L / 2); l.y -= sag * (1 - l.z * l.z / (L * L / 4)) * smooth(-hw / 2, hw / 2, l.y); return l; },
+    });
+  }
+  // the horns at the walls' ends, drawn up from the wall's top and curled outward, tapering
+  for (const s of [-1, 1]) for (const e of [-1, 1]) {
+    const base = V(s * (W / 2 + lean - tw * 0.45), y0 + hw - 0.8 * ETZ, e * (L / 2 - tw * 0.9));
+    const pts = [[0, 0], [0.9, 1.9], [2.2, 3.6], [3.6, 4.4], [4.8, 4.5]].map(([o, u]) => base.clone().add(V(s * o * ETZ, u * ETZ, 0)));
+    curve(B, pts, pts.map((_, i) => lerp(1.15, 0.2, (i / 4) ** 1.3) * ETZ), sg(lod, 8, 5), { capA: 'flat', capB: 'dome', domeH: 0.8, shade: (th, j) => 0.86 + 0.06 * j / 4 });
+  }
+}
+/** a stack (seder) of n loaves as carried in and out of the Heichal on Shabbat (Menachot 11:7): the kanim are pulled
+ *  on Friday (Menachot 11:6), so each loaf rests on the walls of the one below; hand-made, a touch off line */
+function showbreadStack(B, lod, n) {
+  const hw = 10 * ETZ;
+  for (let i = 0; i < n; i++) {
+    B.transform(new Matrix4().makeRotationY((hashN(i, 3) - 0.5) * 0.04).setPosition((hashN(i, 4) - 0.5) * 0.45 * ETZ, 0, (hashN(i, 5) - 0.5) * 0.45 * ETZ));
+    showbreadLoaf(B, lod, i * hw, i + 1);
+    B.transform(null);
+  }
+}
+
+/** a piece broken from a loaf (eaten standing in the court; the Kohen Gadol's loaves broken up among his men): a corner
+ *  of the floor with the stub of a wall, crust outside, the pale crumb on the broken faces. Natural frame (palm grip):
+ *  lying on the palm, y up from it, −z toward the fingertips, +x toward the thumb */
+const PIECE = 0.82;   // the piece's scale (a share in one hand)
+function breadPiece(B, lod) {
+  B.transform(new Matrix4().makeScale(PIECE, PIECE, PIECE));
+  try { breadPieceShape(B, lod); } finally { B.transform(null); }
+}
+function breadPieceShape(B, lod) {
+  const tw = 1.25 * ETZ, y0 = 0.006;
+  const nu = sg(lod, 12, 6), nv = sg(lod, 6, 3);
+  S(B, 'bread', { color: SHOWBREAD });
+  slabC(B, V(0.004, y0 + tw / 2, -0.014), [0.08, tw, 0.076], { round: 0.42, nu, nv, deform: (l) => { l.y += 0.002 * Math.sin(l.x * 70 + 1) * smooth(-0.02, 0.04, l.z); return l; } });
+  slabC(B, V(-0.032, y0 + 0.031, -0.014), [tw, 0.054, 0.072], { round: 0.42, nu: nv + 2, nv: nu, xf: new Matrix4().makeRotationZ(0.08) });
+  // the broken faces: the front edge, the thumb side and the wall's top — ragged, the crumb showing
+  S(B, 'flour', { color: '#efe2c6', rough: 0.95 });
+  const rag = (amp) => (l) => { l.x += amp * Math.sin(l.z * 260 + l.y * 90); l.z += amp * Math.sin(l.x * 240); return l; };
+  slabC(B, V(0.004, y0 + tw / 2, -0.0515), [0.074, tw * 0.82, 0.004], { round: 0.5, nu: sg(lod, 10, 5), nv: 3, deform: rag(0.0012) });
+  slabC(B, V(0.0435, y0 + tw / 2, -0.014), [0.004, tw * 0.82, 0.07], { round: 0.5, nu: 3, nv: sg(lod, 10, 5), deform: rag(0.0012) });
+  slabC(B, V(-0.0295, y0 + 0.058, -0.014), [tw * 0.8, 0.004, 0.066], { round: 0.5, nu: sg(lod, 8, 4), nv: 3, deform: rag(0.001) });
+}
+
+/**
+ * The slaughtered, unflayed carcass carried to its hook: in the arms (tray — the lamb_dead pose, by kind), lying (free),
+ * or across the shoulders behind the neck (shoulder — clips.js carry_slain: the legs held before the chest). With the
+ * shechitah cut across the throat behind the jaw (the gullet and windpipe severed, Chullin 2:1) and the fleece about it
+ * dark with blood (the blood itself was caught in the mizrak — Zevachim 3:1, Tamid 4:1).
+ */
+function slainCarcass(B, lod, cls, kind) {
+  if (cls === 'shoulder') return slainShoulder(B, lod, kind);
+  lambDead(B, lod, cls, { kind, wound: true });
+}
+/** the cut and the blood (posed rig): a dark-red slit across the throat between neck2 and the head, a soaked patch */
+function throatWound(B, lod, P, rig) {
+  const k = rig.dims.H / 0.66;
+  const n2 = P.worldPos('neck2'), hp = P.worldPos('head'), q = P.worldQ('neck2');
+  const axis = hp.clone().sub(n2).normalize();                                 // along the neck, toward the head
+  const side = V(1, 0, 0).applyQuaternion(q);
+  const ventral = new Vector3().crossVectors(axis, side).normalize();          // ⟂ both; the throat side (down at rest)
+  if (ventral.dot(V(0, -1, 0).applyQuaternion(q)) < 0) ventral.negate();
+  const r = (rig.dims.type === 'goat' ? 0.058 : 0.088) * k;                    // to the surface of the fleece / coat
+  const c = n2.clone().lerp(hp, 0.62).addScaledVector(ventral, r);
+  const basisM = (x, y, z) => new Matrix4().makeBasis(x, y, z);
+  const fr = basisM(side, ventral, axis);
+  S(B, 'liquid', { color: '#3f0a0a', rough: 0.4 });
+  B.ellipsoid(c.clone().addScaledVector(axis, -0.022 * k).addScaledVector(ventral, -0.004), [0.05 * k, 0.012, 0.07 * k], { nu: sg(lod, 12, 6), nv: sg(lod, 6, 3), bone: 0, xf: fr,
+    deform: (l) => { l.x *= 1 + 0.25 * Math.sin(l.z * 60); return l; } });
+  S(B, 'meat', { color: '#6a1712', rough: 0.22 });
+  B.ellipsoid(c.clone().addScaledVector(ventral, 0.004), [0.034 * k, 0.008, 0.009 * k], { nu: sg(lod, 10, 6), nv: 4, bone: 0, xf: fr });
+  S(B, 'fat', { color: '#e4cfc0', rough: 0.3 });                              // the cut windpipe's pale ring
+  B.ellipsoid(c.clone().addScaledVector(ventral, 0.008).addScaledVector(axis, 0.002), [0.008, 0.003, 0.004], { nu: 8, nv: 3, bone: 0, xf: fr });
+}
+
+/** across the shoulders (clips.js carry_slain): the barrel behind the neck, its back to the rear, the fore legs over the
+ *  left shoulder to the left fist, the hind legs over the right to the right fist, the head hanging at the left. Natural
+ *  frame = the shoulder grip's (the right clavicle's anchor, figure axes) */
+function slainShoulder(B, lod, kind) {
+  const man = getRig('man'), d = man.dims, k = d.H / 1.67;
+  const A = V(d.shX * 0.86, man.rest[man.index.uarm_r].y + 0.072 * k, 0.03 * k);
+  const fistAt = (s) => { const [x, y, z] = SLAIN_HANDS[s]; return V(x * k, d.H * y, z * k); };
+  const sc = (getRig(ANIMALS[kind].rig).dims.H / 0.66);
+  // the barrel's middle (figure frame): its belly on the trapezius behind the neck, clear of the back of the head
+  const C = V(0.02 * k, (1.64 + 0.06 * (sc - 1)) * k, (0.3 + 0.08 * (sc - 1)) * k);
+  const dorsal = V(0, 0.2, 0.98).normalize(), long = V(1, 0, 0);
+  const side = new Vector3().crossVectors(dorsal, long).normalize();
+  const base = B.count;
+  let mid = null;
+  const res = bakeAnimal(B, kind, lod, (P, rig) => {
+    P.setQ(P.i('root'), new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(side, dorsal, long)));
+    mid = P.worldPos('pelvis').lerp(P.worldPos('chest'), 0.5);
+    const I = rig.index;
+    for (const [leg, s, dx] of [['fl', 'l', -0.014], ['fr', 'l', 0.014], ['hl', 'r', -0.014], ['hr', 'r', 0.014]]) {
+      const t = fistAt(s).sub(C).add(mid).add(V(dx, -0.03, 0.012));
+      P.twoBone(I[`${leg}_up`], I[`${leg}_lo`], I[`${leg}_ft`], t, V(0, 1, 0.25), V(0, 0, 1));
+      P.rot(`${leg}_ft`, 10, 0, 0);
+    }
+    // the neck and head hang limp at his left (lateral flexion — the lamb lies with its right side up)
+    P.rot('neck', -8, 40, 0); P.rot('neck2', -6, 40, 0); P.rot('head', 0, 30, 0); P.rot('jaw', 10, 0, 0);
+    P.rot('tail', 0, 0, -30); P.rot('ear_l', 0, 0, -20); P.rot('ear_r', 0, 0, -20);
+  }, { tint: [0.3, 0.3, 0.4, 0.4] });
+  if (!res) return;
+  throatWound(B, lod, res.P, res.rig);
+  // into the grip's frame: the barrel's middle onto C, relative to the clavicle anchor
+  const off = C.clone().sub(mid).sub(A);
+  for (let i = base; i < B.count; i++) { B.pos[i * 3] += off.x; B.pos[i * 3 + 1] += off.y; B.pos[i * 3 + 2] += off.z; }
+}
+
+/** a head baked from the live rig of `kind`, hanging nose-down below a carcass on the hook (still on in the flaying —
+ *  Tamid 4:2 "until he reaches the breast; there he cut off the head"): its poll at `at`, the forehead toward −z (the
+ *  carcass's back), the ears hanging toward the ground */
+function hangingHead(B, lod, kind, at) {
+  const rig = getRig(ANIMALS[kind].rig);
+  const { fwd, up, P0 } = quadHeadFrame(rig);
+  const I = rig.index;
+  const headBones = new Set([I.head, I.jaw, I.ear_l, I.ear_r]);
+  const base = B.count;
+  const res = bakeAnimal(B, kind, lod, (P) => { P.rot('ear_l', 70, 0, 25); P.rot('ear_r', 70, 0, -25); P.rot('jaw', 8, 0, 0); }, {
+    tint: [0.3, 0.3, 0.4, 0.4],
+    only: (si, sw, i) => { let w = 0; for (let q = 0; q < 4; q++) if (headBones.has(si[i * 4 + q])) w += sw[i * 4 + q] / 255; return w > 0.6; },
+  });
+  if (!res) return;
+  const side = new Vector3().crossVectors(up, fwd).normalize();
+  const S0 = new Matrix4().makeBasis(side, up, fwd).invert();
+  const T0 = new Matrix4().makeBasis(V(1, 0, 0), V(0, 0, -1), V(0, -1, 0));     // up (forehead) → −z, fwd (nose) → −y
+  const M = new Matrix4().makeTranslation(at.x, at.y, at.z).multiply(T0).multiply(S0).multiply(new Matrix4().makeTranslation(-P0.x, -P0.y, -P0.z));
+  const v = new Vector3();
+  for (let i = base; i < B.count; i++) {
+    v.set(B.pos[i * 3], B.pos[i * 3 + 1], B.pos[i * 3 + 2]).applyMatrix4(M);
+    B.pos[i * 3] = v.x; B.pos[i * 3 + 1] = v.y; B.pos[i * 3 + 2] = v.z;
+  }
+  // the neck's cut stump above it is the carcass's; the throat cut shows on the head's underside (toward +z)
+  S(B, 'meat', { color: '#5e1510', rough: 0.25 });
+  B.ellipsoid(at.clone().add(V(0, -0.02, 0.045 * rig.dims.H / 0.66)), [0.035, 0.01, 0.02], { nu: 8, nv: 4, bone: 0 });
+}
+
+/** the kinds' carcass proportions against the lamb's (rig L, W) and their fell (the goat's leaner, redder) */
+const CARCASS = {
+  lamb: { L: 1, W: 1, alyah: 1 }, ewe: { L: 0.97, W: 0.97, alyah: 0.9 }, ram: { L: 1.22, W: 1.22, alyah: 1.3 },
+  goat: { L: 1.07, W: 0.88, alyah: 0, lean: true }, she_goat: { L: 1.02, W: 0.85, alyah: 0, lean: true },
+};
+
+/**
+ * The hide after flaying, by kind: the sheep's fleece (hide()); the goat's (people-4-fix) a real hide - its outline with
+ * the flaps of the four legs and the neck and the stub of the tail, folded once along the backbone with the long black
+ * hair outside, the two layers lying on one another, the hair hanging over the edges in locks. Natural frame: lying
+ * on the floor, the fold along x.
+ */
+function hideKind(B, lod, kind) {
+  if (kind !== 'goat') { hide(B, lod); return; }
+  const L = 0.3, W0 = 0.2, rf = 0.011, T = 0.003, arc = (Math.PI * rf) / 2, Zf = W0 / 2;
+  // half-width (spine to belly edge) along the hide: the legs' flaps fore (+x) and hind
+  const Wx = (x) => W0 * (1 - 0.18 * (x / L) ** 2) + 0.075 * Math.exp(-(((x - 0.62 * L) / 0.045) ** 2)) + 0.08 * Math.exp(-(((x + 0.6 * L) / 0.05) ** 2));
+  const at = (u, w, inner) => {
+    const xu = lerp(-L, L, u), d = Math.abs(w) * Wx(xu), top = w > 0;
+    const x = lerp(-L - 0.035 * smooth(0.03, 0, d), L + 0.08 * smooth(0.08, 0.02, d), u);   // the tail's stub; the neck
+    const r = inner ? rf - T : rf;
+    let y, z;
+    if (d < arc) { const b = (top ? 1 : -1) * (Math.PI / 2) * (d / arc); y = rf + r * Math.sin(b); z = Zf + r * Math.cos(b); }
+    else {
+      const lay = smooth(arc, arc + 0.07, d);                                   // the upper layer settles onto the lower
+      y = top ? lerp(rf + r, T + 0.0012 + (inner ? 0 : T), lay) : rf - r;
+      z = Zf - (d - arc);
+      if (top && lod === 0) y += 0.0025 * Math.sin(x * 31 + d * 17) * lay;      // the hair's lie
+    }
+    return V(x, y + 0.0015, z);
+  };
+  const nu = sg(lod, 22, 10), nw = sg(lod, 18, 8);
+  S(B, 'coatProp', { color: '#1d1a18', rough: 0.74, pat: PAT.COAT });
+  const C = (A) => V(A.x, 0.005, Math.min(A.z, Zf));          // between the two layers (inside the fold's round)
+  B.grid(nu, nw, (i, j) => { const p = at(i / nu, (2 * j) / nw - 1, false); return { p, u: p.x, v: p.z, w: 0, shade: 0.8 + 0.2 * Math.sin(i * 2.1 + j * 1.3) ** 2 }; },
+    { inside: (A) => C(A) });
+  S(B, 'hide');
+  B.grid(nu, nw, (i, j) => { const p = at(i / nu, (2 * j) / nw - 1, true); return { p, u: p.x, v: p.z, w: 0, shade: 0.7 }; }, { inside: (A) => C(A), invert: true });
+  if (lod > 0) return;
+  // the long hair over the edges: a shag of broad, overlapping locks from under the edge out onto the floor (matte, the
+  // hair's own streaks along each), the free edges of both layers and the ends
+  S(B, 'coatProp', { color: '#1a1715', rough: 0.92, pat: PAT.COAT });
+  const lock = (p, out, len, wid, k) => {
+    const d = V(out.x, 0, out.z).normalize(), sd = V(-d.z, 0, d.x).applyAxisAngle(d, (hashN(k, 7) - 0.5) * 0.5);
+    const a = p.clone().addScaledVector(d, -0.012).add(V(0, 0.0006, 0));
+    B.ribbon([a, p.clone().addScaledVector(d, len * 0.3).add(V(0, 0.0008, 0)), p.clone().addScaledVector(d, len * 0.7).setY(Math.max(0.0018, p.y * 0.35)), p.clone().addScaledVector(d, len).setY(0.0016)],
+      (t) => wid * (1 - 0.45 * t), { side: sd, weights: 0, shade: 0.7 + 0.3 * hashN(k, 8) });
+  };
+  let k = 0;
+  for (const w of [-1, 1]) for (let i = 0; i < 34; i++) {
+    const u = Math.min(1, Math.max(0, (i + 0.5 + (hashN(++k, 2) - 0.5) * 0.8) / 34)), p = at(u, w, false);
+    lock(p, V((hashN(k, 3) - 0.5) * 0.6, 0, -1), 0.022 + 0.03 * hashN(k, 4), 0.022 + 0.012 * hashN(k, 5), k);
+  }
+  for (const u of [0, 1]) for (let j = 0; j < 9; j++) {
+    const w = ((j + 0.5) / 9) * 2 - 1, p = at(u, w, false);
+    lock(p, V(u ? 1 : -1, 0, (hashN(++k, 5) - 0.5) * 0.6), 0.02 + 0.025 * hashN(k, 6), 0.02 + 0.01 * hashN(k, 9), k);
+  }
+}
+
+/**
+ * The fats (eimurim) of a lamb's or kid's shelamim, chatat or asham in a silver basin, as one kohen takes them up to
+ * be salted and burned (Vayikra 3:9–10, 3:14–15; 4:8–9; Rambam MK 6:4): the fat that covers the innards (the caul, a
+ * pale lace), the fat on the innards, the two kidneys in their suet, the lobe of the liver (yoteret) — and of a sheep the
+ * whole fat tail (alyah), cut off near the backbone; a goat's tail is not offered (Vayikra 3:14–15).
+ */
+function eimurim(B, lod, o = {}) {
+  S(B, 'silver');
+  const prof = [[0.11, 0], [0.145, 0.025], [0.162, 0.05], [0.165, 0.056]];
+  vessel(B, [[0.001, 0], ...prof], sg(lod, 24, 12), 0.003);
+  const sheep = o.alyah !== false;
+  const y0 = 0.006;
+  // raw fat is waxy and opaque, not the carcass's thin fell (no red showing through): plain, with a soft mottle; the
+  // kidney and the liver smooth and glossy, not cut muscle (people-4-fix: the marbled 'meat' read as steak)
+  const fatSet = (color, rough) => S(B, 'fat', { color, rough, pat: PAT.NONE });
+  const organ = (color, rough) => S(B, 'meat', { color, rough, pat: PAT.NONE });
+  const mottle = (f, a) => (l) => 1 - a + a * (0.5 + 0.5 * Math.sin(l.x * f + 1.3) * Math.sin(l.z * f * 1.13 + 0.4));
+  // the layout (people-4-fix: everything ≥ 1.5 cm inside the wall): a sheep's alyah fills the back half and the rest
+  // lies in the front half, partly on top of one another; a goat's (no alyah) spread over the floor
+  const L = sheep
+    ? { kid: [[-0.055, -0.058, 0.5], [0.05, -0.064, -0.35]], kidR: [0.036, 0.022, 0.027], liver: [0.072, 0.034, -0.08, -0.72],
+      caul: [-0.012, -0.072, 0.11, 0.06, 0.036], lumps: [[-0.092, 0.0, 0.016], [0.09, -0.004, 0.015], [-0.004, -0.098, 0.013]] }
+    : { kid: [[-0.05, 0.03, 0.4], [0.05, 0.04, -0.3]], kidR: [0.036, 0.022, 0.027], liver: [0.02, 0.022, -0.05, -0.2],
+      caul: [-0.02, -0.02, 0.13, 0.09, 0.03], lumps: [[-0.08, -0.05, 0.016], [0.085, -0.03, 0.015], [0.0, 0.085, 0.014]] };
+  if (sheep) {
+    // the alyah: a broad, heavy pad of fat in two lobes parted by a groove, lying across the basin's back half; at its
+    // root the cut through the tail, the vertebra showing
+    fatSet('#ecdfc5', 0.5);
+    B.ellipsoid(V(0.0, y0 + 0.024, 0.042), [0.1, 0.026, 0.068], { nu: sg(lod, 18, 9), nv: sg(lod, 8, 4), bone: 0, shade: mottle(70, 0.07),
+      // pear-shaped: broad where the fat sagged, narrowing to the root at the cut (+x); two lobes parted by a groove
+      // cut off flat at its root (x 0.085), where the cut face shows
+      deform: (l) => { l.y *= 1 - 0.5 * Math.exp(-((l.z / 0.012) ** 2)) * smooth(-0.01, 0.026, l.y); l.z *= 1 - 0.35 * smooth(-0.04, 0.1, l.x); l.y *= 1 - 0.25 * smooth(0.02, 0.1, l.x); l.x = Math.min(l.x, 0.085); return l; } });
+    S(B, 'meat', { color: '#d9b8a3', rough: 0.3, pat: PAT.NONE });
+    B.ellipsoid(V(0.0855, y0 + 0.024, 0.042), [0.0012, 0.0095, 0.022], { nu: 10, nv: 5, bone: 0 });
+    S(B, 'bone');
+    B.ellipsoid(V(0.0865, y0 + 0.025, 0.042), [0.0012, 0.0045, 0.0055], { nu: 6, nv: 4, bone: 0 });
+  }
+  // the two kidneys in their suet: white, crumbly lumps, the dark glossy kidney showing where the suet was opened
+  const [kx, ky, kz] = L.kidR;
+  for (const [x, z, a] of L.kid) {
+    fatSet('#f4eedf', 0.7);
+    B.ellipsoid(V(x, y0 + ky, z), [kx, ky, kz], { nu: sg(lod, 12, 6), nv: sg(lod, 7, 4), bone: 0, xf: new Matrix4().makeRotationY(a), shade: mottle(160, 0.08),
+      deform: (l) => { l.y += 0.004 * Math.sin(l.x * 160) * Math.sin(l.z * 150); return l; } });
+    organ('#4e1a14', 0.16);
+    B.ellipsoid(V(x + 0.01 * Math.cos(a), y0 + 2 * ky - 0.004, z - 0.01 * Math.sin(a)), [0.021, 0.0105, 0.013], { nu: sg(lod, 10, 6), nv: 5, bone: 0, xf: new Matrix4().makeRotationY(a),
+      shade: (l) => 0.82 + 0.18 * smooth(-0.006, 0.01, l.y) });
+  }
+  // the lobe of the liver (yoteret): smooth, glossy dark red-brown, a thin edge
+  const [lx, ly, lz, la] = L.liver;
+  organ('#45130f', 0.13);
+  B.ellipsoid(V(lx, y0 + ly, lz), [0.048, 0.01, 0.024], { nu: sg(lod, 12, 6), nv: 5, bone: 0, xf: new Matrix4().makeRotationY(la),
+    deform: (l) => { l.y *= 1 - 0.55 * smooth(0.01, 0.024, Math.abs(l.z)); return l; }, shade: (l) => 0.85 + 0.15 * smooth(-0.008, 0.008, l.y) });
+  // the caul (the fat that covers the innards): a thin, pale, lacy sheet folded over the front of the pile
+  const [cx, cz, cw, cd, ch] = L.caul;
+  fatSet('#f6f0e2', 0.45);
+  const n = sg(lod, 12, 5);
+  plateGrid(B, cw, cd, (u, v) => {
+    const x = cx + (u - 0.5) * cw, z = cz + (v - 0.5) * cd;
+    return V(x, y0 + ch * (0.55 + 0.45 * Math.sin(Math.PI * u)) * (0.75 + 0.25 * Math.sin(v * 7)) + 0.004 * Math.sin(u * 17 + v * 9), z);
+  }, n, Math.max(2, n - 4));
+  // the fat stripped from the innards: small irregular lumps between them
+  fatSet('#f1e8d6', 0.55);
+  for (const [x, z, r] of L.lumps) B.ellipsoid(V(x, y0 + 0.012, z), [r * 1.3, r * 0.6, r], { nu: 8, nv: 4, bone: 0, shade: mottle(200, 0.08) });
+}
+
+/** the nazir's basket (sal matzot, Bamidbar 6:15; Menachot 7:2, 76b): ten loaves (challot) of matzah mingled with oil and ten
+ *  wafers (rekikin) anointed with oil, in a shallow willow basket with two handles */
+function salMatzot(B, lod) {
+  S(B, 'reed');
+  vessel(B, [[0.001, 0], [0.15, 0], [0.19, 0.03], [0.205, 0.1], [0.21, 0.108]], sg(lod, 24, 12), 0.008);
+  for (const s of [-1, 1]) curve(B, [V(s * 0.2, 0.095, -0.06), V(s * 0.245, 0.11, 0), V(s * 0.2, 0.095, 0.06)], [0.008, 0.008, 0.008], sg(lod, 6, 4));
+  // two piles: the challot (thick, round, glossy with the oil) and the rekikin (thin wafers, smeared with oil)
+  const nC = sg(lod, 10, 4), nR = sg(lod, 10, 4);
+  S(B, 'bread', { color: '#e4c48f', rough: 0.55 });
+  for (let i = 0; i < nC; i++) {
+    const t = i / nC;
+    B.ellipsoid(V(-0.07 + 0.008 * Math.sin(i * 2.3), 0.025 + (lod === 0 ? i * 0.0075 : i * 0.019), 0.005 * Math.cos(i * 1.7)), [0.065, 0.012, 0.065], { nu: sg(lod, 12, 6), nv: 4, bone: 0,
+      deform: (l) => { l.y *= 1 + 0.2 * Math.sin(l.x * 40 + t * 9) * Math.sin(l.z * 37); return l; } });
+  }
+  S(B, 'bread', { color: '#ead3a6', rough: 0.45 });
+  for (let i = 0; i < nR; i++) {
+    B.ellipsoid(V(0.085 + 0.006 * Math.cos(i * 2.1), 0.02 + (lod === 0 ? i * 0.0042 : i * 0.0105), 0.004 * Math.sin(i * 1.3)), [0.07, 0.003, 0.07], { nu: sg(lod, 12, 6), nv: 3, bone: 0 });
+  }
+}
+
+/** a razor (ta'ar — Bamidbar 6:5, 6:18; the nazir's hair shaved in his chamber, Middot 2:5): a broad iron blade with a
+ *  curved edge on a short bone handle (after the period's razors; reconstruction). Natural frame: the handle along +y */
+function razor(B, lod) {
+  S(B, 'bone', { color: '#e3d8c2', rough: 0.45 });
+  slabC(B, V(0, 0.035, 0), [0.014, 0.07, 0.01], { round: 0.5, nu: sg(lod, 10, 6), nv: 5 });
+  // the blade: one piece, its back straight along the handle's line, the edge swelling in a curve and rounding into a
+  // blunt end; thick at the back (1.8 mm), ground thin to the edge, the honed bevel bright (people-4-fix)
+  S(B, 'iron', { rough: 0.22 });
+  const y0 = 0.072, y1 = 0.142, xb = -0.007;
+  const xe = (t) => xb + 0.018 + 0.016 * Math.sin(Math.PI * t ** 0.9);
+  const at = (u, t, sgn) => {
+    const x = lerp(xb, xe(t), u), y = lerp(y0, y1 - 0.009 * u * u, t);
+    return V(x, y, sgn * (0.0009 * (1 - u) ** 0.8 + 0.00012));
+  };
+  const nu = sg(lod, 6, 3), nt = sg(lod, 10, 5);
+  for (const sgn of [1, -1]) {
+    B.grid(nu, nt, (i, j) => ({ p: at(i / nu, j / nt, sgn), u: i * 0.005, v: j * 0.01, w: 0, shade: i / nu > 0.75 ? 1.25 : 1 }), { inside: V(0, 0.1, -sgn), flip: false });
+  }
+  // the back, the end and the heel: strips joining the two faces
+  const strip = (pts, out) => B.grid(pts.length - 1, 1, (k, j) => ({ p: at(...pts[k], j ? -1 : 1), u: k * 0.005, v: j * 0.002, w: 0 }), { inside: out });
+  strip(Array.from({ length: nt + 1 }, (_, j) => [0, j / nt]), V(0.05, 0.1, 0));                 // the back (spine)
+  strip(Array.from({ length: nu + 1 }, (_, i) => [i / nu, 1]), V(0, 0.0, 0));                     // the end
+  strip(Array.from({ length: nu + 1 }, (_, i) => [i / nu, 0]), V(0, 0.2, 0));                     // the heel
+  S(B, 'bronze', { rough: 0.35 });
+  B.box(V(0.0, y0, 0), [0.017, 0.006, 0.006]);                                                       // the bolster
+}
+
+/**
+ * An earthenware cooking pot (the nazir's shelamim cooked in his chamber, Middot 2:5; Nazir 6:8; "an earthenware vessel
+ * in which it was cooked is broken", Zevachim 11:7): the Jerusalem cooking pot of the period — a thin, red-brown, ribbed
+ * globular body, a short neck with an everted rim, two strap handles from rim to shoulder, the base sooted (after the
+ * pottery of Herodian Jerusalem; reconstruction).
+ */
+const POT_PROF = [[0.001, 0.0], [0.05, 0.004], [0.095, 0.03], [0.118, 0.075], [0.118, 0.11], [0.1, 0.15], [0.068, 0.178], [0.06, 0.186], [0.066, 0.2], [0.072, 0.206]];
+const potSoot = (y) => lerp(0.32, 1, smooth(0.02, 0.1, y));     // the base blackened by the fire
+function clayPot(B, lod) {
+  S(B, 'clay');
+  const prof = POT_PROF;
+  const soot = (th, j) => { const y = prof[Math.min(j, prof.length - 1)][1]; return potSoot(y) * (lod === 0 && j >= 4 && j <= 6 ? 0.94 + 0.06 * Math.sin(j * 9) : 1); };
+  lathe(B, prof, sg(lod, 22, 11), { capA: 'flat', shade: soot, radial: lod === 0 ? (th, j) => 1 + (j >= 4 && j <= 6 ? 0.012 * Math.sin(th * 3 + j) : 0) : null });
+  const inner = prof.slice(5).reverse().map(([r, y]) => [Math.max(0.001, r - 0.004), y]);
+  inner.push([0.03, 0.17]);
+  lathe(B, inner, sg(lod, 22, 11), { invert: true, shade: () => 0.45 });
+  if (lod === 0) for (let i = 0; i < 6; i++) {        // the ribbing of the shoulder
+    const y = 0.112 + i * 0.009, r = lerp(0.116, 0.088, i / 6);
+    curve(B, Array.from({ length: 25 }, (_, a) => V(Math.cos(a / 24 * Math.PI * 2) * (r + 0.0015), y, Math.sin(a / 24 * Math.PI * 2) * (r + 0.0015))), Array(25).fill(0.0016), 4);
+  }
+  for (const s of [-1, 1]) curve(B, [V(s * 0.068, 0.196, 0), V(s * 0.1, 0.19, 0), V(s * 0.112, 0.15, 0), V(s * 0.108, 0.13, 0)], [[0.006, 0.0025], [0.007, 0.0028], [0.007, 0.0028], [0.006, 0.0025]], sg(lod, 6, 4));
+}
+/** the pot's outer profile by arc-length fraction s (0 the base centre … 1 the rim): radius, height, outward normal */
+const POT_S = (() => { const L = [0]; for (let i = 1; i < POT_PROF.length; i++) L.push(L[i - 1] + Math.hypot(POT_PROF[i][0] - POT_PROF[i - 1][0], POT_PROF[i][1] - POT_PROF[i - 1][1])); return L.map((l) => l / L[L.length - 1]); })();
+function potAt(s) {
+  let i = 1;
+  while (i < POT_S.length - 1 && POT_S[i] < s) i++;
+  const [r0, y0] = POT_PROF[i - 1], [r1, y1] = POT_PROF[i];
+  const t = Math.min(1, Math.max(0, (s - POT_S[i - 1]) / (POT_S[i] - POT_S[i - 1])));
+  const dr = r1 - r0, dy = y1 - y0, l = Math.hypot(dr, dy);
+  return { r: lerp(r0, r1, t), y: lerp(y0, y1, t), nr: dy / l, ny: -dr / l };
+}
+/**
+ * One sherd of the cooking pot in the pot's frame: the patch θ0…θ1 × s0…s1 of its wall (full: the whole round of the
+ * base up to s1) with its 4.5 mm thickness - the sooted outer face (and the shoulder's ribbing), the plain inner face,
+ * and the fresh break all round, paler and redder, along an irregular outline (people-4-fix).
+ */
+function sherd(B, lod, o) {
+  const T = 0.0045, full = !!o.full, nu = full ? sg(lod, 16, 8) : sg(lod, 7, 3), nv = sg(lod, 5, 2);
+  const [th0, th1] = full ? [0, Math.PI * 2] : o.th, [s0, s1] = o.s;
+  const jag = (q, k) => 0.17 * Math.sin(q * 8.3 + o.seed * 3.7 + k * 1.9) + 0.09 * Math.sin(q * 21.7 + o.seed * 1.3 + k * 4.1);
+  const at = (i, j, inner) => {
+    const u = i / nu, v = j / nv;
+    const dth = th1 - th0, ds = s1 - s0;
+    const th = full ? th0 + dth * u : lerp(th0 + dth * 0.18 * jag(v, 0), th1 - dth * 0.18 * jag(v, 1), u);
+    const top = full ? 0.17 * Math.sin(u * 6 * Math.PI + o.seed * 3.7) + 0.09 * Math.sin(u * 14 * Math.PI + o.seed * 1.3) : jag(u, 3);  // (periodic round the base)
+    const sv = lerp(full ? s0 : s0 + ds * 0.25 * jag(u, 2), s1 - ds * 0.25 * top, v);
+    const q = potAt(Math.min(1, Math.max(0, sv)));
+    let r = q.r, y = q.y;
+    if (lod === 0 && !inner && y > 0.11 && y < 0.16) r += 0.0011 * (0.5 + 0.5 * Math.sin(((y - 0.112) / 0.009) * Math.PI * 2));
+    if (inner) { r -= T * q.nr; y -= T * q.ny; }
+    return { p: V(Math.cos(th) * r, y, Math.sin(th) * r), y };
+  };
+  const axis = (A) => V(0, Math.min(0.15, Math.max(0.05, A.y + 0.05)), 0);
+  S(B, 'clay');
+  B.grid(nu, nv, (i, j) => { const q = at(i, j, false); return { p: q.p, u: i * 0.01, v: j * 0.01, w: 0, shade: potSoot(q.y) }; }, { inside: axis });
+  B.grid(nu, nv, (i, j) => { const q = at(i, j, true); return { p: q.p, u: i * 0.01, v: j * 0.01, w: 0, shade: 0.72 }; }, { inside: axis, invert: true });
+  // the break: a band round the outline from the outer face to the inner
+  const ring = [];
+  if (!full) { for (let i = 0; i < nu; i++) ring.push([i, 0]); for (let j = 0; j < nv; j++) ring.push([nu, j]); }
+  for (let i = nu; i > 0; i--) ring.push([i, nv]);
+  if (!full) for (let j = nv; j > 0; j--) ring.push([0, j]);
+  ring.push(ring[0]);
+  const c = at(nu / 2, nv / 2, false).p.lerp(at(nu / 2, nv / 2, true).p, 0.5);
+  S(B, 'clay', { color: '#ad6c49', rough: 0.95 });
+  B.grid(ring.length - 1, 1, (k, j) => { const [i, jj] = ring[k]; return { p: at(i, jj, j === 1).p, u: k * 0.004, v: j * 0.004, w: 0, shade: 1.06 }; },
+    { inside: (A) => V(c.x, A.y, c.z) });
+  return potAt((s0 + s1) / 2);
+}
+/** the pot broken (Zevachim 11:7 "an earthenware vessel in which it was cooked is broken"): its sherds on the floor —
+ *  the rim with a strap handle, the sooted round of the base, pieces of the wall and the ribbed shoulder, most lying
+ *  concave side up, one on its edge (people-4-fix: shells cut from the pot's own profile) */
+function clayPotBroken(B, lod) {
+  const pieces = [
+    { th: [-0.5, 0.6], s: [0.58, 1.0], handle: true, at: [0.0, 0.03], yaw: 0.7, lie: 'side', seed: 1 },   // on its side, the handle up
+    { full: true, s: [0, 0.22], at: [-0.15, -0.05], yaw: 0, lie: 'base', seed: 2 },
+    { th: [1.3, 2.15], s: [0.24, 0.52], at: [0.15, 0.08], yaw: 2.2, lie: 'down', seed: 3 },
+    { th: [2.5, 3.2], s: [0.4, 0.72], at: [0.03, -0.15], yaw: 4.1, lie: 'down', seed: 4 },
+    { th: [3.6, 4.3], s: [0.44, 0.78], at: [-0.14, 0.12], yaw: 1.0, lie: 'edge', seed: 5 },
+    { th: [4.8, 5.35], s: [0.26, 0.46], at: [0.19, -0.1], yaw: 5.3, lie: 'up', seed: 6 },
+  ].slice(0, lod === 0 ? 6 : 4);
+  const down = V(0, -1, 0), up = V(0, 1, 0), edge = V(0.75, -0.66, 0).normalize(), side = V(0.55, 0.83, 0).normalize();
+  for (const pc of pieces) {
+    const sub = new MeshBuilder();
+    const mid = sherd(sub, lod, pc);
+    if (pc.handle) {
+      S(sub, 'clay');
+      curve(sub, [V(0.068, 0.196, 0), V(0.1, 0.19, 0), V(0.112, 0.15, 0), V(0.108, 0.13, 0)], [[0.006, 0.0025], [0.007, 0.0028], [0.007, 0.0028], [0.006, 0.0025]], sg(lod, 6, 4));
+    }
+    // lie it down: the outer face's normal at its middle turned down (concave side up), up, or to the side (on edge)
+    const thc = pc.full ? 0 : (pc.th[0] + pc.th[1]) / 2;
+    const n = V(mid.nr * Math.cos(thc), mid.ny, mid.nr * Math.sin(thc)).normalize();
+    const q = new Quaternion().setFromUnitVectors(n, { up, edge, side }[pc.lie] || down);
+    const m = new Matrix4().makeRotationY(pc.yaw).multiply(new Matrix4().makeRotationFromQuaternion(pc.lie === 'base' ? new Quaternion() : q));
+    sub.applyMatrix(m);
+    let minY = Infinity, cx = 0, cz = 0;
+    const nv = sub.count;
+    for (let i = 0; i < nv; i++) { minY = Math.min(minY, sub.pos[i * 3 + 1]); cx += sub.pos[i * 3]; cz += sub.pos[i * 3 + 2]; }
+    sub.applyMatrix(new Matrix4().makeTranslation(pc.at[0] - cx / nv, 0.0005 - minY, pc.at[1] - cz / nv));
+    B.merge(sub);
+  }
+}
+
+/** coins: silver shekels and half-shekels of Tyre (the sanctuary's reckoning is "in the Tyrian maneh", Bekhorot 8:7) and small
+ *  bronze prutot — for the chests (Shekalim 6:5) or the seals (Shekalim 5:4). Natural frame: lying flat, a small spread */
+function coins(B, lod) {
+  const list = [[0, 0.0, 0.0, 0.0125, 'silver'], [0.024, 0.002, 0.012, 0.0105, 'silver'], [-0.02, 0.004, 0.016, 0.0125, 'silver'],
+    [0.012, 0.0045, -0.018, 0.0075, 'bronze'], [-0.012, 0.002, -0.014, 0.0072, 'bronze'], [0.028, 0.0035, -0.008, 0.007, 'bronze']];
+  list.forEach(([x, y, z, r, m], i) => {
+    S(B, m, m === 'bronze' ? { color: '#7e6040', rough: 0.5 } : { rough: 0.32 });
+    // each lying a little tilted on the ones below; the struck faces a touch domed
+    B.transform(new Matrix4().makeRotationFromEuler(new Euler((hashN(i, 7) - 0.5) * 0.16, hashN(i, 8) * 6.28, (hashN(i, 9) - 0.5) * 0.16)).setPosition(x, y, z));
+    lathe(B, [[0.001, 0], [r * 0.96, 0], [r, 0.0009], [r * 0.96, 0.0026], [0.001, 0.0029]], sg(lod, 12, 6), { capA: 'flat', capB: 'flat' });
+    B.transform(null);
+  });
+}
+
+/**
+ * The isaron, the larger of the two dry measures of the Mikdash (Menachot 9:1: the isaron and the half-isaron), holding
+ * a tenth of an ephah (43⅕ eggs ≈ 2.5 l at R' Chaim Naeh, scaled with the amah), heaped with fine flour — "all the
+ * measures in the Mikdash were heaped" (Menachot 9:5). Silver, straight-walled (reconstruction of the form).
+ */
+const ISARON = (() => {
+  const vol = 1.8 * KAV_M3;                     // a kav = 24 eggs, the isaron 43⅕
+  const r = Math.cbrt(vol / (2 * Math.PI));     // a cylinder as deep as it is wide
+  return { r, h: 2 * r };
+})();
+function measure(B, lod) {
+  const { r, h } = ISARON;
+  S(B, 'silver');
+  vessel(B, [[0.001, 0], [r + 0.004, 0], [r + 0.004, 0.006], [r, 0.01], [r, h - 0.006], [r + 0.003, h - 0.002], [r + 0.003, h]], sg(lod, 22, 11), 0.0025);
+  S(B, 'flour');
+  // the heap's flour pattern laid flat from above (people-4-fix: the ellipsoid's own uv wound into a pinwheel at its pole)
+  B.ellipsoid(V(0, h - 0.004, 0), [r - 0.002, r * 0.62, r - 0.002], { nu: sg(lod, 16, 8), nv: 5, bone: 0, lat: [0, 0.5],
+    deform: (l) => { l.y *= 1 + 0.08 * Math.sin(l.x * 70) * Math.sin(l.z * 60); return l; }, uvFn: (q) => [q.x, q.z] });
+}
+
+/** dough being kneaded (people-4-fix — the 'knead' pose's work: the meal offerings, Menachot 5:1–2; the showbread's dough,
+ *  Yoma 38a): about an isaron's worth (≈ 3 l), a soft mound pushed out long by the heels of the hands, its far edge folded
+ *  back over it in a ridge, the dusting of flour round it. Natural frame: lying on the table, its bottom at y 0, the
+ *  kneader at +z (lay it KNEAD.reach before him on the KNEAD.surface). */
+function dough(B, lod) {
+  S(B, 'flour', { color: '#efe4cd', rough: 0.95 });
+  B.ellipsoid(V(0, 0.0008, -0.004), [0.165, 0.0012, 0.135], { nu: sg(lod, 16, 8), nv: 3, bone: 0, lat: [0, 0.5], uvFn: (q) => [q.x, q.z] });
+  S(B, 'bread', { color: '#eadcbf', rough: 0.62, pat: PAT.NONE });
+  B.ellipsoid(V(0, 0.002, 0), [0.13, 0.044, 0.1], { nu: sg(lod, 20, 10), nv: sg(lod, 10, 5), bone: 0,
+    deform: (l) => {
+      if (l.y < 0) l.y *= 0.04;                                                        // flat on the table
+      l.y *= 1 - 0.18 * Math.exp(-(((l.z - 0.03) / 0.03) ** 2)) - 0.12 * Math.exp(-(((l.x / 0.05) ** 2) + ((l.z - 0.035) / 0.035) ** 2));   // the heels' trough
+      l.y += 0.012 * Math.exp(-(((l.z + 0.045) / 0.018) ** 2)) * smooth(0.13, 0.05, Math.abs(l.x)) * smooth(0, 0.02, l.y);           // the fold
+      return l;
+    },
+    shade: (l) => 0.92 + 0.08 * smooth(-0.07, -0.03, l.z) - 0.06 * Math.exp(-(((l.z + 0.06) / 0.008) ** 2)) });
+}
+
+const STACK_POSES = { carry: 'carry_stack', carry_walk: 'carry_stack_walk' };
+const STACK_TRAY = { grip: [-0.19, 0.004, 0], rot: eul(0, 90, 0) };   // (natural +x → his front)
+const SLAIN_GRIPS = { tray: { grip: [0, -0.015, -0.12], rot: ID() }, shoulder: { rot: ID() }, free: { rot: ID(), pos: [0, 0, 0] } };
+export const PEOPLE4_PROPS = {
+  // carried (carry_stack): the loaves' walls toward and away from the carrier (the solid bread before him), held well out
+  // on the forearms so the back horns clear his chest (2–3 cm) — which way the kohanim turned the stacks is not stated ⚙
+  showbread_stack: { big: true, build(B, lod) { showbreadStack(B, lod, 6); }, poses: STACK_POSES, grips: { tray: STACK_TRAY, free: { rot: ID(), pos: [0, 0, 0] } } },
+  showbread_half: { big: true, build(B, lod) { showbreadStack(B, lod, 3); }, poses: STACK_POSES, grips: { tray: STACK_TRAY, free: { rot: ID(), pos: [0, 0, 0] } } },
+  bread_piece: { build(B, lod) { breadPiece(B, lod); }, grips: { palm: { grip: [0, 0, 0], rot: PALM }, fist: { grip: [0.004 * PIECE, (0.006 + 0.625 * ETZ) * PIECE, 0.014 * PIECE], rot: eul(90, 0, 0) }, tray: { grip: [0, 0, 0], rot: ID() }, free: { rot: ID(), pos: [0, -0.006, 0] } } },
+  lamb_slain: { flesh: true, big: true, poses: { carry_shoulder: 'carry_slain', carry_shoulder_walk: 'carry_slain_walk' }, build(B, lod, cls) { slainCarcass(B, lod, cls, 'lamb'); }, grips: SLAIN_GRIPS },
+  ewe_slain: { flesh: true, big: true, poses: { carry_shoulder: 'carry_slain', carry_shoulder_walk: 'carry_slain_walk' }, build(B, lod, cls) { slainCarcass(B, lod, cls, 'ewe'); }, grips: SLAIN_GRIPS },
+  goat_slain: { flesh: true, big: true, poses: { carry_shoulder: 'carry_slain', carry_shoulder_walk: 'carry_slain_walk' }, build(B, lod, cls) { slainCarcass(B, lod, cls, 'goat'); }, grips: SLAIN_GRIPS },
+  she_goat_slain: { flesh: true, big: true, poses: { carry_shoulder: 'carry_slain', carry_shoulder_walk: 'carry_slain_walk' }, build(B, lod, cls) { slainCarcass(B, lod, cls, 'she_goat'); }, grips: SLAIN_GRIPS },
+  hide_goat: { flesh: true, big: true, build(B, lod) { hideKind(B, lod, 'goat'); }, grips: { shoulder: { grip: [0, -0.02, 0], rot: eul(0, 0, 10) }, free: { rot: ID(), pos: [0, 0, 0] } } },
+  eimurim: { flesh: true, build(B, lod) { eimurim(B, lod); }, grips: { tray: { grip: [0, 0, 0], rot: ID() }, palm: { grip: [0, 0, 0], rot: PALM }, free: { rot: ID(), pos: [0, 0, 0] } } },
+  eimurim_goat: { flesh: true, build(B, lod) { eimurim(B, lod, { alyah: false }); }, grips: { tray: { grip: [0, 0, 0], rot: ID() }, palm: { grip: [0, 0, 0], rot: PALM }, free: { rot: ID(), pos: [0, 0, 0] } } },
+  // tray: held out 10 cm and up 2 cm (the 42-cm basket's back wall clear of his belly, its floor on his fingers — people-4-fix)
+  sal_matzot: { big: true, build(B, lod) { salMatzot(B, lod); }, grips: { tray: { grip: [0, -0.02, 0.1], rot: ID() }, shoulder: { grip: [-0.05, 0, 0], rot: eul(0, 0, -12) }, fist: { grip: [0.245, 0.11, 0], rot: eul(0, -90, 0) }, free: { rot: ID(), pos: [0, 0, 0] } } },
+  razor: { build(B, lod) { razor(B, lod); }, grips: { fist: { grip: [0, 0.035, 0], rot: ID() }, free: { rot: eul(0, 0, 90), pos: [0, 0.007, 0] } } },
+  clay_pot: { build(B, lod) { clayPot(B, lod); }, grips: { tray: { grip: [0, 0, 0], rot: ID() }, fist: { grip: [0.11, 0.16, 0], rot: eul(0, -90, 0) }, pour: { grip: [0, 0.17, 0.11], rot: PAN_FIST }, free: { rot: ID(), pos: [0, 0, 0] } } },
+  clay_pot_broken: { build(B, lod) { clayPotBroken(B, lod); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } },
+  coins: { build(B, lod) { coins(B, lod); }, grips: { palm: { grip: [0, -0.003, 0], rot: PALM }, fist: { grip: [0, 0, 0], rot: eul(0, 0, 90) }, free: { rot: ID(), pos: [0, 0, 0] } } },
+  dough: { build(B, lod) { dough(B, lod); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } },
+  measure: { build(B, lod) { measure(B, lod); }, grips: { tray: { grip: [0, 0, 0], rot: ID() }, palm: { grip: [0, 0, 0], rot: PALM }, pour: { grip: [0, ISARON.h * 0.85, ISARON.r + 0.006], rot: PAN_FIST }, free: { rot: ID(), pos: [0, 0, 0] } } },
+};
+// the hung states by kind (origin at the hook, free) — Tamid 4:2; a ram hangs from the middle row (G5)
+for (const kind of ['ram', 'goat', 'ewe', 'she_goat']) {
+  PEOPLE4_PROPS[`${kind}_hung`] = { flesh: true, big: true, build(B, lod) { lambHung(B, lod, kind); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } };
+  PEOPLE4_PROPS[`carcass_flaying_${kind}`] = { flesh: true, big: true, build(B, lod) { carcassFlaying(B, lod, kind); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } };
+  if (kind === 'ram' || kind === 'goat') PEOPLE4_PROPS[`carcass_hung_${kind}`] = { flesh: true, big: true, build(B, lod) { carcassHungBody(B, lod, { opened: true, kind }); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } };
+}
+// the bikkurim basket held by its rims and waved (clips.js wave_basket — Bikkurim 3:6): the right fist on the right rim,
+// its orientation RIMS_HAND; the basket upright when the fist is (rot = (hand rotation · fist→hand)⁻¹)
+{
+  const q = handQ(RIMS_HAND.thumb, RIMS_HAND.fingers);
+  const Q = new Matrix4().makeRotationFromQuaternion(q);
+  const MR = basis([0, -1, 0], [0, 0, -1], [1, 0, 0]);
+  const rot = MR.clone().transpose().multiply(Q.clone().transpose());
+  PROPS.basket.grips.rims = { grip: [RIMS_HAND.rimR + RIMS_HAND.out, RIMS_HAND.rimY, 0], rot };
+  PROPS.basket.poses = { ...(PROPS.basket.poses || {}), wave: 'wave_basket' };
+}
+
 // 'pour' grip (pour_low): the vessel upright in a fist whose thumb points along the pour and whose fingers point down,
 // held at its handle (jugs), neck (flasks) or back rim (basins), so tipping the thumb down pours over the front lip
 const POUR = {
@@ -1709,12 +2281,12 @@ for (const [k, g] of Object.entries(POUR)) {
 // sudar too — the segan's waved cloth is a signal seen across the court (Tamid 7:3: Ben Arza and the Levites act on it)
 export const HELD_VESSELS = new Set(['mizrak_gold', 'mizrak_silver', 'machtah_silver', 'machtah_gold', 'machtah_gold_yk', 'kaf', 'kaf_covered',
   'bazach', 'kuz', 'teni', 'flask', 'bowl', 'cup_gold', 'wine_jug', 'oil_flask', 'solet', 'chavitin', 'entrails_bazach', 'machavat', 'marcheshet',
-  'sudar']);
+  'sudar', 'eimurim', 'eimurim_goat', 'measure', 'clay_pot']);
 
 // props that can stand on the palms in a two-handed carry
 for (const k of ['solet', 'chavitin', 'salt', 'wine_jug', 'marcheshet', 'machavat', 'entrails_bazach', 'cup_gold', 'kaf_covered']) VESSELS.add(k);
 
-Object.assign(PROPS, OFFERING_PROPS, SERVICE_PROPS);
+Object.assign(PROPS, OFFERING_PROPS, SERVICE_PROPS, PEOPLE4_PROPS);
 
 // ---------------------------------------------------------------------------------------------- placement
 const M_R = basis([0, -1, 0], [0, 0, -1], [1, 0, 0]);   // fist frame → right hand-local
@@ -1727,7 +2299,7 @@ function gripOf(name, cls) {
   if (cls === 'free') return { grip: [0, 0, 0], rot: ID(), pos: [0, 0, 0] };
   // vessels carried in both hands sit upright on the palms (natural frame, base on the hands)
   if (cls === 'tray') return VESSELS.has(name) ? { grip: [0, 0, 0], rot: ID(), pos: [0, 0, 0] } : null;
-  if (cls === 'shoulder' || cls === 'palm' || cls === 'pour' || cls.startsWith('pillow')) return null;
+  if (cls === 'shoulder' || cls === 'palm' || cls === 'pour' || cls === 'rims' || cls.startsWith('pillow')) return null;
   return { grip: [0, 0, 0], rot: ID(), pos: [0, 0, 0] };
 }
 
@@ -1739,7 +2311,7 @@ function placementMatrix(name, cls, side) {
   const m = new Matrix4().makeTranslation(-g.grip[0], -g.grip[1], -g.grip[2]);
   m.premultiply(g.rot);
   if (cls === 'free') m.premultiply(new Matrix4().makeTranslation(...g.pos));
-  else if (cls === 'fist' || cls === 'palm' || cls === 'pour' || !gripOf(name, cls)) m.premultiply(side === 'l' ? M_L : M_R);
+  else if (cls === 'fist' || cls === 'palm' || cls === 'pour' || cls === 'rims' || !gripOf(name, cls)) m.premultiply(side === 'l' ? M_L : M_R);
   else if (side === 'l' && !cls.startsWith('pillow')) m.premultiply(new Matrix4().makeScale(-1, 1, 1));
   return m;
 }
@@ -1817,7 +2389,7 @@ export function propAttach(name, cls, side, rig) {
   let out = null;
   if (rig.kind === 'human') {
     const d = rig.dims, k = d.H / 1.67, sgn = side === 'l' ? -1 : 1;
-    if (real === 'fist' || real === 'palm' || real === 'pour') {
+    if (real === 'fist' || real === 'palm' || real === 'pour' || real === 'rims') {
       const b = rig.index[`hand_${side}`];
       const g = gripOffset(rig, side);
       const r = rig.rest[b];

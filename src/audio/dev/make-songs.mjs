@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Generates src/audio/songs-text.js: for every verse the Levites sing (the seven daily psalms, the Shabbat
-// afternoon songs and Ha'azinu) the caption Hebrew and a syllabified chant transliteration.
+// afternoon songs, Ha'azinu and the bikkurim song, Psalm 30) the caption Hebrew and a syllabified chant transliteration.
 //
 //   node src/audio/dev/make-songs.mjs [--cache DIR]        (fetches from Sefaria when DIR has no copy)
 //
@@ -28,6 +28,8 @@ const TEXTS = [
   ['Psalms.24', 'Ps 24', 1, true], ['Psalms.48', 'Ps 48', 1, true], ['Psalms.82', 'Ps 82', 1, true], ['Psalms.94', 'Ps 94', 1, true],
   ['Psalms.81', 'Ps 81', 1, true], ['Psalms.93', 'Ps 93', 1, true], ['Psalms.92', 'Ps 92', 1, true],
   ['Exodus.15.1-18', 'Ex 15', 1, false], ['Numbers.21.17-20', 'Nu 21', 17, false], ['Deuteronomy.32.1-43', 'Dt 32', 1, false],
+  // the bikkurim song (Bikkurim 3:4; render-audio-3)
+  ['Psalms.30', 'Ps 30', 1, true],
 ];
 
 // Elohim / El used of judges or of other gods: not a Divine Name, left as written (occurrence index among the
@@ -79,7 +81,9 @@ async function fetchText(ref) {
 
 /** raw verse → clean pointed text: qere for ketiv, no paragraph marks, no paseq/sof pasuq/joiners */
 function clean(v) {
-  return v.replace(/[א-ת]+ \[([^\]]+)\]/g, '$1').replace(/\((?:פ|ס)\)/g, '').replace(/[׀׃‍͏]/g, '')
+  // "ketiv [qere]"; a ketiv joined by maqaf to the next word carries it in both ("מיורדי־[מִיָּֽרְדִי־] בֽוֹר", Ps 30:4):
+  // the qere then joins the next word without the space
+  return v.replace(/[א-ת]+־? ?\[([^\]]+)\] ?/g, (m, q) => (q.endsWith('־') ? q : `${q} `)).replace(/\((?:פ|ס)\)/g, '').replace(/[׀׃‍͏]/g, '')
     // a furtive patach typed under the yod before a final ayin (הוֹפִֽיַע, Ps 94:1) belongs to the ayin
     .replace(/יַע(?=\s|$)/g, 'יעַ')
     .replace(/\s+/g, ' ').trim();

@@ -49,13 +49,15 @@ export const TEXT = {
  * low over it ⚙ (no bent-pour pose: the bow's stoop). Returns { down: the stoop begins, pour: the coals fall }.
  */
 export function stoopPour(S, A) {
-  // turned ≈ 30° left of the pan, so the stooping right hand (≈ 0.25 m right, 0.4 m ahead) is over it
-  const h = (headingOf(A.ledge[0], A.ledge[1], A.goldOnLedge[0], A.goldOnLedge[1]) + 330) % 360;
+  // "he emptied them into the gold one" (Tamid 5:5), bent to the pan on the ledge: people's pour_low — the fist comes
+  // 0.13 m right of him and 0.5 m ahead, so he turns ≈ 15° left of the gold pan; the silver pan tipped over its lip
+  const h = (headingOf(A.ledge[0], A.ledge[1], A.goldOnLedge[0], A.goldOnLedge[1]) + 345) % 360;
   const down = S.now();
-  S.act(0.04, { pose: 'bow', phase: [0, 0.4], heading: h });
-  S.act(0.07, { pose: 'bow', phase: 0.4, heading: h });
-  const pour = S.now() - 0.04;
-  S.act(0.04, { pose: 'bow', phase: [0.7, 1], heading: h });
+  S.act(0.04, { pose: 'pour_low', phase: [0, 0.3], heading: h });
+  S.act(0.05, { pose: 'pour_low', phase: [0.3, 0.55], heading: h });
+  const pour = S.now() - 0.03;
+  S.act(0.03, { pose: 'pour_low', phase: [0.55, 0.62], heading: h });
+  S.act(0.05, { pose: 'pour_low', phase: [0.62, 1], heading: h });
   return { down, pour };
 }
 
@@ -110,10 +112,12 @@ export function buildMorning(ctx, P, W, D) {
   B1.until(ic0, { pose: 'stand', heading: 95, sway: 6, seed: 11 });
   B1.walk([H.stoneFoot], { speed: 1.0 });
   B1.shift(H.stoneTop, 0.07, { heading: 180 });
+  // each lamp dressed (Tamid 3:9): the old wick and oil out, a new wick — people's tend_lamp, his right hand at the lamp's
+  // mouth, the kuz in his left; the lamps are dark by morning (lit in the afternoon — world-3), so no flame in his hand
   for (const i of [6, 5, 4, 3, 2]) {
     const L = lampAt(i);
-    B1.act(0.06, { pose: 'stand', face: L });
-    B1.act(0.3, { pose: 'kemitzah', phase: { cycle: 3.3, off: rand(SEED, 'lp', i) }, face: L });
+    B1.act(0.06, { pose: 'stand', face: L, props: [null, 'kuz'] });
+    B1.act(0.3, { pose: 'tend_lamp', phase: { cycle: 1 / 0.3, off: rand(SEED, 'lp', i) }, face: L });
     D.lampOut[i] = B1.now() - 0.12;
   }
   B1.act(0.06, { pose: 'stand', heading: 0 });
@@ -182,9 +186,19 @@ export function buildMorning(ctx, P, W, D) {
     P1.walk([A.belowLedge], { speed: 0.9 });
     P1.shift(A.ledge, 0.05, { heading: 0 });
   } else {
-    P1.act(0.05, { pose: 'stand', heading: 200 });
-    P1.act(0.24, { pose: 'bow', phase: [0.05, 0.5], heading: 200 });   // the psachter turned over them ⚙ (no prop yet)
-    P1.act(0.07, { pose: 'bow', phase: [0.7, 1], heading: 0 });
+    // "on Shabbat he would turn the psachter over them" (Tamid 5:5): down from the ledge to the great copper vessel kept
+    // below it ⚙, turned mouth down over the coals that fell there (people's psachter → psachter_inverted), back up
+    const ps = A.psachter;
+    P1.shift(A.belowLedge, 0.05);
+    P1.walk([[ps[0] + 0.9, ps[1] + 0.35, AZ]], { speed: 0.8 });
+    P1.act(0.05, { pose: 'bow', phase: [0, 0.45], face: ps });
+    const tTurn = P1.now() + 0.05;
+    P1.act(0.14, { pose: 'bow', phase: 0.48, face: ps });
+    P1.act(0.07, { pose: 'bow', phase: [0.7, 1], face: ps });
+    P1.walk([A.belowLedge], { speed: 0.9 });
+    P1.shift(A.ledge, 0.05, { heading: 0 });
+    win(D, 'psachter', cp0 - 1, tTurn, ps, 75);
+    win(D, 'psachter_inverted', tTurn, LK0, ps, 75);
   }
   P1.act(0.07, { pose: 'bow', phase: [0, 0.42], heading: 0 });
   const tSilverBack = P1.now();
@@ -211,11 +225,13 @@ export function buildMorning(ctx, P, W, D) {
   I1.walk([[tableE[0], A.onSilver(3)[1], AZ]], { speed: 0.8 });
   I1.act(0.07, { pose: 'bow', phase: [0, 0.4], heading: 270 });
   const tKafUp = I1.now();
-  I1.act(0.06, { pose: 'bow', phase: [0.7, 1], props: ['kaf', null] });
-  I1.walk([[207.0, 283.6, AZ], [203.4, 284.5, AZ], [203.4, 296.0, AZ], [202.4, 299.2, AZ]], { speed: STROLL, pose: 'carry_walk' });
-  I1.until(tGoldTaken + 0.04, { pose: 'carry', face: A.ledge, sway: 8, seed: SEED + 3 });
+  // the kaf with the bazach full of incense in it, its cover and the cloth over it (Tamid 5:4 — people's kaf_covered),
+  // carried by its handle in one hand
+  I1.act(0.06, { pose: 'bow', phase: [0.7, 1], props: ['kaf_covered', null] });
+  I1.walk([[207.0, 283.6, AZ], [203.4, 284.5, AZ], [203.4, 296.0, AZ], [202.4, 299.2, AZ]], { speed: STROLL, pose: 'walk' });
+  I1.until(tGoldTaken + 0.04, { pose: 'stand', face: A.ledge, sway: 8, seed: SEED + 3 });
   const gI = [199.4, 323.6, AZ];
-  I1.walkBy(mg - 0.08, [[200.6, 302.4, AZ], way.sw, [198.6, 319.4, AZ], gI], { pose: 'carry_walk' });
+  I1.walkBy(mg - 0.08, [[200.6, 302.4, AZ], way.sw, [198.6, 319.4, AZ], gI], { pose: 'walk' });
   F1.walk(toTable.map((p, i) => (i > 4 ? [p[0] + 0.8, p[1] + 0.6, p[2]] : p)), { speed: 1.2 });
   F1.walk([[204.6, 289.0, AZ], [204.5, 298.6, AZ]], { speed: STROLL });
   F1.until(tGoldTaken + 0.08, { pose: 'stand', face: A.ledge, sway: 10, seed: SEED + 4 });
@@ -223,7 +239,7 @@ export function buildMorning(ctx, P, W, D) {
   F1.walkBy(mg - 0.05, [[201.4, 303.0, AZ], [199.9, 309.6, AZ], [197.2, 318.8, AZ], gF]);
   add(D, 'gazit', 3, I1);
   add(D, 'servers', SRV.F, F1);
-  win(D, 'kaf', W.VS[1], tKafUp, A.onSilver(3), 90);
+  win(D, 'kaf_covered', W.VS[1], tKafUp, A.onSilver(3), 90);
 
   // ------------------------------------------------------------------------------------------------ 3. the magrefah
   // A comes back from the Gazit; as the others arrive he takes up the magrefah and throws it down (Tamid 5:6) ⚙
@@ -337,7 +353,7 @@ export function buildMorning(ctx, P, W, D) {
   B2.walk([...upSteps(P, 324.6, 328.6), ...intoKodesh(P, 330.0), [143, 328.6, HE], H.stoneFoot], { speed: WALK });
   B2.shift(H.stoneTop, 0.07, { heading: 180 });
   B2.act(0.06, { pose: 'stand', face: lampAt(0) });
-  B2.act(0.32, { pose: 'kemitzah', phase: { cycle: 3.3 }, face: lampAt(0) });
+  B2.act(0.32, { pose: 'tend_lamp', phase: { cycle: 1 / 0.3 }, face: lampAt(0) });
   D.lampOut[0] = B2.now() - 0.12;
   const tLamp0 = D.lampOut[0];
   B2.act(0.06, { pose: 'stand', heading: 0 });
@@ -386,18 +402,18 @@ export function buildMorning(ctx, P, W, D) {
 
   // I and F wait on the third rovad (the north part is the brothers')
   const uI = [r2.X, 321.6, r2.Z], uF = [r2.X, 323.5, r2.Z];
-  I1.until(ih0 + 0.62, { pose: 'carry', heading: 270, sway: 6, seed: SEED + 11 });
-  I1.walk([uI], { speed: STAIR, pose: 'carry_walk' });
+  I1.until(ih0 + 0.62, { pose: 'stand', heading: 270, sway: 6, seed: SEED + 11 });
+  I1.walk([uI], { speed: STAIR, pose: 'walk' });
   F1.until(ih0 + 0.66, { pose: 'stand', heading: 270, sway: 6, seed: SEED + 12 });
   F1.walk([uF], { speed: STAIR });
 
   // ------------------------------------------------------------------------------------------------ 5. the incense
   const kt = { enter: k0 + 0.1, give: k0 + 0.6, pour: k0 + 0.84, warn: k0 + 1.0, out: k0 + 1.14, hakter: k0 + 1.45, withdraw: k0 + 1.62, burn: k0 + 2.3 };
   const iAt = H.goldEast, fAt = [H.goldEast[0] + 0.5, H.goldEast[1] + 1.9, HE];
-  I1.until(kt.enter, { pose: 'carry', heading: 270 });
-  I1.walk([[topX - 0.6, 322.6, HE], ...intoKodesh(P, 330.2), iAt], { speed: WALK, pose: 'carry_walk' });
-  I1.until(kt.give, { pose: 'carry', heading: 270 });
-  I1.act(0.1, { pose: 'carry', face: fAt });
+  I1.until(kt.enter, { pose: 'stand', heading: 270 });
+  I1.walk([[topX - 0.6, 322.6, HE], ...intoKodesh(P, 330.2), iAt], { speed: WALK, pose: 'walk' });
+  I1.until(kt.give, { pose: 'stand', heading: 270 });
+  I1.act(0.1, { pose: 'stand', face: fAt });
   const tKafDown = layIncense(I1, kt, iAt, fAt, H);
   const tBurn = kt.burn + 0.08;
   const kI = [137.9, 330.2, HE];
@@ -406,7 +422,7 @@ export function buildMorning(ctx, P, W, D) {
   I1.shift([iAt[0] + 1.0, iAt[1] - 0.5, HE], 0.07, { heading: 220 });
   I1.act(0.06, { pose: 'bow', phase: [0, 0.42] });
   const tKafUp2 = I1.now();
-  I1.act(0.05, { pose: 'bow', phase: [0.7, 1], props: ['kaf', null] });
+  I1.act(0.05, { pose: 'bow', phase: [0.7, 1], props: ['kaf_covered', null] });    // the cover put back on ⚙ (Tamid 7:2)
   const tIOut = I1.now();
   win(D, 'kaf', tKafDown, tKafUp2, [iAt[0] - 0.2, iAt[1] - 1.1, HE], 90);
   F1.until(kt.enter + 0.05, { pose: 'stand', heading: 270 });
@@ -452,9 +468,9 @@ export function buildMorning(ctx, P, W, D) {
   toSouth(B2, 1, kt.withdraw + 0.05);
   toSouth(P1, 2, kt.withdraw + 0.08);
   toSouth(F1, 3, kt.withdraw + 0.11);
-  I1.walk([[150, 329.4, HE], ...outOfKodesh(P, 322.4), [topX - 0.6, 321.6, HE]], { speed: WALK, pose: 'carry_walk' });
-  I1.walk([[steps.foot, 321.2, AZ], [P.apronX, 320.9, AZ], way.sw, [200.6, 302.4, AZ], south[4]], { speed: 1.0, pose: 'carry_walk' });
-  I1.act(0.05, { pose: 'carry', heading: 20 });
+  I1.walk([[150, 329.4, HE], ...outOfKodesh(P, 322.4), [topX - 0.6, 321.6, HE]], { speed: WALK, pose: 'walk' });
+  I1.walk([[steps.foot, 321.2, AZ], [P.apronX, 320.9, AZ], way.sw, [200.6, 302.4, AZ], south[4]], { speed: 1.0, pose: 'walk' });
+  I1.act(0.05, { pose: 'stand', heading: 20 });
 
   // the gate curtain hangs closed while he is alone inside; it is lifted for each who passes (Tamid 7:1) ⚙
   const cur = D.curtain;
@@ -556,10 +572,12 @@ export function buildMorning(ctx, P, W, D) {
   // the five: Teni, Kuz, the fire-pan, the bazach, the kaf with its cover (Tamid 7:2)
   const five = [[A2, [r0.X, 321.4, r0.Z]], [B2, [r0.X, 323.5, r0.Z]], [P1, [r1.X, 321.4, r1.Z]], [I1, [r1.X, 323.5, r1.Z]], [F1, [r2.X, 321.8, r2.Z]]];
   five.forEach(([S, sp], j) => {
-    S.until(bk0 - 1.6 + 0.08 * j, { pose: 'carry', heading: 20, sway: 5, seed: SEED + 160 + j });
-    S.walk([way.sw, [P.apronX, 320.9, AZ], [steps.foot, sp[1], AZ], sp], { speed: 0.9, pose: 'carry_walk' });
-    S.act(0.06, { pose: 'carry', heading: 90 });
-    S.until(bk1 - 0.7 + 0.05 * j, { pose: 'carry', heading: 90, sway: 2, seed: SEED + 170 + j });
+    // (the kaf "and its cover in one hand", Tamid 7:2: by the handle — stand / walk)
+    const [hp, wp] = S === I1 ? ['stand', 'walk'] : ['carry', 'carry_walk'];
+    S.until(bk0 - 1.6 + 0.08 * j, { pose: hp, heading: 20, sway: 5, seed: SEED + 160 + j });
+    S.walk([way.sw, [P.apronX, 320.9, AZ], [steps.foot, sp[1], AZ], sp], { speed: 0.9, pose: wp });
+    S.act(0.06, { pose: hp, heading: 90 });
+    S.until(bk1 - 0.7 + 0.05 * j, { pose: hp, heading: 90, sway: 2, seed: SEED + 170 + j });
   });
   if (sab) {
     const kgB = [topX, ax + 0.5, HE], sgB = [topX, ax - 2.1, HE];
@@ -625,12 +643,13 @@ export function buildMorning(ctx, P, W, D) {
   const dsh = A.deshenStand;
   const vesselsBack = (S, k, name, ash) => {
     const path = [[steps.foot, 321.0, AZ], [P.apronX, 320.9, AZ], way.sw, [200.4, 302.0, AZ], [203.4, 296.0, AZ], [203.4, 279.5, AZ]];
+    const cw = S === I1 ? 'walk' : 'carry_walk';
     if (ash) {
       S.walk([...path, [207.5, 275.4, AZ], [224.6, 273.6, AZ], [dsh[0] + 0.4 * k, dsh[1] - 0.6 + 0.9 * k, AZ]], { speed: 1.0, pose: 'carry_walk' });
       S.act(0.04, { pose: 'carry', heading: 270 });
       S.act(0.14, { pose: 'pour', phase: [0, 1], heading: 270 });
       S.walk([[224.6, 273.6, AZ], [207.5, 275.4, AZ], [tableE[0], A.onSilver(k)[1], AZ]], { speed: 1.0, pose: 'carry_walk' });
-    } else S.walk([...path, [207.0, 283.6, AZ], [tableE[0], A.onSilver(k)[1], AZ]], { speed: 1.0, pose: 'carry_walk' });
+    } else S.walk([...path, [207.0, 283.6, AZ], [tableE[0], A.onSilver(k)[1], AZ]], { speed: 1.0, pose: cw });
     S.act(0.06, { pose: 'bow', phase: [0, 0.4], heading: 270 });
     const tDown = S.now();
     S.act(0.05, { pose: 'bow', phase: [0.7, 1], props: null });

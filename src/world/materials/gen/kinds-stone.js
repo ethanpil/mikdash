@@ -110,10 +110,10 @@ void surf(vec2 p, inout S s) {
   float band = (1.0 - outF) * (1.0 - smoothstep(0.0, uP2.z, rh - b.ly + 0.006 * nB.y));
   s.alb = col;
   // roughness: pointed boss 0.78-0.84, combed margin 0.52-0.58 (this step is also the detail layer's margin mask),
-  // a plain fine-dressed face 0.62
+  // a plain fine-dressed face 0.65 (world-4: the top of fine-dressed ashlar's 0.5-0.65, render-env-2-fix)
   float rB = 0.8 + 0.035 * nC.w + 0.03 * pit;
   float rM = 0.55 + 0.025 * nC.w;
-  float rP = 0.62 + 0.03 * nC.w;
+  float rP = 0.65 + 0.02 * nC.w;
   float rF = uP1.x > 0.5 ? mix(rM, rB, boss) : rP;
   s.rough = mix(0.86, rF + (ct == 1 ? 0.015 : 0.0) - 0.03 * vm + 0.02 * shel + 0.02 * streak, face);
   s.ao = mix(0.8, 1.0, face) * (1.0 - uP2.w * band) * (1.0 - 0.06 * pit);

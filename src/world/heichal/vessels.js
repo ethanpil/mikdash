@@ -2,7 +2,8 @@
 // and the two showbread tables of the Ulam. All in site amot; positions from site.js (heichal.menorah / shulchan /
 // mizbach-hazahav / ulam.tables); forms from report Part IX §38 (the Menorah's 18-tefach ladder, Menachot 28b with
 // Rambam BhB 3:1–11; the Shulchan's support set, Menachot 11:4–7, Rambam BhB 3:12–15) and the locks #11, #12, #30–#33.
-import { BufferGeometry, Float32BufferAttribute, CatmullRomCurve3, Vector3 } from 'three';
+import { BufferGeometry, Float32BufferAttribute, CatmullRomCurve3, Vector3, Group, Mesh } from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { AMAH } from '../../core/units.js';
 import { applyWorldUV } from '../geom.js';
 import { B, Mesher, lathe, latheAlong, tube, add3, sub3, scl3, len3, cross3 } from './lib/geo.js';
@@ -306,11 +307,33 @@ function halfReed(m, xc, y0, y1, zb, r, n) {
   for (const a of [0, Math.PI]) m.quadH(P(ri, a, y0), P(r, a, y0), P(r, a, y1), P(ri, a, y1), [0, 0, -1]);
 }
 
-/** the Shulchan with its twelve loaves in two stacks of six, the 28 kanim, 4 snifin, 2 bazichin of levonah */
+/**
+ * The Shulchan with its twelve loaves in two stacks of six, the 28 kanim, 4 snifin, 2 bazichin of levonah.
+ * The bread, the kanim between the loaves and the two bazichin with their levonah are one movable (world-4),
+ * 'heichal.shulchan.bread', for the Shabbat exchange (Menachot 11:7: "four kohanim enter, two with the two stacks in
+ * their hands and two with the two bazichin … the incoming stand in the north and the outgoing in the south; these
+ * draw and those set down, the handbreadth of this one beside the handbreadth of that"):
+ *   userData.slide(f, south = true): 0 = on the table … 1 = drawn its full width (plus the horns) off the table to the
+ *     south (south false: to the north — the new bread is set on from the north); open(f) = slide(f) in the last
+ *     direction (south by default), and
+ *     openGroup('south' | 'north', f) for sim.door(id).setGroup; openAmount / amount = f;
+ *   show(bool) hides it (the bread in the kohanim's hands as props); kanim(bool) shows or hides the reeds in the stacks
+ *     (pulled out on Friday and laid along the table — Menachot 11:6 — the laid-out reeds are not drawn). Defaults: 0, on
+ *     the table, shown, kanim in. The snifin stay with the table.
+ * 'heichal.shulchan.bread.incoming' (world-4-fix) is a second set with the same userData, sharing the geometry: the new
+ *   bread, so the table is never bare. Defaults: slide(1, false) (off the table to the north), hidden, kanim out. The
+ *   exchange: incoming.show(true); for f 0 → 1, bread.slide(f, true) and incoming.slide(1 − f, false) (always D apart,
+ *   handbreadth beside handbreadth); then bread.show(false) once the old is in the kohanim's hands. At the end the two
+ *   are identical, so the sim may swap back: bread.slide(0) + show(true) + kanim(false), incoming.show(false) and
+ *   slide(1, false).
+ */
 export function buildShulchan(H) {
   const { kit, el, d } = H;
   const e = el('heichal.shulchan');
   const b = e.box;
+  // the movable's parts (world geometry): bread, the reeds, the bowls and their resin
+  const breadGeos = [], bowlGeos = [], resinGeos = [];
+  const km = new Mesher();
   // gold over acacia (Shemot 25:24; the Shulchan "is wood", Chagigah 26b; Part V §13 table): the plated sheet
   const top = goldTable(H, b, 'gold_plate');
   // the loaves (Menachot 11:4–5 / 96a; locks #31–#32): 10 × 5 tefachim, laid across the 5-tefach width and folded up
@@ -338,20 +361,19 @@ export function buildShulchan(H) {
         const n = kanim[i];
         for (let k = 0; k < n; k++) {
           const kx = sx0 + ((k + 1) * (sx1 - sx0)) / (n + 1);
-          if (d >= 1) halfReed(gm, kx, yS - 0.05, yN + 0.05, wallTop, rK, [3, 4, 6, 8][d]);
-          else gm.box([kx - rK, yS - 0.05, wallTop], [kx + rK, yN + 0.05, wallTop + rK]);
+          if (d >= 1) halfReed(km, kx, yS - 0.05, yN + 0.05, wallTop, rK, [3, 4, 6, 8][d]);
+          else km.box([kx - rK, yS - 0.05, wallTop], [kx + rK, yN + 0.05, wallTop + rK]);
         }
         z = wallTop + rK;
       }
       const L = loafGeometry(lx0, lx1, yS + jy, yN + jy, z, d, R);
-      kit.geo(L.body, breadKey, { collide: false, castShadow: true });
-      kit.geo(L.caps, breadKey, { collide: false, castShadow: true });
+      breadGeos.push(L.body, L.caps);
       // the horns: four, at the walls' ends — the dough drawn up from the wall's end and curled outward, 7 etzba'ot
       // long, thick at the root and tapering (the loaf above rests on the kanim between them)
       for (const hx of [lx0 + L.tw * 0.9, lx1 - L.tw * 0.9]) for (const [hy, ey] of [[yS + jy - L.lean + L.tw * 0.45, -1], [yN + jy + L.lean - L.tw * 0.45, 1]]) {
         const zt = z + L.hw - 0.8 * ETZ;
         const pts = [[0, 0], [0.9, 1.9], [2.2, 3.6], [3.6, 4.4], [4.8, 4.5]].map(([o, u]) => [hx, hy + ey * o * ETZ, zt + u * ETZ]);
-        kit.geo(taperTube(pts, 1.15 * ETZ, 0.18 * ETZ, [3, 8, 12, 14][d], [4, 6, 8, 10][d]), breadKey, { collide: false, castShadow: true });
+        breadGeos.push(taperTube(pts, 1.15 * ETZ, 0.18 * ETZ, [3, 8, 12, 14][d], [4, 6, 8, 10][d]));
       }
       wallTop = z + L.hw;
       inner = z + L.tw;
@@ -374,12 +396,80 @@ export function buildShulchan(H) {
   for (const st of stackTops) {
     const r = 0.11, yc = (yN + yS) / 2;
     const z0 = st.floor;
-    kit.geo(lathe([[0, 0], [r * 0.45, 0], [r * 0.5, 0.02], [r, 0.09], [r * 1.05, 0.11], [r * 0.95, 0.11], [r * 0.85, 0.07], [0, 0.07]], [st.x, yc, z0], [8, 12, 16, 20][d]), 'gold_vessel', { collide: false });
+    bowlGeos.push(lathe([[0, 0], [r * 0.45, 0], [r * 0.5, 0.02], [r, 0.09], [r * 1.05, 0.11], [r * 0.95, 0.11], [r * 0.85, 0.07], [0, 0.07]], [st.x, yc, z0], [8, 12, 16, 20][d]));
     // a heaped handful of resin tears (a fistful each — kemitzah)
-    const heap = lathe([[0, 0], [0.085, 0], [0.08, 0.05], [0.06, 0.1], [0.035, 0.14], [0, 0.155]], [st.x, yc, z0 + 0.07], [6, 8, 12, 14][d]);
-    kit.geo(heap, resinKey, { collide: false, castShadow: false });
+    resinGeos.push(lathe([[0, 0], [0.085, 0], [0.08, 0.05], [0.06, 0.1], [0.035, 0.14], [0, 0.155]], [st.x, yc, z0 + 0.07], [6, 8, 12, 14][d]));
   }
+  shulchanBread(H, { breadGeos, breadKey, reeds: km.count ? km.geometry() : null, bowlGeos, resinGeos, resinKey, depth: yN - yS });
   return { top, stackTops };
+}
+
+/** the movables 'heichal.shulchan.bread' and 'heichal.shulchan.bread.incoming' (see buildShulchan) */
+function shulchanBread(H, { breadGeos, breadKey, reeds, bowlGeos, resinGeos, resinKey, depth }) {
+  const { kit } = H;
+  const clean = (g) => {
+    let q = g.index ? g.toNonIndexed() : g;
+    if (!q.attributes.normal) q.computeVertexNormals();
+    if (!q.attributes.uv) applyWorldUV(q);
+    for (const k of Object.keys(q.attributes)) if (!['position', 'normal', 'uv'].includes(k)) q.deleteAttribute(k);
+    return q;
+  };
+  const group = new Group();
+  group.name = 'heichal.shulchan.bread';
+  const part = (geos, key, name, cast = true) => {
+    const list = geos.filter(Boolean).map(clean);
+    if (!list.length) return null;
+    const mesh = new Mesh(mergeGeometries(list, false), kit.material(key));
+    mesh.name = `heichal.shulchan.bread:${name}`;
+    mesh.castShadow = cast;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+  };
+  part(breadGeos, breadKey, 'loaves');
+  part([reeds], 'gold_vessel', 'kanim');
+  part(bowlGeos, 'gold_vessel', 'bazichin');
+  part(resinGeos, resinKey, 'levonah', false);
+  // the slide: the stacks' own N–S depth plus the horns (≈ 5 etzba'ot each side), so at 1 nothing is over the table.
+  // The outgoing at slide(f, true) and the incoming at slide(1 − f, false) stay exactly D apart, horn tip by horn tip:
+  // "the handbreadth of this one beside the handbreadth of that" (Menachot 11:7)
+  const D = (depth + 0.45) * AMAH;
+  // the incoming set: a copy sharing the geometry and materials (no memory; draw calls only while shown), hidden off
+  // the table to the north, its kanim out — it is set down on Shabbat, and the kanim go back in after it (Menachot
+  // 11:6) (world-4-fix). Cloned before either gets its userData (clone() would copy it through JSON).
+  const incoming = group.clone();
+  breadMovable(H, group, 'heichal.shulchan.bread', D, { f: 0, south: true, shown: true, kanim: true });
+  breadMovable(H, incoming, 'heichal.shulchan.bread.incoming', D, { f: 1, south: false, shown: false, kanim: false });
+}
+
+/** register one bread set as a movable (userData: slide / open / openGroup / show / kanim; see buildShulchan) */
+function breadMovable(H, group, id, D, init) {
+  group.name = id;
+  for (const m of group.children) m.name = `${id}:${m.name.split(':').pop()}`;
+  const reedMesh = group.children.find((m) => m.name === `${id}:kanim`) || null;
+  const ud = {
+    kind: 'bread', id, f: 0, south: true, shown: true, kanimIn: true,
+    get amount() { return ud.f; },
+    get openAmount() { return ud.f; },
+    slide(f, south = true) {
+      const v = Math.min(1, Math.max(0, +f || 0));
+      ud.f = v;
+      ud.south = south !== false;
+      group.position.set(0, 0, (ud.south ? 1 : -1) * v * D);       // site −Y (south) = world +z
+      group.updateMatrixWorld(true);
+      return v;
+    },
+    open(f) { return ud.slide(f, ud.south); },
+    openGroup(g, f) { return ud.slide(f, g !== 'north'); },
+    show(v) { ud.shown = v !== false; group.visible = ud.shown; return ud.shown; },
+    kanim(v) { ud.kanimIn = v !== false; if (reedMesh) reedMesh.visible = ud.kanimIn; return ud.kanimIn; },
+  };
+  group.userData = ud;
+  ud.slide(init.f, init.south);
+  ud.show(init.shown);
+  ud.kanim(init.kanim);
+  H.kit.add(group);
+  H.ctx.movables.set(id, group);
 }
 
 /** the golden altar: 1 × 1 × 2 with a zer round its top and four horns (Shemot 30:1–5) */

@@ -58,14 +58,37 @@ export function places(ctx) {
   const xT1 = wb.max[0] - 0.45;
   const wheelX = xT1 - 0.16 - 0.25;                       // the hand-wheel's plane, inside the east trestle (kiyor.js)
   const axleY = (wb.min[1] + wb.max[1]) / 2;
-  const spigot = (deg, r = KR + 0.85) => [KC[0] + Math.cos(deg / 57.2958) * r, KC[1] + Math.sin(deg / 57.2958) * r, Z];
+  // people's windlass stations (src/people/clips.js WINDLASS / WINDLASS_RAISE, amot): the operator 1.146 amot west of
+  // the wheel's plane, facing it (heading 90), 1.5625 amot south of the axle to lower the kiyor (the south rim pulled
+  // down) or north of it to raise it (the north rim pulled down)
+  const st = { westOfWheel: 1.146, fromAxle: 1.5625 };
+  // people's 'kiddush' crouches over the hands on the insteps, the head ≈ 0.4 m before the feet (src/people/clips.js):
+  // facing the laver his head would be in its bowl, the spigot at his neck. He stands turned 50° off the radial, his
+  // right side to the laver, the outer edge of his right hand and its instep under the nozzle (r 2.3 amot). A capsule
+  // check over people's joints at sizes 0.95–1.05 (choreo-adopt-fix): head ≥ 15 cm off the bowl, shoulder ≥ 2 cm off the
+  // pipe and nozzle, ≥ 4 cm from the man at the next spigot ⚙ — in the spigot's frame (amot): u out from the axis, v
+  // counter-clockwise; the facing is inward turned `turn` degrees counter-clockwise
+  const KID = { u: KR * 1.15 + 0.454, v: -0.084, turn: 50 };
+  const kiddushAt = (deg) => {
+    const a = deg / 57.2958, c = Math.cos(a), s = Math.sin(a);
+    const f = (deg + 180 + KID.turn) / 57.2958;
+    return { p: [KC[0] + c * KID.u - s * KID.v, KC[1] + s * KID.u + c * KID.v, Z], h: (((90 - f * 57.2958) % 360) + 360) % 360 };
+  };
+  const kidSpots = [-45, -15, 15, 45, 135, 165, 195, 225].map(kiddushAt);
   const kiyor = {
     c: KC, r: KR, wheel: wb, wheelX, axleY,
     // he works the hand-wheel from inside the frame, beside its plane, hands on the pegs of its lower rim ⚙
     wheelStand: [wheelX - 0.8, axleY - 1.05, Z],
-    east: spigot(0, KR + 0.95),
-    // twelve spigots (Yoma 37a): the court is open east and west of the laver (steps to the north, the frame south)
-    spots: [-48, -16, 16, 48, 132, 164, 196, 228].map((a) => spigot(a)),
+    lowerStand: [wheelX - st.westOfWheel, axleY - st.fromAxle, Z],
+    raiseStand: [wheelX - st.westOfWheel, axleY + st.fromAxle, Z],
+    // the axle is 2.6 amot up (1.25 m): to reach the north station from the frame's open south side he ducks under it
+    underAxle: [[wheelX - st.westOfWheel, axleY - 1.15, Z], [wheelX - st.westOfWheel, axleY + 1.0, Z]],
+    // the twelve spigots (Yoma 37a) at 15° + k·30° (world/altar/kiyor.js): each man stands with his right hand and foot
+    // under one (people's 'kiddush', Zevachim 19b), turned off the radial as KID above; east/spots are where he stands,
+    // eastHeading/spotHeadings the way he faces
+    east: kiddushAt(15).p, eastHeading: kiddushAt(15).h,
+    // the court is open east and west of the laver (steps to the north, the frame south)
+    spots: kidSpots.map((k) => k.p), spotHeadings: kidSpots.map((k) => k.h),
   };
 
   // ---- the silver pan's niche, Beit HaDeshen, the tables west of the ramp

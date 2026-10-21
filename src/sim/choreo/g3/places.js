@@ -6,6 +6,8 @@
 // never costs a physics query (the per-frame budget is < 0.5 ms for the whole group). Spots marked ⚙ are staging
 // choices (docs/decisions/choreo-g3-sanctuary.md).
 
+import { AMAH } from '../../../core/units.js';
+
 const C2 = (b) => [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2];
 
 export function places(ctx) {
@@ -87,9 +89,10 @@ export function places(ctx) {
     top, ZT, wk, ramp, incPile, cupsC, niche, ledgeB, silver, marble, deshen,
     // the SW corner of the walkway, where tamid-morning hands the Kohen Gadol over on Shabbat (g2/tamid.js swAt) ⚙
     pourAt: [wk.W + 0.4, wk.S + 0.6, ZT],
-    // where the pourer stands to pour: facing south over the cups (Sukkah 4:9 — the wine's cup by the SW horn), the
-    // 'pour' pose's right hand (≈ 0.35 amah right, 0.8 forward) over their centre ⚙
-    pourStand: [cupsC[0] + 0.35, cupsC[1] + 0.82, ZT],
+    // where the pourer stands to pour: facing south over the cups (Sukkah 4:9 — the wine's, the eastern of the two, by
+    // the SW horn); people's pour_low brings the fist 0.13 m right (west) of him and 0.5 m ahead at the bottom, the jug's
+    // lip ≈ 0.1 m beyond it ⚙
+    pourStand: [cupsC[0] + 0.25 + 0.13 / AMAH, cupsC[1] + 0.6 / AMAH, ZT],
     // the segan "on the corner" with the sudarin (Tamid 7:3), beside the pourer, toward the court ⚙
     seganAt: [wk.W + 3.2, wk.S + 0.5, ZT],          // east of the pourer, clear of the incense pile ⚙
     // the wine handed to the Kohen Gadol by the man who brought it up (Shabbat) ⚙
@@ -99,8 +102,12 @@ export function places(ctx) {
     // the silver pan's niche, reached stooping from the ledge of the yesod ramp (as terumat-hadeshen does) ⚙
     ledge: [nx, ledgeB.max[1] - 0.55, ledgeB.max[2]],
     belowLedge: [nx, ledgeB.min[1] - 0.6, AZ],
-    // the gold pan set on the ledge, under the fire-pan man's hands as he stoops (≈ 0.5 m before his feet) ⚙
-    goldOnLedge: [nx - 1.0, ledgeB.max[1] - 0.95, ledgeB.max[2]],
+    // the gold pan set on the ledge where the silver pan's lip comes as he bends to empty it (people's pour_low: the fist
+    // 0.5 m ahead, the pan's mouth ≈ 0.12 m beyond) ⚙
+    goldOnLedge: [nx - 1.2, ledgeB.max[1] - 1.03, ledgeB.max[2]],
+    // Shabbat: the psachter that is turned over the scattered coals (Tamid 5:5), kept by the yesod ramp's ledge below the
+    // gold pan ⚙ place
+    psachter: [nx - 0.9, ledgeB.min[1] - 1.0, AZ],
     // the amah's open channel west of the yesod ramp (Middot 3:2; Tamid 5:5 — the spilled coals swept into it)
     amahX: 199.6,
     // the vessels on the silver table (Shekalim 6:4), south → north ⚙

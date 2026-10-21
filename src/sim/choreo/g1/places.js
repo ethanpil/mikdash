@@ -45,8 +45,9 @@ export function mokedPlaces(ctx) {
   M.elders = [];
   for (const k of [0, 1, 2]) for (const side of [-1, 1]) {
     const t = tread(side, k);
-    // a little toward the tread's open edge: the arm on the riser side clears the next ledge up
-    M.elders.push({ at: [t.X - 0.18 * side, ky + 0.25, t.Z], h: 180, pose: 'lie', side, k, floor: [side < 0 ? i.min[0] + 3.6 : i.max[0] - 3.6, ky + 1.6 + 0.9 * k, Z] });
+    // centred on the 1-amah tread: people's ledge bedding (folded_garments_ledge) assumes it, and 'lie' now rests the
+    // hands on the belly, elbows at the sides (people-3-fix)
+    M.elders.push({ at: [t.X, ky + 0.25, t.Z], h: 180, pose: 'lie', side, k, floor: [side < 0 ? i.min[0] + 3.6 : i.max[0] - 3.6, ky + 1.6 + 0.9 * k, Z] });
   }
   // what the floor must keep clear of (plan-check.mjs tests every sleeping spot against these): the hearth's kerb
   // (r 1.35) and its star logs (to r 1.7), the chel door's two 5-amah leaves swinging into the hall (the Ish Har
@@ -111,14 +112,15 @@ export function mokedPlaces(ctx) {
  * heading. Measured from the people clips (src/people/dev/joints.mjs man sleep|lie 0.5) and the folded_garments mat
  * (1.95 × 0.78 m) and mantle cover of the pillow grips (src/people/props.js foldedGarments / cover):
  *   sleep: mat from 0.24 m behind the toes … the head end; cover to 0.25 m behind the back; the left hand 0.69 m forward
- *   lie:   mat from 0.25 m beyond the feet … past the head (1.71 m); cover ± 0.42 m across
+ *   lie:   mat from 0.25 m beyond the feet … past the head (1.71 m); cover ± 0.42 m across; the body ± 0.55 amah
+ *          (hands on the belly, elbows at the sides - people-3-fix)
  *   kneel / stand: the body (and kneeling shins) only
  * body: the figure itself (what a walker must not pass through). head: the head's centre.
  */
 export const FOOT = {
   sleep: { r: [-0.5, 3.6], f: [-0.55, 1.45], body: { r: [0.3, 3.5], f: [-0.3, 1.45] }, head: [3.05, 0.2] },
-  lie: { r: [-0.88, 0.88], f: [-3.65, 0.56], body: { r: [-0.75, 0.75], f: [-3.45, 0.1] }, head: [0, -3.1] },
-  lie_bare: { r: [-0.75, 0.75], f: [-3.45, 0.1], body: { r: [-0.75, 0.75], f: [-3.45, 0.1] }, head: [0, -3.1] },
+  lie: { r: [-0.88, 0.88], f: [-3.65, 0.56], body: { r: [-0.55, 0.55], f: [-3.45, 0.1] }, head: [0, -3.1] },
+  lie_bare: { r: [-0.55, 0.55], f: [-3.45, 0.1], body: { r: [-0.55, 0.55], f: [-3.45, 0.1] }, head: [0, -3.1] },
   kneel: { r: [-0.55, 0.55], f: [-0.75, 0.6], body: { r: [-0.55, 0.55], f: [-0.75, 0.6] }, head: [0, 0.1] },
 };
 

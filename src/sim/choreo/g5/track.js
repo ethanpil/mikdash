@@ -13,6 +13,23 @@ export const one = (a = 0, b = null) => ({ k: 'one', a, b });
 export const cyc = (p, o = 0) => ({ k: 'cyc', p, o });
 export const fix = (v) => ({ k: 'fix', v });
 
+/**
+ * The animal's states by kind (people-4): slain and unflayed in the arms (carry_lamb) — no ram (too heavy to carry so:
+ * the live figure is carried as before ⚙); hung by the hock, being flayed, dressed (origin at the hook); its hide; its
+ * fats in a silver basin (a goat has no alyah — Vayikra 3:9, 3:14–15). A flayed ewe or she-goat is drawn as the lamb's
+ * or the goat's.
+ */
+export const CARCASS = {
+  lamb: { slain: 'lamb_slain', hung: 'lamb_hung', flaying: 'carcass_flaying', dressed: 'carcass_hung', hide: 'hide', eimurim: 'eimurim' },
+  ewe: { slain: 'ewe_slain', hung: 'ewe_hung', flaying: 'carcass_flaying_ewe', dressed: 'carcass_hung', hide: 'hide', eimurim: 'eimurim' },
+  ram: { slain: null, hung: 'ram_hung', flaying: 'carcass_flaying_ram', dressed: 'carcass_hung_ram', hide: 'hide', eimurim: 'eimurim' },
+  goat: { slain: 'goat_slain', hung: 'goat_hung', flaying: 'carcass_flaying_goat', dressed: 'carcass_hung_goat', hide: 'hide_goat', eimurim: 'eimurim_goat' },
+  she_goat: { slain: 'she_goat_slain', hung: 'she_goat_hung', flaying: 'carcass_flaying_she_goat', dressed: 'carcass_hung_goat', hide: 'hide_goat', eimurim: 'eimurim_goat' },
+};
+export const carcassOf = (sp) => CARCASS[sp] || CARCASS.lamb;
+/** people's 'wave' / 'wave_under' cycle (rate 0.4/s) in minutes: the tenufah pair share one phase */
+export const WAVE_P = 1 / (0.4 * 60);
+
 export class Track {
   /** role: 'O' | 'A' | 'K1' …; pool: the actor pool name; extra fields are kept (e.g. seed, label) */
   constructor(inst, role, pool, extra = {}) {

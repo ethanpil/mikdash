@@ -26,7 +26,14 @@ export function buildFire(A) {
   const TR = tp.radius, TH = tp.height;
   const piles = Object.fromEntries(maar.params.piles.map((p) => [p.id, p]));
   const ASH = 'ash';
-  const BARK = 'timber_rough', END = A.mat('timber_pile_end', 'timber_rough');
+  // bark: one species per billet — fig, walnut and oil-tree (pine), Tamid 2:3 (world-4); the species come from their own
+  // random stream, so nothing else on the altar moves. The incense pile is "fine fig wood" (Tamid 2:5). Detail 0 (low)
+  // draws every billet in walnut, as the courts do there: one bark mesh in the batch and one in the pile, not three
+  // each (world-4-fix; walnut is timber_rough's set, baked on low anyway).
+  const BARKS = ['timber_bark_fig', 'timber_bark_walnut', 'timber_bark_pine'].map((k) => A.mat(k, 'timber_rough'));
+  const BARK = BARKS[1], END = A.mat('timber_pile_end', 'timber_rough');
+  const RS = rng(A.seed ^ 0x51ec7);
+  const species = (sp) => (d === 0 ? 1 : sp ?? Math.min(2, Math.floor(RS() * 3)));
   // charred wood and charcoal: the materials task's timber_charred once it exists; meanwhile the darkest non-metal key
   // (glass_dark: charcoal's satin black) — never the fresh bark, which hid the burnt core
   const CHAR = A.mat('timber_charred', A.mat('glass_dark', BARK));
@@ -84,8 +91,8 @@ export function buildFire(A) {
 
   // ---------------------------------------------------------------- wood
   const seg = [5, 7, 8, 10][d], rows = d === 0 ? 1 : d === 1 ? 2 : 3;
-  const sides = [], caps = [], chars = [];
-  /** a billet from site point a to b (amot), radius r; o: { char, taper (radius factor at a), squash, roll };
+  const sides = [[], [], []], caps = [], chars = [];
+  /** a billet from site point a to b (amot), radius r; o: { char, taper (radius factor at a), squash, roll, species };
    *  rec: a great-pile billet record that takes the geometry (the movable pile) instead of the static lists;
    *  rnd: the random stream (the pile's extension billets draw from their own, so nothing else moves) */
   const addLog = (a, b, r, o = {}, rec = null, rnd = R) => {
@@ -94,8 +101,9 @@ export function buildFire(A) {
     const g = logGeometry(len, rb * (o.taper ?? 1), rb * (0.88 + 0.12 * rnd()), seg, rnd, d >= 2 ? 0.07 : 0.04, rows, o.squash ?? 1, o.roll ?? 0);
     g.side.applyMatrix4(matrix);
     g.caps.applyMatrix4(matrix);
-    if (rec) { rec.char = !!o.char; rec.side = g.side; rec.caps = g.caps; pileRecs.push(rec); return; }
-    if (o.char) chars.push(g.side, g.caps); else { sides.push(g.side); caps.push(g.caps); }
+    const sp = species(o.species);
+    if (rec) { rec.char = !!o.char; rec.sp = sp; rec.side = g.side; rec.caps = g.caps; pileRecs.push(rec); return; }
+    if (o.char) chars.push(g.side, g.caps); else { sides[sp].push(g.side); caps.push(g.caps); }
   };
   const pileRecs = [];
   const section = (rnd = R) => (rnd() < 0.35 ? { squash: 0.55 + 0.15 * rnd(), roll: rnd() * Math.PI } : {});   // split or round
@@ -259,7 +267,7 @@ export function buildFire(A) {
 
   // the second pile (incense coals, Tamid 2:5) and the third (keeping the fire, Yoma 45a): cribs of gizrin over a
   // heap of coals, the billets a shortened amah long, laid end to end where the crib is wider than one
-  const crib = (box, r, perLayer, layers, charredLayers) => {
+  const crib = (box, r, perLayer, layers, charredLayers, sp = null) => {
     const [x0, y0, z0] = box.min, [x1, y1] = box.max;
     const runs = (a0, a1) => {                           // billets end to end across [a0, a1]
       const k = Math.max(1, Math.round((a1 - a0) / (GL + 0.06))), w = (a1 - a0) / k, out = [];
@@ -271,7 +279,7 @@ export function buildFire(A) {
       const ew = j % 2 === 0;
       for (let i = 0; i < perLayer; i++) {
         const t = (i + 0.5) / perLayer;
-        const o = { char: j < charredLayers, ...section() };
+        const o = { char: j < charredLayers, ...section(), ...(sp != null ? { species: sp } : {}) };
         if (ew) { const y = y0 + 0.15 + t * (y1 - y0 - 0.3) + jitter(0.04); for (const [a, b] of runs(x0 + 0.05, x1 - 0.05)) addLog([a, y, z], [b, y + jitter(0.05), z], r * (0.8 + 0.4 * R()), o); }
         else { const x = x0 + 0.15 + t * (x1 - x0 - 0.3) + jitter(0.04); for (const [a, b] of runs(y0 + 0.05, y1 - 0.05)) addLog([x, a, z], [x + jitter(0.05), b, z], r * (0.8 + 0.4 * R()), o); }
       }
@@ -281,7 +289,7 @@ export function buildFire(A) {
     B.geo(polarField(cx, cy, [3, 4, 6, 8][d], [10, 16, 22, 28][d], (t) => rr * (1 + 0.08 * Math.sin(3 * t)), (r01) => z0 - 0.02 + 0.32 * (1 - r01 * r01)), ASH, { collide: true, cast: true });
     return { cx, cy, rr, z0 };
   };
-  const cribI = crib(piles.incense.box, 0.08, 5, 4, 2);          // fine fig wood
+  const cribI = crib(piles.incense.box, 0.08, 5, 4, 2, 0);       // fine fig wood (Tamid 2:5)
   const cribK = crib(piles['kiyum-haesh'].box, 0.11, 6, 4, 1);
 
   // ---------------------------------------------------------------- charcoal and half-burnt chunks (detail ≥ 1)
@@ -317,7 +325,7 @@ export function buildFire(A) {
   }
 
   const merged = (list) => (list.length ? mergeGeometries(list, false) : null);
-  for (const [list, key] of [[sides, BARK], [caps, END], [chars, CHAR]]) {
+  for (const [list, key] of [[sides[0], BARKS[0]], [sides[1], BARKS[1]], [sides[2], BARKS[2]], [caps, END], [chars, CHAR]]) {
     const g = merged(list);
     if (g) B.geo(g, key, { collide: false, cast: true });
   }
@@ -343,12 +351,14 @@ export function buildFire(A) {
     const recs = order.map((i) => pileRecs[i]);
     const N = recs.length;
     const vc = (g) => (g.index ? g.index.count : g.attributes.position.count);
-    const mats = [[BARK, (r) => (r.char ? [] : [r.side])], [END, (r) => (r.char ? [] : [r.caps])], [CHAR, (r) => (r.char ? [r.side, r.caps] : [])]];
+    const mats = [...BARKS.map((key, sp) => [key, (r) => (r.char || r.sp !== sp ? [] : [r.side])]),
+      [END, (r) => (r.char ? [] : [r.caps])], [CHAR, (r) => (r.char ? [r.side, r.caps] : [])]];
     const pile = new Group();
     pile.name = 'altar.maarachah.great.pile';
     const parts = [];
     for (const [key, pick] of mats) {
       const list = [], start = new Int32Array(N), count = new Int32Array(N);
+      if (!recs.some((r) => pick(r).length)) continue;
       let c = 0;
       recs.forEach((r, k) => { start[k] = c; for (const g of pick(r)) { list.push(g); c += vc(g); } count[k] = c - start[k]; });
       if (!list.length) continue;
@@ -358,7 +368,7 @@ export function buildFire(A) {
       index.setUsage(DynamicDrawUsage);
       geo.setIndex(index);
       const mesh = new Mesh(geo, ctx.mats.get(key));
-      mesh.name = `altar.maarachah.great.pile:${key}`;
+      mesh.name = `altar.maarachah.great.pile:${key}`;   // keys: the three barks, the ends, the char
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       pile.add(mesh);
@@ -485,9 +495,11 @@ export function buildFire(A) {
   const cen = (b) => [(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2];
   // the incense pile is a bed of coals with low flames; the third pile a modest fire
   const [ix, iy] = cen(piles.incense.box);
-  A.fires.push(ctx.addFire({ id: 'altar.maarachah.incense', kind: 'pyre', pos: [ix, iy, Z + 0.4], size: 0.75, intensity: 0.6, schedule: 'always', smoke: true }));
+  // the two small piles light nothing of their own (light: false — render-env-2): occluded by the great pile's light,
+  // they only took two of the budgeted fire-light slots; flames, glow and smoke stay
+  A.fires.push(ctx.addFire({ id: 'altar.maarachah.incense', kind: 'pyre', pos: [ix, iy, Z + 0.4], size: 0.75, intensity: 0.6, schedule: 'always', smoke: true, light: false }));
   const [kx, ky] = cen(piles['kiyum-haesh'].box);
-  A.fires.push(ctx.addFire({ id: 'altar.maarachah.kiyum', kind: 'pyre', pos: [kx, ky, Z + 0.5], size: 1.15, intensity: 0.75, schedule: 'always', smoke: true }));
+  A.fires.push(ctx.addFire({ id: 'altar.maarachah.kiyum', kind: 'pyre', pos: [kx, ky, Z + 0.5], size: 1.15, intensity: 0.75, schedule: 'always', smoke: true, light: false }));
 
   return { gTop, tapuachTop: tapZ(tcx, tcy) };
 }

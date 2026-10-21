@@ -116,9 +116,9 @@ export function buildShell(H) {
   // F1: the plated throat (one amah in from the Kodesh face) ends on these planes
   const f1Cuts = [kod.max[1] + 1, kod.min[1] - 1];
   const cuts = [[], [H.gateSurround.y0, H.gateSurround.y1, ...f1Cuts], [H.reliefZ0, H.reliefZ1, el('heichal.gate.great').box.max[2], H.gateSurround.z1]];
-  const bandKey = (type, k) => `herodian_wall_inner|ub:${type}:${k}`;
+  const bandKey = (type, k) => `herodian_wall_inner_courses|ub:${type}:${k}`;
   // the white courses between the lintels: the herodian set's white row with its joints, true scale
-  const lstoneKey = (z0) => `herodian_wall_inner|uz:${z0}`;
+  const lstoneKey = (z0) => `herodian_wall_inner_courses|uz:${z0}`;
   const f1Throat = (Y) => Math.abs(Y - kod.max[1]) < 1 + 1e-6 || Math.abs(Y - kod.min[1]) < 1 + 1e-6;
   const bandAt = (Z) => {
     const r = Z - H.bandBase;
@@ -136,7 +136,7 @@ export function buildShell(H) {
           if (up(f)) return 'gold_plate';
           if (down(f)) return d >= 1 ? null : 'gold_plate';            // coffered kiyur ceiling built separately
           if (s.room === 'kodesh' && f.axis === 0 && f.dir < 0 && Math.abs(X - kod.max[0]) < 1e-3
-            && Z < H.doorTopZ && Math.abs(Y - AY) > H.gateHalfW) return 'herodian_wall_inner';   // behind the doors (Middot 4:1)
+            && Z < H.doorTopZ && Math.abs(Y - AY) > H.gateHalfW) return 'herodian_wall_inner_courses';   // behind the doors (Middot 4:1)
           if (Z < H.reliefZ0 || Z > H.reliefZ1) return 'gold_plate';
           return 'gold_relief|relief';
         }
@@ -145,7 +145,7 @@ export function buildShell(H) {
           if (up(f)) return 'paving_azarah';
           if (down(f)) return 'marble_white';
           if (f.axis === 0 && f.dir > 0 && Y > H.gateSurround.y0 && Y < H.gateSurround.y1 && Z < H.gateSurround.z1) return 'marble_white';
-          return 'herodian_wall_inner';
+          return 'herodian_wall_inner_courses';
         case 'aliyah': return up(f) ? 'marble_white' : down(f) ? 'plaster' : 'ashlar_plain';
         case 'mesibah': return up(f) ? 'steps_stone' : 'ashlar_plain';
         case 'water': return up(f) ? 'paving_azarah' : 'ashlar_plain';
@@ -170,19 +170,19 @@ export function buildShell(H) {
     if (s && s.t === 'recess') {
       if (a.t === 'beam') return 'oak_milah|grainY';
       if (f.axis === s.faceAxis && f.dir === s.faceDir) return bandKey('c', s.k);
-      return 'herodian_wall_inner';
+      return 'herodian_wall_inner_courses';
     }
     if (s && s.t === 'lrecess') {
       if (a.t === 'beam') return 'oak_milah|grainY';
       if (a.t === 'lstone') return lstoneKey(a.z0);
-      return vertical(f) ? bandAt(Z) : 'herodian_wall_inner';
+      return vertical(f) ? bandAt(Z) : 'herodian_wall_inner_courses';
     }
     // exterior faces
     switch (a.t) {
-      case 'otem': return up(f) ? 'paving_azarah' : 'herodian_wall';
+      case 'otem': return up(f) ? 'paving_azarah' : 'herodian_wall_courses';
       case 'beam': return 'oak_milah|grainY';
       case 'lstone': return lstoneKey(a.z0);
-      case 'ulam': return up(f) ? 'roof_plaster' : vertical(f) ? bandAt(Z) : 'herodian_wall_inner';
+      case 'ulam': return up(f) ? 'roof_plaster' : vertical(f) ? bandAt(Z) : 'herodian_wall_inner_courses';
       case 'parapet': {
         if (up(f)) return 'marble_white';
         const isOuter = f.axis === a.outer.axis && f.dir === a.outer.dir;

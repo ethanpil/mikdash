@@ -35,8 +35,9 @@ import { buildWatch } from './watch.js';
 /** leaf styles by name: panelled gold plate, cast Corinthian bronze, cedar boards. `unit`: one canonical leaf
  *  [w, h] scaled per instance (cedar doors of one height class share one draw call). */
 const LEAF = {
-  goldLeaf: { style: 'gate', key: 'gold_plate', t: 0.4, unit: [4.98, 20] },   // every gate leaf is half a 10-amah gate
-  bronzeLeaf: { style: 'bronze', key: 'bronze_corinthian', t: 0.45 },
+  // astragal: the leaves of the gates' pairs carry a lapping meeting astragal (lib/kit.js leafGeometry o.astragal)
+  goldLeaf: { style: 'gate', key: 'gold_plate', t: 0.4, unit: [4.98, 20], astragal: true },   // every gate leaf is half a 10-amah gate
+  bronzeLeaf: { style: 'bronze', key: 'bronze_corinthian', t: 0.45, astragal: true },
   bronzeWicket: { style: 'bronze', key: 'bronze_corinthian', t: 0.3 },
   cedarTall: { style: 'plank', key: 'cedar_v', t: 0.32, unit: [5, 20] },     // the 20-amah EN corner-chamber doors
   cedarLeaf16: { style: 'plank', key: 'cedar_v', t: 0.32, unit: [4, 16] },
@@ -62,8 +63,9 @@ export async function build(ctx) {
   C.curtains = new Curtains(kit, 'parochet', 6, 20);
   C.leafSet = (name, w, h) => {
     const s = LEAF[name];
-    if (s.unit) return C.doors.leafSet(`${s.style}:${s.key}:${s.unit.join('x')}`, s.key, () => leafGeometry(s.unit[0], s.unit[1], s.t, s.style, C.d));
-    return C.doors.leafSet(`${name}:${w.toFixed(2)}x${h.toFixed(2)}`, s.key, () => leafGeometry(w, h, s.t, s.style, C.d));
+    const lo = { astragal: !!s.astragal }, tag = s.astragal ? ':a' : '';
+    if (s.unit) return C.doors.leafSet(`${s.style}:${s.key}:${s.unit.join('x')}${tag}`, s.key, () => leafGeometry(s.unit[0], s.unit[1], s.t, s.style, C.d, [], lo));
+    return C.doors.leafSet(`${name}:${w.toFixed(2)}x${h.toFixed(2)}${tag}`, s.key, () => leafGeometry(w, h, s.t, s.style, C.d, [], lo));
   };
   const leafScale = (name, w, h) => { const u = LEAF[name].unit; return u ? [w / u[0], h / u[1], 1] : null; };
   C.doorPair = (id, name, s0, s1, axis, at, z0, into, o = {}) => {
@@ -85,8 +87,8 @@ export async function build(ctx) {
   C.screen = (id, left, along, span, h, label) => C.screens.add(id, { left, along, span, h, open: 1, label });
   /** marble door-case on a court face of a chamber door or wicket (masonry.doorCase, narrower band) */
   C.doorCase = (face, band = 0.7, proud = 0.16) => doorCase(C, kit.m('marble_white', false, true), face, band, proud);
-  C.anchor = (name, pos, heading, label) => {
-    ctx.addAnchor(name, { pos, heading, label, zone: zoneAtSite(pos[0], pos[1], pos[2] + 0.5) || undefined });
+  C.anchor = (name, pos, heading, label, extra = null) => {
+    ctx.addAnchor(name, { pos, heading, label, zone: zoneAtSite(pos[0], pos[1], pos[2] + 0.5) || undefined, ...(extra || {}) });
     C.anchors.push(name);
   };
   /** marble column (Attic base, entasis, echinus-and-abacus capital — restrained, period-plausible ⚙) */

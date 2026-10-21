@@ -23,9 +23,12 @@
 // function of (t, date): the night is planned once per date in g1/plan.js. ⚙ marks reconstruction (minutes, spots).
 import { nightPlan } from './g1/plan.js';
 import { makePools, stage, runCues, windowAmount, FreeProps } from './g1/stage.js';
-import { within } from '../lib/core.js';
+import { within, window4, since } from '../lib/core.js';
 
-const POOLS = ['young:off', 'young:k', 'keri:off', 'keri:k', 'slab:off', 'slab:k', 'elders:elder', 'levite:guard', 'officer:k', 'gevini:levi'];
+const POOLS = ['young:off', 'young:k', 'young:bath', 'keri:off', 'keri:k', 'keri:bath', 'slab:off', 'slab:k', 'slab:bath', 'elders:elder', 'elders:eoff',
+  'levite:guard', 'officer:k', 'gevini:levi'];
+const SLAB = 'azarah.moked.keys-slab';
+const SLAB_UP = 0.75;      // how far the tablet is raised by its ring (world: 1 = 80°) ⚙
 
 export default {
   id: 'moked-night',
@@ -39,6 +42,8 @@ export default {
     return {
       pools: makePools(sim, POOLS, 2, { 'officer:k': { importance: 3 }, 'gevini:levi': { importance: 3 }, 'slab:off': { importance: 3 } }),
       chel: sim.door('azarah.moked.door-chel'),
+      // the keys slab (Middot 1:9): lifted by its ring through the door contract; the keys on its chain (setKeys)
+      slab: sim.door(SLAB), keys: true,
       nw: sim.door('azarah.moked.chamber.tevilah-descent'),
       ne: sim.door('azarah.moked.chamber.altar-stones'),
       props: new FreeProps(ctx),
@@ -64,10 +69,18 @@ export default {
       state.nw.set(windowAmount(t, P.doors.nw, 0.2));
       state.ne.set(0);
     }
+    // the keys slab: raised while the locking kohen and the officer take and return the keys (Middot 1:9; Tamid 1:3)
+    let lift = 0;
+    for (let i = 0; i < P.slab.length; i++) {
+      const w = P.slab[i], e = since(t, w[0]);
+      if (e <= w[3] - w[0]) lift = Math.max(lift, (w[4] ?? SLAB_UP) * window4(e, 0, w[1] - w[0], w[2] - w[0], w[3] - w[0]));
+    }
+    if (lift > 0) state.slab.set(lift);
+    setKeys(ctx, state, keysAt(P, t));
     runCues(ctx, sim, state, P.cues, 'moked');
   },
 
-  release(ctx, state) { state.props.hide(); },
+  release(ctx, state) { state.props.hide(); setKeys(ctx, state, true); },
 
   debug(s) {
     const P = s.plan, f = s.fmt;
@@ -76,3 +89,22 @@ export default {
     return `figures ${s.n} · lock ${f(T.lock[0])} · keri ${T.keri ? f(T.keri[0]) : '-'} · imm ${f(T.imm[0])} · gevini ${f(P.gevini?.tCall)} · knock ${f(T.knock[0])} · out ${f(T.mokedGateOpen)}`;
   },
 };
+
+/** the keys on the chain at t: all (true); none while the locking kohen has them (false); all but the wicket's (7)
+ *  while the officer has it (P.keysWin = [[t0, t1, state]]) */
+function keysAt(P, t) {
+  for (let i = 0; i < P.keysWin.length; i++) {
+    const [a, b, v] = P.keysWin[i];
+    if (Number.isFinite(a) && Number.isFinite(b) && within(t, a, b)) return v;
+  }
+  return true;
+}
+
+/** world: azarah.moked.keys-slab setKeys(true | false | n) — change-cached */
+function setKeys(ctx, state, v) {
+  if (state.keys === v) return;
+  const ud = ctx.movables?.get?.(SLAB)?.userData;
+  if (typeof ud?.setKeys !== 'function') return;
+  state.keys = v;
+  ud.setKeys(v);
+}

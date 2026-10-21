@@ -95,7 +95,12 @@ export function buildKitchen(A) {
   const cx = K[0] - HEARTH.cookOff, cy = K[1];        // the hearth's centre, west of the cook
   const { halfX: hx, halfY: hy, wall: tw, h: hS, mouth } = HEARTH;
   const STONE = 'steps_stone', COP = 'copper', IRON = 'iron', ASH = 'ash';
-  const BARK = 'timber_rough', END = A.mat('timber_pile_end', 'timber_rough');
+  // the firewood's bark: one species per log — fig, walnut, oil-tree (Tamid 2:3; world-4), from its own random stream
+  const BARKS = ['timber_bark_fig', 'timber_bark_walnut', 'timber_bark_pine'].map((k) => A.mat(k, 'timber_rough'));
+  const END = A.mat('timber_pile_end', 'timber_rough');
+  const RS = rng(A.seed ^ 0x6b5e);
+  // detail 0: walnut only (fire.js; world-4-fix)
+  const species = () => (d === 0 ? 1 : Math.min(2, Math.floor(RS() * 3)));
   // charred wood: the materials task's timber_charred once it exists. Until then a brand is drawn as it lies after a
   // burning — its burnt end grey with ash, the rest bark — and the charcoal satin black-grey (iron: a dark, rough metal
   // has a black dielectric's reflectance, F0 ≈ 0.05, and no diffuse); never glass_dark's gloss, which drew the brands
@@ -144,7 +149,7 @@ export function buildKitchen(A) {
   // the fire burns under the cauldron, a little toward the mouth so the cook sees it (and stokes it) from the east
   const fireXY = [cx + 0.1, potC[1] - 0.13];
 
-  const coal = [], burnt = [], bark = [], ends = [];
+  const coal = [], burnt = [], bark = [[], [], []], ends = [];
   if (d >= 1) {
     // charcoal in the bed and two half-burnt brands pushed in at the mouth, their burnt ends under the pot
     const oct = new OctahedronGeometry(1, 0);
@@ -158,7 +163,7 @@ export function buildKitchen(A) {
     }
     for (const [a0, b0, f] of [[[cx - 0.02, fireXY[1] + 0.1], [cx + 0.82, cy + 0.04], 0.45], [[cx + 0.06, cy + 0.08], [cx + 0.72, cy - 0.2 + jit(0.04)], 0.4]]) {
       const g = brandGeometry([a0[0], a0[1], bed(a0[0], a0[1]) + 0.04], [b0[0], b0[1], Z + 0.07], 0.032, R, f);
-      burnt.push(...g.burnt); bark.push(...g.bark); ends.push(...g.ends);
+      burnt.push(...g.burnt); bark[species()].push(...g.bark); ends.push(...g.ends);
     }
   }
 
@@ -218,7 +223,7 @@ export function buildKitchen(A) {
   // ---------------------------------------------------------------- firewood north of the hearth (detail ≥ 1)
   const wy0 = cy + hy + 0.3, wy1 = wy0 + 0.6, wx0 = cx - 0.55, wx1 = cx + 0.55;
   if (d >= 1) {
-    const sides = [], caps = [];
+    const sides = [[], [], []], caps = [];
     const r = 0.075;
     for (let layer = 0; layer < 3; layer++) {
       const nL = 4 - (layer === 2 ? 1 : 0);
@@ -230,11 +235,11 @@ export function buildKitchen(A) {
         const rb = r * A.AMAH * (0.85 + 0.25 * R());
         const g = logGeometry(len, rb, rb * (0.9 + 0.1 * R()), [5, 6, 7, 8][d], R, 0.06, 2, R() < 0.4 ? 0.6 : 1, R() * 3);
         g.side.applyMatrix4(matrix); g.caps.applyMatrix4(matrix);
-        sides.push(g.side); caps.push(g.caps);
+        sides[species()].push(g.side); caps.push(g.caps);
       }
     }
-    sides.push(...bark); caps.push(...ends);
-    B.geo(mergeGeometries(sides, false), BARK, { collide: false, cast: true });
+    bark.forEach((list, sp) => sides[sp].push(...list)); caps.push(...ends);
+    sides.forEach((list, sp) => { if (list.length) B.geo(mergeGeometries(list, false), BARKS[sp], { collide: false, cast: true }); });
     B.geo(mergeGeometries(caps, false), END, { collide: false, cast: true });
     col.box([wx0, wy0, Z], [wx1, wy1, Z + 0.45]);
   }

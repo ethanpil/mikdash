@@ -86,7 +86,7 @@ const HEADS = {
   bull: [[0, 0.72, 0.72, 0], [0.12, 1.04, 0.96, 0], [0.3, 1.0, 0.9, 0.05], [0.52, 0.8, 0.8, 0.12], [0.72, 0.72, 0.8, 0.16], [0.88, 0.8, 0.8, 0.18], [1, 0.68, 0.64, 0.2]],
 };
 
-function quad(B, rig, lod, kind) {
+function quad(B, rig, lod, kind, def = {}) {
   const d = rig.dims, H = d.H, L = d.L, W = d.W;
   const sheep = kind === 'sheep', goat = kind === 'goat', bull = kind === 'bull';
   const ram = d.type === 'ram';
@@ -191,11 +191,22 @@ function quad(B, rig, lod, kind) {
     tubeAlong(B, pts, rads, sgL(lod, 12, 6), { weights: (q) => envelope(rig, q, { head: 0.3, neck: 1, neck2: 1, chest: 0.8 }, 4),
       radial: lod === 0 ? (th, j) => 1 + 0.08 * Math.sin(j * 2.1) * Math.max(0, Math.sin(th)) : null });
   }
-  head(B, rig, lod, kind, faceSet, bodySet);
+  head(B, rig, lod, kind, faceSet, bodySet, def);
   // ---- legs
   for (const leg of ['fl', 'fr', 'hl', 'hr']) legMesh(B, rig, lod, leg, kind, bodySet, faceSet, fleece);
+  // ---- a female's udder (modest): small, bare-skinned, two teats, between the hind legs (the ewe lamb and the she-goat
+  // of the individual's chatat — Vayikra 4:28, 4:32); a young female's is small
+  if (def.female) {
+    const pv = R(rig, 'pelvis');
+    const k = H / 0.66;
+    const c = V(0, pv.y * (goat ? 0.6 : 0.62), d.zr - (goat ? 0.12 : 0.1) * L);
+    const sz = (goat ? [0.042, 0.032, 0.05] : [0.03, 0.022, 0.034]).map((x) => x * k);
+    B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.6, metal: 0, color: [1.02, 0.94, 0.92], grp: 0 });
+    B.ellipsoid(c, sz, { nu: sgL(lod, 10, 6), nv: sgL(lod, 6, 4), weights: (p) => envelope(rig, p, { pelvis: 1, hl_up: 0.15, hr_up: 0.15 }, 4), lat: [0.25, 1] });
+    for (const sg of [-1, 1]) tubeAlong(B, [c.clone().add(V(sg * sz[0] * 0.45, -sz[1] * 0.7, 0.004)), c.clone().add(V(sg * sz[0] * 0.55, -sz[1] * 0.7 - 0.016 * k, 0.008))], [0.006 * k, 0.004 * k], 5, { bone: rig.index.pelvis, capB: 'dome' });
+  }
   // ---- male parts (modest): scrotum between the hind legs; the bull's sheath under the belly
-  {
+  if (!def.female) {
     const pv = R(rig, 'pelvis');
     B.set(sheep ? { ...fleeceSet } : coatSet);
     const sc = bull ? [0.07, 0.11, 0.07] : sheep ? [0.045, 0.06, 0.045] : [0.035, 0.05, 0.035];
@@ -306,7 +317,7 @@ export function halterPoint(rig) {
   return rig._halter;
 }
 
-function head(B, rig, lod, kind, faceSet, bodySet) {
+function head(B, rig, lod, kind, faceSet, bodySet, def = {}) {
   const d = rig.dims, H = d.H;
   const sheep = kind === 'sheep', goat = kind === 'goat', bull = kind === 'bull';
   const ram = d.type === 'ram';
@@ -454,7 +465,9 @@ function head(B, rig, lod, kind, faceSet, bodySet) {
   // horns
   const cran = rings[1].c;
   const lambHorn = sheep && !ram;
-  if (ram || lambHorn || goat || bull) {
+  // polled: the ewe lamb (the breed's ewes carry no horns, reconstruction); a she-goat's horns are shorter and thinner
+  const hs = def.hornScale ?? 1;
+  if (!def.polled && (ram || lambHorn || goat || bull)) {
     B.set({ cls: CLS.FIX, pat: PAT.HORN, rough: 0.5, metal: 0, color: goat ? '#2c2624' : bull ? '#cdbb9a' : '#c2ab86', grp: 0 });
     for (const sg of [-1, 1]) {
       const pts = [], rad = [];
@@ -474,8 +487,8 @@ function head(B, rig, lod, kind, faceSet, bodySet) {
           rad.push(lerp(0.016, 0.005, t));
         } else if (goat) { // scimitar: up from the poll, then back in one smooth arc, the tips diverging
           const ang = t * 1.5;
-          p = base.clone().add(V(sg * (0.012 + 0.05 * t * t), 0.2 * Math.sin(ang) * 0.85, 0.2 * (1 - Math.cos(ang)) * 0.9 + 0.01 * t));
-          rad.push(lerp(0.017, 0.003, t ** 0.9));
+          p = base.clone().add(V(sg * (0.012 + 0.05 * t * t) * hs, 0.2 * hs * Math.sin(ang) * 0.85, 0.2 * hs * (1 - Math.cos(ang)) * 0.9 + 0.01 * t));
+          rad.push(lerp(0.017, 0.003, t ** 0.9) * (0.6 + 0.4 * hs));
         } else {
           p = base.clone().add(V(sg * 0.15 * t, 0.06 * t * t + 0.03 * t, -0.07 * t * t));
           rad.push(lerp(0.036, 0.008, t));
@@ -498,7 +511,8 @@ function head(B, rig, lod, kind, faceSet, bodySet) {
     const r2 = rings[rings.length - 2];
     const chin = r2.c.clone().addScaledVector(fwd, -0.04 * len).addScaledVector(up, -r2.rz * 0.72);
     const down = V(0, -1, 0.18).normalize();
-    const pts = [chin.clone().addScaledVector(up, r2.rz * 0.25), chin, chin.clone().addScaledVector(down, 0.045), chin.clone().addScaledVector(down, 0.09).add(V(0, 0, 0.006)), chin.clone().addScaledVector(down, 0.125).add(V(0, 0, 0.012))];
+    const bs = def.beardScale ?? 1;
+    const pts = [chin.clone().addScaledVector(up, r2.rz * 0.25), chin, chin.clone().addScaledVector(down, 0.045 * bs), chin.clone().addScaledVector(down, 0.09 * bs).add(V(0, 0, 0.006)), chin.clone().addScaledVector(down, 0.125 * bs).add(V(0, 0, 0.012))];
     const rad = [[0.012, 0.026], [0.013, 0.03], [0.011, 0.024], [0.007, 0.014], [0.002, 0.004]];
     tubeAlong(B, pts, rad, sgL(lod, 9, 5), { weights: (p) => normW([[jb, 0.7], [hb, 0.3]]), capB: 'dome', domeH: 0.5,
       radial: lod === 0 ? (th, j) => 1 + 0.18 * Math.sin(th * 5 + j * 1.7) * smooth(1, 3, j) : null });
@@ -694,7 +708,7 @@ function bird(B, rig, lod, kind) {
 export function buildAnimalGeometry(def, rig, lod) {
   const B = new MeshBuilder(rig);
   if (def.build === 'dove') bird(B, rig, lod, def.kind || 'pigeon');
-  else quad(B, rig, lod, def.build);
+  else quad(B, rig, lod, def.build, def);
   return B.build();
 }
 export { clamp };

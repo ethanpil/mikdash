@@ -37,6 +37,7 @@ const BURST_QUIET = 0.5;   // s (and 3 frames): … whose capture waits until th
 const METER_WAIT = 0.6;    // s: env holds its exposure snap at most this long for a post-jump measurement
 const MIN_REFRESH = 1.5;   // s between amortised refreshes of one probe …
 const MIN_REFRESH_FAST = 0.3; // … in a time-lapse (|speed| > 20), where 1.5 s real is 15 sim-minutes at 600×
+const SHARE_SLICE_MS = 1; // ms of an amortised refresh's sky-share rays per frame (skyShare)
 const INTERIOR_PASSES = { medium: 2, high: 3, ultra: 3 }; // sync capture bounces of an interior (gold) probe
 const LOG_EPS = 1e-4;      // cd/m²: the darkest luminance the log-average meter counts
 const GAIN_TARGET = 0.5;   // scene units: a capture's mean is brought up to about this (captureGain)
@@ -209,6 +210,9 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     const box = (u, v) => ({ min: new Vector3(Math.min(u.x, v.x), Math.min(u.y, v.y), Math.min(u.z, v.z)), max: new Vector3(Math.max(u.x, v.x), Math.max(u.y, v.y), Math.max(u.z, v.z)) });
     return {
       ...d, slice: i + 1, rt, cam, world: cam.position.clone(), infl: box(a, b), proxy: box(pa, pb), metered: !d.outdoor && !d.skylit,
+      // irradiance × (V here / V at the probe) ≤ cap for its sky share (render-audio-3): V through all the room's openings
+      // ('total': the skylit porch, as render-env-2 had it) or through its main one ('main': the Kodesh's great gate)
+      irr: d.irr || (d.skylit ? { mode: 'total', cap: 1.5 } : null), share: 1, shareCap: 1, shareJob: null,
       Pcap: 0, Ecap: 1, Egcap: 0, valid: false, face: -1, mode: null, pass: 0, meanL: 0, measureSerial: 0, doneAt: -1e9,
       sunAt: new Vector3(0, -2, 0), keyMoon: null, fireSig: -1, doorSig: -1,
     };
@@ -230,7 +234,7 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
    * its shape is stale, its brightness is not. OUTDOOR probes hold no fire light (see renderFaces): their diffuse
    * light is the same anywhere in their influence box, and a fire's is not (lighting-polish-fix).
    */
-  const _ins = { V: 1, vol: null, s: 0 };
+  const _ins = { V: 1, vol: null, s: 0 }, _mv = { V: 0, vol: null };
   const fireAdapt = () => { const a = Number(ctx.fx?.fireAdaptation); return Number.isFinite(a) && a > 0 ? Math.min(a, 1) : 1; };
   /**
    * opts.split: { sky, fire } instead of the sum. A skylit probe's fires (open-air fires lighting a porch, render-env-2-fix)
@@ -266,6 +270,103 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
   /** how much a probe stands for its room now (0 while a post-jump capture is due, or when stale) */
   const coverage = (p) => (p.valid && p.Pcap > 0 && !wantSync ? staleness(p) : 0);
 
+  /**
+   * render-audio-3: the share of an interior probe's light that its irradiance correction (V here / V at the probe)
+   * stands for, taken at its capture: the skylight through the openings — not the room's own lamps (they light the
+   * Kodesh at night, where the always-open windows' V says nothing about them), and not a low Sun's beam that lands
+   * beyond the probe, directly or off the gold walls (at sunrise + 40 min in November a capture by the parochet takes
+   * 5–10 × the mid-room probe's light, at + 90 twice it 8 amot west of the probe: the opposite of the fit). The beam
+   * counts only as far as env's key light carries the Sun (env.sunTerrainVisibility, which env evaluates for the
+   * CAMERA's height, as it does the key light the capture is lit by). In November, the camera in the Kodesh
+   * (kodesh-share-times.mjs, medium): ≈ 1 until the Sun clears the Mount of Olives (0.98 at sunrise + 15; seen from the
+   * Kidron floor it clears between + 30 and + 40), then 0 within one refresh (0.08 at + 20, 0 at + 30 … + 60, 0.01 at
+   * + 90), eased back by + 130 (0.31, 0.56, 0.92, 0.98 at + 100 … + 130) and ≈ 1 for the rest of the day (sun in the
+   * south and west: no beam reaches past the probe). A skylit porch keeps 1 (render-env-2).
+   * A job (render-audio-3-fix): the beam test's rays (≈ 200 at sunrise + 40, up to 5 ms here) ran in a refresh's first
+   * frame — a hitch about every second through a 600× morning on medium+. skyShare() takes the Sun, its visibility and
+   * the openings as they are when it starts (a refresh's first face) and yields after each row of rays; stepShare runs a
+   * slice of it a frame while the faces render and the rest before the capture is applied. A sync capture runs it at
+   * once: the result is the same however it is sliced.
+   */
+  function* skyShare(p) {
+    if (!p.irr || p.outdoor) return 0;
+    if (p.skylit) return 1;
+    // the main opening shut (the great gate's doors or curtain): the room's light is its windows' and lamps' alone
+    if (p.irr.mode === 'main' && !(interiors.mainVisibility(p.world, _mv).V > 1e-5)) return 0;
+    const env = ctx.env || {};
+    const V = interiors.at(p.world, _ins).V, vol = _ins.vol;
+    const Esky = V * (env.globalIlluminance || 0);
+    let Ef = 0;
+    try { Ef = ctx.fx?.illuminanceAt?.(p.world) || 0; } catch { Ef = 0; }
+    const sky = Esky / Math.max(Esky + Ef, 1e-9);
+    return sky * (1 - (yield* deepBeam(p, vol)));
+  }
+  /** advance p's sky-share job by about `ms` (Infinity: to its end), then p.shareCap is its result */
+  function stepShare(p, ms) {
+    const job = p.shareJob;
+    if (!job) return;
+    const t0 = performance.now();
+    for (;;) {
+      const r = job.next();
+      if (r.done) { p.shareCap = r.value; p.shareJob = null; return; }
+      if (performance.now() - t0 >= ms) return;
+    }
+  }
+  /** 0..1: how much of a room's open aperture area passes the Sun's beam to beyond its probe (BVH rays: 8 × 8 over the main opening, 3 × 3 over the others) */
+  function* deepBeam(p, vol) {
+    const env = ctx.env, ph = ctx.physics;
+    if (!vol || !env?.keyDir || env.keyIsMoon || env.keyDir.y <= 0 || typeof ph?.raycast !== 'function') return 0;
+    // as they are now (the rays run over the next frames)
+    const s = env.keyDir.clone();
+    const vis = Number.isFinite(env.sunTerrainVisibility) ? env.sunTerrainVisibility : 1;
+    const aps = vol.apertures.map((a) => [a, a.openness ?? a.value]); // geometric openness (a.value also carries the brightness beyond)
+    const bo = new Vector3(), bd = new Vector3(), bq = new Vector3(), bn = new Vector3(), bh = new Vector3();
+    let open = 0, deep = 0;
+    for (let ai = 0; ai < aps.length; ai++) {
+      const [a, op] = aps[ai];
+      if (!(op > 0)) continue;
+      const area = 4 * a.hx * a.hy * op;
+      open += area;
+      bn.set(0, 0, 0).setComponent(a.axis, a.sign); // outward
+      const c = bn.dot(s);
+      if (c <= 0.02) continue;
+      const dProbe = bn.dot(bh.copy(a.centre).sub(p.world)); // the probe's depth behind the opening's plane
+      const ax = [0, 1, 2].filter((k) => k !== a.axis);
+      let n = 0;
+      const m = ai === 0 ? 8 : 3;
+      for (let i = 0; i < m; i++) {
+        for (let j = 0; j < m; j++) {
+          bq.copy(a.centre);
+          bq.setComponent(ax[0], bq.getComponent(ax[0]) + (((i + 0.5) / m) * 2 - 1) * a.hx);
+          bq.setComponent(ax[1], bq.getComponent(ax[1]) + (((j + 0.5) / m) * 2 - 1) * a.hy);
+          // the light seen from the opening (nothing in the way) …
+          if (ph.raycast(bo.copy(bq).addScaledVector(bn, 0.05), s, 1500)) continue;
+          // … and where its beam lands inside: beyond the probe? In a gilded room the walls mirror it on (≈ 0.8 a bounce):
+          // soon after sunrise the beam strikes the north wall near the gate and its reflection lights the far half
+          bo.copy(bq).addScaledVector(bn, -0.05); bd.copy(s).negate();
+          let k = 0;
+          for (let b = 0, e = 1; b <= (vol.gold ? 2 : 0); b++, e *= 0.8) {
+            const h = ph.raycast(bo, bd, 300);
+            if (!h) { if (b === 0) k = e; break; } // after a bounce: back out of the room
+            if (bn.dot(bh.copy(a.centre).sub(h.point)) > dProbe) { k = e; break; }
+            const nd = bd.dot(h.normal);
+            bd.addScaledVector(h.normal, -2 * nd).normalize();
+            bo.copy(h.point).addScaledVector(h.normal, 0.02);
+          }
+          n += k;
+        }
+        yield; // a row of rays
+      }
+      deep += area * c * (n / (m * m));
+    }
+    const f = open > 0 ? (deep / open) * vis : 0;
+    p.deepF = f; // dev read-out
+    // eased out from the first deep sunbeam to 30 % of the openings' area (sunrise + 30 … + 60 min in November: 40 %; the
+    // fraction falls through the morning — 0.28 at +90, 0.19 at +100, 0.05 at +120, 0.005 at +150 — and the fit comes back with it)
+    const t = Math.min(Math.max(f / 0.3, 0), 1);
+    return t * t * (3 - 2 * t);
+  }
+
   /** probe uniforms; `self` = the probe being captured (scaled down / off) */
   function writeUniforms(self = null, selfScale = 1) {
     const P = ctx.env?.preExposure || 1;
@@ -280,10 +381,16 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
       const hi = [p.infl.max.x + m - O.x, p.infl.max.y + m - O.y, p.infl.max.z + m - O.z].map(cmUp);
       PH.set([(lo[0] | (lo[1] << 16)) >>> 0, (lo[2] | (hi[0] << 16)) >>> 0, (hi[1] | (hi[2] << 16)) >>> 0, (halfBits(p.shell) | (halfBits(m) << 16)) >>> 0], k * 4);
       C.set([p.world.x, p.world.y, p.world.z, sc], k * 4);
-      D.set([p.proxy.min.x, p.proxy.min.y, p.proxy.min.z, p === self ? 1 : staleness(p)], k * 4);
-      // fraction: the sky visibility at a skylit interior probe (its irradiance is scaled by V here / V there)
-      const vRef = p.skylit ? Math.min(Math.max(interiors.at(p.world, _ins).V, 0.01), 0.99) : 0;
-      E.set([p.proxy.max.x, p.proxy.max.y, p.proxy.max.z, p.slice + (p.outdoor ? 8 : 0) + vRef], k * 4);
+      // w: the weight (0..1) + 2 × the sky share × 255 (render-audio-3; interiors-glsl.js decodes both)
+      const share = p.irr ? Math.round(Math.min(Math.max(p.share, 0), 1) * 255) : 0;
+      D.set([p.proxy.min.x, p.proxy.min.y, p.proxy.min.z, (p === self ? 1 : staleness(p)) + 2 * share], k * 4);
+      // fraction: the sky visibility at an interior probe whose irradiance is scaled by V here / V there (≤ cap); integer:
+      // slice + 8 (outdoor) + 16 × (cap index + 16 × mode): cap 1 + 0.5 i; mode 0 all openings (exact V, as render-env-2),
+      // 1 the main opening (the shader's own cheap form, interiors.mainVisibility)
+      const main = p.irr?.mode === 'main';
+      const vRef = !p.irr ? 0 : Math.min(Math.max(main ? interiors.mainVisibility(p.world, _mv).V : interiors.at(p.world, _ins).V, 0.001), 0.99);
+      const ci = p.irr ? Math.min(15, Math.max(0, Math.round((p.irr.cap - 1) / 0.5))) : 0;
+      E.set([p.proxy.max.x, p.proxy.max.y, p.proxy.max.z, p.slice + (p.outdoor ? 8 : 0) + 16 * (ci + 16 * (main ? 1 : 0)) + vRef], k * 4);
     });
     interiors.setProbes(PH, C, D, E, order.length, order.filter((p) => !p.outdoor).length);
   }
@@ -502,7 +609,8 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
   function finish(p, measureMode = 'async', defer = false) {
     const t0 = performance.now();
     const Ecap = lightLevel(p), EcapPhys = lightLevel(p, false), Egcap = ctx.env?.globalIlluminance || 0, Pcap = (ctx.env?.preExposure || 1) * (p.capGain || 1);
-    const apply = (tex) => { copyInto(p.slice, tex); p.Ecap = Ecap; p.EcapPhys = EcapPhys; p.Egcap = Egcap; p.Pcap = Pcap; p.valid = true; };
+    const share = p.shareCap; // this capture's (a deferred apply may land after the next refresh has begun)
+    const apply = (tex) => { copyInto(p.slice, tex); p.Ecap = Ecap; p.EcapPhys = EcapPhys; p.Egcap = Egcap; p.Pcap = Pcap; p.share = share; p.valid = true; };
     if (defer && measureMode && p.metered && p.valid) {
       // amortised refresh of a metered room: the previous capture stays in the atlas until this one's measurement
       // lands, so the room's light and the eye's adaptation to it change in the same frame — swapping the light
@@ -524,6 +632,8 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     // before: the gold room's first interreflections (later amortised refreshes keep converging)
     const passes = p.outdoor || p.skylit ? 1 : INTERIOR_PASSES[tierKey] || 2; // a skylit porch: its own bounce is minor
     p.capGain = captureGain(p);
+    p.shareJob = skyShare(p);
+    stepShare(p, Infinity);
     for (let k = 0; k < passes; k++) {
       prof('faces', () => renderFaces(p, 0, 6, k === 0 ? 0 : SELF_FEEDBACK));
       finish(p, k === passes - 1 ? 'last' : null);
@@ -556,7 +666,9 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
       schedule(dt);
       const p = queue[0];
       if (p) {
-        if (p.face === 0) p.capGain = captureGain(p); // one gain for all six faces of the refresh
+        if (p.face === 0) { p.capGain = captureGain(p); p.shareJob = skyShare(p); } // one gain (and sky share, as of now) for all six faces of the refresh
+        // the sky share's beam test: a slice a frame beside the faces, the rest before the capture is applied
+        stepShare(p, p.face < 6 ? SHARE_SLICE_MS : Infinity);
         // a skylit porch never sees its previous self (as in its one-pass sync capture): its irradiance is scaled up
         // toward the opening (V / V at the probe, ≤ 1.5), so 0.9 × that × a pale wall's albedo can pass 1 (render-env-2)
         if (p.face < 6) { renderFaces(p, p.face, p.face + 1, p.skylit ? 0 : SELF_FEEDBACK); p.face++; stats.faces++; } else {

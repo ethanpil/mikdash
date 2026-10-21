@@ -3,6 +3,11 @@
 // params; the reconstruction choices (cornice profile, frames, window set) are logged in
 // docs/decisions/build-courts.md.
 import { gridSolid, B, EB, isect, inside, sweep } from './lib/geo.js';
+import { courseRuns } from '../materials/courses.js';
+
+/** the Herodian wall keys on the materials' course table (1.00–1.20 m courses; world-4): outer faces and the dressed
+ *  inner faces. The modelled set-out courses follow ctx.mats.courseAt (materials/courses.js courseRuns). */
+export const WALL = 'herodian_wall_courses', WALL_IN = 'herodian_wall_inner_courses';
 
 /** court interiors (above their floors): faces looking into them are the dressed inner faces */
 export const COURT_IN = [B(260, 263, -50, 395, 398, 300), B(68, 263, -50, 255, 398, 300)];
@@ -32,7 +37,7 @@ export function classify(f) {
   if (f.add?.side) return f.add.side;
   const p = probe(f);
   for (const r of ROOMS) if (inside(r, p)) return r.mat;
-  return COURT_IN.some((b) => inside(b, p)) ? 'herodian_wall_inner' : 'herodian_wall';
+  return COURT_IN.some((b) => inside(b, p)) ? WALL_IN : WALL;
 }
 
 /** wall ∩ box as a sub (keeps tags) */
@@ -71,7 +76,7 @@ export function buildMasonry(C) {
     ['enN', 'en.chamber.chashaim', { room, floor: 'paving_mount' }],
     ['azE', 'azarah.chamber.pinchas', { room, floor: 'paving_azarah' }],
     ['azE', 'azarah.chamber.chavitin', { room, floor: 'paving_azarah' }],
-    ['azN', 'azarah.gate.nitzotz.exedra', { room: 'herodian_wall_inner', floor: 'paving_azarah' }],
+    ['azN', 'azarah.gate.nitzotz.exedra', { room: WALL_IN, floor: 'paving_azarah' }],
     ['azN', 'azarah.beit-hanitzotz', { room }],
     ['azN', 'azarah.chamber.etz', { room, floor: 'paving_azarah' }],
     ['azN', 'azarah.chamber.kelim', { room, floor: 'paving_azarah' }],
@@ -105,9 +110,9 @@ export function buildMasonry(C) {
   subs.push(...windows);
   C.windows = windows;
 
-  // ---- apik shefa v'a'eil shefa (Bava Batra 4a): alternate courses set out 1 etzba on the outer faces (detail ≥ 2)
+  // ---- apik shefa v'a'eil shefa (Bava Batra 4a): alternate courses set out 1 etzba on the outer faces (detail ≥ 2) —
+  // the courses the materials' course table sets out (whole courses only), so the steps meet the baked joints
   if (d >= 2) {
-    const rowH = (C.ctx.mats.tile?.('herodian_wall')?.rowH ?? 1.1) / C.AMAH;   // course height in amot (texture rows)
     const out = 1.5 / 24;                                                        // 1½ etzba'ot ⚙
     const fringe = [];
     const faceRuns = [
@@ -123,8 +128,9 @@ export function buildMasonry(C) {
       ['x', 1, walls.enE.max[0], [walls.enE.min[1], walls.enE.max[1]], walls.enE.max[2]],
     ];
     for (const [ax, s, at, [r0, r1], ztop] of faceRuns) {
-      for (let k = 0; (k + 1) * rowH <= ztop - 1.3; k += 2) {
-        const z0 = k * rowH, z1 = (k + 1) * rowH;
+      for (const run of courseRuns(C.ctx.mats, WALL, 0, ztop - 1.3)) {
+        if (!run.setOut || !run.whole) continue;
+        const { z0, z1 } = run;
         if (ax === 'y') fringe.push(B(r0, s < 0 ? at - out : at, z0, r1, s < 0 ? at : at + out, z1));
         else fringe.push(B(s < 0 ? at - out : at, r0, z0, s < 0 ? at : at + out, r1, z1));
       }
@@ -142,7 +148,7 @@ export function buildMasonry(C) {
         'azarah.chamber.etz.flight'].map((id) => EB(el(id))),
       { ...EB(el('azarah.moked.hall')), min: [el('azarah.moked.hall').box.min[0] - 0.5, 395, -1] },
       { ...EB(el('azarah.chamber.gazit')), min: [40, el('azarah.chamber.gazit').box.min[1], -1] },
-    ]), (f) => (f.axis === 2 ? 'ashlar_plain' : 'herodian_wall'));
+    ]), (f) => (f.axis === 2 ? 'ashlar_plain' : WALL));
     kit.solid(fr, false, false);
   }
 
@@ -296,11 +302,11 @@ export function buildFloors(C) {
   adds.push(B(az.min[0], az.min[1], 0, az.max[0], az.max[1], az.max[2], { top: 'paving_azarah', side: 'ashlar_plain' }));
   // Gazit chol-half substructure (podium), carried through the replaced W-wall line to the court floor
   const gp = el('azarah.chamber.gazit.podium').box;
-  adds.push(B(gp.min[0], gp.min[1], 0, az.min[0], gp.max[1], Z_AZ, { top: 'paving_azarah', side: 'herodian_wall' }));
+  adds.push(B(gp.min[0], gp.min[1], 0, az.min[0], gp.max[1], Z_AZ, { top: 'paving_azarah', side: WALL }));
   // Beit HaMoked: the hall floor (marble — the kohanim walked it barefoot, Yoma 1:7 ⚙) and its podium through the wall line
   const mk = el('azarah.moked.hall').box, mp = el('azarah.moked.podium').box;
-  adds.push(B(mk.min[0], C.walls.azN.min[1], 0, mk.max[0], mp.max[1], Z_AZ - 1, { top: 'marble_white', side: 'herodian_wall' }));
-  adds.push(B(mk.min[0], mk.min[1], Z_AZ - 1, mk.max[0], mk.max[1], Z_AZ, { top: 'marble_white', side: 'herodian_wall', under: 'ashlar_plain' }));
+  adds.push(B(mk.min[0], C.walls.azN.min[1], 0, mk.max[0], mp.max[1], Z_AZ - 1, { top: 'marble_white', side: WALL }));
+  adds.push(B(mk.min[0], mk.min[1], Z_AZ - 1, mk.max[0], mk.max[1], Z_AZ, { top: 'marble_white', side: WALL, under: 'ashlar_plain' }));
   // cellars of the instruments (Middot 2:6)
   for (const r of el('en.music-chambers').params.rooms) subs.push({ ...r.box, room: 'ashlar_plain', floor: 'paving_mount', ceil: 'ashlar_plain' });
   // the winding stair shaft from the Moked's NW chamber (Middot 1:6, 1:9), open to the hall floor: its marble landing

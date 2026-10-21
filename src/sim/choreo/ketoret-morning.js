@@ -27,7 +27,7 @@ import { m2w } from '../../core/units.js';
 const SEED = 0x6730;
 const COALS = 'g3.mizbach-hazahav.coals', GLOW = 'g3.pan-coals', LEDGE = 'g3.pan-coals.ledge';
 const CURTAIN = 'curtain:heichal.gate-curtain';
-const PROPS = ['teni', 'kuz', 'machtah_gold', 'kaf', 'magrefah'];
+const PROPS = ['teni', 'kuz', 'machtah_gold', 'kaf', 'kaf_covered', 'magrefah', 'psachter', 'psachter_inverted'];
 const INCENSE_DENSITY = { low: 1.0, medium: 0.043, high: 0.03, ultra: 0.023 };
 const CROWD_AREA = [{ min: [260, 263, 6], max: [395, 398, 7.5] }, { min: [244, 263, 13.5], max: [255, 398, 15] }];
 const TEXT = {

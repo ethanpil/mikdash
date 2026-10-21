@@ -18,7 +18,7 @@
 // muchni raises it — the two logs on the great pile (morning and afternoon, Yoma 2:5, 22a), the wood stack by the ramp
 // and the shovels and forks kept with the service vessels west of the ramp. Every pose is a pure function of (t, date):
 // one Script per figure, rebuilt per date.
-import { Script, runScripts, FreeProps, movableCall, playerNear, win, walkMin, jit, SPEED, headingOf,
+import { Script, runScripts, FreeProps, movableCall, playerNear, win, walkMin, jit, SPEED,
   since, within, wrap, smooth } from './g2/lib.js';
 import { places, rampUp, rampDown, circuit } from './g2/places.js';
 import { pmLogs } from './g2/tamid.js';
@@ -47,6 +47,19 @@ const FIRE_DEFAULT = { great: 1, inner: 0.9, incense: 0.6, kiyum: 0.75 };   // a
 /** the night's embers the clearer finds at the muchni ⚙ — altar-night's wants sink to them before this module's begin */
 export const EMBERS = { great: 0.55, inner: 0.45 };
 const COALS_FIRE = 'sim.g2.terumat-coals';
+// the muchni's wheel as the operator's pose meets it (people's ctx.people.stations.windlass / windlassRaise): the
+// kiyor's raise(f) turns the wheel to (1 − f)·drop/0.36 rad (world/altar/kiyor.js); the pose's phase is the station's
+// phaseAt(angle) — these fallbacks repeat people's formulas when the people module is absent
+const WINDLASS_FALLBACK = { phaseAt(a) { const p = (a - Math.PI / 12) / (Math.PI / 2); return p - Math.floor(p); } };
+const WINDLASS_RAISE_FALLBACK = { phaseAt(a) { const p = (-Math.PI / 12 - a) / (Math.PI / 2); return p - Math.floor(p); } };
+const DRUM_R = 0.36;               // amot: the rope drum the wheel turns (world/altar/kiyor.js)
+// the tapuach (world: altar.tapuach grow(f), 1 = site.js's mound): the night's ash settles as it cools ⚙, and the morning's
+// is raked up onto it (Tamid 2:2) — near 1 always (world-3-fix: its collider is the full mound)
+const TAPUACH_LOW = 0.94;
+// the evening's limb not consumed by dawn (Tamid 2:1): charred (altar-night's charred(); spelled out here, since
+// altar-night imports this module — a top-level call through the cycle runs before it is defined)
+const LIMB = 'limb_gerah_charred';
+const BRANCH = 'gizrin_branch', BUNDLE = 'branch_bundle';   // the pile's wood (Tamid 2:3): fig, walnut, oil-wood
 
 export default {
   id: 'terumat-hadeshen',
@@ -58,9 +71,10 @@ export default {
     sim.setBounds([80, 266, 0], [245, 392, 40]);
     const state = {
       P,
-      winner: sim.pool({ name: 'winner', role: 'kohen', count: 1, seed: SEED, importance: 3 }),
+      // the winner works the muchni's wheel: an operator at a fixture at scale 1 (people-4-fix), as in every G1 module
+      winner: sim.pool({ name: 'winner', role: 'kohen', count: 1, seed: SEED, importance: 3, scale: 1 }),
       brothers: sim.pool({ name: 'brothers', role: 'kohen', count: NB, seed: SEED + 1, importance: 2 }),
-      lowerer: sim.pool({ name: 'kiyor-lowerer', role: 'kohen', count: 1, seed: SEED + 2, importance: 1 }),
+      lowerer: sim.pool({ name: 'kiyor-lowerer', role: 'kohen', count: 1, seed: SEED + 2, importance: 1, scale: 1 }),
       wicket: sim.door('azarah.gate.moked.pishpash'),
       props: new FreeProps(ctx),
       plan: null, planGen: -1,
@@ -82,7 +96,10 @@ export default {
     runScripts(ctx, S.lowerer, [P.L], t, S.out, S.fL);
     S.props.update(t);
     // the kiyor on the muchni: sunk overnight, raised at dawn (Yoma 37a; Tamid 1:4)
-    movableCall(ctx, S, 'altar.kiyor', 'raise', Math.round(kiyorAt(P, t) * 1e4) / 1e4);
+    movableCall(ctx, S, 'altar.kiyor', 'raise', kiyorQ(P, t));
+    // the great pile cleared with the night's ash and built again log by log (Tamid 2:2–4); the tapuach heaped up
+    movableCall(ctx, S, 'altar.maarachah.great.pile', 'build', Math.round(pileAt(P, t) * 1e4) / 1e4);
+    movableCall(ctx, S, 'altar.tapuach', 'grow', Math.round(tapuachAt(P, t) * 1e4) / 1e4);
     // the silver pan in its niche (Tamid 1:4): out of it from his stoop until he puts it back ⚙
     movableCall(ctx, S, 'altar.machtah', 'visible', !within(t, P.panOut[0], P.panOut[1]));
     // the two logs on the great pile (Yoma 22a, 33a; afternoon: Yoma 2:5)
@@ -126,6 +143,9 @@ function windows(ctx, sim) {
   };
 }
 
+/** the kiyor's height as the movable is given it (quantised: the pose's phase is computed from the same value) */
+const kiyorQ = (P, t) => Math.round(kiyorAt(P, t) * 1e4) / 1e4;
+
 /** the kiyor's height: 1 up … 0 sunk; sunk from the locking until the muchni raises it ⚙ */
 function kiyorAt(P, t) {
   if (within(t, P.tLower, P.tWheel)) return 1 - smooth(0, LIFT, since(t, P.tLower));
@@ -159,7 +179,13 @@ function plan(ctx, sim, state) {
   const southRoute = [[G[0] - 3.5, 300, Z], [231.2, 273.2, Z], [206.3, 273.4, Z], ...P.way.westUp.slice(1, 5)];
   // into the muchni's frame from its open south side, between the trestles ⚙
   const intoFrame = [[196.4, 309.0, Z], [192.4, 308.7, Z], K.wheelStand];
-  const outOfFrame = [[K.wheelStand[0] + 0.1, 314.9, Z]];
+  const outOfFrame = [[K.raiseStand[0] + 0.1, 314.9, Z]];
+  // the wheel's angle and the operators' phases (ctx.people.stations — the wheel ↔ pose coupling)
+  const drop = ctx.movables?.get?.('altar.kiyor')?.userData?.dropAmot ?? 4.8;
+  const ST = ctx.people?.stations || {};
+  const WL = ST.windlass?.phaseAt ? ST.windlass : WINDLASS_FALLBACK, WR = ST.windlassRaise?.phaseAt ? ST.windlassRaise : WINDLASS_RAISE_FALLBACK;
+  const wheelAngle = (t) => ((1 - kiyorQ(state.plan, t)) * drop) / DRUM_R;
+  const raisePhase = (t) => WR.phaseAt(wheelAngle(t)), lowerPhase = (t) => WL.phaseAt(wheelAngle(t));
   const footE = (x = R.east) => [x, R.foot - 1.2, Z];
   /** from a spot on the top to the head of the ramp's west half, going round to the right (Zevachim 6:3) */
   const toHeadW = (from) => {
@@ -173,14 +199,23 @@ function plan(ctx, sim, state) {
   const tGo = MU[0] - 0.6;               // the brothers' warning, then he goes alone (Tamid 1:4)
   const w = Script.from(MU[0] - 0.8, [G[0] - 2.4, G[1] - 0.6, Z], 270, 'winner').exact();
   w.until(tGo, { pose: 'stand', heading: 270 });
-  w.walkBy(tWheel - 0.06, [...southRoute, ...intoFrame]);
-  w.act(0.06, { pose: 'stand', heading: 90 });
-  // both hands on the hand-wheel's pegs, working it ⚙ pose 'stoke' (a 'windlass' pose is requested)
-  w.until(tWheel + LIFT, { pose: 'stoke', heading: 90 });
+  // into the frame from its open south side; ducking under the axle (2.6 amot up) to the north of it, where he pulls the
+  // north rim down hand over hand: the kiyor rises (people's windlass_raise, its phase from the wheel's angle) ⚙ side
+  const [ua, ub] = K.underAxle;
+  w.walkBy(tWheel - 0.2, [...southRoute, intoFrame[0], intoFrame[1], ua]);
+  // the axle's underside is 1.17 m up: people's 'bow' keeps the head at 1.25 m (through the axle), so he stoops with
+  // bent knees, a hand on his knee (pour_low's stoop, the jug's tilt not reached before phase 0.32: head 0.96 m), and
+  // shuffles through; people have no stooped walk yet (requested) ⚙
+  w.act(0.035, { pose: 'pour_low', phase: [0, 0.29], heading: 0 });
+  w.shift(ub, 0.06, { pose: 'pour_low', phase: 0.3, heading: 0 });
+  w.act(0.035, { pose: 'pour_low', phase: [0.78, 1], heading: 0 });
+  w.shift(K.raiseStand, 0.03, { heading: 90 });
+  w.until(tWheel, { pose: 'stand', heading: 90 });
+  w.until(tWheel + LIFT, { pose: 'windlass_raise', phase: raisePhase, heading: 90 });
   w.until(TH[0], { pose: 'stand', heading: 75 });
   // the kiyor: right hand on the right foot, left on the left, under the spigot (Zevachim 19b)
   w.walk([...outOfFrame, K.east], { speed: SPEED.slow });
-  sanctify(w, 270, 0.6);
+  sanctify(w, K.eastHeading, 0.6);
   // the pan's niche: up onto the small yesod ramp's level run, stoop for the pan in the pocket below it ⚙
   w.walk([[194.6, 315.6, Z], [196.4, 309.0, Z], [200.3, 306.4, Z], [200.3, 302.6, Z], P.pan.floor], { speed: SPEED.slow });
   w.shift(P.pan.ledge, 0.05, { pose: 'walk', heading: 0 });
@@ -269,8 +304,9 @@ function plan(ctx, sim, state) {
     const westSide = kSpot[0] < K.c[0];
     const route = [[G[0] - 3.5 + jit(SEED, 0.6, 'rx', i), 300, Z], [231.2, 273.2 + jit(SEED, 0.4, 'ry', i), Z], [206.3, 273.4 + jit(SEED, 0.4, 'rz', i), Z],
       ...P.way.westUp.slice(1, 5), ...(westSide ? [[196.0, 308.8, Z], [184.2, 308.9, Z], [184.0, kSpot[1], Z]] : [[196.4, 309.0, Z], [195.4, 315.7, Z]]), kSpot];
+    void westSide;
     s.walk(route, { speed: SPEED.run, pose: 'run' });
-    sanctify(s, headingOf(kSpot[0], kSpot[1], K.c[0], K.c[1]), 0.7 + 0.3 * rand(SEED, 'sc', i));
+    sanctify(s, K.spotHeadings[i], 0.7 + 0.3 * rand(SEED, 'sc', i));
     // the shovels and the forks, kept with the service vessels west of the ramp ⚙
     const tool = tools[i];
     s.walk([...(westSide ? [[184.0, kSpot[1], Z], [184.2, 308.9, Z], [196.0, 308.8, Z]] : [[195.4, 315.7, Z], [196.4, 309.0, Z]]), ...P.way.westDown.slice(1, 4)], { speed: 1.8 });
@@ -328,7 +364,10 @@ function plan(ctx, sim, state) {
         s.walk([[R.west + 2.5, R.foot - 1.7, Z], [R.box.max[0] + 1.2, R.foot - 1.6, Z], st.stand], { speed: SPEED.walk });
         s.act(0.08, { pose: 'bow', phase: [0, 0.45], face: [st.X, st.Y] });
         st.pick = s.now();
-        const LOG = ['log', null];
+        // a branch of the pile's wood on the shoulder (people's gizrin_branch → carry_log); the fig wood for the
+        // incense pile as a bundle of fine branches (Tamid 2:5)
+        const LOG = [FIG.includes(i) && k === TRIPS - 1 ? BUNDLE : BRANCH, null];
+        st.name = LOG[0];
         s.act(0.1, { pose: 'bow', phase: [0.6, 1], face: [st.X, st.Y], props: LOG });
         const lx = R.east + jit(SEED, 0.5, 'lx', i * 3 + k);
         s.walk([footE(lx), [lx, R.foot, R.z(R.foot)]], { speed: SPEED.walk, pose: 'carry_shoulder_walk', props: LOG });
@@ -432,11 +471,15 @@ function plan(ctx, sim, state) {
   const L0 = W.lock;
   // the one who sinks it at the locking: out of Beit HaMoked by the wicket and back in ⚙
   const mk = P.moked;
-  const toWheel = [mk.wicket, mk.wicketOut, [mk.wicketOut[0], 378.5, Z], [mk.wicketOut[0] - 0.2, 371, Z], [205, 346, Z], [P.apronX, 340.2, Z], [P.apronX, 321, Z], [199.6, 309.2, Z], ...intoFrame];
-  const lo = Script.from(L0 - 0.1 - walkMin(mk.wicketIn, toWheel), mk.wicketIn, 180, 'lowerer').exact();
+  // he lowers it from the axle's south side: the south rim pulled down hand over hand (people's windlass, its phase from
+  // the wheel's angle as the kiyor sinks)
+  const toWheel = [mk.wicket, mk.wicketOut, [mk.wicketOut[0], 378.5, Z], [mk.wicketOut[0] - 0.2, 371, Z], [205, 346, Z], [P.apronX, 340.2, Z], [P.apronX, 321, Z], [199.6, 309.2, Z], intoFrame[0], intoFrame[1], K.lowerStand];
+  const lo = Script.from(L0 - 0.15 - walkMin(mk.wicketIn, toWheel), mk.wicketIn, 180, 'lowerer').exact();
   wicketPass.push([lo.t0 - 0.05, lo.t0 + 0.3]);
   lo.walk(toWheel, { speed: SPEED.walk });
-  lo.until(L0 + LIFT + 0.05, { pose: 'stoke', heading: 90 });
+  lo.until(L0, { pose: 'stand', heading: 90 });
+  lo.until(L0 + LIFT, { pose: 'windlass', phase: lowerPhase, heading: 90 });
+  lo.act(0.05, { pose: 'stand', heading: 90 });
   lo.walk([...[...toWheel].reverse().slice(1), mk.wicketIn], { speed: SPEED.walk });
   wicketPass.push([lo.tEnd - 0.35, lo.tEnd + 0.05]);
 
@@ -446,7 +489,7 @@ function plan(ctx, sim, state) {
   const pmPick = pmLogs(W.pm)?.pick;
   stack.forEach((st, j) => {
     const end = j >= CARRIERS.length * TRIPS + 2 ? (pmPick ? pmPick[j - CARRIERS.length * TRIPS - 2] : wrap(SP[1] + 600)) : wrap(st.pick ?? SP[1]);
-    items.push({ name: 'log', show: [ready, end], keys: [{ t: ready, X: st.X, Y: st.Y, Z: st.Z, h: st.h }] });
+    items.push({ name: st.name, show: [ready, end], keys: [{ t: ready, X: st.X, Y: st.Y, Z: st.Z, h: st.h }] });
   });
   for (const tool of tools) {
     const rest = tool.drop ?? SP[1] + 2;
@@ -456,29 +499,31 @@ function plan(ctx, sim, state) {
     const keys = limbKeys[j].slice().sort((x, y) => x.t - y.t).map((k) => ({ ...k, t: wrap(k.t) }));
     items.push({ name: l.name, show: [wrap(MU[0] - 2.5), wrap(limbBurn[j] + LIMBS_BURN)], keys });
   });
-  // the new wood on the piles as each log is thrown on (Tamid 2:3–5): the gizrin east–west on the great pile, their
-  // inner ends toward the tapuach (Tamid 2:4); the fig wood on the incense pile. The builder's pile stands for the
-  // night's embers under them (a pile that can be cleared and rebuilt is requested from the altar builder) ⚙
+  // the new wood as each load is thrown on (Tamid 2:3–5): the great pile is the altar builder's movable, built again
+  // load by load (pileAt below, its inner ends touching the tapuach, Tamid 2:4); the fig wood on the incense pile shows
+  // as the bundles laid there ⚙
   const woodEnd = pmLogs(W.pm)?.lay;
-  let ng = 0, ni = 0;
+  let ni = 0;
+  const greatLays = [];
   for (const [tl, which] of lay.slice().sort((a, b) => a[0] - b[0])) {
     const end = Number.isFinite(woodEnd) ? woodEnd : wrap(tl + WOOD_BURN);
-    if (which === 'great') {
-      const g = A.great, col = ng % 2, row = Math.floor(ng / 2);
-      const X = (g.min[0] + g.max[0]) / 2 + (col ? 0.95 : -0.95) + jit(SEED, 0.2, 'wx', ng);
-      const Y = g.min[1] + 1.1 + 1.45 * row + jit(SEED, 0.15, 'wy', ng);
-      items.push({ name: 'log', show: [wrap(tl), end], keys: [{ t: wrap(tl), X, Y: Math.min(Y, g.max[1] - 0.7), Z: g.max[2] + 0.03 + 0.07 * (ng % 3), h: 90 + jit(SEED, 9, 'wh', ng) }] });
-      ng++;
-    } else {
+    if (which === 'great') greatLays.push(tl);
+    else {
       const g = A.incense;
-      items.push({ name: 'log', show: [wrap(tl), end], keys: [{ t: wrap(tl), X: (g.min[0] + g.max[0]) / 2 + jit(SEED, 0.15, 'ix', ni), Y: g.min[1] + 0.6 + 0.8 * ni, Z: g.max[2] + 0.03 + 0.06 * ni, h: 90 + 25 * ni }] });
+      items.push({ name: BUNDLE, show: [wrap(tl), end], keys: [{ t: wrap(tl), X: (g.min[0] + g.max[0]) / 2 + jit(SEED, 0.15, 'ix', ni), Y: g.min[1] + 0.6 + 0.8 * ni, Z: g.max[2] + 0.03 + 0.08 * ni, h: 90 + 25 * ni }] });
       ni++;
     }
   }
   state.props.setPlan(items);
 
+  // the great pile (world: altar.maarachah.great.pile build(f)): the night's pile raked down with its embers once the
+  // limbs are moved aside (Tamid 2:2 — through the clearing and the heaping of the tapuach), then built again: each
+  // load's share of the billets laid as it lands, the builder arranging it ⚙ (Tamid 2:3–4; Yoma 22a)
+  const pile = { down: [CL[1] - 0.2, TP[0] + 0.6 * (TP[1] - TP[0])], lays: greatLays, n: Math.max(1, greatLays.length) };
+  // the tapuach: settling through the night from sunset, the morning's ash raked onto it through the tapuach event ⚙
+  const tap2 = { settle0: ctx.time?.zmanim?.sunset ?? 1020, heap: [TP[0], TP[1]] };
   const out = {
-    W: w, B, L: lo, MU, TH, CL, TP, GP, SP,
+    W: w, B, L: lo, MU, TH, CL, TP, GP, SP, pile, tap: tap2, base: b,
     tWheel: wrap(tWheel), tLower: wrap(L0), tPour: wrap(tPour), tRun: wrap(tRun), tLight: wrap(tLight), tGo: wrap(tGo),
     panOut: [wrap(tPanUp), wrap(tPanBack)],
     wicket: wicketPass.map(([a, b]) => [wrap(a), wrap(b)]),
@@ -501,11 +546,13 @@ function plan(ctx, sim, state) {
   return out;
 }
 
-/** sanctifying hands and feet at the kiyor: stooped under the spigot (Zevachim 19b) ⚙ pose (requested: 'kiddush') */
+/** sanctifying hands and feet at the kiyor under a spigot: "he places his right hand on his right foot and his left
+ *  hand on his left foot and sanctifies", standing (Zevachim 19b — people's 'kiddush', the water rubbed over them) */
 function sanctify(s, heading, min = 0.55) {
-  s.act(0.08, { pose: 'bow', phase: [0, 0.38], heading });
-  s.act(Math.max(0.15, min - 0.16), { pose: 'bow', phase: 0.45, heading });
-  s.act(0.08, { pose: 'bow', phase: [0.7, 1], heading });
+  // turned into his stance standing, then down: he stands 50° off the radial (g2/places.js KID), not crouched as he turns
+  s.act(0.06, { pose: 'stand', heading });
+  s.act(Math.max(0.25, min) - 0.06, { pose: 'kiddush', phase: { cycle: 1 / 0.35 }, heading });
+  s.act(0.05, { pose: 'stand', heading });
 }
 
 function pickTool(s, tool) {
@@ -535,17 +582,52 @@ function toolSpots(P) {
   return out;
 }
 
-/** the wood east of the ramp's foot: two piles of boards ⚙ (a pile of fig and walnut branches is requested from people) */
+/**
+ * The wood east of the ramp's foot (⚙ place): two piles, each the two thin gizrin of Moshe's measure at the bottom — an
+ * amah square, as thick as a se'ah's strickle (Zevachim 62b; the 'log' board), the morning's and the afternoon's
+ * (Yoma 2:5) — and the pile's branches of fig, walnut and oil-wood on them (Tamid 2:3; people's gizrin_branch, r 6 cm),
+ * three side by side in two layers, taken from the top.
+ */
 function stackSpots() {
   const out = [];
   const n = CARRIERS.length * TRIPS + 4;          // the carriers', the morning's two logs, the afternoon's two (Yoma 2:5)
-  const per = Math.ceil(n / 2);
+  const per = Math.ceil(n / 2), nb = CARRIERS.length * TRIPS;
+  const BOARD = 0.075, BR = 0.25;                 // amot: a board's thickness; a branch's (0.12 m)
   for (let j = 0; j < n; j++) {
     const pile = j % 2, level = per - 1 - Math.floor(j / 2);     // taken from the top
-    const X = 230.9 + jit(SEED, 0.06, 'sx', j), Y = 276.7 + pile * 2.15 + jit(SEED, 0.06, 'sy', j);
-    out.push({ X, Y, Z: 16 + 0.075 * level, h: 90 + jit(SEED, 7, 'sh', j), stand: [X - 1.3, Y, 16], pick: null });
+    const X = 230.9 + jit(SEED, 0.06, 'sx', j), Y0 = 276.7 + pile * 2.15 + jit(SEED, 0.06, 'sy', j);
+    if (j >= nb) {
+      out.push({ name: 'log', X, Y: Y0, Z: 16 + BOARD * level, h: 90 + jit(SEED, 7, 'sh', j), stand: [X - 1.3, Y0, 16], pick: null });
+      continue;
+    }
+    const q = level - 2, layer = Math.floor(q / 3), pos = q % 3;   // above the two boards
+    const Y = Y0 + (pos - 1) * 0.27 + (layer ? 0.135 : 0);
+    out.push({ name: BRANCH, X, Y, Z: 16 + 2 * BOARD + layer * BR * 0.8, h: 90 + jit(SEED, 7, 'sh', j), stand: [X - 1.3, Y0, 16], pick: null });
   }
   return out;
+}
+
+/** the great pile at t (0 cleared … 1 built): 1 through the day and night; raked down over P.pile.down; rebuilt load by load */
+function pileAt(P, t) {
+  const b = P.base, u = b + since(t, b);
+  const D = P.pile;
+  if (u < D.down[0] || u >= b + 600) return 1;
+  let f = 1 - smooth(D.down[0], D.down[1], u);
+  if (u >= D.down[1]) {
+    f = 0;
+    for (let k = 0; k < D.lays.length; k++) f += smooth(D.lays[k], D.lays[k] + 0.6, u) / D.n;
+  }
+  return Math.max(0, Math.min(1, f));
+}
+
+/** the tapuach's size at t (world grow(f)): settled to TAPUACH_LOW from the evening to the morning ⚙; the ash raked up
+ *  onto it again through the tapuach event (Tamid 2:2) */
+function tapuachAt(P, t) {
+  const T = P.tap, b = P.base, u = b + since(t, b);
+  if (u < T.heap[0]) return TAPUACH_LOW;                          // from the muchni until the ash is raked up onto it
+  if (u < b + 600) return TAPUACH_LOW + (1 - TAPUACH_LOW) * smooth(T.heap[0], T.heap[1], u);
+  const len = wrap(b - T.settle0), e = since(t, T.settle0);       // overnight: from sunset to the muchni
+  return e < len ? 1 - (1 - TAPUACH_LOW) * smooth(0, len, e) : 1;
 }
 
 /** the evening's limbs not consumed: on the pile, pushed to the sides, pushed back (Tamid 2:1, 2:5) ⚙ */
@@ -554,7 +636,7 @@ function leftoverLimbs(A) {
   const gx = (g.min[0] + g.max[0]) / 2, gy = (g.min[1] + g.max[1]) / 2;
   // the one limb still on the fire at dawn: altar-night's last small-hours limb, taken over at its spot ⚙
   const L = [
-    { name: 'limb_gerah', pile: [gx - 1.6, gy + 2.2], h: 220, edge: [gx - 2.0, A.wk.N - 1.6], dir: [0, -1] },
+    { name: LIMB, pile: [gx - 1.6, gy + 2.2], h: 220, edge: [gx - 2.0, A.wk.N - 1.6], dir: [0, -1] },
     { name: 'limb', pile: [g.min[0] + 1.6, g.min[1] + 1.8], edge: [g.min[0] + 1.2, A.wk.S + 1.9], dir: [0, 1] },
     { name: 'limb_dofen', pile: [g.min[0] + 3.6, g.min[1] + 2.4], edge: [g.max[0] + 0.5, A.wk.S + 2.6], dir: [-0.4, 0.92] },
     { name: 'limb_foreleg', pile: [g.min[0] + 2.0, g.max[1] - 1.6], edge: [g.min[0] + 1.0, A.wk.N - 1.6], dir: [0, -1] },

@@ -2,7 +2,7 @@
 import { gridSolid, B, lathe, latheLocal } from './geo.js';
 import { CylinderGeometry, CircleGeometry, TorusGeometry, Matrix4, Quaternion, Vector3 } from 'three';
 import { masonryLayout } from '../../materials/gen/layout.js';
-import { classify } from '../masonry.js';
+import { classify, WALL } from '../masonry.js';
 import { placeAt, mergeGeometries, boxAt, finishLocal } from './kit.js';
 import { AMAH, m2w } from '../../../core/units.js';
 
@@ -39,7 +39,7 @@ export function doorBox(box, face, c, w, h, t, z0 = box.min[2], extra = {}) {
  *  underpass: { fromHead: [s0, s1], springZ } (site.js flight params.underpass) — the flight carried on a semicircular
  *  barrel vault spanning s0..s1, its axis across the flight, so a walkway passes under it at the foot's level ⚙
  */
-export function flight(C, { axis, head, dir, c0, c1, steps, rise = 0.5, tread = 0.5, zTop, cheek = 0.75, cheekH = 2, base = null, collide = true, mat = 'steps_stone', sideMat = 'herodian_wall', underpass = null }) {
+export function flight(C, { axis, head, dir, c0, c1, steps, rise = 0.5, tread = 0.5, zTop, cheek = 0.75, cheekH = 2, base = null, collide = true, mat = 'steps_stone', sideMat = WALL, underpass = null }) {
   const adds = [];
   const zFoot = base ?? zTop - steps * rise;
   const P = (s0, s1, a, b, z0, z1, tags) => (axis === 'y'
@@ -243,20 +243,32 @@ export function logGeometry(seg = 9) {
   g.computeBoundingSphere();
   return g;
 }
-/** register the log set (once) */
-export function logSet(C) {
-  return C.kit.set('logs', () => logGeometry(C.d >= 2 ? 10 : 8), ['timber_rough', C.kit.mat('timber_pile_end', 'timber_rough')]);
+/** the firewood's bark, one species per log: fig, walnut and oil-tree (pine) — never olive or vine (Tamid 2:3) */
+export const BARK_KEYS = ['timber_bark_fig', 'timber_bark_walnut', 'timber_bark_pine'];
+/** register the log set of one bark species (0 fig, 1 walnut, 2 pine) once: an instanced set per species, the ends shared */
+export function logSet(C, species = 1) {
+  const sp = Math.max(0, Math.min(2, species | 0));
+  return C.kit.set(`logs:${sp}`, () => logGeometry(C.d >= 2 ? 10 : 8), [C.kit.mat(BARK_KEYS[sp], 'timber_rough'), C.kit.mat('timber_pile_end', 'timber_rough')]);
+}
+/** a log's species from its place (stable: the same log keeps its bark whatever else is built) */
+export function barkSpecies(X, Y, Z, heading = 0) {
+  let k = (Math.round(X * 131) * 73856093) ^ (Math.round(Y * 131) * 19349663) ^ (Math.round(Z * 131 + heading) * 83492791);
+  k = Math.imul(k ^ (k >>> 13), 0x5bd1e995);
+  k ^= k >>> 15;
+  return (k >>> 0) % 3;
 }
 const _q = new Quaternion(), _q2 = new Quaternion(), _s = new Vector3();
 const UP = new Vector3(0, 1, 0), X_AX = new Vector3(1, 0, 0), Z_AX = new Vector3(0, 0, 1);
 /** a log centred at site [X, Y, Z] (its axis), running toward compass heading `heading` (deg), tilted up by pitch (deg),
- *  length and radius in amot, rolled about its axis by roll (rad) */
-export function logAt(C, [X, Y, Z], heading, len, r, { pitch = 0, roll = 0 } = {}) {
-  logSet(C);
+ *  length and radius in amot, rolled about its axis by roll (rad); species 0 fig, 1 walnut, 2 pine (default: from its place) */
+export function logAt(C, [X, Y, Z], heading, len, r, { pitch = 0, roll = 0, species = null } = {}) {
+  // detail 0 has only the sticks in the fire pits (the piles are boxes there): one species, two draw calls instead of six
+  const sp = C.d >= 1 ? (species ?? barkSpecies(X, Y, Z, heading)) : 1;
+  logSet(C, sp);
   const yaw = ((90 - heading) * Math.PI) / 180;
   _q.setFromAxisAngle(UP, yaw).multiply(_q2.setFromAxisAngle(Z_AX, (pitch * Math.PI) / 180)).multiply(new Quaternion().setFromAxisAngle(X_AX, roll));
   _s.set(len * AMAH, r * AMAH, r * AMAH);
-  C.kit.inst('logs', new Matrix4().compose(m2w(X, Y, Z), _q, _s));
+  C.kit.inst(`logs:${Math.max(0, Math.min(2, sp | 0))}`, new Matrix4().compose(m2w(X, Y, Z), _q, _s));
 }
 /** a star fire: n logs pushed in from round the hearth, inner ends on the embers (zIn), outer ends on the kerb (zOut) */
 export function starFire(C, [X, Y], zIn, zOut, rOut, n = 5, seed = 1, r = 0.16) {

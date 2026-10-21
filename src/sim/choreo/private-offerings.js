@@ -13,8 +13,8 @@
 // Each offering in progress is also a watchable sub-event of the schedule (g5/dynamic.js via ctx.schedule.addSource):
 // listed under its stage's event in "Happening now" and counted on the map, with a spot to watch it from.
 import { buildGeo } from './g5/geo.js';
-import { buildPlan, POOLS } from './g5/plan.js';
-import { segAt, sampleSeg, phaseOf, HOLD, WALK, CARRIED } from './g5/track.js';
+import { buildPlan, POOLS, ANIMALS } from './g5/plan.js';
+import { segAt, sampleSeg, phaseOf, HOLD, WALK, CARRIED, CARCASS } from './g5/track.js';
 import { createSource } from './g5/dynamic.js';
 import { crossed, cueAt } from '../lib/cue.js';
 import { upperBound, clamp, smooth } from '../lib/core.js';
@@ -23,7 +23,8 @@ import { m2w } from '../../core/units.js';
 
 const SEED = 0x6735;
 const TURN_RATE = 240;       // degrees per real second: figures turn to a new heading, never snap (except on jumps)
-const HUNG = ['lamb_hung', 'carcass_flaying', 'carcass_hung'];
+// the hung carcass stages of every kind (people-4: g5/track.js CARCASS), one free prop per lane each
+const HUNG = [...new Set(Object.values(CARCASS).flatMap((c) => [c.hung, c.flaying, c.dressed]))];
 const CAGES = ['bird_cage', 'bird_cage_pigeons'];
 const LANES = 6, BIRD_LANES = 3;
 
@@ -36,9 +37,9 @@ export default {
     const G = buildGeo(ctx);
     sim.setBounds([60, 236, -2], [412, 425, 40]);
     const pools = {};
-    const imp = { kohen: 2, israelite: 2, kohen_offduty: 2, nazir: 2, levi: 1, lamb: 2, ram: 2, goat: 2 };
+    const imp = { kohen: 2, israelite: 2, kohen_offduty: 2, nazir: 2, levi: 1, lamb: 2, ram: 2, goat: 2, ewe: 2, she_goat: 2 };
     for (const [name, n] of Object.entries(POOLS)) {
-      const animal = ['lamb', 'ram', 'goat'].includes(name);
+      const animal = ANIMALS.has(name);
       pools[name] = sim.pool({ name: `g5-${name}`, ...(animal ? { animal: name } : { role: name }), count: n, seed: SEED + name.length * 131 + n, importance: imp[name] || 1, prop: animal ? undefined : null });
     }
     const state = {
@@ -153,13 +154,15 @@ function poseSlot(ctx, state, P, slot, tr, t, dt, forced) {
   }
   slot._hs = h;
   slot.heading(h);
+  // the tenufah pair at one size (tr.scale = 1: people-4-fix); else the figure's own
+  slot.scale(tr.scale ?? null);
   let ph;
   if (s.ph?.k === 'walk') ph = walkPhase(ctx, slot, s.pose, o.d);
   else ph = phaseOf(s, t);
   slot.pose(s.pose, ph);
   if (s.kind !== CARRIED && slot._pkey !== s.pkey) setProps(slot, s.prop, s.hand, s.prop2, s.pkey);
   // an animal on its owner's rope
-  if (tr.pool === 'lamb' || tr.pool === 'ram' || tr.pool === 'goat') {
+  if (ANIMALS.has(tr.pool)) {
     const lt = s.lead ? tr.inst.byRole?.[s.lead] : null;
     const leader = lt && lt.slot >= 0 && t >= lt.t0 && t < lt.t1 ? state.pools[lt.pool]?.slot(lt.slot)?.actor : null;
     if (slot._lead !== leader) { slot._lead = leader; slot.actor?.setLead?.(leader || null); }

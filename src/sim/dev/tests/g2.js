@@ -9,7 +9,10 @@
 //      nobody in the Gazit stands above its floor;
 //   5. cues — continuous play at 120× through the dawn service and the afternoon tamid: every cue key fires once,
 //      no sound twice at the same moment, none on jumps;
-//   6. cost — the five modules' update time per frame (runtime EMA per entry, summed) during that play.
+//   6. cost — the five modules' update time per frame (runtime EMA per entry, summed) during that play;
+//   7. adopted assets (choreo-adopt) — the muchni's windlass_raise / windlass with the pose's phase on the wheel's angle,
+//      'kiddush' at the kiyor, the great pile cleared and rebuilt (build) and the tapuach heaped (grow), branches on the
+//      shoulder, the slain lamb carried in the arms, 'rinse' at the marble table.
 // run: node src/sim/dev/run.mjs --q low --script src/sim/dev/tests/g2.js "date=2026-11-02&t=alot-60"   (and a Shabbat date)
 const rt = ctx.schedule.runtime;
 const IDS = ['terumat-hadeshen', 'barkai', 'tamid-morning', 'tamid-afternoon', 'gazit-shema'];
@@ -38,6 +41,7 @@ function snap() {
   return {
     figs, props,
     kiyor: r3(mv('altar.kiyor')?.userData?.raised?.() ?? -1), pan: !!mv('altar.machtah')?.visible, logs: !!mv('altar.two-logs')?.visible,
+    pile: r3(mv('altar.maarachah.great.pile')?.userData?.amount ?? -1), tapuach: r3(mv('altar.tapuach')?.userData?.amount ?? -1),
     wicket: r3(mv('door:azarah.gate.moked.pishpash')?.userData?.openAmount ?? -1),
   };
 }
@@ -83,9 +87,14 @@ let waySamples = 0;
 for (const id of IDS) for (const S of scriptsOf(id)) S.steps.forEach((st, k) => {
   if (!st.zx) return;
   const head = rt.choreo('tamid-morning').state.P.ramp.head;
+  // the kiyor's bronze platform covers its well when it is raised (part of the kiyor movable, not of the static
+  // colliders): the men sanctifying under the spigots stand on it (Z 16) — choreo-adopt
+  const well = ctx.el('altar.kiyor.muchni')?.params?.well;
+  const onPlatform = (X, Y, Z) => well && Math.abs(Z - 16) < 0.05 && X >= well.min[0] && X <= well.max[0] && Y >= well.min[1] && Y <= well.max[1];
   const test = (X, Y, Z, what) => {
     // the ramp stands a hair's breadth off the altar (Zevachim 62b): its seam at the head is not a step
     if (Math.abs(Y - head) < 0.25 && Z > 24) return;
+    if (onPlatform(X, Y, Z)) return;
     waySamples++;
     const f = floor(X, Y, Z);
     if (f == null || Math.abs(f - Z) > 0.25) {
@@ -206,7 +215,157 @@ for (const c of caps) { const last = capSeen.get(c.id); if (last !== undefined &
 cost.sort((a, b) => a - b);
 const pct = (p) => +(cost[Math.min(cost.length - 1, Math.floor(p * cost.length))] || 0).toFixed(3);
 const warns = IDS.map((id) => rt.choreo(id).mod.debug?.(rt.choreo(id).state) || '').filter((x) => x.includes('⚠'));
+// ---- 7. the adopted assets
+const adopt = {};
+let kiddushClearance = '';
+{
+  const ok = (k, v, info) => { adopt[k] = v ? true : `FAIL ${info ?? ''}`; };
+  const TH = rt.choreo('terumat-hadeshen'), P = TH.state.plan;
+  const slots = (e, pool) => (e.pools.find((p) => p.name === pool)?.slots || []).filter((x) => x.want);
+  const mv = (id) => ctx.movables.get(id);
+  const wheel = () => mv('wheel:altar.kiyor.muchni')?.rotation?.x ?? NaN;
+  const st = ctx.people?.stations;
+  const phErr = (s, station) => { const d = Math.abs(s._phase - station.phaseAt(wheel())); return Math.min(d, 1 - d); };
+  // the dawn raising: windlass_raise on the north side, the pose's phase on the wheel's angle
+  let n = 0, worst = 0;
+  for (let k = 0.2; k < 1.6; k += 0.35) {
+    ctx.time.set((P.tWheel + k + 1440) % 1440); await frames(3);
+    const w = slots(TH, 'winner')[0];
+    if (w?._pose === 'windlass_raise') { n++; worst = Math.max(worst, phErr(w, st.windlassRaise)); }
+  }
+  ok('windlass_raise on the wheel', n >= 3 && worst < 0.02, `n ${n} worst ${worst.toFixed(3)}`);
+  ok('winner scale 1', slots(TH, 'winner')[0]?.actor?.scale === 1, slots(TH, 'winner')[0]?.actor?.scale);
+  // the evening lowering: windlass on the south side
+  n = 0; worst = 0;
+  for (let k = 0.3; k < 1.6; k += 0.4) {
+    ctx.time.set((P.tLower + k + 1440) % 1440); await frames(3);
+    const w = slots(TH, 'kiyor-lowerer')[0];
+    if (w?._pose === 'windlass') { n++; worst = Math.max(worst, phErr(w, st.windlass)); }
+  }
+  ok('windlass (lowering) on the wheel', n >= 3 && worst < 0.02, `n ${n} worst ${worst.toFixed(3)}`);
+  // kiddush at the kiyor (the winner, then the brothers)
+  let kid = 0;
+  for (let t = P.TH[0]; t < P.CL[1] + 2; t += 0.05) {
+    ctx.time.set(((t % 1440) + 1440) % 1440); await frames(2);
+    for (const pn of ['winner', 'brothers']) for (const s2 of slots(TH, pn)) if (s2._pose === 'kiddush') kid++;
+    if (kid > 6) break;
+  }
+  ok('kiddush', kid > 0, kid);
+  // ... and clear of the laver (choreo-adopt-fix): people's joints for each man in 'kiddush' (his phase, his size)
+  // carried to the site by his figure's matrix, against world's kiyor (world/altar/kiyor.js: the bowl's profile, the
+  // twelve spigot pipes r 1.86–2.3 at 1.52 amot, the nozzle hanging at r 2.3): the head off the bowl and the pipes,
+  // the shoulders off the pipes and nozzles, the right hand under a nozzle
+  {
+    const { getRig } = await import('/src/people/rig.js');
+    const { PoseBuilder } = await import('/src/people/pose.js');
+    const { HUMAN_CLIPS } = await import('/src/people/clips.js');
+    const { w2m, AMAH } = await import('/src/core/units.js');
+    const kel = ctx.el('altar.kiyor'), KC = kel.params.center, KR = kel.params.diameter / 2, KH = kel.box.max[2] - kel.box.min[2];
+    const sc = KR / 2;
+    const prof = [[1.32, 0], [1.36, 0.05], [1.3, 0.11], [1.12, 0.17], [0.86, 0.3], [0.72, 0.52], [0.66, 0.78], [0.7, 0.86], [0.92, 0.95],
+      [1.25, 1.03], [1.62, 1.2], [1.86, 1.52], [1.95, 2.0], [1.95, 2.74], [1.99, 2.8], [2.0, 2.92], [1.96, 3.0]].map(([r, z]) => [r * sc, 0.02 + z * KH / 3]);
+    const bowlR = (z) => { if (z <= prof[0][1]) return prof[0][0]; for (let i = 1; i < prof.length; i++) if (z <= prof[i][1]) { const [r0, z0] = prof[i - 1], [r1, z1] = prof[i]; return r0 + (r1 - r0) * (z - z0) / (z1 - z0); } return 0; };
+    const zSp = 0.02 + 1.5 * KH / 3, rIn = 1.86 * sc, rOut = 2.3 * sc;
+    const spig = Array.from({ length: 12 }, (_, i) => (i + 0.5) * Math.PI / 6);
+    // metres from a site point (amot) to the nearest pipe (a segment) and to the nearest nozzle (a short vertical)
+    const toPipe = (q) => Math.min(...spig.map((a) => { const u = (q.X - KC[0]) * Math.cos(a) + (q.Y - KC[1]) * Math.sin(a), v = -(q.X - KC[0]) * Math.sin(a) + (q.Y - KC[1]) * Math.cos(a);
+      return Math.hypot(u - Math.min(rOut, Math.max(rIn, u)), v, q.Z - KC[2] - zSp) * AMAH; }));
+    const toNozzle = (q, flat = false) => Math.min(...spig.map((a) => { const dx = q.X - KC[0] - Math.cos(a) * rOut, dy = q.Y - KC[1] - Math.sin(a) * rOut;
+      const z = q.Z - KC[2], dz = flat ? 0 : z - Math.min(zSp - 0.08 + 0.09, Math.max(zSp - 0.08 - 0.09, z));
+      return Math.hypot(dx, dy, dz) * AMAH; }));
+    const offBowl = (q) => (Math.hypot(q.X - KC[0], q.Y - KC[1]) - bowlR(q.Z - KC[2])) * AMAH;
+    const rig = getRig('man'), PB = new PoseBuilder(rig);
+    const res = [];
+    let n2 = 0;
+    for (let t = P.TH[0]; t < P.CL[1] + 2 && n2 < 9; t += 0.05) {
+      ctx.time.set(((t % 1440) + 1440) % 1440); await frames(2);
+      for (const pn of ['winner', 'brothers']) for (const s2 of slots(TH, pn)) {
+        if (s2._pose !== 'kiddush' || !s2.actor || res.some((r) => r.who === `${pn}#${s2.index}`)) continue;
+        n2++;
+        PB.reset();
+        HUMAN_CLIPS.kiddush.fn(PB, rig, Number.isFinite(s2._phase) ? s2._phase : 0.5);
+        const o3 = s2.actor.object3D, k = s2.actor.scale;
+        o3.updateMatrixWorld();
+        const J = (name) => w2m(PB.worldPos(name).multiplyScalar(k).applyMatrix4(o3.matrixWorld));
+        // the skull's centre ≈ 9 cm on from the head bone along the neck (the head bowed over the feet)
+        const hb = PB.worldPos('head'), nk = PB.worldPos('neck');
+        const hc = w2m(hb.clone().add(hb.clone().sub(nk).setLength(0.09)).multiplyScalar(k).applyMatrix4(o3.matrixWorld));
+        const head = J('head'), sh = [J('uarm_l'), J('uarm_r')], hand = J('hand_r'), fing = J('fing_r');
+        const r = {
+          who: `${pn}#${s2.index}`, scale: k,
+          headBowl: +Math.min(offBowl(head), offBowl(hc)).toFixed(3), headPipe: +Math.min(toPipe(head), toPipe(hc)).toFixed(3),
+          shoulderPipe: +Math.min(...sh.map(toPipe), ...sh.map((q) => toNozzle(q))).toFixed(3),
+          handNozzle: +Math.min(toNozzle(hand, true), toNozzle(fing, true)).toFixed(3),
+        };
+        r.ok = r.headBowl > 0.13 && r.headPipe > 0.13 && r.shoulderPipe > 0.07 && r.handNozzle < 0.12;
+        res.push(r);
+      }
+    }
+    ok('kiddush clear of the kiyor', res.length >= 5 && res.every((r) => r.ok), JSON.stringify(res.filter((r) => !r.ok).slice(0, 3)) + ` of ${res.length}`);
+    // under the muchni's axle (world/altar/kiyor.js: 2.6 amot up, r 0.16) the winner's head and shoulders stay below it
+    const wb = ctx.el('altar.kiyor.muchni').params.wheel, yAx = (wb.min[1] + wb.max[1]) / 2, zUnder = wb.min[2] + 2.6 - 0.16;
+    let under = 0, worstTop = -9;
+    for (let t = P.tWheel - 0.6; t < P.tWheel + 0.1; t += 0.005) {
+      ctx.time.set(((t % 1440) + 1440) % 1440); await frames(1);
+      const w = slots(TH, 'winner')[0];
+      if (!w?.actor) continue;
+      const q = w2m(w.actor.object3D.position);
+      if (Math.abs(q.Y - yAx) > 0.5 || Math.abs(q.X - (wb.max[0] - 0.45 - 0.41 - 1.146)) > 0.6) continue;
+      under++;
+      PB.reset();
+      const clip = HUMAN_CLIPS[w._pose];
+      if (!clip) continue;
+      clip.fn(PB, rig, Number.isFinite(w._phase) ? w._phase : 0.5);
+      const o3 = w.actor.object3D; o3.updateMatrixWorld();
+      const top = Math.max(...['head', 'neck', 'uarm_l', 'uarm_r'].map((n) => w2m(PB.worldPos(n).multiplyScalar(w.actor.scale).applyMatrix4(o3.matrixWorld)).Z + (n === 'head' ? 0.14 : 0.06) / AMAH));
+      worstTop = Math.max(worstTop, top);
+    }
+    ok('under the axle: head below it', under >= 3 && worstTop < zUnder, `${under} samples, top ${worstTop.toFixed(2)} vs underside ${zUnder.toFixed(2)} amot`);
+    kiddushClearance = res.map((r) => `${r.who} s${r.scale.toFixed(3)} head ${r.headBowl}/${r.headPipe} shoulder ${r.shoulderPipe} hand ${r.handNozzle}`).join('; ');
+  }
+  // the great pile cleared and rebuilt; the tapuach heaped
+  const amt = async (t) => { ctx.time.set(((t % 1440) + 1440) % 1440); await frames(3); return [mv('altar.maarachah.great.pile')?.userData?.amount, mv('altar.tapuach')?.userData?.amount]; };
+  const [p0] = await amt(P.MU[0] - 1);
+  const [p1, g1] = await amt(P.TP[1] + 0.05);
+  const [p2, g2] = await amt(P.SP[1] + 1);
+  const [, g0] = await amt(P.TP[0] - 0.2);
+  ok('pile built at night', p0 > 0.99, p0);
+  ok('pile cleared after the tapuach', p1 < 0.05, p1);
+  ok('pile rebuilt by the second pile', p2 > 0.99, p2);
+  ok('tapuach heaped', g0 < g1 && g1 > 0.99 && g2 > 0.99, `${g0} ${g1} ${g2}`);
+  let mid = null;
+  for (let t = P.GP[0]; t < P.GP[1] + 2; t += 0.25) { const [a] = await amt(t); if (a > 0.05 && a < 0.95) { mid = a; break; } }
+  ok('pile grows load by load', mid != null, mid);
+  // branches on the shoulder (Tamid 2:3)
+  let br = false;
+  for (let t = P.GP[0] - 1; t < P.GP[1] && !br; t += 0.1) {
+    ctx.time.set(((t % 1440) + 1440) % 1440); await frames(2);
+    br = slots(TH, 'brothers').some((s2) => s2._g2r === 'gizrin_branch' || s2._g2r === 'branch_bundle');
+  }
+  ok('gizrin branches carried', br);
+  // the slain lamb in the arms; the innards rinsed
+  const TM = rt.choreo('tamid-morning');
+  let lamb = false, rinse = false;
+  for (let off = 2; off <= 40 && !(lamb && rinse); off += 0.5) {
+    ctx.time.set(tOf(`sunrise+${off}`)); await frames(2);
+    for (const p of TM.pools) for (const s2 of p.slots) if (s2.want) {
+      if (s2._g2r === 'lamb_slain' && /carry_lamb/.test(s2._pose)) lamb = true;
+      if (s2._pose === 'rinse') rinse = true;
+    }
+  }
+  ok('lamb_slain carried', lamb); ok('rinse', rinse);
+  // never a moment without the lamb: in the flayer's arms until it hangs, on the hook from then (choreo-adopt-fix)
+  {
+    const hang = TM.state.plan?.M?.t?.cuts?.hang;
+    const inArms = async (x) => { ctx.time.set(tOf(x)); await frames(2); return TM.pools.some((p) => p.slots.some((s2) => s2.want && s2._g2r === 'lamb_slain')); };
+    const onHook = () => !!TM.state.props.items.find((i) => i.name === 'lamb_hung')?.slot?.vis;
+    const a = Number.isFinite(hang) && await inArms(hang - 0.02);
+    const b = Number.isFinite(hang) && (await inArms(hang + 0.02), onHook());
+    ok('lamb in arms until it hangs', a && b, `${hang} arms ${a} hook ${b}`);
+  }
+}
 return {
+  adopt, adoptOk: Object.values(adopt).every((v) => v === true), kiddushClearance,
   dayType, deterministic: diffs.length === 0, diffs: diffs.slice(0, 6), summary,
   ways: { samples: waySamples, bad: wayBad.length, list: wayBad.slice(0, 40) },
   faces: { twice: twice.size, list: [...twice.entries()].slice(0, 20).map(([k, v]) => `${v} ${k}`) },

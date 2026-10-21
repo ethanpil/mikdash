@@ -18,7 +18,7 @@
 // the hand leading it, the slain lamb carried in the arms, props, turning at a natural rate), on the calling module's
 // own pools. The free props hung on the hooks are spawned here.
 import { buildGeo } from '../g5/geo.js';
-import { Track, one, fix, segAt, sampleSeg, phaseOf, HOLD, WALK, CARRIED, WALKPH, tableOrder } from '../g5/track.js';
+import { Track, one, fix, cyc, segAt, sampleSeg, phaseOf, HOLD, WALK, CARRIED, WALKPH, tableOrder, carcassOf, WAVE_P } from '../g5/track.js';
 import { createSource } from '../g5/dynamic.js';
 import { SPURS, SPUR_SUB } from './mount.js';
 import { OFFERING_TYPES, NESACHIM } from '../../../data/offerings.js';
@@ -80,7 +80,8 @@ function g4Places(ctx, G) {
     medSpots: G.S.medSpot.slice(0, 3).map((p) => [p[0], p[1] - 5.2, D16]),
     // the nazir's waving: a row north of G5's waving places east of the altar (S.wave), the nazir east facing west and
     // the kohen west of him, 1.3 amot apart (Menachot 61b) ⚙
-    wave: (() => { const tp = G.S.tenufah.pos; const y = tp[1] + 6.6; return { owner: [tp[0] + 0.65, y, D16], kohen: [tp[0] - 0.65, y, D16], ownerIn: [tp[0] + 2.8, y, D16], kohenIn: [tp[0] - 3.1, y, D16] }; })(),
+    // the pair people's WAVE_UNDER.partner apart (0.74 m origin to origin, both at scale 1 — people-4-fix)
+    wave: (() => { const tp = G.S.tenufah.pos; const y = tp[1] + 6.6; const hw = (ctx.people?.stations?.waveUnder?.partner ?? 0.74) / AM / 2; return { owner: [tp[0] + hw, y, D16], kohen: [tp[0] - hw, y, D16], ownerIn: [tp[0] + 2.8, y, D16], kohenIn: [tp[0] - 3.1, y, D16] }; })(),
   };
 }
 
@@ -158,10 +159,14 @@ export function entryBack() {
   for (let x = BACK; x >= -1e-6; x -= 0.4) { R.sample(L - Math.max(0, x), q, side); pts.push([q.X, q.Y, q.Z]); }
   return pts;
 }
-/** ways to lay the nazir's set out at G4's rings and hooks (ring A for the chatat and the ram, ring B for the olah) */
+/**
+ * ways to lay the nazir's set out at G4's rings and hooks: the three animals at ring A one after another (ring 16, the
+ * west column: west of it no G5 corridor runs, so the party waits there — ring 18's cell is boxed in by G5's row and
+ * column corridors; choreo-adopt-fix), each on its own hook. rB is kept for callers and no longer used.
+ */
 export const NAZIR_COMBOS = [
-  { rA: 0, rB: 1, hC: 0, hO: 1, hR: 2 }, { rA: 1, rB: 0, hC: 1, hO: 0, hR: 3 },
-  { rA: 0, rB: 1, hC: 2, hO: 3, hR: 0 }, { rA: 1, rB: 0, hC: 3, hO: 2, hR: 1 },
+  { rA: 0, rB: 0, hC: 0, hO: 1, hR: 2 }, { rA: 0, rB: 0, hC: 1, hO: 0, hR: 3 },
+  { rA: 0, rB: 0, hC: 2, hO: 3, hR: 0 }, { rA: 0, rB: 0, hC: 3, hO: 2, hR: 1 },
 ];
 
 /**
@@ -372,15 +377,24 @@ function animal(B, G, t, o) {
   A.hold(tLift, { pose: 'bound', h: 180 });
   ringUse.b = tLift + 0.1;
   o.out.lift = tLift;
-  K2.walk(G, H.flayer, { speed: SPEED.carry, pose: 'carry_walk' });
-  A.carried(K2.lastWalk, { up: 0.74, hOff: -90, fwd: 0.36, side: 0 });
+  const CC = carcassOf(sp);
+  if (CC.slain) {
+    // the slain animal lifted into his arms, its back against him, the head hanging (people's *_slain in carry_lamb), and
+    // carried to the hook; the live figure is gone from the ring as he lifts it ⚙
+    K2.holdFor(0.05, { pose: 'carry_lamb', h: 270, prop: CC.slain });
+    K2.walk(G, H.flayer, { speed: SPEED.carry, pose: 'carry_lamb_walk', prop: CC.slain });
+  } else {
+    // a ram is too heavy to carry so (people-4): the bound animal itself is borne to the hook ⚙
+    K2.walk(G, H.flayer, { speed: SPEED.carry, pose: 'carry_walk' });
+    A.carried(K2.lastWalk, { up: 0.74, hOff: -90, fwd: 0.36, side: 0 });
+  }
   const tHang = K2.t;
   const dF = minutes(type, 'hefshet', r, [10, 20]);
   K2.hold(tHang + dF, { pose: 'flay', h: H.fh, prop: 'knife_flay' });
   const at = sp === 'ram' ? H.atRam : H.at;
-  B.props.push({ name: 'lamb_hung', hook: H.id, t0: tHang, t1: tHang + 0.14 * dF, at, h: H.h });
-  B.props.push({ name: 'carcass_flaying', hook: H.id, t0: tHang + 0.14 * dF, t1: tHang + 0.72 * dF, at, h: H.h });
-  const hungFinal = { name: 'carcass_hung', hook: H.id, t0: tHang + 0.72 * dF, t1: NaN, at, h: H.h };
+  B.props.push({ name: CC.hung, hook: H.id, t0: tHang, t1: tHang + 0.14 * dF, at, h: H.h });
+  B.props.push({ name: CC.flaying, hook: H.id, t0: tHang + 0.14 * dF, t1: tHang + 0.72 * dF, at, h: H.h });
+  const hungFinal = { name: CC.dressed, hook: H.id, t0: tHang + 0.72 * dF, t1: NaN, at, h: H.h };
   B.props.push(hungFinal);
   mark(B, 'hefshet', tLift, tHang + dF, { type, zone: 'slaughter-zone', view: { at: [H.flayer[0] + (H.fh === 0 ? 3 : H.fh === 90 ? -3.5 : 3.5), 371.0, D16], heading: H.fh === 0 ? 345 : H.fh === 90 ? 20 : 340 },
     label: `${o.title}: hung on ${H.pillar === 0 ? 'the westernmost' : 'the easternmost'} pillar's hooks and flayed${type === 'olah' ? ', cut into its limbs' : ', the fats taken out'}` });
@@ -404,8 +418,8 @@ function animal(B, G, t, o) {
     const tO = t;
     K2.step(H.flayer, { pose: 'walk', speed: 0.8 });
     K2.holdFor(0.12, { pose: 'flay', h: H.fh });
-    K2.walk(G, o.hideSpot, { speed: SPEED.carry, pose: 'carry_shoulder_walk', prop: 'hide' });
-    K2.holdFor(0.35, { pose: 'carry_shoulder', h: 180, prop: 'hide' });
+    K2.walk(G, o.hideSpot, { speed: SPEED.carry, pose: 'carry_shoulder_walk', prop: CC.hide });
+    K2.holdFor(0.35, { pose: 'carry_shoulder', h: 180, prop: CC.hide });
     mark(B, 'or', tO, K2.t, { type, zone: 'parvah', view: view(G.V.south), label: `${o.title}: its hide to the Parvah, to be salted` });
     o.out.orEnd = K2.t - 0.6;
     K2.walk(G, 'MOK_X', { speed: SPEED.kohen });
@@ -459,7 +473,7 @@ function limbsUp(B, G, t, H, title, r) {
     const [pr, pl] = pairs[k];
     c.hold(tSalt + 0.9 + 0.05 * k, { pose: pl ? 'carry_limbs' : 'carry', h: 0, prop: pr, prop2: pl });
     c.step([220.6, c.p[1] + 1.2, G.kevZ(c.p[1] + 1.2)], { pose: pl ? 'carry_limbs_walk' : 'carry_walk', prop: pr, prop2: pl, speed: 0.9 });
-    c.walk(G, pile(n - 1 - k), { speed: SPEED.carry, pose: pl ? 'carry_limbs_walk' : 'carry_walk', prop: pr, prop2: pl, from: 'KE_MID', to: 'TP_E' });
+    c.walk(G, pile(n - 1 - k), { speed: SPEED.carry, pose: pl ? 'carry_limbs_walk' : 'carry_walk', prop: pr, prop2: pl, from: 'KE_MID', to: 'TP_SE' });
     tTop = Math.max(tTop, c.t);
   });
   C.forEach((c, k) => {
@@ -467,7 +481,7 @@ function limbsUp(B, G, t, H, title, r) {
     c.hold(tTop + 0.04 + 0.022 * k + 0.012 * r(), { pose: pl ? 'carry_limbs' : 'carry', h: 270, prop: pr, prop2: pl });
     c.holdFor(0.1, { pose: pl ? 'toss' : 'throw', ph: one(), h: 270, prop: pr, prop2: pl });
     c.hold(tTop + 0.04 + 0.022 * n + 0.13 + 0.04 * k, { pose: 'stand', h: 270 });
-    c.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'TP_E' });
+    c.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'TP_NE' });
   });
   const tThrown = tTop + 0.04 + 0.022 * n + 0.13;
   mark(B, 'haalaah', tSalt + 0.9, tThrown, { type: 'olah', zone: 'mizbeach', view: { at: G.V.top.at, heading: G.V.top.heading }, label: `${title}: its limbs thrown on the great pile` });
@@ -480,21 +494,24 @@ function eimurimUp(B, G, t, H, title, o = {}) {
   const S = G.S;
   const Ke = new Track(null, `${B.role}K3`, 'kohen');
   B.tracks.push(Ke);
+  // the fats taken up in a silver basin (people's eimurim: the alyah, the kidneys in their suet, the lobe of the liver,
+  // the caul — Vayikra 3:9–10; eimurim_goat without the alyah)
+  const EI = o.eimurim || carcassOf(o.sp).eimurim;
   arriveAt(G, Ke, 'MOK_X', add(H.table.stand, 0.4, 1.3), t + 0.1);
-  Ke.holdFor(0.2, { pose: 'carry', h: 180, prop: 'bowl' });
+  Ke.holdFor(0.2, { pose: 'carry', h: 180, prop: EI });
   const t0 = Ke.t;
-  Ke.walk(G, S.saltE, { speed: SPEED.carry, pose: 'carry_walk', prop: 'bowl', to: 'K_FW' });
-  Ke.holdFor(0.08, { pose: 'kneel', ph: fix(0.3), h: 90, prop: 'bowl' });
+  Ke.walk(G, S.saltE, { speed: SPEED.carry, pose: 'carry_walk', prop: EI, to: 'K_FW' });
+  Ke.holdFor(0.08, { pose: 'kneel', ph: fix(0.3), h: 90, prop: EI });
   Ke.holdFor(0.35, { pose: 'salt', h: 90, prop: 'salt', hand: 'left' });
   Ke.holdFor(0.08, { pose: 'kneel', ph: fix(0.3), h: 90 });
   const sy = S.saltE[1];
-  Ke.step([220.6, sy + 1.2, G.kevZ(sy + 1.2)], { pose: 'carry_walk', prop: 'bowl', speed: 0.9 });
-  Ke.walk(G, [S.pileFaceX, 321.5 + 2.4, 25], { speed: SPEED.carry, pose: 'carry_walk', prop: 'bowl', from: 'KE_MID', to: 'TP_E' });
-  Ke.holdFor(0.1, { pose: 'throw', ph: one(), h: 270, prop: 'bowl' });
+  Ke.step([220.6, sy + 1.2, G.kevZ(sy + 1.2)], { pose: 'carry_walk', prop: EI, speed: 0.9 });
+  Ke.walk(G, [S.pileFaceX, 321.5 + 2.4, 25], { speed: SPEED.carry, pose: 'carry_walk', prop: EI, from: 'KE_MID', to: 'TP_SE' });
+  Ke.holdFor(0.1, { pose: 'throw', ph: one(), h: 270, prop: EI });
   mark(B, 'haalaah', t0, Ke.t, { type: o.type || B.type, zone: 'mizbeach', view: { at: G.V.ramp.at, heading: G.V.ramp.heading }, label: `${title}: its eimurim salted and burned on the great pile` });
   if (o.meat) {
     // the most-holy meat to the kohanim's cooking place in the court (Zevachim 5:3, 11:4)
-    Ke.walk(G, H.flayer, { speed: SPEED.kohen, from: 'TP_E' });
+    Ke.walk(G, H.flayer, { speed: SPEED.kohen, from: 'TP_NE' });
     const tTake = Ke.t;
     B.tTake = tTake;
     Ke.holdFor(0.15, { pose: 'flay', h: H.fh });
@@ -503,7 +520,7 @@ function eimurimUp(B, G, t, H, title, o = {}) {
     mark(B, 'achilah', tTake, Ke.t, { type: o.type || B.type, zone: 'ezrat-kohanim', view: { at: G.V.kitchen.at, heading: G.V.kitchen.heading }, parent: o.mealParent,
       label: `${title}: its meat to the kohanim's cooking place, to be eaten in the court by male kohanim until midnight` });
     Ke.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'E_K' });
-  } else Ke.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'TP_E' });
+  } else Ke.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'TP_NE' });
   return Ke.t;
 }
 
@@ -518,10 +535,10 @@ function nesachim(B, G, t, label) {
   arriveAt(G, N2, 'MOK_X', [208.0, 281.2, 16], tN0 + 0.05, { to: 'K_FW' });
   N1.holdFor(0.2, { pose: 'carry', h: 270, prop: 'solet' });
   N1.walk(G, 'K_FE', { speed: SPEED.carry, pose: 'carry_walk', prop: 'solet' });
-  N1.walk(G, [S.pileFaceX, 322.5 + 1.6, 25], { speed: SPEED.carry, pose: 'carry_walk', prop: 'solet', from: 'K_FE', to: 'TP_E' });
+  N1.walk(G, [S.pileFaceX, 322.5 + 1.6, 25], { speed: SPEED.carry, pose: 'carry_walk', prop: 'solet', from: 'K_FE', to: 'TP_SE' });
   N1.holdFor(0.1, { pose: 'toss', ph: one(), h: 270, prop: 'solet' });
   const t1 = N1.t;
-  N1.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'TP_E' });
+  N1.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'TP_NE' });
   N2.holdFor(0.2, { pose: 'carry', h: 270, prop: 'wine_jug' });
   const up = wineRoute(G, N2.p, 0);
   N2.walkRoute(up, { speed: SPEED.carry, pose: 'carry_walk', prop: 'wine_jug' });
@@ -551,21 +568,26 @@ export function scriptNazir(G, k, seed, places, back, F = null) {
   B.role = `n${k}`;
   const r = rng(hashStr(`g4:nazir:${seed}:${k}`));
   const P4 = G.g4;
-  const [ringA, ringB] = [P4.rings[places.rA], P4.rings[places.rB]];
+  const ringA = P4.rings[places.rA];
   const [hC, hO, hR] = [P4.hooks[places.hC], P4.hooks[places.hO], P4.hooks[places.hR]];
   const O = new Track(null, 'O', 'nazir'), C1 = new Track(null, 'C1', 'companion'), C2 = new Track(null, 'C2', 'companion');
-  const AC = new Track(null, 'AC', 'lamb'), AO = new Track(null, 'AO', 'lamb'), AR = new Track(null, 'AR', 'ram');
+  // his chatat a ewe lamb (Bamidbar 6:14 "a ewe lamb in its first year" — people's ewe), his olah a lamb, his shelamim a ram
+  const AC = new Track(null, 'AC', 'ewe'), AO = new Track(null, 'AO', 'lamb'), AR = new Track(null, 'AR', 'ram');
   B.tracks.push(O, C1, C2, AC, AO, AR);
   // ---- in at the foot of Sha'ar HaKorban's flight (Middot 1:5) — where their walk over the Mount ends — up the flight
   // to the rings: the nazir leads the ram, C1 the two lambs, C2 carries the basket, a little apart. Each leader's walk
   // begins a few metres back down the spur, so the animals behind him go on from where they were. By ring A each has
-  // his own waiting place east of it, clear of where the kohanim will stand (⚙ places)
+  // his own waiting place west and north of it, clear of where the kohanim will stand (east of the ring) and >= 0.85
+  // amah off G5's corridors (the west one at X 199.5, the X 209 column, the row at Y 370, each with its keep-right
+  // offset); they come down the west corridor (R_W) ⚙ places (choreo-adopt-fix: they had waited east of the ring, in
+  // the X 209 / 225 corridors, G5's walkers passing through them)
   const dt = { C1: 0.13, C2: 0.34 }, lagR = 1.4, lagL = [1.4, 2.3];
   const [X, Y] = ringA.ring;
-  const spot = { O: [X + 3.6, Y - 1.9, D16], AR: [X + 3.6, Y + 1.4, D16], C2: [X + 4.7, Y + 0.5, D16], C1: [X + 2.7, Y + 2.7, D16], AC: [X + 1.7, Y + 3.3, D16], AO: [X + 3.0, Y + 3.8, D16] };
+  const spot = { O: [X - 2.0, Y + 2.7, D16], AR: [X - 2.6, Y + 0.1, D16], C2: [X - 3.5, Y + 1.5, D16], C1: [X - 0.8, Y + 3.1, D16], AC: [X + 1.7, Y + 3.3, D16], AO: [X + 0.6, Y + 4.5, D16] };
+  const hRing = (p) => headTo(p, ringA.ring);
   const start = back[back.length - 1];
   const lead = (tr, t0, to, pose, prop) => {
-    const g = G.route(start, to, { from: 'KOR_FOOT' });
+    const g = G.route(start, to, { from: 'KOR_FOOT', to: 'R_W' });
     const pts = [...back.map((p) => p.slice()), ...g.path.points.slice(1).map((p) => [p.X, p.Y, p.Z])];
     const path = pathOf(pts, [...back.map(() => 1), ...Array.from(g.near).slice(1)]);
     const d0 = path.path.cum[back.length - 1];
@@ -582,50 +604,41 @@ export function scriptNazir(G, k, seed, places, back, F = null) {
   AO.step(spot.AO, { pose: 'walk_led', speed: 0.6, lead: 'C1' });
   lead(C2, dt.C2, spot.C2, 'carry_shoulder_walk', 'loaves_todah');
   let t = Math.max(O.t, C1.t, C2.t, AR.t, AC.t, AO.t) + 0.3;
-  O.hold(t, { pose: 'lead', h: 270 }); AR.hold(t, { pose: 'stand_halter', h: 270, lead: 'O' });
-  C1.hold(t, { pose: 'lead', h: 270 }); AC.hold(t, { pose: 'stand_halter', h: 260, lead: 'C1' }); AO.hold(t, { pose: 'stand_halter', h: 280, lead: 'C1' });
-  C2.hold(t, { pose: 'carry_shoulder', h: 270, prop: 'loaves_todah' });
+  O.hold(t, { pose: 'lead', h: hRing(spot.O) }); AR.hold(t, { pose: 'stand_halter', h: 90, lead: 'O' });
+  C1.hold(t, { pose: 'lead', h: hRing(spot.C1) }); AC.hold(t, { pose: 'stand_halter', h: hRing(spot.AC), lead: 'C1' }); AO.hold(t, { pose: 'stand_halter', h: hRing(spot.AO), lead: 'C1' });
+  C2.hold(t, { pose: 'carry_shoulder', h: hRing(spot.C2), prop: 'loaves_todah' });
   mark(B, 'arrive', 0, t, { type: 'nazir', zone: 'slaughter-zone', view: { at: G.V.korban.at, heading: G.V.korban.heading },
     label: 'The nazir comes in by Sha\'ar HaKorban with a ewe lamb, a lamb and a ram, and a basket of twenty loaves (Bamidbar 6:14–15)' });
   // the ram's rope to C2 (beside it) while the nazir leans on the lambs
-  O.holdFor(0.3, { pose: 'lead', h: 0 });
-  AR.hold(O.t, { pose: 'stand_halter', h: 270, lead: 'O' });
-  C2.hold(O.t, { pose: 'carry_shoulder', h: 300, prop: 'loaves_todah' });
-  AR.hold(O.t + 0.05, { pose: 'stand_halter', h: 270, lead: 'C2' });
+  O.holdFor(0.3, { pose: 'lead', h: headTo(spot.O, spot.C2) });
+  AR.hold(O.t, { pose: 'stand_halter', h: 90, lead: 'O' });
+  C2.hold(O.t, { pose: 'carry_shoulder', h: headTo(spot.C2, spot.AR), prop: 'loaves_todah' });
+  AR.hold(O.t + 0.05, { pose: 'stand_halter', h: 90, lead: 'C2' });
   t = O.t + 0.1;
-  C2.hold(t, { pose: 'carry_shoulder', h: 300, prop: 'loaves_todah' });
+  C2.hold(t, { pose: 'carry_shoulder', h: headTo(spot.C2, spot.AR), prop: 'loaves_todah' });
   // ---- the chatat (the ewe lamb) at ring A, C1 holding the olah's rope: the nazir leans and slaughters
-  C1.hold(t, { pose: 'lead', h: 250 });
-  AO.hold(t, { pose: 'stand_halter', h: 280, lead: 'C1' });
-  const oC = animal(B, G, t, { type: 'chatat', sp: 'lamb', A: AC, lead: 'C1', O, ring: ringA, hook: hC, hideSpot: P4.hideSpots[0], r, roles: 'c', title: 'The nazir\'s chatat (a ewe lamb)', out: {}, medLane: 0, F });
-  // ---- the olah (the lamb) at ring B, straight after: C1 leads it along the row of rings, the nazir follows
-  const [XB, YB] = ringB.ring;
-  t = Math.max(O.t, C1.t);
-  C1.hold(t, { pose: 'lead', h: 250 });
-  AO.hold(t, { pose: 'stand_halter', h: 280, lead: 'C1' });
-  const c1B = [XB + 2.7, YB + 2.7, D16], aoB = [XB + 3.0, YB + 3.8, D16];
-  const dWalk = (Math.hypot(c1B[0] - C1.p[0], c1B[1] - C1.p[1]) * AM) / 0.9 / 60;
-  C1.step(c1B, { pose: 'lead_walk', speed: 0.9 });
-  AO.step(aoB, { pose: 'walk_led', speed: (Math.hypot(aoB[0] - AO.p[0], aoB[1] - AO.p[1]) * AM) / (dWalk * 60), lead: 'C1' });
-  O.step([XB + 3.6, YB - 1.9, D16], { pose: 'walk', speed: 0.9 });
-  t = Math.max(C1.t, O.t, AO.t);
-  C1.hold(t, { pose: 'lead', h: 250 });
-  AO.hold(t, { pose: 'stand_halter', h: 270, lead: 'C1' });
-  const oO = animal(B, G, t, { type: 'olah', sp: 'lamb', A: AO, lead: 'C1', O, ring: ringB, hook: hO, hideSpot: P4.hideSpots[1], r, roles: 'o', title: 'The nazir\'s olah (a lamb)', out: {}, medLane: 1, F, orAfter: oC.orEnd, bloodAfter: oC.blood + 0.1 });
-  C1.hold(Math.max(C1.t, O.t), { pose: 'stand', h: 250 });
-  // ---- the ram, back at ring A once the chatat has been lifted from it: C2 brings it
-  O.step([X + 3.6, Y - 1.9, D16], { pose: 'walk', speed: 0.9 });
-  const tR0 = Math.max(O.t, oC.lift + 0.3);
+  C1.hold(t, { pose: 'lead', h: hRing(spot.C1) });
+  AO.hold(t, { pose: 'stand_halter', h: hRing(spot.AO), lead: 'C1' });
+  const oC = animal(B, G, t, { type: 'chatat', sp: 'ewe', A: AC, lead: 'C1', O, ring: ringA, hook: hC, hideSpot: P4.hideSpots[0], r, roles: 'c', title: 'The nazir\'s chatat (a ewe lamb)', out: {}, medLane: 0, F });
+  // ---- the olah (the lamb) at the same ring once the chatat has been lifted from it; the nazir waits where he
+  // slaughtered (east of the ring), C1 leads the lamb in from its place north of the ring
+  t = Math.max(O.t, C1.t, oC.lift + 0.3);
+  O.hold(t, { pose: 'stand', h: 270 });
+  C1.hold(t, { pose: 'lead', h: hRing(spot.C1) });
+  AO.hold(t, { pose: 'stand_halter', h: hRing(spot.AO), lead: 'C1' });
+  const oO = animal(B, G, t, { type: 'olah', sp: 'lamb', A: AO, lead: 'C1', O, ring: ringA, hook: hO, hideSpot: P4.hideSpots[1], r, roles: 'o', title: 'The nazir\'s olah (a lamb)', out: {}, medLane: 1, F, orAfter: oC.orEnd, bloodAfter: oC.blood + 0.1 });
+  C1.hold(Math.max(C1.t, O.t), { pose: 'stand', h: hRing(spot.C1) });
+  // ---- the ram, once the olah has been lifted from the ring: C2 brings it in from the west, a step nearer first
+  const tR0 = Math.max(O.t, oO.lift + 0.3);
   O.hold(tR0, { pose: 'stand', h: 270 });
-  C2.hold(tR0 - 0.4, { pose: 'carry_shoulder', h: 270, prop: 'loaves_todah' });
-  AR.hold(tR0 - 0.4, { pose: 'stand_halter', h: 270, lead: 'C2' });
-  C2.step([X + 2.7, Y + 2.6, D16], { pose: 'carry_shoulder_walk', speed: 0.6, prop: 'loaves_todah' });
-  AR.hold(Math.max(tR0, C2.t), { pose: 'stand_halter', h: 270, lead: 'C2' });
-  C2.hold(Math.max(tR0, C2.t), { pose: 'carry_shoulder', h: 250, prop: 'loaves_todah' });
+  C2.hold(tR0 - 0.4, { pose: 'carry_shoulder', h: headTo(spot.C2, spot.AR), prop: 'loaves_todah' });
+  AR.hold(tR0 - 0.4, { pose: 'stand_halter', h: 90, lead: 'C2' });
+  C2.step([X - 1.7, Y + 2.1, D16], { pose: 'carry_shoulder_walk', speed: 0.6, prop: 'loaves_todah' });
+  AR.hold(Math.max(tR0, C2.t), { pose: 'stand_halter', h: 90, lead: 'C2' });
+  C2.hold(Math.max(tR0, C2.t), { pose: 'carry_shoulder', h: hRing(C2.p), prop: 'loaves_todah' });
   const oR = animal(B, G, Math.max(tR0, C2.t), { type: 'shelamim', sp: 'ram', A: AR, lead: 'C2', O, ring: ringA, hook: hR, r, roles: 'r', title: 'The nazir\'s ram (shelamim)', out: {}, medLane: 2, F });
-  // the waiting places by the rings are the set's from its arrival until the ram is lifted
+  // the ring and the waiting places by it are the set's from its arrival until the ram is lifted
   uses(B, ringA.id, 0, oR.lift + 0.1);
-  uses(B, ringB.id, oC.lift - 6, oO.lift + 0.1);
   // ---- he goes down to his chamber to shave (after the slaughter of the shelamim — Rambam Nezirut 8:2); C2 with him
   const tNazirOut = O.t + 0.1;
   const gate0 = tNazirOut;
@@ -633,7 +646,8 @@ export function scriptNazir(G, k, seed, places, back, F = null) {
   O.walk(G, 'STEP_FOOT', { speed: SPEED.owner, to: 'NIK_W' });
   const tC2 = Math.max(C2.t, tNazirOut + 0.05);
   C2.hold(tC2, { pose: 'carry_shoulder', h: 90, prop: 'loaves_todah' });
-  C2.walk(G, add([G.N.STEP_FOOT.X, G.N.STEP_FOOT.Y, G.N.STEP_FOOT.Z], 0, 1.6), { speed: SPEED.owner, pose: 'carry_shoulder_walk', prop: 'loaves_todah', to: 'NIK_W' });
+  // (out by the west corridor: eastward from his place he would pass the kohen holding the ram's legs)
+  C2.walk(G, add([G.N.STEP_FOOT.X, G.N.STEP_FOOT.Y, G.N.STEP_FOOT.Z], 0, 1.6), { speed: SPEED.owner, pose: 'carry_shoulder_walk', prop: 'loaves_todah', from: 'R_W', to: 'NIK_W' });
   // through Nikanor's gateway (kept clear of the metzora's rites there: nikanor-stations books them first)
   uses(B, 'gate:nikanor', gate0, Math.max(O.t, C2.t));
   // ---- the olah's limbs and the chatat's eimurim and meat, the libations of the olah and the ram
@@ -656,9 +670,20 @@ export function scriptNazir(G, k, seed, places, back, F = null) {
   K2.walk(G, 'MOK_X', { speed: SPEED.kohen });
   uses(B, `${hR.table.id}:${hR.id}`, tDress, NaN);
   const tableUse = B.res[B.res.length - 1];
-  const meetAt = add(hR.flayer, hR.fh === 90 ? -1.2 : 1.2, -0.6);
+  // where he takes it: a step south of the flayer's place, off the corridors that run past the end pillars (X 199–200
+  // and 235: g5/geo.js T_W–N_W, T_E–N_E) ⚙. Until it is ready he waits in the Ezrat Yisrael, north of the places the
+  // lesser offerings' owners wait at (Kelim 1:8: an Israelite enters the Ezrat Kohanim only for his need), and comes
+  // in to be there as it is ready (choreo-adopt: he had stood 25–37 min at the hook, on the west corridor) ⚙
+  const meetAt = add(hR.flayer, 0, -1.0);
+  const tReady = tDress + 0.5;
+  const eyWait = [251.6 + (k % 2) * 1.6, 375.0 + 1.8 * (k % 3), G.EY];
+  const dIn = G.route(eyWait, meetAt).path.length / SPEED.owner / 60;
+  if (tReady - C1.t > G.route(C1.p, eyWait).path.length / SPEED.owner / 60 + dIn + 2) {
+    C1.walk(G, eyWait, { speed: SPEED.owner });
+    C1.hold(tReady - dIn, { pose: 'stand', h: 265 });
+  }
   C1.walk(G, meetAt, { speed: SPEED.owner });
-  C1.hold(Math.max(C1.t, tDress + 0.5), { pose: 'stand', h: headTo(meetAt, hR.flayer) });
+  C1.hold(Math.max(C1.t, tReady), { pose: 'stand', h: headTo(meetAt, hR.flayer) });
   const tTake = C1.t;
   oR.hungFinal.t1 = tTake + 0.1;
   C1.holdFor(0.3, { pose: 'carry_shoulder', h: headTo(meetAt, hR.flayer), prop: 'lamb_carcass' });
@@ -712,13 +737,14 @@ export function scriptWaving(G, k, seed, sy, place, F = null) {
   K1.hold(tW, { pose: 'carry', h: 90, prop: 'limb_foreleg', prop2: 'chavitin' });
   // KW2 with the bowl from the table
   arriveAt(G, K2, 'MOK_X', sy.tableStand, tW - 2.6);
-  K2.holdFor(0.25, { pose: 'carry', h: 180, prop: 'bowl' });
-  K2.walk(G, add(W.kohen, -0.2, 1.4), { speed: SPEED.carry, pose: 'carry_walk', prop: 'bowl' });
-  K2.hold(tW, { pose: 'carry', h: 120, prop: 'bowl' });
-  // the waving
+  K2.holdFor(0.25, { pose: 'carry', h: 180, prop: 'eimurim' });
+  K2.walk(G, add(W.kohen, -0.2, 1.4), { speed: SPEED.carry, pose: 'carry_walk', prop: 'eimurim' });
+  K2.hold(tW, { pose: 'carry', h: 120, prop: 'eimurim' });
+  // the waving: the things laid on the nazir's palms, the kohen's hands beneath his, moving with them (Menachot 61b;
+  // Rambam MK 9:6 — people's wave_under, the nazir in 'wave'); one phase for the pair from tW, both at scale 1
   const dur = 2.2;
-  K1.hold(tW + 0.2, { pose: 'carry', h: 90 });
-  K1.hold(tW + dur, { pose: 'carry', h: 90 });
+  K1.scale = 1;
+  K1.hold(tW + dur, { pose: 'wave_under', h: 90, ph: cyc(WAVE_P, 0) });
   K2.hold(tW + dur, { pose: 'stand', h: 120 });
   mark(B, 'tenufah', tW, tW + dur, { type: 'nazir', zone: 'ezrat-kohanim', view: { at: [W.owner[0] + 3.4, W.owner[1] + 4.6, D16], heading: 215 },
     label: 'The cooked foreleg, a loaf and a wafer, with the breast, the thigh and the eimurim, on the nazir\'s palms; the kohen\'s hands beneath — waved (Nazir 6:9; Rambam MK 9:9)' });
@@ -726,22 +752,22 @@ export function scriptWaving(G, k, seed, sy, place, F = null) {
   K1.walk(G, 'MOK_X', { speed: SPEED.kohen });
   // the eimurim up and onto the pile (when the ramp's salting place and the pile are free); the breast and thigh are
   // the kohanim's
-  K2.holdFor(0.2, { pose: 'carry', h: 120, prop: 'bowl' });
+  K2.holdFor(0.2, { pose: 'carry', h: 120, prop: 'eimurim' });
   fitSub(B, F, K2.t, (S, tt) => {
     const Kx = new Track(null, K2.role, 'kohen');
     S.tracks.push(Kx);
     Kx.at(tt, K2.p, K2.h);
     const t0 = Kx.t;
-    Kx.walk(G, G.S.saltE, { speed: SPEED.carry, pose: 'carry_walk', prop: 'bowl', to: 'K_FW' });
-    Kx.holdFor(0.08, { pose: 'kneel', ph: fix(0.3), h: 90, prop: 'bowl' });
+    Kx.walk(G, G.S.saltE, { speed: SPEED.carry, pose: 'carry_walk', prop: 'eimurim', to: 'K_FW' });
+    Kx.holdFor(0.08, { pose: 'kneel', ph: fix(0.3), h: 90, prop: 'eimurim' });
     Kx.holdFor(0.35, { pose: 'salt', h: 90, prop: 'salt', hand: 'left' });
     const syE = G.S.saltE[1];
-    Kx.step([220.6, syE + 1.2, G.kevZ(syE + 1.2)], { pose: 'carry_walk', prop: 'bowl', speed: 0.9 });
-    Kx.walk(G, [G.S.pileFaceX, 321.5 + 2.4, 25], { speed: SPEED.carry, pose: 'carry_walk', prop: 'bowl', from: 'KE_MID', to: 'TP_E' });
-    Kx.holdFor(0.1, { pose: 'throw', ph: one(), h: 270, prop: 'bowl' });
+    Kx.step([220.6, syE + 1.2, G.kevZ(syE + 1.2)], { pose: 'carry_walk', prop: 'eimurim', speed: 0.9 });
+    Kx.walk(G, [G.S.pileFaceX, 321.5 + 2.4, 25], { speed: SPEED.carry, pose: 'carry_walk', prop: 'eimurim', from: 'KE_MID', to: 'TP_SE' });
+    Kx.holdFor(0.1, { pose: 'throw', ph: one(), h: 270, prop: 'eimurim' });
     mark(S, 'haalaah', t0, Kx.t, { type: 'shelamim', zone: 'mizbeach', view: { at: G.V.ramp.at, heading: G.V.ramp.heading }, label: 'The ram\'s eimurim salted and burned; now the nazir may drink wine (Nazir 6:9)' });
     const te = Kx.t;
-    Kx.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'TP_E' });
+    Kx.walk(G, 'MOK_X', { speed: SPEED.kohen, from: 'TP_NE' });
     return te;
   }, { graftFirst: K2, max: 20 });
   // the waving place and the table are this set's while it is used
@@ -780,7 +806,9 @@ export function scriptMetzora(G, seed, places, gateAt, F = null) {
   ['chatat', 'olah'].forEach((type, j) => {
     // his agent brings it in by Sha'ar HaKorban (an Israelite: the kohanim in their garments do not go out to the city)
     // to the gateway, where he leans on it; a kohen takes it from there to its ring and slaughters it
-    const AG = new Track(null, `m${j}AG`, 'israelite'), K0 = new Track(null, `m${j}K0`, 'kohen'), A = new Track(null, `m${j}A`, 'lamb');
+    // the chatat a ewe lamb, the olah a lamb (Vayikra 14:10 "two male lambs and one ewe lamb")
+    const sp = type === 'chatat' ? 'ewe' : 'lamb';
+    const AG = new Track(null, `m${j}AG`, 'israelite'), K0 = new Track(null, `m${j}K0`, 'kohen'), A = new Track(null, `m${j}A`, sp);
     B.tracks.push(AG, K0, A);
     const start = j === 0 ? 0 : tNext;
     AG.at(start, foot, 180); A.at(start, foot, 180);
@@ -803,8 +831,8 @@ export function scriptMetzora(G, seed, places, gateAt, F = null) {
     const t = Math.max(K0.t, A.t) + 0.1;
     K0.hold(t, { pose: 'lead', h: 270 });
     A.hold(t, { pose: 'stand_halter', h: 270, lead: `m${j}K0` });
-    const o = animal(B, G, t, { type, sp: 'lamb', A, lead: `m${j}K0`, O: null, K0, lean: false, ring: rings[j], hook: hooks[j], hideSpot: P4.hideSpots[j], r, roles: `m${j}`,
-      title: `The metzora's ${type === 'chatat' ? 'chatat' : 'olah'} (a lamb)`, out: {}, medLane: j, bloodParent: 'metzora', F, bloodAfter: j === 1 ? outs[0].blood + 0.1 : undefined });
+    const o = animal(B, G, t, { type, sp, A, lead: `m${j}K0`, O: null, K0, lean: false, ring: rings[j], hook: hooks[j], hideSpot: P4.hideSpots[j], r, roles: `m${j}`,
+      title: `The metzora's ${type === 'chatat' ? 'chatat (a ewe lamb)' : 'olah (a lamb)'}`, out: {}, medLane: j, bloodParent: 'metzora', F, bloodAfter: j === 1 ? outs[0].blood + 0.1 : undefined });
     K0.walk(G, 'MOK_X', { speed: SPEED.kohen });
     outs.push(o);
     // the olah is brought once the chatat is at its ring (the chatat's blood comes first: Zevachim 10:2)
@@ -938,6 +966,7 @@ export function placeSet(build, s0, book, P5, G, { step = 2, maxShift = 90 } = {
  * its time (pools: { role pool name → ActorPool }), update() poses each slot's current track as private-offerings
  * does. Free props: the hung carcass stages on the G4 hooks.
  */
+const ANIMAL_POOLS = new Set(['lamb', 'ewe', 'ram', 'goat', 'she_goat', 'bull']);
 export class SetCast {
   constructor(ctx, pools) {
     this.ctx = ctx;
@@ -1002,6 +1031,8 @@ export class SetCast {
     }
     slot._hs = h;
     slot.heading(h);
+    // a figure posed at a partner or a fixture at one size (tr.scale: people-4-fix); else its pool's own
+    slot.scale(tr.scale ?? slot.pool.spec.scale ?? null);
     let ph;
     if (s.ph?.k === 'walk') { const f = this.ctx.people?.util?.phaseFor; ph = f && slot.actor ? f(slot.actor, s.pose, Math.max(0, o.d)) : (o.d / 1.45) % 1; }
     else ph = phaseOf(s, t);
@@ -1013,7 +1044,7 @@ export class SetCast {
       else { a.setProps?.(null, null); a.setProp(s.prop || null, s.hand || 'right'); }
       slot._prop = s.prop || null; slot._hand = s.hand || 'right';
     }
-    if (tr.pool === 'lamb' || tr.pool === 'ram') {
+    if (ANIMAL_POOLS.has(tr.pool)) {
       const lt = s.lead ? tr.byRole?.[s.lead] : null;
       const leader = lt && lt.slot >= 0 && t >= lt.t0 && t < lt.t1 ? this.pools[lt.pool]?.slot(lt.slot)?.actor : null;
       if (slot._lead !== leader) { slot._lead = leader; slot.actor?.setLead?.(leader || null); }

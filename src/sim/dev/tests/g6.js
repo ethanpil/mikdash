@@ -7,7 +7,10 @@
 //      costliest frames (time, per module);
 //   4. the hand-overs — shabbat-showbread → shabbat-mishmar at the division's start: the figure is in the same place;
 //      nothing of G6 on a weekday;
-//   5. the musaf's fallback plan (libation-song not staging the pour): built without warnings, with its pourer.
+//   5. the musaf's fallback plan (libation-song not staging the pour): built without warnings, with its pourer;
+//   6. adopted assets (choreo-adopt): the stacks (showbread_stack) carried; the Shulchan's bread movables through the
+//      change — the old slid off south as the new comes on from the north, the table never bare, the bowls in hand off
+//      the table, the kanim out on Shabbat; the shares eaten with the bread piece.
 // run: node src/sim/dev/run.mjs --q low --script src/sim/dev/tests/g6.js "date=2026-11-07&t=07:30"
 const rt = ctx.schedule.runtime;
 const IDS = ['shabbat-musaf', 'shabbat-showbread', 'shabbat-mishmar', 'shabbat-eve'];
@@ -24,6 +27,10 @@ function snap() {
     figs.push(`${e.id}/${p.name}#${s.index} ${r3(o.x)},${r3(o.y)},${r3(o.z)} h${r3(s._heading)} ${s._pose}${Number.isNaN(s._phase) ? '' : '@' + r3(s._phase)} ${s._g2r || ''}/${s._g2l || ''}`);
   }
   const props = [];
+  for (const id of ['heichal.shulchan.bread', 'heichal.shulchan.bread.incoming']) {
+    const ud = ctx.movables.get(id)?.userData;
+    if (ud) props.push(`${id} f${r3(ud.amount)} shown:${ud.shown} kanim:${ud.kanimIn} bowls:${ctx.movables.get(id).children.find((m) => /:bazichin$/.test(m.name))?.visible}`);
+  }
   for (const e of E) {
     const fp = e.state?.props;
     if (!fp) continue;
@@ -151,5 +158,43 @@ ctx.time.setDate('2026-11-07'); await frames(3);
   const cl = mm.musafPlan(ctx, rt.choreo('shabbat-musaf').sim, true);
   const f = (m) => ctx.time.format(((m % 1440) + 1440) % 1440);
   out.fallback = fb ? { warn: fb.warn, pourer: !!fb.pourer, pick: f(fb.t.pickW), pour: f(fb.t.pour), claimedPick: f(cl.t.pickW), claimedPour: f(cl.t.pour), flourUp: f(fb.t.tossF) } : 'no plan';
+}
+
+// ---- 6. the adopted assets
+{
+  const A = {};
+  const ok = (k, v, info) => { A[k] = v ? true : `FAIL ${info ?? ''}`; };
+  ctx.time.setDate('2026-11-07'); await frames(3);
+  const SB = rt.choreo('shabbat-showbread'), Bp = SB.state.plan, T = Bp.t;
+  const go = async (t) => { ctx.time.set(((t % 1440) + 1440) % 1440); await frames(2); };
+  const ud = (id) => ctx.movables.get(id)?.userData;
+  const bowlsOn = (id) => ctx.movables.get(id)?.children.find((m) => /:bazichin$/.test(m.name))?.visible;
+  const main = 'heichal.shulchan.bread', inc = 'heichal.shulchan.bread.incoming';
+  await go(T.lift - 0.3);
+  ok('before: the old set on the table, kanim out', ud(main).shown && ud(main).amount < 0.01 && !ud(inc).shown && ud(main).kanimIn === false && bowlsOn(main) === true);
+  await go((T.slide[0] + T.slide[1]) / 2);
+  const m1 = ud(main), i1 = ud(inc);
+  ok('mid-slide: both sets, a set\'s depth apart', m1.shown && i1.shown && m1.amount > 0.2 && m1.amount < 0.8 && Math.abs(m1.amount + i1.amount - 1) < 0.02 && m1.south === true && i1.south === false && bowlsOn(main) === false && bowlsOn(inc) === false,
+    `${m1.amount} ${i1.amount} ${bowlsOn(main)} ${bowlsOn(inc)}`);
+  const holders = rt.choreo('shabbat-showbread').pools.flatMap((p) => p.slots.filter((x) => x.want && x._g2r === 'showbread_stack'));
+  ok('no stack in hand while the bread slides', holders.length === 0, holders.length);
+  await go(T.slide[1] + 0.05);
+  ok('after the slide: the old in hand, the new on the table', !ud(main).shown && ud(inc).shown && ud(inc).amount < 0.01
+    && rt.choreo('shabbat-showbread').pools.flatMap((p) => p.slots.filter((x) => x.want && x._g2r === 'showbread_stack')).length === 2);
+  await go(T.bowlsSet + 0.05);
+  ok('the new bowls set on', bowlsOn(inc) === true);
+  await go(T.swapBack + 0.2);
+  ok('swapped back', ud(main).shown && ud(main).amount < 0.01 && bowlsOn(main) === true && !ud(inc).shown);
+  // the shares eaten
+  const MM = rt.choreo('shabbat-mishmar');
+  let eat = false;
+  for (let t = T.endN + 0.5; t < T.endN + 12 && !eat; t += 0.15) { await go(t); eat = MM.pools.some((p) => p.slots.some((x) => x.want && x._pose === 'eat' && x._g2r === 'bread_piece')); }
+  ok('eat with the bread piece', eat);
+  // a weekday: the set on the table as built
+  ctx.time.setDate('2026-11-04'); await frames(3); await go(600);
+  ok('weekday: kanim in, the set on the table', ud(main).shown && ud(main).kanimIn === true && !ud(inc).shown);
+  ctx.time.setDate('2026-11-07'); await frames(3);
+  out.adopt = A;
+  out.adoptOk = Object.values(A).every((v) => v === true);
 }
 return out;

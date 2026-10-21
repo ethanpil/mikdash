@@ -52,8 +52,9 @@ export const STONES = [
 ];
 
 // optional parts by instance mask bit (1 << (grp - 1)): mantle, head-cloth, (3 always on), the priestly headgear (on by
-// default; Actor.setHeadgear(false) hides it) and the hair shells drawn instead when it is off
-export const GRP = { MANTLE: 1, HEADCLOTH: 2, HEADGEAR: 4, BARE: 5 };
+// default; Actor.setHeadgear(false) hides it) and the hair shells drawn instead when it is off; the hair and the beard
+// (on by default) and the shaven scalp and face drawn instead when they are shaved (Actor.setShaven — people-4)
+export const GRP = { MANTLE: 1, HEADCLOTH: 2, HEADGEAR: 4, BARE: 5, HAIR: 6, SHAVEN: 7, BEARD: 8, SHAVEN_FACE: 9 };
 
 // segment counts per LOD; LOD3 (far silhouettes beyond the figure budget) thins LOD2 further
 const L3 = (lod, a, b, c) => (lod === 0 ? a : lod === 1 ? b : lod === 2 || c <= 3 ? c : Math.max(3, Math.round(c * 0.65)));
@@ -313,7 +314,8 @@ export function hair(B, rig, lod, H, o = {}) {
   const side = Math.acos(clamp((H.f.eyeY + 0.014 * H.hs) / H.r[1], -1, 1));
   const back = Math.acos(clamp((o.long ? H.f.mouthY - 0.02 * H.hs : H.f.mouthY + 0.008 * H.hs) / H.r[1], -1, 1));
   const vol = 0.0065 * H.hs + (o.volume || 0);
-  const lock = lod === 0 ? (phi, th) => 1 + 0.35 * Math.sin(phi * 23 + th * 4) * Math.sin(phi * 7 - th * 9) : () => 1;
+  const wild = o.wild ?? 1;   // > 1: uncombed, unkempt locks (the metzora - Vayikra 13:45)
+  const lock = lod === 0 ? (phi, th) => 1 + 0.35 * Math.min(wild, 1.3) * Math.sin(phi * 23 + th * 4) * Math.sin(phi * 7 - th * 9) : () => 1;
   const capAt = (i, j, nU, nV, off) => {
     const phi = (i / nU) * Math.PI * 2;
     const c = Math.cos(phi);
@@ -363,11 +365,21 @@ export function hair(B, rig, lod, H, o = {}) {
       const y = lerp(H.C.y + H.f.mouthY + 0.01, sh.y + 0.0, t);
       rings.push({ c: V(0, y, H.C.z + lerp(0.01, 0.035, t)), rx: lerp(H.r[0] * 0.98, rig.dims.shX * 0.78, t), rz: lerp(H.r[2] * 0.86, rig.dims.chest[1] * 1.1, t) });
     }
-    B.tube(rings, {
+    const longHair = {
       seg: L3(lod, 18, 8, 4), arc: [0.12, Math.PI - 0.12],
       weights: (p) => envelope(rig, p, { head: 1, neck: 0.9, chest: 0.5 }, 3),
-      radial: (th, j) => 1 + (j ? 0.06 * Math.sin(th * 11) * Math.min(1, j / 2) : 0),
-    });
+      radial: wild > 1
+        // unkempt: uneven locks, but held to the mass (≤ ±9 %), calm toward the sheet's side edges and the edges tucked in
+        // to the neck and shoulders - seen from the front a free edge stood off beside the neck as a shard (people-4-fix)
+        ? (th, j) => {
+          const win = smooth(0.12, 0.7, th) * smooth(Math.PI - 0.12, Math.PI - 0.7, th);
+          return (1 - 0.24 * (1 - win)) * (1 + (j ? Math.min(1, j / 2) * win * (0.055 * Math.sin(th * 11) + 0.035 * Math.sin(th * 23 + j * 2.3)) : 0));
+        }
+        : (th, j) => 1 + (j ? 0.06 * wild * Math.sin(th * 11) * Math.min(1, j / 2) : 0),
+    };
+    B.tube(rings, longHair);
+    // unkempt hair is a mass, not a sheet: its inner face too (from the front a sheet showed only as its edge)
+    if (wild > 1 && lod <= 1) B.tube(rings.map((q) => ({ ...q, rx: q.rx * 0.965, rz: q.rz * 0.965 })), { ...longHair, invert: true, shade: () => 0.72 });
   }
 }
 
@@ -467,6 +479,54 @@ export function beard(B, rig, lod, H, o = {}) {
     }, () => [[hb, 1]]);
   }
   B.morph = null;
+}
+
+/**
+ * The scalp shaved with a razor, shown instead of the hair (mask group SHAVEN; Actor.setShaven): a skin shell just over
+ * the skull within the hairline - paler than the face (long under the hair) with the faint cool grey of the cut
+ * stubble, fading out at its edge into the forehead and nape. The nazir at the end of his term (Bamidbar 6:18; Nazir
+ * 6:8; his chamber, Middot 2:5), the metzora on his seventh day (Vayikra 14:9).
+ */
+export function shavenScalp(B, rig, lod, H, o = {}) {
+  if (B.noHead || lod >= 3) return;
+  const shape = headShape(H);
+  const hb = rig.index.head;
+  const nu = L3(lod, 28, 12, 6), nv = L3(lod, 7, 4, 2);
+  const front = Math.acos(clamp((H.f.eyeY + (o.hairline ?? 0.05) * H.hs) / H.r[1], -1, 1));
+  const side = Math.acos(clamp((H.f.eyeY + 0.014 * H.hs) / H.r[1], -1, 1));
+  const back = Math.acos(clamp((H.f.mouthY + 0.008 * H.hs) / H.r[1], -1, 1));
+  B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.52, metal: 0, color: [1, 1, 1], grp: o.grp ?? GRP.SHAVEN });
+  B.grid(nu, nv, (i, j) => {
+    const phi = (i / nu) * Math.PI * 2, c = Math.cos(phi);
+    const lb = c > 0 ? lerp(side, front, c ** 1.5) : lerp(side, back, (-c) ** 0.8);
+    const th = Math.max(0.03, (j / nv) * lb);
+    const y = Math.cos(th) * H.r[1];
+    const S = headSurf(H, shape, phi, y);
+    const n = S.clone().setY(S.y * 0.4).normalize();
+    const e = 1 - smooth(0.55, 1, j / nv);                        // 1 inside, 0 at the hairline
+    const p = S.addScaledVector(n, 0.0007 * H.hs * (0.25 + 0.75 * e)).add(H.C);
+    return { p, u: phi * 0.09, v: -th * 0.1, w: hb, col: [lerp(1, 1.05, e), lerp(1, 1.035, e), lerp(1, 1.075, e)] };
+  }, { wrap: true, inside: H.C });
+}
+
+/** the beard shaved off (mask group SHAVEN_FACE): a skin shell over the jaw and chin within the beard's line, a touch
+ *  darker with the stubble's shadow, fading at its edge (the metzora's seventh day: "all his hair: his head, his beard
+ *  and his eyebrows", Vayikra 14:9 - the brows are taken off in the face shader by the same mask bit) */
+export function shavenFace(B, rig, lod, H, o = {}) {
+  if (B.noHead || lod >= 2) return;
+  const shape = headShape(H);
+  const hb = rig.index.head;
+  const { f, hs } = H;
+  const chinY = f.chinY - 0.004 * hs;
+  B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.5, metal: 0, color: [0.97, 0.965, 0.975], grp: o.grp ?? GRP.SHAVEN_FACE });
+  faceShell(B, H, shape, L3(lod, 22, 10, 6), L3(lod, 5, 3, 2), (a, b) => {
+    const aa = Math.abs(a);
+    const phi = a * 1.78;
+    const yTop = aa < 0.28 ? lerp(f.mouthY - 0.009 * hs, f.mouthY, smooth(0.08, 0.28, aa)) : lerp(f.mouthY, f.eyeY - 0.014 * hs, smooth(0.28, 1.0, aa) ** 0.85);
+    const yBot = lerp(chinY, f.mouthY - 0.038 * hs, smooth(0.5, 1, aa));
+    const e = smooth(0, 0.3, b) * smooth(1, 0.7, b) * (1 - smooth(0.82, 1, aa));
+    return { phi, y: lerp(yTop, yBot, b), t: 0.0005 * hs, hang: 0, shade: lerp(1.03, 0.96, e) };
+  }, () => [[hb, 1]]);
 }
 
 // --------------------------------------------------------------------------------------------- headwear
@@ -619,6 +679,7 @@ export function headCloth(B, rig, lod, H, o = {}) {
   }, { wrap: true, inside: H.C });
   // drape: from the cap's edge, hugging the cheeks and neck, then over the shoulders and back, in soft folds
   const folds = lod === 0 ? (phi, k) => 1 + 0.045 * k * k * (Math.abs(Math.sin(phi * 4.5 + 0.7)) - 0.64) : () => 1;
+  if (o.wrap) { wrapDrape(B, rig, lod, H, shape, { nu, nv, open, bottomBack, yEndAt, W, neckClear, torsoClear, folds }); return; }
   B.grid(nu, nv, (i, j) => {
     const phi = lerp(open, Math.PI * 2 - open, i / nu);
     const c = -Math.cos(phi);
@@ -642,6 +703,50 @@ export function headCloth(B, rig, lod, H, o = {}) {
     const shade = 1 - 0.12 * smooth(0.12, 0, edge) - (lod === 0 ? 0.08 * k * Math.max(0, 0.64 - Math.abs(Math.sin(phi * 4.5 + 0.7))) : 0);
     return { p, u: phi * 0.12, v: -0.2 - k * 0.5, w: W(k), shade };
   }, { inside: (A) => V(0, A.y, H.C.z) });
+}
+
+/**
+ * The atifah (people-4-fix): the head-cloth wound round the head and the sides of the face down to the beard - "any
+ * wrapping not like the Ishmaelites' is no wrapping; Rav Nachman showed it: up to the sides of the beard" (Moed Katan
+ * 24a) - and a fold of it brought over the mouth ("al safam ya'teh", Vayikra 13:45; Rambam Avel 5:19). The mourner's;
+ * the menudeh's by the same (reconstruction, Moed Katan 15a leaves it open). From under the cap's edge the cloth hugs
+ * the head over the beard to the chin (no gap at the cap), then falls round the neck to the shoulders and back.
+ */
+function wrapDrape(B, rig, lod, H, shape, q) {
+  const { hs, f } = H;
+  const { nu, nv, open, bottomBack, yEndAt, W, neckClear, torsoClear, folds } = q;
+  const sh = R(rig, 'uarm_r'), ch = R(rig, 'chest'), nk = R(rig, 'neck');
+  const yC = f.chinY - 0.004 * hs;
+  const off = (y) => lerp(0.016, 0.021, smooth(f.eyeY, f.mouthY, y)) * hs;    // clear of the hair, and of the beard below the cheekbones
+  const hug = (phi, y) => { const S = headSurf(H, shape, phi, y); return S.addScaledVector(S.clone().setY(S.y * 0.3).normalize(), off(y)).add(H.C); };
+  const kH = 0.45;
+  B.grid(nu, nv, (i, j) => {
+    const phi = lerp(open, Math.PI * 2 - open, i / nu), c = -Math.cos(phi), k = j / nv;
+    let p;
+    if (k <= kH) p = hug(phi, lerp(yEndAt(phi) + 0.01 * hs, yC, (k / kH) ** 0.9));   // from under the cap's edge
+    else {
+      const t = (k - kH) / (1 - kH), top = hug(phi, yC);
+      const yB = lerp(sh.y + 0.03, bottomBack, smooth(-0.5, 1, c));
+      const rx = rig.dims.shX + 0.04, rz = rig.dims.chest[1] + 0.035, front = Math.max(0, -c);
+      const lowX = Math.sin(phi) * rx * (1 - 0.35 * front), lowZ = ch.z - Math.cos(phi) * rz + 0.01;
+      const tt = t * t * (1.4 - 0.4 * t), y = lerp(top.y, yB, smooth(0, 1, t));
+      const rTop = Math.hypot(top.x, top.z - H.C.z), rLow = Math.hypot(lowX, lowZ - H.C.z);
+      let r = lerp(rTop, rLow, tt) * (1 + 0.04 * Math.sin(Math.PI * t)) * folds(phi, t);
+      if (y > nk.y - 0.08 && y < nk.y + 0.12) r = Math.max(r, neckClear(y, c) + 0.002);
+      const ang = Math.atan2(lerp(top.x, lowX, tt), -lerp(top.z - H.C.z, lowZ - H.C.z, tt));
+      r = Math.max(r, torsoClear(y, ang));
+      p = V(Math.sin(ang) * r, y, H.C.z - Math.cos(ang) * r);
+    }
+    const edge = Math.min(phi - open, Math.PI * 2 - open - phi);
+    return { p, u: phi * 0.12, v: -0.2 - k * 0.5, w: W(k > kH ? 1 : 0), shade: 1 - 0.12 * smooth(0.12, 0, edge) };
+  }, { inside: (A) => V(0, A.y, H.C.z) });
+  // the fold over the mouth: from under the nose to the chin, its ends under the drape's edges, the edges rolled
+  const hb = rig.index.head;
+  faceShell(B, H, shape, L3(lod, 16, 8, 4), L3(lod, 3, 2, 1), (a, b) => ({
+    phi: a * (open + 0.12), y: lerp(f.nTip - 0.01 * hs, f.chinY + 0.002 * hs, b),
+    t: lerp(0.022, 0.016, smooth(0.75, 1, Math.abs(a))) * hs * (1 + (lod === 0 ? 0.05 * Math.sin(a * 9 + b * 3) : 0)), hang: 0,
+    shade: Math.abs(b - 0.5) > 0.4 ? 0.86 : 1,
+  }), () => [[hb, 1]]);
 }
 
 // --------------------------------------------------------------------------------------------- limbs
@@ -1061,6 +1166,7 @@ export function backLift(rig) {
  */
 function garmentBody(B, rig, lod, hemY, o = {}) {
   const top = torsoRings(rig, { ...o, lod });
+  if (o.rent) rentRings(top, o.rent, lod);
   const sk = skirtRings(rig, hemY, { ...o, lod });
   const rings = top.concat(sk);
   const ySeat = R(rig, 'thigh_r').y - 0.06 * rig.dims.H / 1.67;
@@ -1071,12 +1177,20 @@ function garmentBody(B, rig, lod, hemY, o = {}) {
   const last = rings.length - 1;
   const W = skirtW(rig, ySeat, hemY);
   const tw = torsoW(rig);
-  B.tube(rings, {
-    seg: L3(lod, 40, 16, 7), uvMode: o.uvMode,
+  const seg = L3(lod, 40, 16, 7);
+  // a rent (o.rent, keri'ah): the tube starts at the front centre so its seam is there, and the seam is parted along the
+  // rent - the cloth's own edges, the chest behind (rentFront)
+  const rent = o.rent || null;
+  const g = B.tube(rings, {
+    seg, uvMode: o.uvMode, arc: rent ? [-Math.PI / 2, Math.PI * 1.5] : undefined, thMap: rent ? rentMap(rent, seg) : undefined,
     lift: (th, j, Rg) => bl(th, j, Rg) + (j === last && dr.hem ? dr.hem(th, j) : 0),
     weights: (p, j) => (j < nTop - 1 ? tw(p) : W(p)),
     radial: dr.radial, shade: dr.shade,
   });
+  if (rent) {
+    for (let j = 0; j < rings.length; j++) if (!(rent.half(rings[j].c.y) > 0)) B.seams.push([g.id(0, j), g.id(seg, j)]);
+    rings.rentGrid = { g, seg };
+  }
   // the hem's inner facing: cloth thickness at the edge, dark inside (seen from low angles and when it lifts)
   if (lod <= 1 && o.inner !== false) {
     const hem = rings[last];
@@ -1159,9 +1273,82 @@ export function tunic(B, rig, lod, o = {}) {
   const d = rig.dims, k = d.H / 1.67;
   const hemY = o.hemY ?? R(rig, 'shin_r').y - 0.17 * k;
   B.set({ cls: o.cls ?? CLS.GA, pat: o.pat ?? PAT.WOOL_CLAVI, rough: 0.9, metal: 0, color: [1, 1, 1], grp: 0 });
-  garmentBody(B, rig, lod, hemY, { folds: o.folds ?? 0.085, nFolds: o.nFolds ?? 8, flare: o.flare ?? 0.07 * k, thick: 0.008, uvMode: o.pat === PAT.WOOL ? undefined : 'x', seed: o.seed ?? 0.7, foldFrom: 'waist' });
+  const rent = o.rent && lod <= 2 ? rentShape(rig) : null;
+  const rings = garmentBody(B, rig, lod, hemY, { folds: o.folds ?? 0.085, nFolds: o.nFolds ?? 8, flare: o.flare ?? 0.07 * k, thick: 0.008, uvMode: o.pat === PAT.WOOL ? undefined : 'x', seed: o.seed ?? 0.7, foldFrom: 'waist', rent });
   for (const s of ['l', 'r']) arm(B, rig, lod, s, { sleeveTo: o.sleeve || 'elbow', cls: o.cls ?? CLS.GA, pat: PAT.WOOL, rough: 0.9 });
+  if (rent) rentFront(B, rig, lod, rings, rent, { cls: o.cls ?? CLS.GA });
   return hemY;
+}
+
+/**
+ * Keri'ah: the tunic rent at the breast from the neckline down - the metzora's "garments shall be rent" (Vayikra 13:45;
+ * Rambam Tumat Tzara'at 10:6), a mourner's a tefach and more (Moed Katan 22b): a V from the collar ring (the neckline)
+ * 20 cm down, half(y) wide each side of the middle, closing to nothing at the bottom (people-4-fix: a real opening -
+ * the tube's seam parted, not a patch laid over the cloth).
+ */
+function rentShape(rig) {
+  const k = rig.dims.H / 1.67;
+  const y0 = R(rig, 'neck').y + 0.04 * k, len = 0.2 * k, hw = 0.036 * k;   // y0: torsoRings' collar ring
+  return { y0, len, half: (y) => hw * clamp((y - (y0 - len)) / len) ** 0.75 };
+}
+/** rows for the rent's V (the torso rings are 4-12 cm apart): rings interpolated at fractions of its length, the
+ *  closing row always */
+function rentRings(top, rent, lod) {
+  for (const t of lod === 0 ? [0.3, 0.55, 0.8, 1] : lod === 1 ? [0.55, 1] : [1]) {
+    const y = rent.y0 - rent.len * t;
+    const j = top.findIndex((q, i) => i > 0 && q.c.y < y);
+    if (j < 1) continue;
+    const a = top[j - 1], b = top[j];
+    if (t < 1 && Math.min(a.c.y - y, y - b.c.y) < 0.015) continue;      // a ring there already
+    const u = (a.c.y - y) / (a.c.y - b.c.y);
+    top.splice(j, 0, { c: a.c.clone().lerp(b.c, u), rx: lerp(a.rx, b.rx, u), rz: lerp(a.rz, b.rz, u) });
+  }
+}
+/** the tube's angle map for a rent: column 0 (θ = -90°, the front centre, his right side of the seam) and column seg
+ *  (his left) part to ±half(y); the cloth within 0.45 rad of the edge gathers toward it */
+function rentMap(rent, seg) {
+  return (th, j, Rg, i) => {
+    const h = rent.half(Rg.c.y);
+    if (!(h > 0)) return th;
+    const right = i <= seg / 2, a = Math.abs(right ? th + Math.PI / 2 : th - Math.PI * 1.5);
+    const hA = Math.asin(Math.min(0.9, h / Rg.rx)), A = hA + 0.45;
+    if (a >= A) return th;
+    return -Math.PI / 2 + (right ? 1 : -1) * (hA + a * (A - hA) / A);
+  };
+}
+/** the chest seen in the rent (a strip of skin 7 mm inside the cloth, reaching 1.2 cm under each edge, shaded where the
+ *  cloth overhangs) and the torn edges: frayed lips of the cloth along both, turned out a little - laid on the tube's
+ *  own edge vertices */
+function rentFront(B, rig, lod, rings, rent, o = {}) {
+  const { g, seg } = rings.rentGrid;
+  const k = rig.dims.H / 1.67;
+  const tw = torsoW(rig);
+  const rows = [];
+  for (let j = 0; j < rings.length; j++) { rows.push(j); if (!(rent.half(rings[j].c.y) > 0)) break; }
+  const tOf = (j) => clamp((rent.y0 - rings[j].c.y) / rent.len);
+  B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.55, metal: 0, color: [0.96, 0.94, 0.93], grp: 0 });
+  const nu = L3(lod, 8, 4, 2);
+  B.grid(nu, rows.length - 1, (i, jj) => {
+    const Rg = rings[rows[jj]];
+    const hA = Math.asin(Math.min(0.9, (rent.half(Rg.c.y) + 0.012 * k) / Rg.rx));
+    const a = hA * (2 * i / nu - 1), th = -Math.PI / 2 + a;
+    const p = V(Rg.c.x + Math.cos(th) * (Rg.rx - 0.007), Rg.c.y, Rg.c.z + Math.sin(th) * (Rg.rz - 0.007));
+    const e = Math.abs(a) / Math.max(1e-4, hA);
+    return { p, u: p.x, v: p.y, w: tw, shade: 1 - 0.32 * smooth(0.45, 1, e) - 0.12 * smooth(0.6, 1, tOf(rows[jj])) };
+  }, { inside: V(0, rent.y0 - rent.len / 2, 0.03) });
+  B.set({ cls: o.cls ?? CLS.GA, pat: PAT.WOOL, rough: 0.92, metal: 0, color: [1, 1, 1], grp: 0 });
+  for (const [col, sg] of [[0, 1], [seg, -1]]) {
+    const side = V(sg, 0, -0.4).normalize();
+    const pts = [], wid = [];
+    rows.forEach((j, n) => {
+      const t = tOf(j), w = (0.009 * (1 - t) + 0.003) * k;
+      const fray = lod === 0 && n < rows.length - 1 ? 0.0018 * (0.5 + 0.5 * Math.sin(n * 5.3 + sg)) : 0;
+      const e = V(B.pos[g.id(col, j) * 3], B.pos[g.id(col, j) * 3 + 1], B.pos[g.id(col, j) * 3 + 2]);
+      pts.push(e.addScaledVector(side, w / 2 - fray).add(V(0, 0, -0.0015 * (1 - t))));
+      wid.push(w);
+    });
+    B.ribbon(pts, (u) => wid[Math.round(u * (wid.length - 1))], { side, weights: tw });
+  }
 }
 
 /**
@@ -1917,11 +2104,13 @@ export const RECIPES = {
     });
     for (const s of ['l', 'r']) foot(B, rig, lod, s, { to: hemY + 0.12 });
   },
-  israelite(B, rig, lod) {
+  israelite(B, rig, lod, cloth = null) {
     const H = head(B, rig, lod);
-    hair(B, rig, lod, H, { hairline: 0.05 });
-    beard(B, rig, lod, H, { len: 0.045 });
-    headCloth(B, rig, lod, H, { grp: GRP.HEADCLOTH, short: true, open: 1.05, backY: R(rig, 'uarm_r').y - 0.08 });
+    hair(B, rig, lod, H, { hairline: 0.05, grp: GRP.HAIR });
+    beard(B, rig, lod, H, { len: 0.045, grp: GRP.BEARD });
+    shavenScalp(B, rig, lod, H, { hairline: 0.05 });
+    shavenFace(B, rig, lod, H);
+    headCloth(B, rig, lod, H, cloth || { grp: GRP.HEADCLOTH, short: true, open: 1.05, backY: R(rig, 'uarm_r').y - 0.08 });
     let hemY;
     withBody(B, rig, lod, () => {
       hemY = tunic(B, rig, lod, { hemY: R(rig, 'shin_r').y - 0.2 * rig.dims.H / 1.67 });
@@ -1930,15 +2119,36 @@ export const RECIPES = {
     });
     for (const s of ['l', 'r']) foot(B, rig, lod, s, { to: hemY + 0.12 });
   },
+  // the mourner and the one under a ban (Middot 2:2): an Israelite wrapped in the atifah (wrapDrape) (people-4-fix)
+  mourner(B, rig, lod) { RECIPES.israelite(B, rig, lod, { grp: GRP.HEADCLOTH, wrap: true, open: 0.72 }); },
   nazir(B, rig, lod) {
     const H = head(B, rig, lod);
-    hair(B, rig, lod, H, { hairline: 0.055, long: true, volume: 0.006 });
-    beard(B, rig, lod, H, { len: 0.085, volume: 0.004 });
+    hair(B, rig, lod, H, { hairline: 0.055, long: true, volume: 0.006, grp: GRP.HAIR });
+    beard(B, rig, lod, H, { len: 0.085, volume: 0.004, grp: GRP.BEARD });
+    shavenScalp(B, rig, lod, H, { hairline: 0.055 });
+    shavenFace(B, rig, lod, H);
     let hemY;
     withBody(B, rig, lod, () => {
       hemY = tunic(B, rig, lod, { hemY: R(rig, 'shin_r').y - 0.2 * rig.dims.H / 1.67 });
       belt(B, rig, lod, { thick: 0.008 });
       mantle(B, rig, lod, {});
+    });
+    for (const s of ['l', 'r']) foot(B, rig, lod, s, { to: hemY + 0.12 });
+  },
+  // the metzora of Vayikra 13:45: the tunic rent at the breast, the hair let grow long and uncombed, the beard untrimmed
+  // ("he may not cut his hair or wash his clothes all the days of his declaration" - Rambam Tumat Tzara'at 10:6); shaven
+  // all over on his seventh day (Actor.setShaven('all'), Vayikra 14:9)
+  metzora(B, rig, lod) {
+    const H = head(B, rig, lod);
+    hair(B, rig, lod, H, { hairline: 0.055, long: true, volume: 0.009, wild: 1.7, grp: GRP.HAIR });
+    beard(B, rig, lod, H, { len: 0.1, volume: 0.007, grp: GRP.BEARD });
+    shavenScalp(B, rig, lod, H, { hairline: 0.055 });
+    shavenFace(B, rig, lod, H);
+    let hemY;
+    withBody(B, rig, lod, () => {
+      hemY = tunic(B, rig, lod, { hemY: R(rig, 'shin_r').y - 0.2 * rig.dims.H / 1.67, rent: true, seed: 1.9 });
+      belt(B, rig, lod, { thick: 0.008 });
+      mantle(B, rig, lod, { gap: 0.5 });
     });
     for (const s of ['l', 'r']) foot(B, rig, lod, s, { to: hemY + 0.12 });
   },

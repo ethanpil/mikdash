@@ -3,8 +3,8 @@
 // wheel), Lishkat HaEtz = Parhedrin (the Kohen Gadol's chamber, opening only to the chel), and Melach, Parvah (the KG's
 // roof mikveh) and Medichin (its winding stair).
 import { B, gridSolid, lathe } from './lib/geo.js';
-import { shell, flight, spiral, lampStand } from './lib/parts.js';
-import { classify } from './masonry.js';
+import { shell, flight, spiral, lampStand, wallLamp } from './lib/parts.js';
+import { classify, WALL_IN } from './masonry.js';
 import { meshOf, Object3D, boxAt, finishLocal } from './lib/kit.js';
 import { AMAH, m2w } from '../../core/units.js';
 import { CylinderGeometry, TorusGeometry } from 'three';
@@ -43,7 +43,7 @@ function gazit(C) {
       doors.push(B(x - dx * 0.36, inward < 0 ? y - 0.55 : y - 0.01, z0, x + dx * 0.36, inward < 0 ? y + 0.01 : y + 0.55, z0 + 1.05, { mat: 'ashlar_plain' }));
     }
   }
-  shell(C, B(...b.min, ...b.max), { t, room: 'herodian_wall_inner', ceil: 'ashlar_plain', floor: 'paving_azarah', top: 'roof_plaster', doors });
+  shell(C, B(...b.min, ...b.max), { t, room: WALL_IN, ceil: 'ashlar_plain', floor: 'paving_azarah', top: 'roof_plaster', doors });
   // ---- the kodesh half: a basilica nave between two rows of marble columns carrying stone architraves (no wood in
   // the Azarah — Rambam BhB 1:9); the chol half: an open hall under cedar beams for the Sanhedrin ⚙
   const rows = [b.min[1] + t + 3.6, b.max[1] - t - 3.6];
@@ -60,14 +60,18 @@ function gazit(C) {
   const ph = C.kit.m('marble_veined', false, true);
   for (let y = b.min[1] + t + 0.5; y < b.max[1] - t; y += 1) ph.box([split - 0.15, y - 0.15, Z], [split + 0.15, y + 0.15, Z + 0.07]);
   // ---- the Sanhedrin's semicircle "like half a round threshing floor, so they see one another" (Sanhedrin 4:3):
-  // four stepped tiers of stone benches, open toward the chol door; ≥ 71 places at an amah each (EK's measure) ⚙
+  // four stepped tiers of stone benches, open toward the chol door; ≥ 71 places at an amah each (EK's measure) ⚙.
+  // Risers of one amah (tops 1, 2, 3, 4 above the floor) on treads of 1.1 (the last 1.05, to the side walls), so a man
+  // seated on a bench (people's 'sit': a 1-amah seat) rests his feet on the bench below (world-4; were ½-amah rises)
   const [sx] = p.stations.sanhedrin;
   const cxy = [sx, cy];
-  const rIn = [4.6, 5.7, 6.8, 7.9], rOut = Math.min(8.95, cy - b.min[1] - t - 0.05), tz = [0.9, 1.5, 2.1, 2.7];
+  const rIn = [4.6, 5.7, 6.8, 7.9], rOut = Math.min(8.95, cy - b.min[1] - t - 0.05), tz = [1, 2, 3, 4];
   amphitheatre(C, cxy, Z, rIn, rOut, tz);
-  // the nasi's seat at the apex, a little raised; two scribes' desks before them (Sanhedrin 4:3)
+  // the nasi's seat at the apex, a little raised (+0.35) with a footstool of the same height before it, so his seat
+  // too stands an amah over his feet; two scribes' desks before them (Sanhedrin 4:3) ⚙
   const seat = C.kit.m('marble_white', true, true);
   seat.box([sx + rIn[0] - 0.05, cy - 0.75, Z + tz[0]], [sx + rIn[0] + 0.7, cy + 0.75, Z + tz[0] + 0.35]);
+  seat.box([sx + rIn[0] - 0.75, cy - 0.75, Z], [sx + rIn[0] - 0.05, cy + 0.75, Z + 0.35]);
   // the two scribes stand before them (Sanhedrin 4:3 "omdin lifneihem"): standing lecterns, sloped up toward the judges ⚙
   const wood = C.kit.m('cedar', true, true);
   for (const s of [-1, 1]) {
@@ -93,6 +97,8 @@ function gazit(C) {
   const [lx, ly] = p.stations.lottery;
   C.anchor('courts.gazit.lottery', [lx, ly, Z], 270, 'Lishkat HaGazit — the lottery (kodesh half)');
   C.anchor('courts.gazit.sanhedrin', [sx + rIn[0] + 0.35, cy, Z + tz[0] + 0.35], 270, 'Lishkat HaGazit — seat of the Sanhedrin (chol half)');
+  // the benches as built, for the sim (sanhedrin.js GZ): centre [sx, cy], tiers' inner radii rIn, tops tz above Z
+  C.anchor('courts.gazit.benches', [sx, cy, Z], 270, "Lishkat HaGazit — the Sanhedrin's benches (centre of the semicircle)", { rIn, rOut, tz, seat: tz[0] + 0.35, footstool: 0.35 });
   C.anchor('courts.chamber.gazit', [b.max[0] - 3, cy - 4, Z], 270, e.name.en);
   C.anchor('courts.gate.gazit.west', [b.min[0] - 2, cy, Z], 90, 'Lishkat HaGazit — the chol door');
 }
@@ -120,8 +126,9 @@ function amphitheatre(C, c, Z, rIn, rOut, tz) {
       m.quadH(P(r0, z0, a0), P(r1, z1, a0), P(r1, z1, a1), P(r0, z0, a1), hint);
     }
   }
-  // end caps on the diameter
-  for (const [a, s] of [[-Math.PI / 2, -1], [Math.PI / 2, 1]]) m.poly(prof.map(([r, z]) => P(r, z, a)), [0, s, 0]);
+  // end caps on the diameter: both lie in the plane X = c[0] and face the open side (−X), so the hint is −X — poly()
+  // projects on the hint's dominant axis, and a ±Y hint flattened them onto (X, Z), a line: no triangles (world-4-fix)
+  for (const a of [-Math.PI / 2, Math.PI / 2]) m.poly(prof.map(([r, z]) => P(r, z, a)), [-1, 0, 0]);
 }
 
 // ------------------------------------------------------------------------------------------------ Golah
@@ -178,7 +185,9 @@ function golah(C) {
   C.ctx.movables.set(pivot.name, pivot);
   // rope and bucket down to the water
   C.kit.m('timber_rough', false, false).box([cx - 0.05, cyy + 0.5, waterZ + 0.6], [cx + 0.05, cyy + 0.6, az]);
-  C.kit.geo(lathe([[0, 0], [0.35, 0], [0.42, 0.6], [0.38, 0.62], [0, 0.1]], [cx, cyy + 0.55, waterZ + 0.05], 10), 'copper', { collide: false });
+  C.kit.geo(lathe([[0, 0], [0.35, 0], [0.42, 0.6], [0.38, 0.62], [0, 0.1]], [cx, cyy + 0.55, waterZ + 0.05], 10), C.kit.mat('copper_worn', 'copper'), { collide: false });
+  // an oil lamp on a bracket on the west wall, for the draws before dawn (fire 'service', dark until the sim lights it) ⚙
+  wallLamp(C, 'courts.golah.lamp', b.min[0] + t, cyy - 2, Z + 4.4, [1, 0], { schedule: 'service', intensity: 0 });
   C.anchor('courts.chamber.golah', [cx, b.min[1] + t + 0.8, Z], 0, e.name.en);
 }
 
@@ -241,7 +250,11 @@ function southTrio(C) {
     C.anchor(`courts.chamber.${k}`, [dx, b.max[1] - t - 3, Z], 180, e.name.en);
     const r = { min: [b.min[0] + t, b.min[1] + t, Z], max: [b.max[0] - t, b.max[1] - t, b.max[2] - t] };
     if (k === 'melach') saltStore(C, r);
-    if (k === 'parvah') hides(C, r);
+    if (k === 'parvah') {
+      hides(C, r);
+      // an oil lamp on a bracket on the east wall by the door, for the salting before the court's light (fire 'service') ⚙
+      wallLamp(C, 'courts.parvah.lamp', r.max[0], r.max[1] - 1.2, Z + 4.4, [-1, 0], { schedule: 'service', intensity: 0 });
+    }
     if (k === 'medichin') rinsers(C, r, { max: [sc[0] + sr + 0.2] });
   }
   // Middot 5:3: "from it a winding stair goes up to the roof of the Parvah"

@@ -3,7 +3,12 @@
 //   cues: continuous play at 120x fires every planned cue in the played span exactly once, jumps fire none;
 //   cost: the module's own update time per frame while playing;
 //   schedule: dynamic sub-events in active()/at()/byId(), not in upcoming() unless asked;
-//   graph: every authored corridor checked against nav (a much longer nav path means the straight leg is blocked).
+//   graph: every authored corridor checked against nav (a much longer nav path means the straight leg is blocked);
+//   adopt (choreo-adopt): the slain lamb/ewe/goat carried to the hook in people's carry_lamb; each kind hung, flayed and
+//   dressed as its own (goat in its hair, ram with horns); the goat's hide and fats as a goat's; an individual's chatat
+//   a ewe or a she-goat; the tenufah and the bikkurim basket waved over the kohen's wave_under in one phase, both at
+//   scale 1, the partner distance apart; Psalm 30 for the bikkurim; no carrier on the altar top walks through a man
+//   standing there to throw.
 // Run: node src/sim/dev/run.mjs --q low --script src/sim/dev/tests/g5.js "t=sunrise+150"
 const rt = ctx.schedule.runtime, time = ctx.time, sch = ctx.schedule;
 const e = rt.choreo('private-offerings');
@@ -130,8 +135,8 @@ out.schedule = {
 }
 
 // ---------------------------------------------------------------- the plan's rules, and nobody standing in anybody, on several dates
-const { segAt, sampleSeg } = await import('/src/sim/choreo/g5/track.js');
-const ANIMAL = new Set(['lamb', 'ram', 'goat']);
+const { segAt, sampleSeg, carcassOf } = await import('/src/sim/choreo/g5/track.js');
+const ANIMAL = new Set(['lamb', 'ram', 'goat', 'ewe', 'she_goat']);
 /** every G5 figure at every 0.04 min: pairs closer than 0.85 amah (41 cm between body centres) */
 function sweep(P2, thr = 0.85, step = 0.04) {
   const hum = P2.tracks.filter((tr) => tr.slot >= 0 && !ANIMAL.has(tr.pool)).sort((a, b) => a.t0 - b.t0);
@@ -179,7 +184,9 @@ for (const date of [dateNow, '2026-11-06', '2026-06-15']) {
     yoledet: `${yol.length - yolBad.length}/${yol.length} chatat first`, yolBad,
     ashamNotRam: P2.insts.filter((x) => x.type === 'asham' && x.species !== 'ram').length,
     goatMostHoly: P2.insts.filter((x) => x.species === 'goat' && ['olah', 'chatat', 'asham'].includes(x.type)).length,
-    goatFleece: P2.props.filter((p) => p.kind === 'hung' && p.name !== 'carcass_hung' && p.inst.species === 'goat').length,
+    // every hung stage drawn as its own kind (people-4: a goat in its hair, a ram with its horns)
+    wrongKind: P2.props.filter((p) => p.kind === 'hung' && p.inst?.species && !Object.values(carcassOf(p.inst.species)).includes(p.name)).map((p) => `${p.inst.species}:${p.name}`).slice(0, 4),
+    chatatSpecies: P2.insts.filter((x) => x.kind === 'animal' && x.type === 'chatat').reduce((m, x) => { m[x.species] = (m[x.species] || 0) + 1; return m; }, {}),
     birdsUnbrought: P2.insts.filter((x) => x.kind === 'bird' && !x.job?.set && x.job?.source === 'bringer' && !x.tracks.some((tr) => tr.role === 'O')).length,
     birdSources: P2.insts.filter((x) => x.kind === 'bird').reduce((m, x) => { m[x.job?.source] = (m[x.job?.source] || 0) + 1; return m; }, {}),
     overlaps: sw.count, standing: sw.stand,
@@ -213,4 +220,97 @@ if (ctx.nav?.isReady) {
   }
 }
 out.graph = { navReady: !!ctx.nav?.isReady, edgesChecked: checked, suspect: bad };
+
+// ---------------------------------------------------------------- adopted assets (choreo-adopt)
+{
+  const A = {};
+  const ok = (k, v, info) => { A[k] = v ? true : `FAIL ${info ?? ''}`; };
+  const go = async (t) => { time.set(t); await frames(2); };
+  time.set(time.parse('sunrise+150')); await frames(2);
+  const P3 = e.state.plan;
+  const an = P3.insts.filter((x) => x.kind === 'animal');
+  // the carry to the hook: the slain animal in his arms (no ram: too heavy)
+  const carryBad = an.filter((x) => {
+    const CC = carcassOf(x.species);
+    const has = x.tracks.some((tr) => tr.segs.some((sg) => sg.pose === 'carry_lamb_walk' && sg.prop === CC.slain));
+    return CC.slain ? !has : x.tracks.some((tr) => tr.segs.some((sg) => sg.pose === 'carry_lamb_walk'));
+  }).map((x) => `${x.id}:${x.species}`);
+  ok('slain carried in carry_lamb (not a ram)', carryBad.length === 0 && an.some((x) => x.species !== 'ram'), carryBad.slice(0, 3));
+  // hides and fats by kind
+  const hideBad = an.filter((x) => x.tracks.some((tr) => tr.segs.some((sg) => /^hide/.test(sg.prop || '') && sg.prop !== carcassOf(x.species).hide))).map((x) => x.id);
+  ok('hide by kind', hideBad.length === 0, hideBad.slice(0, 3));
+  const eimBad = an.filter((x) => x.tracks.some((tr) => tr.segs.some((sg) => /^eimurim/.test(sg.prop || '') && sg.prop !== carcassOf(x.species).eimurim))).map((x) => x.id);
+  ok('eimurim by kind', eimBad.length === 0 && P3.tracks.some((tr) => tr.segs.some((sg) => /^eimurim/.test(sg.prop || ''))), eimBad.slice(0, 3));
+  // an individual's chatat: a ewe or a she-goat (Vayikra 4:28, 4:32), on every date checked
+  const chBad = Object.values(out.rules).flatMap((r) => (r && r.chatatSpecies ? Object.keys(r.chatatSpecies).filter((sp) => sp !== 'ewe' && sp !== 'she_goat') : []));
+  ok('chatat a ewe or a she-goat', chBad.length === 0, chBad);
+  ok('hung stages by kind', Object.values(out.rules).every((r) => !r?.wrongKind || r.wrongKind.length === 0), JSON.stringify(Object.values(out.rules).map((r) => r?.wrongKind)));
+  // the waving pairs: the owner's wave over the kohen's wave_under, one phase, both at scale 1, the partner distance apart
+  const partner = ctx.people?.stations?.waveUnder?.partner ?? 0.74;
+  const pairs = [];
+  for (const tr of P3.tracks) for (const sg of tr.segs) if (sg.pose === 'wave_under') pairs.push({ inst: tr.inst, t: (sg.t0 + sg.t1) / 2 });
+  const waveRes = [];
+  for (const pr of [pairs.find((x) => x.inst.type !== 'bikkurim'), pairs.find((x) => x.inst.type === 'bikkurim')].filter(Boolean)) {
+    await go(pr.t);
+    const sl = e.pools.flatMap((p) => p.slots.filter((x) => x.want && x.shown));
+    const ku = sl.filter((x) => x._pose === 'wave_under'), ow = sl.filter((x) => x._pose === 'wave');
+    let best = null;
+    for (const k of ku) for (const o2 of ow) {
+      const d = k.actor.object3D.position.distanceTo(o2.actor.object3D.position);
+      if (!best || d < best.d) best = { d, k, o: o2 };
+    }
+    if (!best) { waveRes.push(`${pr.inst.type}: no pair`); continue; }
+    const dp = Math.abs(best.k._phase - best.o._phase);
+    waveRes.push({ type: pr.inst.type, dist: r3(best.d), dPhase: r3(Math.min(dp, 1 - dp)), scale: [best.k.actor.scale, best.o.actor.scale], prop: best.o._pkey });
+  }
+  ok('wave_under pairs', waveRes.length > 0 && waveRes.every((w) => typeof w === 'object' && Math.abs(w.dist - partner) < 0.03 && w.dPhase < 0.02 && w.scale[0] === 1 && w.scale[1] === 1), JSON.stringify(waveRes));
+  // Psalm 30 for the bikkurim: the audio's song 'bikkurim', its three sections
+  const bik = P3.insts.filter((x) => x.type === 'bikkurim');
+  const psalm = P3.cues.filter((c) => c.id === 'choir-psalm' && c.opts?.song === 'bikkurim');
+  ok('Psalm 30 with the bikkurim', bik.length === 0 || psalm.length === 3 * bik.length, `${bik.length} baskets, ${psalm.length} sections`);
+  // the altar top: no carrier walks through a man standing there to throw or pour (Z 25: the pile's east face and the
+  // cups at the SW horn), of another offering or of the same one (a ram's two flour and two wine bearers, Yoma 2:7) —
+  // on every date of the rules
+  const throughOn = (P4) => {
+    const tops = P4.tracks.filter((tr) => tr.slot >= 0 && !ANIMAL.has(tr.pool) && tr.segs.some((sg) => sg.kind === 0 && sg.Z > 24)).sort((a, b) => a.t0 - b.t0);
+    let through = 0, pairs = 0;
+    const seen = [];
+    const o3 = {}, tmp3 = {};
+    const T0 = tops.length ? tops[0].t0 : 0, T1 = Math.max(0, ...tops.map((tr) => tr.t1));
+    let ix = 0, act = [];
+    for (let x = T0; x < T1; x += 0.01) {
+      while (ix < tops.length && tops[ix].t0 <= x) act.push(tops[ix++]);
+      act = act.filter((tr) => tr.t1 > x);
+      const pts = [];
+      for (const tr of act) {
+        const k = segAt(tr.segs, x);
+        if (k < 0) continue;
+        const q = sampleSeg(tr.segs[k], x, o3, tmp3);
+        if (q.Z > 24) pts.push({ tr, X: q.X, Y: q.Y, walk: tr.segs[k].kind === 1 });
+      }
+      for (const a of pts) for (const b of pts) {
+        if (a === b || !a.walk || b.walk) continue;
+        if (Math.hypot(a.X - b.X, a.Y - b.Y) < 0.85) {
+          through++;
+          if (a.tr.inst === b.tr.inst) pairs++;
+          if (seen.length < 4) seen.push(`${time.format(x)} ${a.tr.inst.id}/${a.tr.role} through ${b.tr.inst.id}/${b.tr.role} at ${a.X.toFixed(1)},${a.Y.toFixed(1)}`);
+        }
+      }
+    }
+    return { through, pairs, seen, twoBearers: P4.tracks.filter((tr) => tr.role === 'N1b' || tr.role === 'N2b').length };
+  };
+  const topRes = {};
+  for (const date of Object.keys(out.rules)) {
+    if (time.dateString !== date) { time.setDate(date); await frames(3); }
+    time.set(time.parse('sunrise+150')); await frames(2);
+    if (e.state.plan?.ok) topRes[date] = throughOn(e.state.plan);
+  }
+  if (time.dateString !== dateNow) { time.setDate(dateNow); await frames(3); }
+  time.set(time.parse('sunrise+150')); await frames(2);
+  out.altarTop = Object.fromEntries(Object.entries(topRes).map(([d, v]) => [d, `${(v.through * 0.6).toFixed(1)} s (${(v.pairs * 0.6).toFixed(1)} s same offering), ${v.twoBearers} N1b/N2b tracks ${v.seen.join('; ')}`]));
+  ok('altar top: no walk through a thrower or pourer', Object.keys(topRes).length > 0 && Object.values(topRes).every((v) => v.through === 0), JSON.stringify(out.altarTop));
+  ok('altar top: a ram\'s two bearers staged', Object.values(topRes).some((v) => v.twoBearers > 0), JSON.stringify(out.altarTop));
+  out.adopt = A;
+  out.adoptOk = Object.values(A).every((v) => v === true);
+}
 return out;

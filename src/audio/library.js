@@ -43,6 +43,10 @@ export const CUE_LIB = {
   'crowd-prostrate': C(74, 12, { cat: 'crowd', variants: 2, priority: 3, send: 0.7, people: 600 }),
   footsteps: C(56, 1, { cat: 'foley', variants: 4, send: 0.4, synth: ['steps', 'pace'] }),
   keys: C(72, 1, { cat: 'foley', variants: 2, send: 0.5 }),
+  // render-audio-3: an earthenware pot dashed on the pavement (the scouring: Lev 6:21, broken in a holy place, Zevachim
+  // 11:4): a sharp crack and clatter, ≈ 95 dB at 1 m in its loudest 400 ms (a ceramic pot smashed on stone peaks above
+  // 100 dB) ⚙
+  'pot-break': C(95, 1, { cat: 'foley', variants: 3, priority: 2, send: 0.6, synth: ['size'] }),
 };
 // aliases accepted by cue(): schedule ids may name blast sets this way
 export const CUE_ALIAS = {
@@ -51,6 +55,7 @@ export const CUE_ALIAS = {
   'great-gate': 'great-gate-open', 'gate-open': 'gate-boom', 'gate-close': 'gate-boom', gate: 'gate-boom', shalom: 'shalom-call',
   choir: 'choir-psalm', psalm: 'choir-psalm', song: 'choir-psalm', 'levites-song': 'choir-psalm', prostration: 'crowd-prostrate',
   'cymbal-crash': 'cymbal', 'muchni-creak': 'muchni', 'kg-bells': 'bells',
+  'pot-shatter': 'pot-break', 'earthenware-break': 'pot-break', 'break-pot': 'pot-break',
 };
 
 // Loops. bed: non-spatial stereo bed through the outdoor bus (muffled indoors); spl of a bed = level heard.

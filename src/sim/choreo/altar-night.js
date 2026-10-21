@@ -29,6 +29,9 @@ import { CUE_LEAD } from '../lib/cue.js';
 const FIRES = { great: 'altar.maarachah.great', inner: 'altar.maarachah.great.inner' };
 const INNER_DEFAULT = 0.9;                         // the inner pile as the altar builder lights it (altar/fire.js)
 const LIMB_BURNS = 240;                            // minutes a limb or fat stays visible on the fire ⚙
+const CHARS = 25;                                  // minutes on the fire before a limb shows charred (people's limb*_charred) ⚙
+/** the charred twin of a limb prop (people-3: limb_charred, limb_head_charred, … the same grips and frame) */
+export const charred = (name) => (/^limb(_|$)/.test(name) && !name.endsWith('_charred') ? `${name}_charred` : name);
 const TEXT = {
   limbsUp: { en: 'The last of the day\'s limbs and fats go up the ramp and onto the great pile; the kohanim tend it with forks (Rambam MK 4:2; Tamid 2:1)', he: 'מַעֲלִין אֵבָרִים וּפְדָרִים לַמַּעֲרָכָה' },
   spring: { en: 'A limb has sprung off the fire: before midnight it is put back (Zevachim 9:6)', he: 'אֵבָרִים שֶׁפָּקְעוּ מֵעַל גַּבֵּי הַמִּזְבֵּחַ, קֹדֶם לַחֲצוֹת — יַחֲזִיר' },
@@ -90,11 +93,19 @@ function prepare(ctx, state, P, sim) {
   const items = [];
   for (const s of A.stack) items.push({ name: s.name, at: s.at, h: s.h, show: [s.from, s.until ?? s.from] });
   // (the evening's last limbs stay on the fire to 24:00, where the small hours' leftovers continue them — LEFT)
-  for (const p of A.pile) items.push({ name: p.name, at: p.at, h: p.h, show: [p.from, p.persist ? 1439.999 : Math.min(p.from + LIMB_BURNS, 1439.9)] });
+  // on the fire: raw as it is thrown on, then charred - a black crust - as it burns (Tamid 2:1: "limbs and fats not
+  // consumed since evening"); the same spot and heading, so the swap is in place ⚙ when
+  for (const p of A.pile) {
+    const end = p.persist ? 1439.999 : Math.min(p.from + LIMB_BURNS, 1439.9);
+    const ch = Math.min(p.from + CHARS, end);
+    items.push({ name: p.name, at: p.at, h: p.h, show: [p.from, ch] });
+    if (end > ch) items.push({ name: charred(p.name), at: p.at, h: p.h, show: [ch, end] });
+  }
   if (T.nightTurn || P.T.fats) LEFT.forEach((L, k) => {
-    // consumed one by one through the small hours; the last is terumat-hadeshen's leftover limb at dawn
+    // consumed one by one through the small hours; the last is terumat-hadeshen's leftover limb at dawn - all of them
+    // charred by now
     const end = k === LEFT.length - 1 ? (cut < 720 ? cut : 300) : Math.min(cut < 720 ? cut : 300, 80 * (k + 1) + (T.nightTurn ? 60 : 0));
-    items.push({ name: L.name, at: ap.onPile[L.idx], h: L.h, show: [0, Math.max(1, end)] });
+    items.push({ name: charred(L.name), at: ap.onPile[L.idx], h: L.h, show: [0, Math.max(1, end)] });
   });
   state.props.set(items);
   // the fire's window: from sunset (fats-burning) until terumat-hadeshen's wants begin (muchni.t0 − 0.5); in its last
