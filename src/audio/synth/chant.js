@@ -67,3 +67,28 @@ export function psalmMelody(text, { tempo = 1, firstIntonation = true } = {}) {
 
 /** A rendered section is the melody plus this ring-out (strings, reverberant tail) — renderPsalm(). */
 export const SECTION_TAIL = 3.5;
+
+// A section is rendered verse by verse (one buffer per verse, placed at its own time on the section's clock), so a
+// listener who arrives mid-section waits for one verse to render, not the whole section. Every verse ends with a
+// cadence and a breath of at least 0.55 s in which no voice sounds, so the voices split cleanly there; the strings
+// ring on under the next verse in the chunk's tail (the chunks overlap and are summed).
+/** a later chunk starts this long before its first note: onset consonants (≤ 0.2 s), the singers' lag and jitter */
+export const CHUNK_PRE = 0.35;
+/** a chunk other than the last ends this long after its last event (which includes the breath): the strings' ring */
+export const CHUNK_TAIL = 2;
+
+/**
+ * The render chunks of a melody (psalmMelody) whose verses have `sizes` syllables each: one per verse,
+ * [{ k, e0, e1 (its events [e0, e1)), t0, t1 (s on the section's clock: its buffer spans [t0, t1)) }]. Chunk 0 starts
+ * at 0, the others CHUNK_PRE before their first note; the last ends where the whole section's buffer ends.
+ */
+export function melodyChunks(events, length, sizes) {
+  const out = [];
+  let i = 0;
+  sizes.forEach((n, k) => {
+    const a = events[i], z = events[i + n - 1], last = k === sizes.length - 1;
+    out.push({ k, e0: i, e1: i + n, t0: k ? Math.max(0, a.t - CHUNK_PRE) : 0, t1: last ? length + SECTION_TAIL : z.t + z.dur + CHUNK_TAIL });
+    i += n;
+  });
+  return out;
+}

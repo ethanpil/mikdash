@@ -14,6 +14,11 @@ export const ARCHETYPES = {
   kohen: { rig: 'man', recipe: 'kohen', palette: pal(SKIN, HAIR, LINEN, LINEN, ['#5c3a2c', '#3c3a46']) },
   kg_gold: { rig: 'man', recipe: 'kg_gold', palette: pal(SKIN, HAIR, LINEN, LINEN, ['#5c3a2c', '#3c3a46']) },
   kg_white: { rig: 'man', recipe: 'kg_white', palette: pal(SKIN, HAIR, LINEN, LINEN, ['#5c3a2c', '#3c3a46']) },
+  // an elder of the beit av in the four garments (the elder rig, grey); a kohen in the michnasayim only; a bather
+  kohen_old: { rig: 'elder', recipe: 'kohen_elder', palette: pal(SKIN, ['#3a342e', '#d7d2c8'], LINEN, LINEN, ['#5c3a2c', '#3c3a46']) },
+  kohen_breeches: { rig: 'man', recipe: 'kohen_breeches', palette: pal(SKIN, HAIR, LINEN, LINEN, ['#5c3a2c', '#3c3a46']) },
+  kohen_bathing: { rig: 'man', recipe: 'kohen_bathing', palette: pal(SKIN, HAIR, ['#e9e3d4', '#e4dccb', '#ece6d9', '#dfd7c6'], LINEN, ['#5c3a2c', '#3c3a46']) },
+  kohen_bathing_old: { rig: 'elder', recipe: 'kohen_bathing', palette: pal(SKIN, ['#3a342e', '#d7d2c8'], ['#e9e3d4', '#e4dccb', '#ece6d9', '#dfd7c6'], LINEN, ['#5c3a2c', '#3c3a46']) },
   levi: {
     rig: 'man', recipe: 'levi',
     palette: pal(SKIN, HAIR, ['#dccdaf', '#d3c3a2', '#e2d5b8', '#cdbb98'], ['#c3ad88', '#b49f7d', '#cfbf9e', '#a28e6c'], ['#6a4a35', '#4f4a3e']),
@@ -46,17 +51,28 @@ export const ARCHETYPES = {
 
 /**
  * role: { arch, mantle (probability of the mantle), headcloth (probability), grey: [min,max] hair greying,
- *         prop / pose defaults, scale: [min,max] }
+ *         prop / pose defaults, scale: [min,max],
+ *         offduty (in 'sleep' / 'lie': own clothes = offArch (default 'israelite') on offProp (default 'folded_garments')),
+ *         bathArch (in 'bathe': the bathing figure) }
  */
 export const ROLES = {
   // offduty: in 'sleep' / 'lie' the figure wears its own clothes and sleeps on the folded holy garments (Tamid 1:1)
-  kohen: { arch: 'kohen', grey: [0, 0.35], scale: [0.95, 1.05], offduty: true },
-  segan: { arch: 'kohen', grey: [0.2, 0.55], scale: [0.98, 1.04], offduty: true },
+  kohen: { arch: 'kohen', grey: [0, 0.35], scale: [0.95, 1.05], offduty: true, bathArch: 'kohen_bathing' },
+  segan: { arch: 'kohen', grey: [0.2, 0.55], scale: [0.98, 1.04], offduty: true, bathArch: 'kohen_bathing' },
   kohen_gadol: { arch: 'kg_gold', grey: [0.15, 0.5], scale: [1.0, 1.04], lowBlessing: true, offduty: true },
   kohen_gadol_white: { arch: 'kg_white', grey: [0.15, 0.5], scale: [1.0, 1.04], lowBlessing: true, offduty: true },
   // a kohen out of the holy garments: his own tunic and mantle, head bare (Tamid 1:1 "they cover themselves
   // with their own clothes"); pose sleep/lie adds the folded garments under his head
-  kohen_offduty: { arch: 'israelite', mantle: 1, headcloth: 0, grey: [0, 0.35], scale: [0.95, 1.05], offduty: true },
+  kohen_offduty: { arch: 'israelite', mantle: 1, headcloth: 0, grey: [0, 0.35], scale: [0.95, 1.05], offduty: true, bathArch: 'kohen_bathing' },
+  // the elders of the beit av who sleep on the stone rovadin of Beit HaMoked with the keys (Tamid 1:1): in the four
+  // garments when serving; asleep in their own clothes on their folded garments, the kesset folded to fit the ledge,
+  // covered by their own mantle. kohen_elder_offduty = the same man in his own clothes when awake.
+  kohen_elder: { arch: 'kohen_old', mantle: 1, headcloth: 0, grey: [0.55, 1], scale: [0.96, 1.03], offduty: true, offArch: 'elder', offProp: 'folded_garments_ledge', bathArch: 'kohen_bathing_old' },
+  kohen_elder_offduty: { arch: 'elder', mantle: 1, headcloth: 0, grey: [0.55, 1], scale: [0.96, 1.03], offduty: true, offArch: 'elder', offProp: 'folded_garments_ledge', bathArch: 'kohen_bathing_old' },
+  // stripped by the chazzanim to the michnasayim only (Tamid 5:3)
+  kohen_breeches: { arch: 'kohen_breeches', grey: [0, 0.35], scale: [0.95, 1.05], bathArch: 'kohen_bathing' },
+  // immersing, drying and warming himself at the fire in a linen wrap (Tamid 1:1–2; Yoma 3:3)
+  kohen_bathing: { arch: 'kohen_bathing', grey: [0, 0.35], scale: [0.95, 1.05] },
   levi: { arch: 'levi', mantle: 0.55, grey: [0, 0.3], scale: [0.95, 1.05] },
   guard_levi: { arch: 'levi', mantle: 1, grey: [0, 0.3], scale: [0.97, 1.05], prop: 'torch', pose: 'torch' },
   levi_boy: { arch: 'boy', grey: [0, 0], scale: [0.92, 1.06] },

@@ -78,7 +78,7 @@ export function resolveTarget(ctx, physics, target, hintY = null) {
     const zHint = target.z ?? Z;
     const exact = Number.isFinite(zHint);
     const feet = m2w(X, Y, 0);
-    let y = physics.standFloor(feet.x, feet.z, exact ? a(zHint) : hintY, exact);
+    let y = exact ? physics.nearestFloor(feet.x, feet.z, a(zHint)) : physics.standFloor(feet.x, feet.z, hintY);
     if (exact && physics.bvh && (y === null || y - a(zHint) > 0.5)) {
       // the only floor here is on top of something (a wood pile, a table, a wall top): the nearest spot on the
       // requested level instead (a floor BELOW the requested Z is kept: the Z is then an estimate of the ground)
@@ -365,7 +365,7 @@ export function createAuto(ctx, ctrl, physics, nav) {
         let pitchT = null;
         if (kappa > 0.8) {
           pointAt(P, j.s + NEWEL_LOOK, tmp2);
-          const ny = physics.standFloor(tmp2.x, tmp2.z, tmp2.y, true);
+          const ny = physics.nearestFloor(tmp2.x, tmp2.z, tmp2.y);
           if (ny !== null && Math.abs(ny - feet.y) > 0.3) {
             const d = Math.max(0.5, Math.hypot(tmp2.x - feet.x, tmp2.z - feet.z));
             const half = ((ctx.camera?.fov || 62) * DEG) / 2;
@@ -379,7 +379,7 @@ export function createAuto(ctx, ctrl, physics, nav) {
         if (Math.hypot(vx, vz) > 0.3) yawErr = turnToward(Math.atan2(-vx, -vz), dt, 2.4);
         if (pitchT === null) {
           pointAt(P, j.s + 4, tmp2);
-          const gy = physics.standFloor(tmp2.x, tmp2.z, tmp2.y, true); // the ground there, not the chord's height
+          const gy = physics.nearestFloor(tmp2.x, tmp2.z, tmp2.y); // the ground there, not the chord's height
           if (gy !== null) tmp2.y = gy;
           const hd = Math.max(1.5, Math.hypot(tmp2.x - feet.x, tmp2.z - feet.z));
           pitchT = Math.max(-0.28, Math.min(0.28, Math.atan2(tmp2.y - feet.y, hd) * 0.75)) - 0.03;
@@ -401,7 +401,7 @@ export function createAuto(ctx, ctrl, physics, nav) {
           if (++j.nudges > 3) { hop(j); return hold(); }
           // on the floor nearest the body's own height (the path's interpolated height can be in the air)
           pointAt(P, j.s + 1.2, tmp);
-          const fy = physics.standFloor(tmp.x, tmp.z, feet.y, true);
+          const fy = physics.nearestFloor(tmp.x, tmp.z, feet.y);
           if (fy !== null) tmp.y = fy;
           ctrl.place(tmp); j.s += 1.2; j.lastS = j.s;
         }

@@ -6,11 +6,18 @@
 //    opts.caption: true (and names no verse without it);
 // D. libation({ song }) schedules every part where libationTimeline says, and handle.started tells when t = 0 sounded;
 //    a time jump cancels the captions.
+// E. a section not yet rendered joins in progress at the timeline's place after one verse renders (the verse chunks);
+// F. a 'choir' loop asked for mid-section (offset, as after a jump) with nothing rendered: how soon it sings, where.
+// A sung section plays verse by verse (engine.schedulePart): each chunk's start is seen through engine.onPart.
 const A = ctx.audio, E = A.engine, bus = ctx.bus;
 const caps = [];
 bus.on('caption', (c) => caps.push({ t: performance.now() / 1000, id: c.id, verse: c.verse || null, dur: +(+c.duration).toFixed(2), en: (c.text?.en || '').slice(0, 48) }));
 const wait = (s) => sleep(s * 1000);
 const out = {};
+// chunk starts: { v, k, perf (s, when it sounds), pos (s on the section's clock where it joins), off (s into the chunk) }
+const parts = [];
+E.onPart = (v, p, when, off) => parts.push({ v, id: v.id, k: p.k, when, perf: performance.now() / 1000 + (when - E.ac.currentTime), pos: p.t0 + off, off, start: v.startTime });
+const idleMusic = async (cap = 240000) => { const M = E.renderer.lanes.music, d0 = performance.now(); while ((M.busy || M.queue.length) && performance.now() - d0 < cap) await wait(0.5); };
 
 // ---- A. locked
 {
@@ -42,7 +49,7 @@ const level = () => { an.getFloatTimeDomainData(buf); let e = 0; for (let i = 0;
   const T = A.sectionTiming(opts);
   // render first so the start is not late (late sections join in progress)
   const r0 = performance.now();
-  await E.renderer.get('cue', 'choir-psalm', { ...opts, style: 'mishnah' }, E.rateFor('choir-psalm'), { priority: 50 });
+  await Promise.all(E.fetchSection({ ...opts, style: 'mishnah' }, { priority: 50 }));
   out.renderMs = Math.round(performance.now() - r0);
   const bed = []; for (let k = 0; k < 10; k++) { bed.push(level()); await wait(0.05); }
   caps.length = 0;
@@ -68,16 +75,19 @@ const level = () => { an.getFloatTimeDomainData(buf); let e = 0; for (let i = 0;
 {
   const opts = { psalm: 93, section: 2 };
   const T = A.sectionTiming(opts);
-  await E.renderer.get('cue', 'choir-psalm', { psalm: 93, section: 2, style: 'mishnah' }, E.rateFor('choir-psalm'), { priority: 50 });
+  await Promise.all(E.fetchSection({ ...opts, style: 'mishnah' }, { priority: 50 }));
   caps.length = 0;
   A.cue('choir-psalm', null, opts);
   await wait(4);
   const cueV = [...E.voices].find((x) => x.id === 'choir-psalm');
+  const n0 = parts.length;
   const L = A.loop('choir', null, { ...opts, caption: true }); // verse captions on a loop are opt-in
   const lv = [...E.loops].find((x) => x.id === 'choir');
   await wait(T.duration - 4 + 3);
+  const lp = parts.slice(n0).find((x) => x.id === 'choir');
   out.C = {
-    cueEnds: cueV ? +(cueV.startTime + cueV.buffer.duration).toFixed(2) : null, loopStarts: lv?.startTime != null ? +lv.startTime.toFixed(2) : null,
+    cueEnds: cueV ? +(cueV.startTime + cueV.secDur).toFixed(2) : null, loopStarts: lv?.startTime != null ? +lv.startTime.toFixed(2) : null,
+    loopFirstChunkAt: lp ? +(lp.start + T.chunks[lp.k].t0 + 0).toFixed(2) : null,
     loopActive: L.active, captions: caps.filter((c) => c.verse).map((c) => c.verse),
   };
   L.stop(0.2);
@@ -98,6 +108,7 @@ const level = () => { an.getFloatTimeDomainData(buf); let e = 0; for (let i = 0;
   const orig = E.startVoice.bind(E);
   E.startVoice = (v, b, when, off, f) => { starts.push({ id: v.id, when, off, perf: performance.now() + (when - E.ac.currentTime) * 1000 }); return orig(v, b, when, off, f); };
   caps.length = 0;
+  const n0 = parts.length;
   const t0 = performance.now();
   const lib = A.libation(opts);
   const started = await lib.started;
@@ -106,8 +117,10 @@ const level = () => { an.getFloatTimeDomainData(buf); let e = 0; for (let i = 0;
   const waitedS = +((performance.now() - t0) / 1000 - T.done).toFixed(1); // render wait before the first blast
   const s0 = starts.find((x) => x.id === 'trumpet-set')?.when ?? 0;
   const ids = new Set(T.cues.map((c) => c.id));
-  // the buffer's zero on the timeline: a section that joined in progress starts later at an offset
-  const got = starts.filter((x) => ids.has(x.id)).map((x) => ({ id: x.id, t: +(x.when - x.off - s0).toFixed(2), late: +x.off.toFixed(2) }));
+  // each section's zero on the timeline (its clock: v.startTime), and how far into it its first chunk joined
+  const secs = new Map();
+  for (const x of parts.slice(n0)) if (x.id === 'choir-psalm' && !secs.has(x.v)) secs.set(x.v, { id: x.id, when: x.start, off: 0, late: x.pos > x.v.parts[0].t0 + 0.05 ? x.pos : 0 });
+  const got = [...starts, ...secs.values()].filter((x) => ids.has(x.id)).map((x) => ({ id: x.id, t: +(x.when - x.off - s0).toFixed(2), late: +(x.late ?? x.off).toFixed(2) })).sort((a, b) => a.t - b.t);
   out.D = {
     timeline: T.cues.map((c) => `${c.id}@${c.t}`), played: got.map((g) => `${g.id}@${g.t}${g.late ? ` (joined ${g.late} s in)` : ''}`),
     maxErr: Math.max(...T.cues.map((c, i) => Math.abs((got[i]?.t ?? 99) - c.t))), done, waitedS,
@@ -116,7 +129,7 @@ const level = () => { an.getFloatTimeDomainData(buf); let e = 0; for (let i = 0;
     verses: caps.filter((c) => c.verse).map((c) => c.verse), headings: caps.filter((c) => c.id === 'choir-psalm' && !c.verse).map((c) => c.en),
   };
   // a jump in the middle of a section cancels its captions
-  await E.renderer.get('cue', 'choir-psalm', { song: 'haazinu-1', section: 0, style: 'mishnah' }, E.rateFor('choir-psalm'), { priority: 50 });
+  await Promise.all(E.fetchSection({ song: 'haazinu-1', section: 0, style: 'mishnah' }, { priority: 50 }));
   caps.length = 0;
   A.cue('choir-psalm', null, { song: 'haazinu-1', section: 0 });
   await wait(3);
@@ -125,26 +138,47 @@ const level = () => { an.getFloatTimeDomainData(buf); let e = 0; for (let i = 0;
   await wait(8);
   out.jump = { before: n, after: caps.length - n, tracks: E.tracks.size };
 }
-// ---- E. a section not yet rendered joins in progress at the timeline's place; its captions do not wait for the render
+// ---- E. a section not yet rendered joins in progress at the timeline's place after one verse renders; its captions
+// do not wait for the render
 {
   const opts = { song: 'haazinu-2', section: 1 };
   const T = A.sectionTiming(opts);
   // the music lane idle first (the earlier parts' follow-on renders), so the wait measured is this render's own
-  const M = E.renderer.lanes.music, d0 = performance.now();
-  while ((M.busy || M.queue.length) && performance.now() - d0 < 240000) await wait(0.5);
-  const starts = [];
-  const orig = E.startVoice.bind(E);
-  E.startVoice = (v, b, when, off, f) => { if (v.id === 'choir-psalm') starts.push({ when, off, perf: performance.now() / 1000 + (when - E.ac.currentTime) }); return orig(v, b, when, off, f); };
+  await idleMusic();
   caps.length = 0;
+  const n0 = parts.length;
   const t0 = performance.now() / 1000;
   A.cue('choir-psalm', null, opts);
   await wait(T.duration + 1);
-  E.startVoice = orig;
-  const st = starts[0];
+  const mine = parts.slice(n0).filter((x) => x.id === 'choir-psalm');
+  const st = mine[0];
   const v = caps.filter((c) => c.verse);
   out.E = {
-    startedAfter: st ? +(st.perf - t0).toFixed(2) : null, offset: st ? +st.off.toFixed(2) : null, clockErr: st ? +Math.abs(st.perf - t0 - st.off).toFixed(3) : null,
+    startedAfter: st ? +(st.perf - t0).toFixed(2) : null, joinedAt: st ? +st.pos.toFixed(2) : null, clockErr: st ? +Math.abs(st.perf - t0 - st.pos).toFixed(3) : null,
+    chunks: mine.map((x) => `${x.k}@${x.pos.toFixed(2)}${x.off > 0.05 ? ` (+${x.off.toFixed(2)})` : ''}`),
     verses: v.map((c) => ({ verse: c.verse, at: +(c.t - t0).toFixed(2), want: T.verses.find((x) => x.key === c.verse)?.t0 })),
   };
 }
+// ---- F. a 'choir' loop asked for mid-section with nothing rendered (offset, as G3 should pass after a jump)
+{
+  const opts = { psalm: 94, section: 1, caption: true };
+  const T = A.sectionTiming(opts), offset = 30;
+  await idleMusic();
+  caps.length = 0;
+  const n0 = parts.length;
+  const t0 = performance.now() / 1000;
+  const L = A.loop('choir', null, { ...opts, offset });
+  await wait(25);
+  L.stop(0.2);
+  const mine = parts.slice(n0).filter((x) => x.id === 'choir');
+  const st = mine[0];
+  out.F = {
+    sectionS: +T.duration.toFixed(1), offset, startedAfter: st ? +(st.perf - t0).toFixed(2) : null,
+    // where the section's clock was when the first chunk sounded vs where that chunk joined
+    joinedAt: st ? +st.pos.toFixed(2) : null, clockAt: st ? +(offset + st.perf - t0).toFixed(2) : null,
+    chunks: mine.map((x) => `${x.k}@${x.pos.toFixed(2)}${x.off > 0.05 ? ` (+${x.off.toFixed(2)})` : ''}`),
+    verses: caps.filter((c) => c.verse).map((c) => `${c.verse}@${(c.t - t0).toFixed(1)}`),
+  };
+}
+E.onPart = null;
 return out;

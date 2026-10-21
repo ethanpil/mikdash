@@ -1,5 +1,5 @@
 // Navigation: multi-level walkability grids (built off-thread from the collider soup) + A* + string pulling.
-// ctx.nav = { findPath(fromWorld, toWorld) -> Vector3[] | null, ready: Promise, nearest(p), landing(p, goal),
+// ctx.nav = { findPath(fromWorld, toWorld, opts?) -> Vector3[] | null, ready: Promise, nearest(p), landing(p, goal),
 //             floorsAt(x,z), rebuild(), stats, lastQueryMs }
 // Layers (nav/multi.js): the 0.5 m main grid; ~4 cm patches over the site's winding stairs and the rooms they are
 // entered from (a 0.3 m capsule has a 7–12 cm band round a newel); a 2 m layer over the far ground the UI can send
@@ -8,8 +8,9 @@
 // goal at query time; its distances steer the fine A* along the right corridor (gates, stairs) instead of flooding
 // the open Mount.
 import { Vector3, BufferGeometry, Float32BufferAttribute, Points, PointsMaterial, Line, LineBasicMaterial } from 'three';
-import { NAV_DEFAULTS, FLAG_NEAR_EDGE, DIRS } from './grid-build.js';
+import { NAV_DEFAULTS, FLAG_NEAR_EDGE, DIRS, OPP } from './grid-build.js';
 import { buildNav, FLAG_STITCH } from './multi.js';
+import { createDoors } from './doors.js';
 import { AMAH, m2w } from '../../core/units.js';
 import { BODY } from '../controller.js';
 
@@ -44,6 +45,9 @@ export function createNav(ctx, physics) {
     }
   };
   let spare = spawn();
+  // door leaves in their shut pose, measured now: the builders' amounts, before the sim drives any door
+  const doors = createDoors(ctx);
+  { const t0 = performance.now(); doors.measureAll(); (ctx.buildTimes ||= {})['player.doors'] = Math.round(performance.now() - t0); }
 
   const nav = {
     ready: null,
@@ -52,15 +56,44 @@ export function createNav(ctx, physics) {
     lastExpanded: 0,
     /** site points [X, Y, Z?] the observer may be sent to (zone stands, event viewpoints): the far-ground layer reaches them */
     targets: null,
-    /** World-space path (feet points) from → to, or null (unreachable / not built yet). */
-    findPath(from, to) {
+    /**
+     * World-space path (feet points) from → to, or null (unreachable / not built yet).
+     * opts (all optional; default: door leaves are passed, as the observer passes them):
+     *   closedDoors: true | number — every 'door:*' movable whose openAmount is at or below the number (true = 0.05)
+     *                is a wall at its shut leaves;
+     *   blockedDoors: iterable of door ids ('door:<id>' or '<id>') walled at their shut leaves whatever their amount
+     *                now (a route planned for a time the gate will be locked).
+     * A wicket cut into a gate's leaf (the Moked gate's pishpash) is a hole in the walled gate while the query does
+     * not block the wicket itself (closedDoors: open above the threshold; blockedDoors: not named).
+     * The start and the goal snap to nodes no shut leaf covers, on their own side of every shut leaf (a walker in a
+     * doorway steps out backwards, never through). A way cut by shut doors returns null at once: the coarse graph is
+     * split at the walled nodes for the query (door-aware distances, which also steer the A* round a detour).
+     */
+    findPath(from, to, opts = null) {
       if (!grid) return null;
       const t0 = performance.now();
-      const p = grid.findPath(from, to);
+      let w = null;
+      nav.lastBlocked = [];
+      nav.lastCut = [];
+      if (opts && (opts.closedDoors || opts.blockedDoors)) {
+        w = doors.walls(opts, BODY.radius);
+        nav.lastBlocked = w.keys;
+        nav.lastCut = w.cut;
+      }
+      const p = grid.findPath(from, to, w && w.boxes.length ? w.boxes : null, w?.sig ?? null);
       nav.lastQueryMs = performance.now() - t0;
       nav.lastExpanded = grid.lastExpanded;
       if (p && debugOn) drawPath(p);
       return p;
+    },
+    /** door keys the last findPath walled off (opts.closedDoors / blockedDoors) */
+    lastBlocked: [],
+    /** wicket keys whose openings the last findPath cut out of their walled gates (a passable pishpash) */
+    lastCut: [],
+    /** Shut-pose leaf boxes (world Box3 copies) of a door ('door:<id>' or '<id>'), or null when its leaves are not found. */
+    doorFootprint(id) {
+      const b = doors.footprint(doors.keyOf(id));
+      return b ? b.map((x) => x.clone()) : null;
     },
     /** Nearest walkable point (world) to p, searching up to `radius` m. */
     nearest(p, radius = 4) {
@@ -432,6 +465,16 @@ class NavGraph {
     this.parent = new Int32Array(n);
     this.mark = new Uint32Array(n); // 2·search = open, 2·search + 1 = closed
     this.search = 0;
+    // nodes walled off by shut doors for the current query: blk[k] === blkStamp (0 = no query blocks); the walled
+    // nodes listed (blkList[0…blkCount)), the wall set they were marked for (blkSig: kept while queries repeat it) and
+    // the door-aware coarse overlay built from them (ov)
+    this.blk = null;
+    this.blkStamp = 0;
+    this.blkOn = 0;
+    this.blkSig = null;
+    this.blkList = null;
+    this.blkCount = 0;
+    this.ov = null;
     this.heap = new Heap(1 << 14);
     this.cdist = new Float32Array(this.coarse.n);
     this.cHeap = new Heap(1 << 12);
@@ -621,22 +664,45 @@ class NavGraph {
     return best;
   }
 
-  /** Coarse-graph Dijkstra from the goal's block component (distances in m to the goal). */
+  /**
+   * Coarse-graph Dijkstra from coarse node q0 (distances in m to the goal). While a query walls shut doors (blkOn), on
+   * the door-aware graph: the coarse nodes holding walled nodes are replaced by the overlay's pieces (ids ≥ coarse.n).
+   */
   coarseFrom(q0) {
-    const { off, adj, w } = this.coarse;
+    const { off, adj, w, n } = this.coarse;
+    const ov = this.blkOn ? this.ov : null, sf = ov ? ov.split : null;
     const dist = this.cdist, heap = this.cHeap;
     dist.fill(Infinity);
     heap.clear();
+    if (q0 < 0) return;
     dist[q0] = 0;
     heap.push(q0, 0);
     while (heap.size) {
       const key = heap.topKey(), q = heap.pop();
       if (key > dist[q]) continue;
-      for (let e = off[q], ee = off[q + 1]; e < ee; e++) {
-        const r = adj[e], nd = key + w[e];
-        if (nd < dist[r]) { dist[r] = nd; heap.push(r, nd); }
+      if (q < n) {
+        for (let e = off[q], ee = off[q + 1]; e < ee; e++) {
+          const r = adj[e];
+          if (sf && sf[r]) continue;
+          const nd = key + w[e];
+          if (nd < dist[r]) { dist[r] = nd; heap.push(r, nd); }
+        }
+      }
+      const ex = ov ? (q < n ? ov.extra.get(q) : ov.adj[q - n]) : null;
+      if (ex) {
+        for (let i = 0; i < ex.length; i += 2) {
+          const r = ex[i], nd = key + ex[i + 1];
+          if (nd < dist[r]) { dist[r] = nd; heap.push(r, nd); }
+        }
       }
     }
+  }
+
+  /** coarse node of global node k for the current query (an overlay piece when its block holds walled nodes; -1 walled) */
+  cq(k) {
+    const L = this.layerOf(k), q = L.coarseOff + L.coarseOf[k - L.off];
+    if (!this.blkOn || !this.ov || !this.ov.split[q]) return q;
+    return this.ov.pieceOf.get(k) ?? -1;
   }
 
   /** stitch CSR row of global node k, or -1 */
@@ -651,24 +717,31 @@ class NavGraph {
     return -1;
   }
 
-  astar(s, t, maxExpand = 2e6) {
-    const { g, parent, mark, heap, cdist, st } = this;
+  /** A* s → t (global nodes); haveDist: coarseFrom(cq(t)) has just run (route() checks the cut first) */
+  astar(s, t, maxExpand = 2e6, haveDist = false) {
+    const { g, parent, mark, heap, st } = this;
+    const blk = this.blkOn ? this.blk : null, bs = this.blkStamp;
+    const ov = blk ? this.ov : null, sf = ov ? ov.split : null;
     let search = ++this.search;
     if (search >= 0x7fffffff) { mark.fill(0); this.search = search = 1; }
     const OPEN = search * 2, CLOSED = OPEN + 1;
     const tp = this.nodePos(t, TMP);
     const tx = tp.x, tz = tp.z;
-    const Lt = this.layerOf(t);
-    this.coarseFrom(Lt.coarseOff + Lt.coarseOf[t - Lt.off]);
-    // h = max(octile, coarse distance − slack): the coarse term knows about walls, gates and stairs
+    if (!haveDist) this.coarseFrom(this.cq(t));
+    const cdist = this.cdist;
+    // h = max(octile, coarse distance − slack): the coarse term knows about walls, gates, stairs (and shut doors)
     const h = (L, lk) => {
       const c = L.nodeCell[lk];
       const dx = Math.abs(L.x0 + (c % L.nx + 0.5) * L.cell - tx), dz = Math.abs(L.z0 + (((c / L.nx) | 0) + 0.5) * L.cell - tz);
       const oct = dx > dz ? dx + (SQRT2 - 1) * dz : dz + (SQRT2 - 1) * dx;
-      const cd = cdist[L.coarseOff + L.coarseOf[lk]] - L.slack;
+      let q = L.coarseOff + L.coarseOf[lk];
+      if (sf && sf[q]) q = ov.pieceOf.get(lk + L.off) ?? q;
+      const cd = cdist[q] - L.slack;
       return cd > oct ? cd : oct;
     };
-    const W = 1.1;
+    // heuristic weight; with shut doors 1.25: a detour round the Mount hugs walls, whose near-edge cost (×1.35) the
+    // coarse distance lacks — 1.1 expanded 157 k nodes for 1.27 km round the Shushan gate, 1.25 12.8 k (+1 m of path)
+    const W = blk ? 1.25 : 1.1;
     heap.clear();
     g[s] = 0; parent[s] = -1; mark[s] = OPEN;
     { const L = this.layerOf(s); heap.push(s, h(L, s - L.off) * W); }
@@ -685,7 +758,7 @@ class NavGraph {
         const lb = L.link(la, d);
         if (lb < 0) continue;
         const b = lb + off;
-        if (mark[b] === CLOSED) continue;
+        if (mark[b] === CLOSED || (blk && blk[b] === bs)) continue;
         const ng = ga + (d >= 4 ? SQRT2 : 1) * step * ((L.nodeFlags[lb] & FLAG_NEAR_EDGE) ? 1.35 : 1) + Math.abs(L.nodeY[lb] - ya) * 0.8;
         if (mark[b] !== OPEN || ng < g[b]) {
           g[b] = ng; parent[b] = a; mark[b] = OPEN;
@@ -696,7 +769,7 @@ class NavGraph {
         const q = this.stRow(a);
         for (let e = q < 0 ? 0 : st.off[q], ee = q < 0 ? 0 : st.off[q + 1]; e < ee; e++) {
           const b = st.to[e];
-          if (mark[b] === CLOSED) continue;
+          if (mark[b] === CLOSED || (blk && blk[b] === bs)) continue;
           const Lb = this.layerOf(b), lb = b - Lb.off;
           const ng = ga + st.w[e] * 1.1 + Math.abs(Lb.nodeY[lb] - ya) * 0.8;
           if (mark[b] !== OPEN || ng < g[b]) {
@@ -720,13 +793,14 @@ class NavGraph {
     const ai = ca % nx, aj = (ca / nx) | 0, bi = cb % nx, bj = (cb / nx) | 0;
     const nxs = Math.abs(bi - ai), nzs = Math.abs(bj - aj);
     const sx = Math.sign(bi - ai), sz = Math.sign(bj - aj);
+    const blk = this.blkOn ? this.blk : null, bs = this.blkStamp, off = L.off;
     let cur = a, ix = 0, iz = 0;
     while (ix < nxs || iz < nzs) {
       const lhs = (1 + 2 * ix) * nzs, rhs = (1 + 2 * iz) * nxs;
       let di = 0, dj = 0;
       if (lhs === rhs) { di = sx; dj = sz; ix++; iz++; } else if (lhs < rhs) { di = sx; ix++; } else { dj = sz; iz++; }
       cur = L.link(cur, DIR_INDEX[(dj + 1) * 3 + di + 1]);
-      if (cur < 0) return false;
+      if (cur < 0 || (blk && blk[cur + off] === bs)) return false;
     }
     return cur === b;
   }
@@ -766,14 +840,200 @@ class NavGraph {
     return out;
   }
 
-  findPath(from, to) {
+  /**
+   * Wall off the nodes a body standing there would share with any of the boxes (world AABBs of shut door leaves):
+   * plan within the capsule radius, the body's height overlapping the box, not low enough to step over. Returns the
+   * stamp (blk[k] === stamp); the walled nodes are listed in blkList. A box is at least the radius deep on each side,
+   * more than a cell of the 0.5 m grid, so no link of a layer finer than 0.6 m crosses it (a link moves one cell).
+   */
+  markBlocks(boxes) {
+    if (!this.blk) this.blk = new Uint16Array(this.n);
+    if (!this.blkList) this.blkList = new Int32Array(4096);
+    if (++this.blkStamp >= 0xffff) { this.blk.fill(0); this.blkStamp = 1; }
+    const blk = this.blk, stamp = this.blkStamp, R = BODY.radius;
+    let nB = 0;
+    for (const b of boxes) {
+      const x0 = b.min.x - R, x1 = b.max.x + R, z0 = b.min.z - R, z1 = b.max.z + R;
+      const yLo = b.min.y - BODY.height, yHi = b.max.y - BODY.stepUp;
+      for (const L of this.layers) {
+        if (x1 < L.x0 || x0 > L.x1 || z1 < L.z0 || z0 > L.z1) continue;
+        const cell = L.cell, nx = L.nx;
+        const i0 = Math.max(0, Math.ceil((x0 - L.x0) / cell - 0.5)), i1 = Math.min(nx - 1, Math.floor((x1 - L.x0) / cell - 0.5));
+        const j0 = Math.max(0, Math.ceil((z0 - L.z0) / cell - 0.5)), j1 = Math.min(L.nz - 1, Math.floor((z1 - L.z0) / cell - 0.5));
+        for (let j = j0; j <= j1; j++) {
+          for (let i = i0; i <= i1; i++) {
+            const c = j * nx + i;
+            for (let k = L.nodeStart[c], e = L.nodeStart[c + 1]; k < e; k++) {
+              const y = L.nodeY[k], g = k + L.off;
+              if (!(y > yLo && y < yHi) || blk[g] === stamp) continue;
+              blk[g] = stamp;
+              if (nB === this.blkList.length) { const a2 = new Int32Array(nB * 2); a2.set(this.blkList); this.blkList = a2; }
+              this.blkList[nB++] = g;
+            }
+          }
+        }
+      }
+    }
+    this.blkCount = nB;
+    this.ov = null;
+    this.blkSig = null;
+    return stamp;
+  }
+
+  /** block marks and the door-aware coarse overlay for a wall set, kept while the queries repeat its signature */
+  useBlocks(boxes, sig) {
+    if (sig !== null && sig === this.blkSig && this.ov) return;
+    this.markBlocks(boxes);
+    this.buildOverlay();
+    this.blkSig = sig;
+  }
+
+  /**
+   * Door-aware coarse graph for the walled nodes. Every coarse node (a block's local component) that holds walled
+   * nodes is split into the local components of its free nodes ("pieces", ids coarse.n + i), joined to their
+   * neighbours by the fine links and stitches their nodes have; the rest of the coarse graph is kept, its edges into a
+   * split node moved to the pieces. Its connectivity is the fine graph's (undirected) with the doors shut, so a way
+   * the doors cut has an infinite coarse distance, and the distances steer the A* round a detour.
+   */
+  buildOverlay() {
+    const nC = this.coarse.n, blk = this.blk, bs = this.blkStamp, st = this.st;
+    if (!this.splitFlag) this.splitFlag = new Uint8Array(nC);
+    const sf = this.splitFlag;
+    for (const q of this.ovSplit || []) sf[q] = 0;
+    const splitList = [], seed = [];
+    for (let i = 0; i < this.blkCount; i++) {
+      const k = this.blkList[i], L = this.layerOf(k), q = L.coarseOff + L.coarseOf[k - L.off];
+      if (!sf[q]) { sf[q] = 1; splitList.push(q); seed.push(k); }
+    }
+    const pieceOf = new Map(), members = [];
+    const px = [], py = [], pz = [], pn = [];
+    for (let s = 0; s < splitList.length; s++) {
+      const k0 = seed[s], L = this.layerOf(k0), lq = L.coarseOf[k0 - L.off];
+      const B = L.block || 8, nx = L.nx, c0 = L.nodeCell[k0 - L.off];
+      const bi = (((c0 % nx) / B) | 0) * B, bj = ((((c0 / nx) | 0) / B) | 0) * B;
+      const mem = [], idx = new Map();
+      for (let j = bj; j < Math.min(L.nz, bj + B); j++) {
+        for (let i = bi; i < Math.min(nx, bi + B); i++) {
+          const c = j * nx + i;
+          for (let n = L.nodeStart[c], e = L.nodeStart[c + 1]; n < e; n++) {
+            if (L.coarseOf[n] !== lq || blk[n + L.off] === bs) continue;
+            idx.set(n, mem.length);
+            mem.push(n);
+          }
+        }
+      }
+      const uf = Int32Array.from(mem.keys());
+      const find = (a) => { while (uf[a] !== a) { uf[a] = uf[uf[a]]; a = uf[a]; } return a; };
+      for (let m = 0; m < mem.length; m++) {
+        for (let d = 0; d < 8; d++) {
+          const lb = L.link(mem[m], d), o = lb < 0 ? undefined : idx.get(lb);
+          if (o === undefined) continue;
+          const ra = find(m), rb = find(o);
+          if (ra !== rb) uf[ra] = rb;
+        }
+      }
+      const pid = new Map();
+      for (let m = 0; m < mem.length; m++) {
+        const r = find(m);
+        let p = pid.get(r);
+        if (p === undefined) { p = nC + pn.length; pid.set(r, p); px.push(0); py.push(0); pz.push(0); pn.push(0); }
+        const n = mem[m], c = L.nodeCell[n], i = p - nC;
+        px[i] += L.x0 + ((c % nx) + 0.5) * L.cell; pz[i] += L.z0 + (((c / nx) | 0) + 0.5) * L.cell; py[i] += L.nodeY[n]; pn[i]++;
+        pieceOf.set(n + L.off, p);
+        members.push(n + L.off);
+      }
+    }
+    // edges of the pieces: their nodes' fine links (either direction) and stitches to free nodes elsewhere
+    const C = this.coarse, M = nC + pn.length + 1;
+    const pos = (p, a) => (p < nC ? (a === 0 ? C.cx[p] : a === 1 ? C.cy[p] : C.cz[p]) : (a === 0 ? px : a === 1 ? py : pz)[p - nC] / pn[p - nC]);
+    const of = (g) => { const L = this.layerOf(g), q = L.coarseOff + L.coarseOf[g - L.off]; return sf[q] ? (pieceOf.get(g) ?? -1) : q; };
+    const edges = new Map();
+    const add = (a, b) => {
+      if (b < 0 || a === b) return;
+      const key = a < b ? a * M + b : b * M + a;
+      if (!edges.has(key)) edges.set(key, Math.hypot(pos(a, 0) - pos(b, 0), pos(a, 2) - pos(b, 2)) + Math.abs(pos(a, 1) - pos(b, 1)) * 0.8);
+    };
+    for (const g of members) {
+      const a = pieceOf.get(g), L = this.layerOf(g), la = g - L.off, c = L.nodeCell[la], i = c % L.nx, j = (c / L.nx) | 0;
+      for (let d = 0; d < 8; d++) {
+        const ni = i + DIRS[2 * d], nj = j + DIRS[2 * d + 1];
+        if (ni < 0 || nj < 0 || ni >= L.nx || nj >= L.nz) continue;
+        const cc = nj * L.nx + ni, fwd = L.link(la, d);
+        for (let n = L.nodeStart[cc], e = L.nodeStart[cc + 1]; n < e; n++) {
+          if (blk[n + L.off] === bs || (n !== fwd && L.link(n, OPP[d]) !== la)) continue;
+          add(a, of(n + L.off));
+        }
+      }
+      if (L.nodeFlags[la] & FLAG_STITCH) {
+        const r = this.stRow(g);
+        if (r >= 0) for (let e = st.off[r]; e < st.off[r + 1]; e++) if (blk[st.to[e]] !== bs) add(a, of(st.to[e]));
+      }
+    }
+    const adj = pn.map(() => []), extra = new Map();
+    for (const [key, w] of edges) {
+      const a = Math.floor(key / M), b = key % M;
+      for (const [u, v] of [[a, b], [b, a]]) {
+        if (u >= nC) adj[u - nC].push(v, w);
+        else { let l = extra.get(u); if (!l) extra.set(u, (l = [])); l.push(v, w); }
+      }
+    }
+    if (this.cdist.length < nC + pn.length) this.cdist = new Float32Array(nC + pn.length + 1024);
+    this.ov = { split: sf, pieceOf, adj, extra, pieces: pn.length };
+    this.ovSplit = splitList;
+  }
+
+  /** boxes (as markBlocks) that wall off a body with feet at p */
+  blocksAtPoint(p, boxes) {
+    const R = BODY.radius;
+    return boxes.filter((b) => p.x >= b.min.x - R && p.x <= b.max.x + R && p.z >= b.min.z - R && p.z <= b.max.z + R
+      && p.y > b.min.y - BODY.height && p.y < b.max.y - BODY.stepUp);
+  }
+
+  /** Would the straight step from p to node k pass through a shut leaf (cross a box's mid-plane within its span)? */
+  crosses(p, k, boxes) {
+    const q = this.nodePos(k, TMP3), R = BODY.radius;
+    for (const b of boxes) {
+      if (q.y <= b.min.y - BODY.height || q.y >= b.max.y - BODY.stepUp) continue;
+      const thinX = b.max.x - b.min.x < b.max.z - b.min.z;
+      const mid = thinX ? (b.min.x + b.max.x) / 2 : (b.min.z + b.max.z) / 2;
+      const pu = (thinX ? p.x : p.z) - mid, qu = (thinX ? q.x : q.z) - mid;
+      if (pu === 0 || pu * qu > 0) continue;
+      const t = pu / (pu - qu), pv = thinX ? p.z : p.x, v = pv + t * ((thinX ? q.z : q.x) - pv);
+      if (thinX ? v > b.min.z - R && v < b.max.z + R : v > b.min.x - R && v < b.max.x + R) return true;
+    }
+    return false;
+  }
+
+  findPath(from, to, boxes = null, sig = null) {
     this.lastExpanded = 0;
-    const s = this.nearestNodeM(from.x, from.y, from.z, 3, -1);
-    if (s < 0) return null;
-    // goal: nearest node in the start's component (falls back to the nearest reachable spot)
-    const t = this.nearestNodeM(to.x, to.y, to.z, 8, this.compOf(s));
+    if (boxes) this.useBlocks(boxes, sig);
+    this.blkOn = boxes ? 1 : 0;
+    try {
+      const blk = boxes ? this.blk : null, bs = this.blkStamp;
+      // with shut doors the start snaps off their leaves on its own side: a walker in a doorway steps back out of it
+      const s = this.nearestNodeM(from.x, from.y, from.z, 3, -1, blk ? (k) => blk[k] !== bs && !this.crosses(from, k, boxes) : null);
+      if (s < 0) return null;
+      return this.route(s, from, to, boxes);
+    } finally {
+      this.blkOn = 0;
+    }
+  }
+
+  route(s, from, to, boxes) {
+    // goal: nearest node in the start's component (falls back to the nearest reachable spot); with shut doors, off
+    // their leaves and on the goal's own side of them
+    const blk = this.blkOn ? this.blk : null, bs = this.blkStamp;
+    const t = this.nearestNodeM(to.x, to.y, to.z, 8, this.compOf(s), blk ? (k) => blk[k] !== bs && !this.crosses(to, k, boxes) : null);
     if (t < 0) return null;
-    let nodes = s === t ? [s] : this.astar(s, t);
+    let nodes;
+    if (s === t) nodes = [s];
+    else if (!blk) nodes = this.astar(s, t);
+    else {
+      // door-aware coarse distances: a way the shut doors cut is known at once (no flood), and they steer the A*
+      this.coarseFrom(this.cq(t));
+      const qs = this.cq(s);
+      nodes = qs >= 0 && this.cdist[qs] < Infinity ? this.astar(s, t, 2e6, true) : null;
+    }
     if (!nodes) return null;
     nodes = nodes.length > 2 ? this.smooth(nodes) : nodes;
     const pts = nodes.map((k) => this.nodePos(k, new Vector3()));
@@ -781,12 +1041,13 @@ class NavGraph {
     const first = pts[0], lastP = pts[pts.length - 1];
     if (Math.hypot(from.x - first.x, from.z - first.z) < 1.0 && Math.abs(from.y - first.y) < 0.6) pts[0] = new Vector3(from.x, first.y, from.z);
     else pts.unshift(new Vector3(from.x, from.y, from.z));
-    if (Math.hypot(to.x - lastP.x, to.z - lastP.z) < 0.75 && Math.abs(to.y - lastP.y) < 0.6) pts[pts.length - 1] = new Vector3(to.x, to.y, to.z);
+    if (Math.hypot(to.x - lastP.x, to.z - lastP.z) < 0.75 && Math.abs(to.y - lastP.y) < 0.6
+      && !(boxes && this.blocksAtPoint(to, boxes).length)) pts[pts.length - 1] = new Vector3(to.x, to.y, to.z);
     return pts;
   }
 }
 
-const TMP = new Vector3(), TMP2 = new Vector3(), RAY_O = new Vector3(), RAY_D = new Vector3();
+const TMP = new Vector3(), TMP2 = new Vector3(), TMP3 = new Vector3(), RAY_O = new Vector3(), RAY_D = new Vector3();
 /** landing: direction bins of the level-move cache (0.5°), ray heights above the feet (m) */
 const LAND_BINS = 720;
 const LEVEL_RAY_H = [0.3, 0.95, BODY.eye];

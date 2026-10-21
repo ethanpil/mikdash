@@ -51,7 +51,9 @@ export const STONES = [
   ['tarshish', '#5fa8a0'], ['shoham', '#17171a'], ['yashfeh', '#8a4f78'],
 ];
 
-export const GRP = { MANTLE: 1, HEADCLOTH: 2 };
+// optional parts by instance mask bit (1 << (grp - 1)): mantle, head-cloth, (3 always on), the priestly headgear (on by
+// default; Actor.setHeadgear(false) hides it) and the hair shells drawn instead when it is off
+export const GRP = { MANTLE: 1, HEADCLOTH: 2, HEADGEAR: 4, BARE: 5 };
 
 // segment counts per LOD; LOD3 (far silhouettes beyond the figure budget) thins LOD2 further
 const L3 = (lod, a, b, c) => (lod === 0 ? a : lod === 1 ? b : lod === 2 || c <= 3 ? c : Math.max(3, Math.round(c * 0.65)));
@@ -205,6 +207,7 @@ function bodyMorph(rig) {
 
 export function head(B, rig, lod, o = {}) {
   const H = headFrame(rig, lod);
+  if (B.noHead) return H;            // a body-only build (props.js sleeperField: the head lies outside the cover)
   const shape = headShape(H);
   const hb = rig.index.head;
   if (lod <= 1) B.morph = headMorph(H);
@@ -224,7 +227,7 @@ export function head(B, rig, lod, o = {}) {
   const nk = R(rig, 'neck');
   const nr = rig.dims.neckR;
   B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.55, metal: 0, color: [1, 1, 1], grp: 0 });
-  if (lod >= 3) { B.morph = null; return H; } // far silhouette: the collar meets the head
+  if (lod >= 3 || o.neck === false) { B.morph = null; return H; } // far silhouette: the collar meets the head
   // the neck flares into the trapezius at its root and is fuller at the back than the front
   const top = V(0, H.C.y - 0.07 * H.hs, H.C.z + 0.018 * H.hs);
   B.tube([
@@ -301,6 +304,7 @@ function ears(B, rig, lod, H) {
 
 /** hair cap (and long hair falling to the shoulders — the nazir lets it grow); LOD0 adds strand shells */
 export function hair(B, rig, lod, H, o = {}) {
+  if (B.noHead) return;
   const shape = headShape(H);
   const hb = rig.index.head;
   B.set({ cls: CLS.HAIR, pat: PAT.HAIR, rough: 0.7, metal: 0, color: [1, 1, 1], grp: o.grp || 0 });
@@ -322,14 +326,34 @@ export function hair(B, rig, lod, H, o = {}) {
     const edge = j === nV ? 0.25 : 1;
     return { p: S.addScaledVector(n, off * edge * lock(phi, th)).add(H.C), u: phi * 0.09, v: -th * 0.1, th, phi };
   };
-  B.grid(nu, nv, (i, j) => { const q = capAt(i, j, nu, nv, vol); return { p: q.p, u: q.u, v: q.v, w: hb }; }, { wrap: true, inside: H.C });
-  if (lod === 0 && !o.covered) { // two strand shells: a soft, broken outline instead of a helmet
+  if (o.napeOnly) {
+    // the short hair from the cap's back edge down to the nape (below the occiput, about the earlobes' bottom), behind
+    // the ears: a covered cap ends at the mouth's level behind, which bare showed a bowl above a post of a neck
+    const backN = Math.acos(clamp((H.f.mouthY - 0.016 * H.hs) / H.r[1], -1, 1));
+    const nU = L3(lod, 16, 8, 4), nV = L3(lod, 4, 2, 1);
+    const ph0 = Math.PI * 0.74, ph1 = Math.PI * 1.26;           // behind the ears the skull curves in: there it would lift off
+    B.grid(nU, nV, (i, j) => {
+      const phi = lerp(ph0, ph1, i / nU), c = Math.cos(phi);
+      const w = (-c) ** 0.8;
+      const fade = smooth(0.68, 0.95, -c);                      // thinning out toward behind the ears
+      const lb = lerp(side, back, w), lbN = lerp(side, backN, w) + (lod === 0 ? 0.015 * Math.sin(phi * 13) : 0);
+      const th = lerp(lb - 0.04, lerp(lb, Math.max(lb, lbN), fade), j / nV);
+      const y = Math.cos(th) * H.r[1];
+      const S = headSurf(H, shape, phi, y);
+      const n = S.clone().setY(S.y * 0.4).normalize();
+      const off = vol * (j === nV ? 0.22 : 0.85) * (0.4 + 0.6 * fade) * lock(phi, th);
+      return { p: S.addScaledVector(n, off).add(H.C), u: phi * 0.09, v: -th * 0.1, w: hb };
+    }, { inside: H.C });
+    return;
+  }
+  if (!o.shellsOnly) B.grid(nu, nv, (i, j) => { const q = capAt(i, j, nu, nv, vol); return { p: q.p, u: q.u, v: q.v, w: hb }; }, { wrap: true, inside: H.C });
+  if (lod === 0 && (!o.covered || o.shellsOnly)) { // two strand shells: a soft, broken outline instead of a helmet
     for (const t of [0.5, 1]) {
       B.set({ cls: CLS.HAIR, pat: PAT.HAIR_SHELL, rough: 0.6, metal: t, color: [1.06 + 0.06 * t, 1.06 + 0.06 * t, 1.06 + 0.06 * t], grp: o.grp || 0 });
       B.grid(nu, nv, (i, j) => { const q = capAt(i, j, nu, nv, vol + 0.0035 * t); return { p: q.p, u: q.u, v: q.v, w: hb }; }, { wrap: true, inside: H.C });
     }
   }
-  if (o.long) {
+  if (o.long && !o.shellsOnly) {
     B.set({ cls: CLS.HAIR, pat: PAT.HAIR, rough: 0.7, metal: 0, color: [1, 1, 1], grp: o.grp || 0 });
     const sh = R(rig, 'uarm_r');
     const rings = [];
@@ -384,6 +408,7 @@ function faceShell(B, H, shape, nu, nv, fn, wfn) {
  *  its lower edge is closed back to the throat, and its outline is broken into soft locks; LOD0 adds strand
  *  shells so its edge is soft. Men did not shave the corners of the beard (Vayikra 19:27). */
 export function beard(B, rig, lod, H, o = {}) {
+  if (B.noHead) return;
   const shape = headShape(H);
   const hb = rig.index.head, nb = rig.index.neck;
   const { f, hs } = H;
@@ -467,7 +492,7 @@ function profileRings(H, prof, base, nRings, tall = 1) {
  */
 function wound(B, rig, lod, H, prof, o = {}) {
   const hb = rig.index.head;
-  B.set({ cls: o.cls ?? CLS.GA, pat: lod <= 1 ? PAT.WOUND : PAT.LINEN, rough: 0.86, metal: 0, color: o.color || [1, 1, 1], grp: 0 });
+  B.set({ cls: o.cls ?? CLS.GA, pat: lod <= 1 ? PAT.WOUND : PAT.LINEN, rough: 0.86, metal: 0, color: o.color || [1, 1, 1], grp: o.grp || 0 });
   const rings = profileRings(H, prof, (o.base ?? 0.042) * H.hs, lod >= 3 ? 3 : L3(lod, 22, 9, 5), o.tall || 1);
   const pitch = 0.022, k = o.slant ?? 1.6;      // per turn the band advances k pitches (diagonal windings)
   const n = rings.length;
@@ -502,11 +527,11 @@ function wound(B, rig, lod, H, prof, o = {}) {
 }
 
 /** migba'at: the kohen hedyot's 16-amah linen winding, worn "like a hat" — a rounded dome (Rambam KhM 8:2) */
-export function migbaat(B, rig, lod, H) {
+export function migbaat(B, rig, lod, H, o = {}) {
   wound(B, rig, lod, H, [
     [0.0, 1.08, 1.06], [0.02, 1.15, 1.12], [0.05, 1.18, 1.14], [0.08, 1.16, 1.12], [0.104, 1.08, 1.04],
     [0.122, 0.94, 0.9], [0.136, 0.74, 0.71], [0.146, 0.48, 0.46], [0.152, 0.12, 0.12],
-  ], { base: 0.04, slant: 3.2 });
+  ], { base: 0.04, slant: 3.2, grp: o.grp });
 }
 
 /** mitznefet: the Kohen Gadol's turban, wound "like one who bandages a fracture" — lower, broader, the windings
@@ -515,16 +540,16 @@ export function mitznefet(B, rig, lod, H, o = {}) {
   wound(B, rig, lod, H, [
     [0.0, 1.13, 1.1], [0.02, 1.23, 1.17], [0.05, 1.27, 1.21], [0.078, 1.25, 1.19],
     [0.098, 1.15, 1.09], [0.11, 0.9, 0.86], [0.117, 0.45, 0.43], [0.12, 0.08, 0.08],
-  ], { base: o.base ?? 0.068, cls: o.cls, color: o.color, slant: 1.2 });
+  ], { base: o.base ?? 0.068, cls: o.cls, color: o.color, slant: 1.2, grp: o.grp });
 }
 
 /** tzitz: gold band ear to ear on the forehead, techelet cord behind (Shemot 28:36–38) */
-export function tzitz(B, rig, lod, H) {
+export function tzitz(B, rig, lod, H, o = {}) {
   const shape = headShape(H);
   const hb = rig.index.head;
   const { hs, f } = H;
   const y0 = f.eyeY + 0.021 * hs, y1 = f.eyeY + 0.058 * hs;
-  B.set({ cls: CLS.FIX, pat: PAT.TZITZ, rough: 0.2, metal: 1, color: COL.gold, grp: 0 });
+  B.set({ cls: CLS.FIX, pat: PAT.TZITZ, rough: 0.2, metal: 1, color: COL.gold, grp: o.grp || 0 });
   const nu = L3(lod, 24, 10, 6);
   B.grid(nu, 2, (i, j) => {
     const phi = lerp(-1.42, 1.42, i / nu);
@@ -534,7 +559,7 @@ export function tzitz(B, rig, lod, H) {
     S.addScaledVector(n, 0.0045 * hs).add(H.C);
     return { p: S, u: i / nu, v: j / 2, w: hb };
   }, { inside: H.C });
-  B.set({ cls: CLS.FIX, pat: PAT.CORD, rough: 0.8, metal: 0, color: COL.techelet });
+  B.set({ cls: CLS.FIX, pat: PAT.CORD, rough: 0.8, metal: 0, color: COL.techelet, grp: o.grp || 0 });
   const nc = L3(lod, 14, 8, 4);
   B.grid(nc, 1, (i, j) => {
     const phi = lerp(1.42, Math.PI * 2 - 1.42, i / nc);
@@ -548,6 +573,7 @@ export function tzitz(B, rig, lod, H) {
 
 /** veil / head-cloth: covers the hair, frames the face and falls over the shoulders and back */
 export function headCloth(B, rig, lod, H, o = {}) {
+  if (o.grp && B.skipGrp?.has(o.grp)) return;
   const shape = headShape(H);
   const { hs, f } = H;
   const sh = R(rig, 'uarm_r'), ch = R(rig, 'chest'), nk = R(rig, 'neck');
@@ -790,6 +816,55 @@ export function hand(B, rig, lod, s) {
 }
 
 /**
+ * A bare shin from the ankle up to `to` (at most just above the knee): the ankle's narrow neck with the malleoli either
+ * side (the inner one higher and further forward), the Achilles tendon behind, the tibia's flat inner face and its
+ * crest in front, the calf's belly in the upper half behind (its inner head lower and fuller), the knee with the
+ * kneecap and the condyles, the thigh's start above. Rings in u = 0 at the ankle joint … 1 at the knee joint:
+ * [u, across, front–back, centre shift back].
+ */
+function bareShin(B, rig, lod, s, to, legW) {
+  const k = rig.dims.H / 1.67, sg = s === 'l' ? -1 : 1;
+  const an = R(rig, `foot_${s}`), sn = R(rig, `shin_${s}`);
+  const L = sn.y - an.y;
+  const prof = [[-0.03, 0.031, 0.029, 0.004], [0.06, 0.034, 0.03, 0.003], [0.2, 0.029, 0.031, 0.006], [0.42, 0.034, 0.039, 0.01],
+    [0.62, 0.042, 0.048, 0.014], [0.8, 0.045, 0.047, 0.011], [0.93, 0.043, 0.042, 0.004], [1.03, 0.047, 0.047, 0], [1.15, 0.053, 0.055, 0.004]];
+  const sel = lod === 0 ? prof : prof.filter((_, i) => [0, 2, 4, 6, 7, 8].includes(i));
+  const uTo = (to - an.y) / L;
+  const rows = sel.filter(([u]) => u < uTo - 0.02);
+  // the last ring at `to`, interpolated
+  const lastI = prof.findIndex(([u]) => u >= uTo);
+  if (lastI > 0) {
+    const [u0, a0, b0, z0] = prof[lastI - 1], [u1, a1, b1, z1] = prof[lastI], t = (uTo - u0) / (u1 - u0);
+    rows.push([uTo, lerp(a0, a1, t), lerp(b0, b1, t), lerp(z0, z1, t)]);
+  } else rows.push([uTo, ...prof[prof.length - 1].slice(1)]);
+  const rings = rows.map(([u, a, b, zb]) => ({
+    c: V(lerp(an.x, sn.x, clamp(u)), an.y + u * L, lerp(an.z, sn.z, clamp(u)) + zb * k), rx: a * k, rz: b * k, u,
+    ax: V(1, 0, 0), az: V(0, 0, 1),                       // θ = 0 toward +x, π/2 toward the back
+  }));
+  const bump = (u, c, w) => Math.exp(-(((u - c) / w) ** 2));
+  B.tube(rings, {
+    seg: L3(lod, 16, 9, 5), weights: legW,
+    radial: (th, j) => {
+      const u = rings[j].u, sn2 = Math.sin(th), cs = Math.cos(th);
+      const F = Math.max(0, -sn2), Bk = Math.max(0, sn2), med = Math.max(0, -sg * cs), lat = Math.max(0, sg * cs);
+      let m = 1;
+      m += 0.14 * med ** 3 * bump(u, 0.05, 0.05) + 0.12 * lat ** 3 * bump(u, 0.02, 0.05);          // the malleoli
+      m += 0.08 * Bk ** 4 * bump(u, 0.12, 0.12);                                                    // the Achilles tendon
+      m -= 0.06 * F ** 3 * bump(u, 0.5, 0.3) * (1 - 0.6 * med);                                     // the tibia's flat face …
+      m += 0.025 * Math.exp(-(((cs + sg * 0.25) / 0.18) ** 2)) * F * bump(u, 0.5, 0.3);              // … and its crest
+      m += 0.08 * Bk ** 1.5 * bump(u, 0.66, 0.16) + 0.05 * Bk * med * bump(u, 0.58, 0.14);          // the calf, its inner head lower
+      m += 0.1 * F ** 3 * bump(u, 1.03, 0.05) + 0.05 * Math.abs(cs) ** 4 * bump(u, 1.0, 0.06);      // the kneecap, the condyles
+      m -= 0.05 * Bk ** 3 * bump(u, 1.0, 0.05);                                                      // the hollow behind the knee
+      return m;
+    },
+    shade: (th, j) => {
+      const u = rings[j].u, Bk = Math.max(0, Math.sin(th));
+      return 1 - 0.12 * Bk ** 2 * bump(u, 1.0, 0.05) - 0.06 * Bk * bump(u, 0.2, 0.08);
+    },
+  });
+}
+
+/**
  * Bare foot (and ankle up to `to` height) — everyone is barefoot on Har HaBayit (Rambam BhB 7:2; the kohanim
  * with nothing between foot and floor, Zevachim 24a). LOD0: heel, arch, ankle bones, the ball of the foot and
  * five toes with nails; the sole a little darker (dust of the courts). LOD1+: one shaped volume.
@@ -801,12 +876,15 @@ export function foot(B, rig, lod, s, o = {}) {
   const fb = rig.index[`foot_${s}`], tb = rig.index[`toe_${s}`];
   B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.6, metal: 0, color: [1, 1, 1], grp: 0 });
   const to = Math.min(o.to ?? an.y + 0.16, sn.y + 0.06);
-  const pts = [V(an.x, an.y - 0.012, an.z + 0.004), V(an.x, lerp(an.y, to, 0.45), an.z), V(an.x, to, an.z - 0.004)];
-  if (to > sn.y - 0.12) pts.splice(2, 0, V(sn.x, sn.y - 0.13 * k, sn.z));
-  const rad = pts.map((p) => (p.y < an.y + 0.05 ? 0.034 * k : p.y > sn.y - 0.06 ? 0.048 * k : 0.04 * k));
   const legW = (p) => envelope(rig, p, { [`shin_${s}`]: 1, [`foot_${s}`]: 0.6, [`thigh_${s}`]: 0.3 }, 4);
-  if (lod < 3) B.tube(limbRings(lod >= 2 ? [pts[0], pts[pts.length - 1]] : pts, lod >= 2 ? [rad[0], rad[rad.length - 1]] : rad), { seg: L3(lod, 14, 6, 4), weights: legW,
-    radial: lod === 0 ? (th, j) => 1 + (j === 1 ? 0.06 * Math.max(0, -Math.sin(th)) : 0) : null }); // the calf behind
+  if (to > an.y + 0.2 && lod <= 1) bareShin(B, rig, lod, s, to, legW);   // a bare shin to the knee (breeches, the bather)
+  else {
+    const pts = [V(an.x, an.y - 0.012, an.z + 0.004), V(an.x, lerp(an.y, to, 0.45), an.z), V(an.x, to, an.z - 0.004)];
+    if (to > sn.y - 0.12) pts.splice(2, 0, V(sn.x, sn.y - 0.13 * k, sn.z));
+    const rad = pts.map((p) => (p.y < an.y + 0.05 ? 0.034 * k : p.y > sn.y - 0.06 ? 0.048 * k : 0.04 * k));
+    if (lod < 3) B.tube(limbRings(lod >= 2 ? [pts[0], pts[pts.length - 1]] : pts, lod >= 2 ? [rad[0], rad[rad.length - 1]] : rad), { seg: L3(lod, 14, 6, 4), weights: legW,
+      radial: lod === 0 ? (th, j) => 1 + (j === 1 ? 0.06 * Math.max(0, -Math.sin(th)) : 0) : null }); // the calf behind
+  }
   const len = rig.dims.footLen * 0.95;
   if (lod >= 1) {
     const cz = an.z - len * 0.26;
@@ -1009,6 +1087,7 @@ function garmentBody(B, rig, lod, hemY, o = {}) {
     ], { seg, invert: true, weights: (q) => W(V(q.x, hem.c.y, q.z)), radial: dr.radial ? (th) => dr.radial(th, last) : null, // the hem's own weights
       lift: (th, j) => (j === 0 && dr.hem ? dr.hem(th, last) : 0), shade: () => 0.55 });
   }
+  rings.radial = dr.radial;                                  // (the drape, for pieces laid on this garment)
   return rings;
 }
 
@@ -1098,6 +1177,7 @@ export function mantle(B, rig, lod, o = {}) {
   const d = rig.dims, k = d.H / 1.67;
   const hemLow = o.hemY ?? R(rig, 'shin_r').y + 0.02 * k;
   const grp = o.grp ?? GRP.MANTLE;
+  if (B.skipGrp?.has(grp)) return;   // (a build that leaves the optional mantle out — props.js sleeperField)
   const gap = o.gap ?? 0.5;                                   // half-angle of the open front (rad)
   const a0 = -Math.PI / 2 + gap, a1 = Math.PI * 1.5 - gap;
   const sh = R(rig, 'uarm_r'), el = R(rig, 'farm_r'), nk = R(rig, 'neck'), ch = R(rig, 'chest');
@@ -1139,6 +1219,11 @@ export function mantle(B, rig, lod, o = {}) {
     return (lerp(sh.x, el.x, t) + 0.052 * k) * smooth(0.55, 0.95, Math.abs(Math.cos(th)));
   };
   const dr = drape(lod, { amp: 0.11, n: 9, seed: o.seed ?? 3.7, start: 1, span: 5 });
+  // hang: below the seat, the share of the panels' outer (side) cloth that hangs from the pelvis instead of following
+  // the leg cage while the figure is upright (material.js pSkin scales it by how upright the pelvis is) — a seated man's
+  // mantle falls beside him from the arms to the floor and only its inner edges lie on the thighs (all on the cage, the
+  // outer part stretched from the elbow to the knee: a stiff wedge with its inside showing); lying, the cage alone
+  const hangAt = (th) => smooth(0.5, 0.93, Math.abs(Math.cos(th)));    // 0 at the opening's edges … 1 at the sides
   const nu = L3(lod, 44, 16, 7), nv = L3(lod, 15, 9, 4);
   const cols = [];
   B.set({ cls: CLS.GB, pat: PAT.WOOL, rough: 0.93, metal: 0, color: [1, 1, 1], grp });
@@ -1175,10 +1260,14 @@ export function mantle(B, rig, lod, o = {}) {
     const side = smooth(0.62, 0.95, Math.abs(c)) * (y > el.y - 0.08 ? 1 : 0);
     const shade = (dr.shade ? dr.shade(th, 1 + t * 6) : 1) * (1 - 0.12 * smooth(0.06, 0, edge)) * (t > 0.93 ? 0.9 : 1);
     if (!inner) cols.push(p);
+    hv.push(y <= ySeat ? hangAt(th) : 0);
     return { p, u: th * (rx + rz) / 2, v: -y, w: W(p, side * 0.42), shade: inner ? shade * 0.62 : shade };
   }, { inside: (A) => V(0, A.y, 0), invert: inner });
+  const hv = [], s0 = B.count;
   sheet(false);
   if (lod <= 1) sheet(true);
+  // the hang share rides in the (zero) metalness channel: −0.98·hang (material.js pSkin)
+  for (let i = 0; i < hv.length; i++) if (hv[i] > 0.01) B.mat[(s0 + i) * 4 + 1] = -0.98 * hv[i];
   // (no separate collar tube: a rolled ring standing off the neck read as a torus — the sheet's own rolled
   // top row and the dark inner face give the edge)
   if (false) {
@@ -1210,6 +1299,7 @@ export function mantle(B, rig, lod, o = {}) {
       const out = V(Math.cos(th), 0, Math.sin(th));
       const wts = (p) => W(p, 0);
       const gl = 0.045 * k;
+      const v0 = B.count;
       B.set({ cls: CLS.FIX, pat: PAT.CORD, rough: 0.85, metal: 0, color: COL.techelet, grp });
       B.tube([{ c: base.clone().addScaledVector(out, 0.004), rx: 0.0035, rz: 0.0035 }, { c: base.clone().addScaledVector(out, 0.006).add(V(0, -gl, 0)), rx: 0.0032, rz: 0.0032 }],
         { seg: 5, weights: wts, capB: 'flat' });
@@ -1222,6 +1312,11 @@ export function mantle(B, rig, lod, o = {}) {
         const pts = [0, 0.5, 1].map((u) => top0.clone().addScaledVector(tang, off * u * 1.6).addScaledVector(out, 0.004 * u).add(V(0, -u * 0.1 * k, 0)));
         B.ribbon(pts, 0.0016, { side: tang, weights: wts });
       }
+      // plumb: each vertex carries its height h below the knot (material.js VERT_BEGIN) — the strings hang from the
+      // corner straight down in any pose and lie on the floor where they reach it — and the corner's hang share q/20 (so
+      // the knot stays on the corner): metalness channel = −1 − q − h
+      const q = Math.round(hangAt(th) * 20);
+      for (let i = v0; i < B.count; i++) B.mat[i * 4 + 1] = -1 - q - Math.min(0.95, Math.max(0, base.y - B.pos[i * 3 + 1]));
     }
   }
 }
@@ -1394,6 +1489,347 @@ export function choshen(B, rig, lod) {
   }
 }
 
+
+// --------------------------------------------------------------------------------------------- bare body (people-3)
+// A kohen stripped to the michnasayim (Tamid 5:3 "they left them only the breeches") and a bather in a linen wrap
+// (Tamid 1:1–2; Yoma 3:3). Only the upper body is bare: chest and shoulder girdle sculpted (pectorals over the
+// sternum's groove, collar bones, shoulder blades, the spine's furrow, the lats), arms with deltoid, biceps and the
+// forearm's bulk. Kept modest (docs/decisions/people-3.md).
+
+/** the neck's rings under the head (head(): same placement), for a torso that carries its own neck */
+function neckRings(rig, H) {
+  const nk = R(rig, 'neck'), nr = rig.dims.neckR;
+  // the top ring well inside the skull (under the occiput the head's own underside does not reach down far enough)
+  const top = V(0, H.C.y - 0.035 * H.hs, H.C.z + 0.014 * H.hs);
+  return [
+    { c: top, rx: nr * 0.94, rz: nr * 1.0, tag: 'neck2', f: 0, b: 0, rf: 1 },
+    { c: V(0, lerp(nk.y + 0.03, top.y, 0.55), lerp(nk.z, top.z, 0.55) - 0.003), rx: nr * 0.98, rz: nr * 0.99, tag: 'neck1', f: 0, b: 0, rf: 1 },
+    { c: V(0, nk.y + 0.03, nk.z - 0.002), rx: nr * 1.04, rz: nr * 1.0, tag: 'neck0', f: 0, b: 0, rf: 1 },
+  ];
+}
+
+/** the bare shoulder line, [|x|, y]: the trapezius from the neck's side out to the top of the shoulder */
+function trapLine(rig) {
+  const d = rig.dims, k = d.H / 1.67, nk = R(rig, 'neck'), sh = R(rig, 'uarm_r');
+  return [[d.neckR * 1.04, nk.y + 0.03], [d.neckR * 1.6, nk.y + 0.016 * k], [d.shX * 0.66, sh.y + 0.03 * k]];
+}
+/** the deltoid cap over the shoulder joint as a circular arc in the [|x|, y] profile: a(deg) → [x, y] (90° = on top,
+ *  0° = its widest, ≈ 0.49 m across both — the bideltoid breadth, wider than anything on the arm below it) */
+function deltArc(rig, deg) {
+  const d = rig.dims, k = d.H / 1.67, sh = R(rig, 'uarm_r');
+  const a = deg * Math.PI / 180, r = 0.058 * k;
+  return [d.shX - 0.003 * k + r * Math.cos(a), sh.y - 0.042 * k + r * Math.sin(a)];
+}
+
+/**
+ * The bare torso from under the head down to the ring tagged `until` (tucked inside the garment that starts there).
+ * The NECK is part of the same tube (head(…, { neck: false })): from under the skull it widens into the trapezius,
+ * whose rings descend toward the front and the back as well as to the sides, so the skin runs on without a seam —
+ * down to the collarbones in front, down the nape to the upper back behind (a separate neck tube meeting a torso ring
+ * read as a post set in a collar). The shoulder line stays inside the deltoid caps (bareArm). H: head() frame.
+ */
+export function bareTorso(B, rig, lod, until = 'waist', H = headFrame(rig, lod)) {
+  const d = rig.dims, k = d.H / 1.67;
+  const ch = R(rig, 'chest'), sh = R(rig, 'uarm_r'), nk = R(rig, 'neck');
+  const base = torsoRings(rig, { thick: -0.001 });
+  const end = base.findIndex((q) => q.tag === until);
+  const nr = d.neckR;
+  const tl = trapLine(rig);
+  const neck = lod >= 3 ? [] : neckRings(rig, H);
+  // the shoulder carries the deltoid (one skin over the joint): over the acromion, its widest ≈ 4 cm lower, then in
+  // under it to the armpit — the arm (bareArm) grows out from inside this mass below its widest. (A dome on the arm's
+  // tube read as a lid set on a pipe, with a seam where it met the torso.) The trapezius falls gently toward the back.
+  // rings round the deltoid's arc (the rz grows from the trapezius' to the chest's depth over the cap)
+  const arcR = (deg, tag, f = 0, b = 0) => {
+    const [x, y] = deltArc(rig, deg), u = clamp((90 - deg) / 90);
+    return { c: V(0, y, lerp(0.01, 0.012, u)), rx: x, rz: d.chest[1] * lerp(0.92, 1.0, u), tag, f: f * (1 - u), b: b * (1 - u), rf: lerp(0.97, 1, u) };
+  };
+  // the arc ends at its widest: there the arm (bareArm) takes over the outer contour, and the torso turns in steeply
+  // under it to the armpit (a clean crossing; running on down beside the arm, the two surfaces fought)
+  const arcs = lod === 0 ? [[80, 'shoulder'], [56, 'delt1'], [30, 'delt2'], [0, 'delt']] : lod === 1 ? [[74, 'shoulder'], [32, 'delt1'], [0, 'delt']] : [[70, 'shoulder'], [0, 'delt']];
+  const up = [
+    ...neck,
+    { c: V(0, tl[1][1], nk.z), rx: tl[1][0], rz: nr * 1.2, tag: 'trap0', f: -0.014, b: -0.004, rf: 0.88 },
+    { c: V(0, tl[2][1], 0.012), rx: tl[2][0], rz: d.chest[1] * 0.8, tag: 'trap', f: -0.03, b: -0.005, rf: 0.94 },
+    ...arcs.map(([deg, tag]) => arcR(deg, tag, -0.024, -0.004)),
+    { c: V(0, sh.y - 0.084 * k, 0.006), rx: d.chest[0] * 1.05, rz: d.chest[1] * 1.02, tag: 'pit', f: 0, b: 0, rf: 1 },   // in under the cap
+  ];
+  const body = base.slice(base.findIndex((q) => q.tag === 'shoulder') + 1, end + 1).map((q) => ({ ...q, c: q.c.clone(), f: 0, b: 0, rf: 1 }));
+  let rings = [...up, ...body];
+  const yPec = ch.y + 0.01 * k, yTop = sh.y - 0.012 * k;
+  if (lod === 0) { // rows placed on the pectorals' and shoulder blades' features
+    const src = [up[up.length - 1], ...body];
+    const at = (y, tag) => {
+      let j = 1;
+      while (j < src.length - 1 && src[j].c.y > y) j++;
+      const a = src[j - 1], b = src[j], t = clamp((a.c.y - y) / Math.max(1e-4, a.c.y - b.c.y));
+      return { c: a.c.clone().lerp(b.c, t), rx: lerp(a.rx, b.rx, t), rz: lerp(a.rz, b.rz, t), tag, f: lerp(a.f, b.f, t), b: lerp(a.b, b.b, t), rf: lerp(a.rf, b.rf, t) };
+    };
+    const ys = [yPec + 0.06 * k, yPec + 0.035 * k, yPec + 0.014 * k, yPec - 0.004 * k, yPec - 0.026 * k, yPec - 0.06 * k];
+    const extra = ys.filter((y) => y > body[body.length - 1].c.y).map((y, i) => at(y, `f${i}`));
+    rings = [...up, ...extra, ...body.filter((q) => q.c.y < yPec - 0.07 * k)];
+    const lowest = rings[rings.length - 1];
+    if (until !== 'ribs' && lowest.tag !== until) rings.push(body[body.length - 1]);
+  } else if (lod >= 2) rings = rings.filter((q) => ['neck2', 'neck0', 'trap0', 'shoulder', 'delt', 'chest', 'waist', 'hips'].includes(q.tag) || q.tag === until);
+  const nNeck = rings.findIndex((q) => q.tag === 'trap0');
+  const win = (y, a, b, c, e) => smooth(a, b, y) * (1 - smooth(c, e, y));
+  const pecAt = (ax, F, y) => 0.25 * Math.exp(-(((ax - 0.43) / 0.22) ** 2)) * F ** 0.5 * win(y, yPec - 0.012 * k, yPec + 0.022 * k, yTop - 0.045 * k, yTop + 0.01 * k);
+  const sculpt = (th, j) => {
+    const Rg = rings[j];
+    const cs = Math.cos(th), sn = Math.sin(th);
+    const F = Math.max(0, -sn), Bk = Math.max(0, sn), ax = Math.abs(cs);
+    const front = 1 - (1 - Rg.rf) * F ** 1.5;                       // the upper rings narrower in front (the throat)
+    if (lod >= 2) return front;
+    if (j < nNeck) {                                                  // the neck: fuller nape, the larynx in front
+      return 1 + 0.05 * Bk ** 2 + (lod === 0 ? 0.03 * F ** 6 * (Rg.tag === 'neck1' ? 1 : 0.4) : 0);
+    }
+    const y = Rg.c.y;
+    if (Rg.tag.startsWith('delt') || Rg.tag === 'shoulder') {
+      const heads = 0.05 * Math.sin(2 * th) ** 2 * smooth(0.4, 0.8, ax);   // the anterior and posterior deltoid
+      return front * (1 + heads + 0.04 * Bk * Math.exp(-(((ax - 0.5) / 0.25) ** 2)));   // and the blade's spine behind
+    }
+    // pectorals either side of the sternum's groove, their lower border a soft step; collar bones over them
+    const pec = pecAt(ax, F, y);
+    const sternum = -0.05 * Math.exp(-((cs / 0.13) ** 2)) * F * win(y, yPec - 0.08 * k, yPec, yTop, yTop + 0.03 * k);
+    const clav = 0.045 * Math.exp(-(((ax - 0.5) / 0.3) ** 2)) * F * win(y, sh.y - 0.03 * k, sh.y - 0.012 * k, sh.y + 0.004 * k, sh.y + 0.02 * k);
+    // shoulder blades, the spine's furrow between the long back muscles, the lats under the arms
+    const blade = 0.13 * Math.exp(-(((ax - 0.45) / 0.2) ** 2)) * Bk * win(y, ch.y - 0.05 * k, ch.y + 0.03 * k, yTop - 0.03 * k, yTop + 0.02 * k)
+      + 0.05 * Math.exp(-(((ax - 0.36) / 0.1) ** 2)) * Bk * Math.exp(-(((y - (ch.y - 0.035 * k)) / (0.02 * k)) ** 2))   // the lower angles
+      - 0.035 * Math.exp(-(((ax - 0.2) / 0.08) ** 2)) * Bk * win(y, ch.y - 0.02 * k, ch.y + 0.02 * k, yTop - 0.04 * k, yTop);   // between blade and spine
+    const spine = -0.05 * Math.exp(-((cs / 0.09) ** 2)) * Bk + 0.03 * Math.exp(-(((ax - 0.22) / 0.11) ** 2)) * Bk * (1 - smooth(ch.y, sh.y, y));
+    const lats = 0.05 * Math.exp(-(((ax - 0.86) / 0.14) ** 2)) * win(y, ch.y - 0.11 * k, ch.y - 0.03 * k, ch.y + 0.07 * k, ch.y + 0.12 * k);
+    // the belly's gentle round and the navel's hollow (front, below the ribs)
+    const belly = 0.035 * F * F * win(y, R(rig, 'pelvis').y - 0.06 * k, R(rig, 'spine').y - 0.04 * k, ch.y - 0.09 * k, ch.y - 0.04 * k)
+      - 0.03 * Math.exp(-((cs / 0.06) ** 2)) * F * Math.exp(-(((y - (R(rig, 'spine').y - 0.03 * k)) / (0.012 * k)) ** 2));
+    return front * (1 + pec + sternum + clav + blade + spine + lats + belly);
+  };
+  const shade = lod >= 2 ? null : (th, j, p) => {
+    if (j < nNeck) return j === 0 ? 0.82 + 0.18 * Math.max(0, Math.sin(th)) : 1;    // the shadow under the jaw
+    const F = Math.max(0, -Math.sin(th)), Bk = Math.max(0, Math.sin(th)), ax = Math.abs(Math.cos(th));
+    // under the pectorals' border, the sternum's groove, the armpit's hollow, the furrow of the spine, the notch
+    // between the collarbones
+    const under = 0.24 * Math.exp(-(((p.y - (yPec - 0.008 * k)) / (0.016 * k)) ** 2)) * Math.exp(-(((ax - 0.52) / 0.3) ** 2)) * F;
+    const groove = 0.1 * Math.exp(-((Math.cos(th) / 0.1) ** 2)) * (F + Bk) * win(p.y, yPec - 0.1 * k, yPec - 0.02 * k, yTop, yTop + 0.04 * k);
+    const notch = 0.12 * Math.exp(-((Math.cos(th) / 0.12) ** 2)) * F * win(p.y, sh.y - 0.03 * k, sh.y - 0.01 * k, sh.y + 0.01 * k, sh.y + 0.025 * k);
+    const pit = 0.2 * smooth(0.8, 0.97, ax) * win(p.y, ch.y - 0.02 * k, ch.y + 0.05 * k, sh.y - 0.07 * k, sh.y - 0.03 * k);
+    const ridge = 0.05 * pecAt(ax, F, p.y) / 0.25;   // the pectorals' tops catch a little more light
+    const bladeAO = 0.1 * Bk * Math.exp(-(((ax - 0.42) / 0.2) ** 2)) * Math.exp(-(((p.y - (ch.y - 0.055 * k)) / (0.025 * k)) ** 2));
+    return 1 - under - groove - notch - pit - bladeAO + ridge;
+  };
+  B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.55, metal: 0, color: [1, 1, 1], grp: 0 });
+  const tw = torsoW(rig);
+  const nw = (p) => envelope(rig, p, { chest: 0.6, neck: 1, head: 0.8 }, 4);
+  // the deltoid's mass on the torso goes partly with the arm (and its clavicle), so a raised or swung arm carries it
+  const I = rig.index;
+  const dw = (p) => {
+    const ax = Math.abs(p.x), side = p.x < 0 ? 'l' : 'r';
+    const f = 0.6 * smooth(d.shX - 0.035 * k, d.shX + 0.03 * k, ax) * smooth(sh.y - 0.11 * k, sh.y - 0.05 * k, p.y) * (1 - smooth(sh.y + 0.005 * k, sh.y + 0.035 * k, p.y));
+    const base = tw(p);
+    return f < 0.01 ? base : normW([...base.map(([b, w]) => [b, w * (1 - f)]), [I[`clav_${side}`], 0.3 * f], [I[`uarm_${side}`], 0.7 * f]]);
+  };
+  const v0 = B.count;
+  B.tube(rings, { seg: L3(lod, 44, 18, 8), radial: sculpt, shade, capA: lod >= 3 ? null : 'flat',
+    // the neck's rings follow the neck and head, the trapezius blends from them into the torso
+    weights: (p, j) => (j < nNeck ? nw(p) : j === nNeck ? normW([...nw(p).map(([b, w]) => [b, w * 0.4]), ...tw(p).map(([b, w]) => [b, w * 0.6])]) : dw(p)),
+    // the upper rings fall away toward the front (to the collarbones) and the back (down the nape)
+    lift: (th, j, Rg) => (Rg.f * Math.max(0, -Math.sin(th)) ** 1.2 + Rg.b * Math.max(0, Math.sin(th)) ** 1.2) * k });
+  // under the deltoid's widest, where the torso turns in and the arm takes over the outer contour, the torso is shaded
+  // as the arm is (its normals as good as level): no dark crease along the junction
+  if (lod <= 1) {
+    const yW = deltArc(rig, 0)[1], yP = sh.y - 0.084 * k;
+    B.normalFix(v0, B.count, (p, n) => {
+      if (p.y > yW + 0.003 * k || p.y < yP - 0.004 * k || Math.abs(p.x) < d.shX - 0.025 * k || n.y > 0) return n;
+      n.y *= 0.15;
+      return n.normalize();
+    });
+  }
+}
+
+/** a bare arm: from inside the shoulder's deltoid (bareTorso carries its top) — the deltoid's lower part, its
+ *  insertion, biceps and triceps, the narrower part above the elbow, the elbow's bones, the forearm's bulk, the hand */
+export function bareArm(B, rig, lod, s) {
+  const morph = B.morph;
+  B.morph = null;
+  const k = rig.dims.H / 1.67, sg = s === 'l' ? -1 : 1;
+  const sh = R(rig, `uarm_${s}`), el = R(rig, `farm_${s}`), wr = R(rig, `hand_${s}`);
+  const Wa = (p) => envelope(rig, p, { [`clav_${s}`]: 0.5, [`uarm_${s}`]: 1, [`farm_${s}`]: 1, [`hand_${s}`]: 0.7, chest: 0.25 }, 4);
+  // the top (inside the torso's deltoid) goes with the shoulder girdle and the arm as the torso there does; the arm
+  // takes over over ≈ 6 cm below the joint
+  const I = rig.index;
+  const W = (p) => {
+    const f = smooth(sh.y, sh.y - 0.065 * k, p.y);
+    if (f >= 0.999) return Wa(p);
+    return normW([[I[`clav_${s}`], 0.45 * (1 - f)], [I[`uarm_${s}`], 0.4 * (1 - f)], [I.chest, 0.15 * (1 - f)], ...Wa(p).map(([b, w]) => [b, w * f])]);
+  };
+  const mid = (a, b, t) => a.clone().lerp(b, t);
+  // the tube starts inside the deltoid (bareTorso's 'delt' ring is ≈ shX + 5 cm wide) and comes out below its widest
+  const inTop = sh.clone().add(V(-sg * 0.016 * k, -0.012 * k, 0));
+  let pts, rad;
+  if (lod >= 2) {
+    pts = [inTop, mid(sh, el, 0.3), el, wr.clone().add(V(0, 0.012, 0))];
+    rad = [[0.03, 0.036], [0.05, 0.055], [0.041, 0.042], [0.029, 0.022]];
+  } else {
+    pts = [inTop, mid(sh, el, 0.17), mid(sh, el, 0.29), mid(sh, el, 0.44), mid(sh, el, 0.6), mid(sh, el, 0.76), mid(sh, el, 0.9), el,
+      mid(el, wr, 0.17), mid(el, wr, 0.38), mid(el, wr, 0.68), wr.clone().add(V(0, 0.012, 0))];
+    // [across, front–back]: the deltoid's lower part, its insertion, the biceps/triceps (deepest front–back at the
+    // biceps' peak), narrower above the elbow, the elbow, the forearm's flexor/extensor bulk (widest a hand below the
+    // elbow), the flatter wrist
+    rad = [[0.028, 0.032], [0.048, 0.05], [0.049, 0.054], [0.046, 0.054], [0.045, 0.053], [0.042, 0.046], [0.039, 0.041], [0.04, 0.043],
+      [0.046, 0.044], [0.043, 0.038], [0.035, 0.029], [0.029, 0.022]];
+  }
+  B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.55, metal: 0, color: [1, 1, 1], grp: 0 });
+  const sc = (r) => (Array.isArray(r) ? [r[0] * k, r[1] * k] : r * k);
+  const rings = limbRings(pts, rad.map(sc));
+  const J = lod >= 2 ? { bi: [] } : { delt: 1, ins: 2, bi: [3, 4], above: 6, elbow: 7, fore: 8, fore2: 9 };
+  B.tube(rings, {
+    seg: L3(lod, 20, 9, 5), weights: W,
+    // θ = 0 toward +x (outside of the right arm), π/2 toward the back: the deltoid rounder at the outside, the biceps in
+    // front and triceps behind, the olecranon's point and the epicondyles at the elbow with its hollow in front, the
+    // forearm's extensor bulk toward the outside-front
+    radial: lod === 0 ? (th, j) => {
+      const F = Math.max(0, -Math.sin(th)), Bk = Math.max(0, Math.sin(th)), out = Math.max(0, sg * Math.cos(th)), side = Math.abs(Math.cos(th));
+      let m = 1;
+      if (j === J.delt) m += 0.03 * F;
+      if (j === J.ins) m += 0.03 * out + 0.02 * F - 0.02 * (1 - out) * Bk;
+      if (J.bi.includes(j)) m += (j === J.bi[1] ? 0.12 : 0.08) * F ** 1.6 + 0.07 * Bk ** 1.3;
+      if (j === J.above) m += -0.04 * F + 0.03 * Bk;
+      if (j === J.elbow) m += 0.13 * Bk ** 6 - 0.06 * F + 0.05 * side ** 4;
+      if (j === J.fore) m += 0.1 * Math.max(0, 0.7 * out + 0.7 * F) ** 2;
+      if (j === J.fore2) m += 0.05 * Math.max(0, 0.7 * out + 0.7 * F) ** 2;
+      return m;
+    } : null,
+    // the side toward the body in its shadow; the hollow in front of the elbow
+    shade: lod <= 1 ? (th, j, p) => 1 - 0.12 * Math.max(0, -sg * (p.x - (j < 7 ? sh.x : el.x)) / 0.05) * (j <= 6 ? 1 : 0.5)
+      - (lod === 0 && j === J.elbow ? 0.08 * Math.max(0, -Math.sin(th)) : 0) : null,
+  });
+  hand(B, rig, lod, s);
+  B.morph = morph;
+}
+
+/** the michnasayim: plain linen breeches "from the loins to the thighs" — from above the navel close under the chest to
+ *  the knee, closed like a pouch, with drawstrings (Rambam Klei HaMikdash 8:18; Shemot 28:42). Loose linen, gathered
+ *  in fine pleats under the drawstring and filling out over the hips. Cut like trousers: the body tube ends at the
+ *  seat, and each leg starts as that ring's half — a D whose flat inner wall is the crotch seam, skinned like the body
+ *  there — so the legs grow out of the seat with no hem or step in any pose, then round out and taper to the knee. */
+export function michnasayim(B, rig, lod) {
+  const d = rig.dims, k = d.H / 1.67;
+  const ch = R(rig, 'chest'), sp = R(rig, 'spine'), pv = R(rig, 'pelvis'), hp = R(rig, 'thigh_r');
+  const top = ch.y - 0.05 * k;
+  B.set({ cls: CLS.GA, pat: PAT.LINEN, rough: 0.86, metal: 0, color: [1, 1, 1], grp: 0 });
+  const seat = { c: V(0, hp.y - 0.025 * k, 0.012), rx: d.hips[0] * 0.98 + 0.016, rz: d.hips[1] * 1.02 + 0.018 };
+  const rings = [
+    { c: V(0, top, 0.0), rx: d.chest[0] * 0.94 + 0.006, rz: d.chest[1] * 0.96 + 0.007 },             // gathered under the string, just over the skin
+    { c: V(0, top - 0.025 * k, 0.0), rx: d.chest[0] * 0.93 + 0.011, rz: d.chest[1] * 0.95 + 0.013 },
+    { c: V(0, sp.y, 0.002), rx: d.waist[0] + 0.016, rz: d.waist[1] + 0.018 },
+    { c: V(0, pv.y - 0.03 * k, 0.006), rx: d.hips[0] + 0.02, rz: d.hips[1] + 0.02 },               // filling out over the hips
+    seat,
+  ];
+  const nr = lod >= 2 ? [rings[0], rings[2], rings[4]] : rings;
+  const seg = L3(lod, 40, 16, 7);
+  // folds: fine pleats under the string that open into a few soft folds falling over the hips (none at the seat ring,
+  // which the legs continue)
+  const pleat = (th, j) => (Math.abs(Math.sin(th * 13 + j * 0.35)) - 0.637);
+  const fold = (th, j) => (Math.abs(Math.sin(th * 4.5 + 0.8 + j * 0.2)) - 0.637);
+  const pA = [0.03, 0.065, 0.035, 0.012, 0], fA = [0, 0.01, 0.035, 0.03, 0];
+  const bodyW = torsoW(rig, 0.05);
+  // the body and the legs meet on the seat ring: both are shaded there with the ring's own (ellipse) normal, so the
+  // junction leaves no line
+  const seatN = (q, n) => {
+    if (Math.abs(q.y - seat.c.y) > 0.002 || Math.abs(q.x) < 0.012) return n;
+    return n.set(q.x / (seat.rx * seat.rx), 0.15 * n.y, (q.z - seat.c.z) / (seat.rz * seat.rz)).normalize();
+  };
+  const v0 = B.count;
+  B.tube(nr, { seg, weights: bodyW,
+    radial: lod === 0 ? (th, j) => 1 + pleat(th, j) * pA[j] + fold(th, j) * fA[j] : null,
+    shade: lod <= 1 ? (th, j) => 1 - Math.max(0, -pleat(th, j)) * pA[j] * 4 - Math.max(0, -fold(th, j)) * fA[j] * 5 : null });
+  // the legs: from the seat ring's half down to the knee — loose linen, folds spiralling a little
+  for (const [s, sg] of [['l', -1], ['r', 1]]) {
+    const th = R(rig, `thigh_${s}`), kn = R(rig, `shin_${s}`);
+    const legW = (p) => {
+      const u = clamp((th.y - p.y) / Math.max(0.05, th.y - kn.y));
+      return normW([[rig.index.pelvis, 1.2 * (1 - smooth(0, 0.35, u))], [rig.index[`thigh_${s}`], 1], [rig.index[`shin_${s}`], 0.9 * smooth(0.82, 1.08, u)]]);
+    };
+    // the D: centred half-way out, half as wide as the seat ring; its outer side lies on the seat ring's ellipse, its
+    // inner side is a flat wall at the midline (m: the radius multiplier per θ, θ = 0 toward +x)
+    const D = (th0) => {
+      const c = Math.cos(th0) * sg, sn = Math.sin(th0);
+      const a = 0.25 * c * c + sn * sn, bq = 0.5 * c;
+      const mE = (-bq + Math.sqrt(bq * bq + 3 * a)) / (2 * a);
+      return c < -1e-3 ? Math.min(mE, -1 / c) : mE;
+    };
+    const yA = seat.c.y;
+    // loose linen: the legs stay full to the knee (no tailored taper), hanging a little off the thigh behind
+    const legRings = [
+      { c: V(sg * seat.rx / 2, yA, seat.c.z), rx: seat.rx / 2, rz: seat.rz, dn: 1 },
+      { c: V(sg * (seat.rx / 2 + 0.008 * k), yA - 0.045 * k, seat.c.z - 0.002), rx: seat.rx / 2 + 0.008 * k, rz: seat.rz * 0.92, dn: 0.55 },
+      { c: V(th.x * 1.0, lerp(th.y, kn.y, 0.3), 0.004), rx: 0.097 * k, rz: 0.1 * k, dn: 0 },
+      { c: V(th.x * 1.01, lerp(th.y, kn.y, 0.55), 0.002), rx: 0.094 * k, rz: 0.097 * k, dn: 0 },
+      { c: V(kn.x * 1.02, lerp(th.y, kn.y, 0.8), -0.002), rx: 0.09 * k, rz: 0.093 * k, dn: 0 },
+      { c: V(kn.x * 1.02, kn.y - 0.025 * k, -0.004), rx: 0.089 * k, rz: 0.091 * k, dn: 0 },
+    ];
+    const sel = lod >= 2 ? [0, 2, 5] : lod === 1 ? [0, 1, 2, 4, 5] : [0, 1, 2, 3, 4, 5];
+    const lr = sel.map((i) => legRings[i]);
+    const last = lr.length - 1;
+    // folds: a few soft ones spiralling down, and drag folds from the crotch out toward the outer knee (deeper in the
+    // upper leg, where the cloth is pulled between the legs)
+    const lf = (t, j) => (Math.abs(Math.sin(t * 3 + j * 0.9 + sg)) - 0.637);
+    const drag = (t, j) => Math.max(0, Math.cos(t * 2 - sg * 0.6 + j * 0.55)) ** 3 * (j >= 1 && j <= 3 ? 1 : 0.35);
+    // an uneven hem: the cloth hangs a little lower behind and at the outside, with a soft wave
+    const hemLift = (t) => (0.012 * Math.sin(t * 3 + 1.3 * sg) - 0.012 * Math.max(0, Math.sin(t)) - 0.008 * Math.max(0, sg * Math.cos(t))) * k;
+    B.tube(lr, { seg: L3(lod, 24, 10, 5),
+      weights: (p, j) => (j === 0 ? bodyW(p) : legW(p)),               // the first ring skinned as the seat it continues
+      radial: (t, j) => {
+        const dn = lr[j].dn, m = dn > 0 ? lerp(1, D(t), dn) : 1;
+        return m * (lod === 0 && j > 1 ? 1 + 0.08 * lf(t, j) - 0.05 * drag(t, j) : 1);
+      },
+      lift: lod <= 1 ? (t, j) => (j === last ? hemLift(t) : 0) : null,
+      shade: lod <= 1 ? (t, j) => 1 - (j > 1 ? 0.18 * Math.max(0, -lf(t, j)) + 0.16 * drag(t, j) : 0) - 0.14 * Math.max(0, -sg * Math.cos(t)) * smooth(0, 1, lr[j].dn) : null });
+    if (lod <= 1) {
+      const hm = lr[last];
+      B.tube([{ ...hm, c: hm.c.clone() }, { ...hm, c: hm.c.clone().add(V(0, 0.04, 0)), rx: hm.rx * 0.95, rz: hm.rz * 0.95 }], { seg: L3(lod, 24, 10, 5), invert: true, weights: legW, shade: () => 0.55,
+        lift: (t, j) => (j === 0 ? hemLift(t) : 0),
+        radial: lod === 0 ? (t) => 1 + 0.08 * lf(t, last) - 0.05 * drag(t, last) : null });
+    }
+  }
+  B.normalFix(v0, B.count, seatN);
+  // the drawstring and its knot at the front (shnatzim)
+  if (lod === 0) {
+    B.set({ cls: CLS.FIX, pat: PAT.CORD, rough: 0.8, metal: 0, color: '#e8e2d2', grp: 0 });
+    const r0 = rings[0], W = torsoW(rig, 0);
+    const pts = Array.from({ length: 25 }, (_, i) => { const a = (i / 24) * Math.PI * 2; return V(Math.cos(a) * (r0.rx * 1.02 + 0.006), top - 0.002, Math.sin(a) * (r0.rz * 1.02 + 0.006)); });
+    B.tube(limbRings(pts, pts.map(() => 0.0042)), { seg: 5, weights: W });
+    const kn0 = V(0.01, top - 0.006, -r0.rz - 0.01);
+    B.ellipsoid(kn0, [0.009, 0.007, 0.006], { nu: 7, nv: 4, weights: W });
+    for (const x of [-0.004, 0.012]) B.ribbon([kn0.clone().add(V(x, -0.004, -0.002)), kn0.clone().add(V(x * 1.5, -0.07 * k, -0.012)), kn0.clone().add(V(x * 2, -0.13 * k, -0.016))], 0.006, { side: V(1, 0, 0), weights: W });
+  }
+}
+
+/** the bather's linen sheet, wrapped round from the waist to mid-calf and tucked in at the front-left; it stands for
+ *  the towel of "he came up and dried himself" (Tamid 1:1) — the immersion itself is without garments */
+export function bathWrap(B, rig, lod) {
+  const k = rig.dims.H / 1.67;
+  const hemY = R(rig, 'shin_r').y - 0.17 * k;
+  B.set({ cls: CLS.GA, pat: PAT.LINEN, rough: 0.86, metal: 0, color: [1, 1, 1], grp: 0 });
+  // wrapped snug (thick 0.008): a towel stands off the skin only by its own thickness, so the back's curve in the
+  // immersion crouch does not lift its rolled top off the lower back
+  const rings = garmentBody(B, rig, lod, hemY, { from: 'waist', folds: 0.06, nFolds: 9, flare: 0.045 * k, thick: 0.008, foldFrom: 'hips', seed: 3.7 });
+  if (lod <= 1) {
+    // the tucked end: a vertical fold standing a little proud at the front-left, laid on the wrap's own drape (on plain
+    // rings it cut in and out of the folds); and the rolled top edge, close round the waist
+    const W = skirtW(rig, R(rig, 'thigh_r').y - 0.06 * k, hemY);
+    const th0 = Math.PI * 1.32;
+    const dr = rings.radial || (() => 1);
+    B.grid(2, rings.length - 1, (i, j) => {
+      const Rg = rings[j], t = th0 + (i / 2) * 0.22;
+      const out = (dr(t, j) + 0.03 + 0.01 * Math.sin((i / 2) * Math.PI)) * 1.005;
+      return { p: V(Math.cos(t) * Rg.rx * out, Rg.c.y, Rg.c.z + Math.sin(t) * Rg.rz * out), u: i * 0.05, v: -j * 0.1, w: (q) => (j === 0 ? torsoW(rig)(q) : W(q)), shade: 0.92 };
+    }, { inside: (A) => V(0, A.y, 0) });
+    const r0 = rings[0];
+    B.tube(limbRings(Array.from({ length: 33 }, (_, i) => { const a = (i / 32) * Math.PI * 2; return V(Math.cos(a) * (r0.rx + 0.002), r0.c.y + 0.003, r0.c.z + Math.sin(a) * (r0.rz + 0.002)); }), Array(33).fill(0.0075)), { seg: 6, weights: torsoW(rig) });
+  }
+  return hemY;
+}
+
 // --------------------------------------------------------------------------------------------- recipes
 function withBody(B, rig, lod, fn) {
   if (lod <= 1) B.morph = bodyMorph(rig);
@@ -1401,12 +1837,19 @@ function withBody(B, rig, lod, fn) {
   B.morph = null;
 }
 
+/** the priestly headgear in its mask group, and the hair shells shown in its place when it is lifted off (Yoma 25a) */
+function headgear(B, rig, lod, H, fn, hairline) {
+  fn({ grp: GRP.HEADGEAR });
+  if (lod <= 1) hair(B, rig, lod, H, { hairline, napeOnly: true, grp: GRP.BARE });
+  if (lod === 0) hair(B, rig, lod, H, { hairline, shellsOnly: true, grp: GRP.BARE });
+}
+
 export const RECIPES = {
   kohen(B, rig, lod) {
     const H = head(B, rig, lod);
     hair(B, rig, lod, H, { hairline: 0.04, covered: true });   // kohanim kept their hair short (Taanit 17a)
     beard(B, rig, lod, H, { len: 0.04 });
-    migbaat(B, rig, lod, H);
+    headgear(B, rig, lod, H, (o) => migbaat(B, rig, lod, H, o), 0.04);
     let hemY;
     withBody(B, rig, lod, () => { hemY = ketonet(B, rig, lod); avnet(B, rig, lod); });
     for (const s of ['l', 'r']) foot(B, rig, lod, s, { to: hemY + 0.1 });
@@ -1415,7 +1858,7 @@ export const RECIPES = {
     const H = head(B, rig, lod);
     hair(B, rig, lod, H, { hairline: 0.04, covered: true });
     beard(B, rig, lod, H, { len: 0.05 });
-    mitznefet(B, rig, lod, H, { cls: CLS.FIX, color: COL.linenKG, base: 0.05 });
+    headgear(B, rig, lod, H, (o) => mitznefet(B, rig, lod, H, { cls: CLS.FIX, color: COL.linenKG, base: 0.05, ...o }), 0.04);
     let hemY;
     withBody(B, rig, lod, () => { hemY = ketonet(B, rig, lod, { cls: CLS.FIX, color: COL.linenKG }); avnet(B, rig, lod, { white: true }); });
     for (const s of ['l', 'r']) foot(B, rig, lod, s, { to: hemY + 0.1 });
@@ -1424,8 +1867,7 @@ export const RECIPES = {
     const H = head(B, rig, lod);
     hair(B, rig, lod, H, { hairline: 0.04, covered: true });
     beard(B, rig, lod, H, { len: 0.05 });
-    mitznefet(B, rig, lod, H);
-    tzitz(B, rig, lod, H);
+    headgear(B, rig, lod, H, (o) => { mitznefet(B, rig, lod, H, o); tzitz(B, rig, lod, H, o); }, 0.04);
     withBody(B, rig, lod, () => {
       ketonet(B, rig, lod, { noBody: true }); // only the sleeves show from under the sleeveless me'il
       meil(B, rig, lod);
@@ -1433,6 +1875,35 @@ export const RECIPES = {
       choshen(B, rig, lod);
     });
     for (const s of ['l', 'r']) foot(B, rig, lod, s, { to: R(rig, 'foot_r').y + 0.2 });
+  },
+  // an elder of the beit av in the four garments: the older rig, receding hairline, long grey beard
+  kohen_elder(B, rig, lod) {
+    const H = head(B, rig, lod);
+    hair(B, rig, lod, H, { hairline: 0.07, covered: true });
+    beard(B, rig, lod, H, { len: 0.1, volume: 0.004 });
+    headgear(B, rig, lod, H, (o) => migbaat(B, rig, lod, H, o), 0.07);
+    let hemY;
+    withBody(B, rig, lod, () => { hemY = ketonet(B, rig, lod); avnet(B, rig, lod); });
+    for (const s of ['l', 'r']) foot(B, rig, lod, s, { to: hemY + 0.1 });
+  },
+  // stripped to the michnasayim (Tamid 5:3): bare from the chest up, head bare, linen breeches to the knee, bare shins
+  kohen_breeches(B, rig, lod) {
+    const H = head(B, rig, lod, { neck: false });
+    hair(B, rig, lod, H, { hairline: rig.dims.style === 'elder' ? 0.07 : 0.04 });
+    beard(B, rig, lod, H, rig.dims.style === 'elder' ? { len: 0.1, volume: 0.004 } : { len: 0.04 });
+    withBody(B, rig, lod, () => { bareTorso(B, rig, lod, 'waist', H); michnasayim(B, rig, lod); });
+    for (const s of ['l', 'r']) { bareArm(B, rig, lod, s); foot(B, rig, lod, s, { to: R(rig, `shin_${s}`).y + 0.06 }); }
+  },
+  // the bather: a linen sheet wrapped from the waist to mid-calf (Tamid 1:1–2; Yoma 3:3)
+  kohen_bathing(B, rig, lod) {
+    const H = head(B, rig, lod, { neck: false });
+    hair(B, rig, lod, H, { hairline: rig.dims.style === 'elder' ? 0.07 : 0.04 });
+    beard(B, rig, lod, H, rig.dims.style === 'elder' ? { len: 0.1, volume: 0.004 } : { len: 0.04 });
+    let hemY;
+    // the skin ends under the wrap's rolled top (the belly's round would cross the wrap's folds below it), and the shins
+    // only just above the hem (higher, the knees came out through the wrap as they bent in the immersion)
+    withBody(B, rig, lod, () => { bareTorso(B, rig, lod, 'waist', H); hemY = bathWrap(B, rig, lod); });
+    for (const s of ['l', 'r']) { bareArm(B, rig, lod, s); foot(B, rig, lod, s, { to: hemY + 0.05 }); }
   },
   levi(B, rig, lod) {
     const H = head(B, rig, lod);

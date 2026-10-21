@@ -2,7 +2,8 @@
 
 Format: **choice** — why — alternative. Everything the sources do not fix is reconstruction. This log supersedes two
 bullets of `audio.md`: "The cue sings the opening verses of each third" (now whole sections) and "What is pre-rendered
-when" (the song is no longer rendered at unlock on any tier).
+when" (the song is no longer rendered at unlock on any tier). `audio-2-fix.md` in turn supersedes "No tier pre-renders
+the song at unlock", the one-buffer-per-section render and its per-buffer level here, and corrects "The sections".
 
 ## The texts (src/audio/songs.js, songs-text.js, dev/make-songs.mjs)
 
@@ -35,11 +36,15 @@ when" (the song is no longer rendered at unlock on any tier).
 
 ## The sections
 
-- **Psalms keep the first version's division:** the sense break nearest each third. The sections start where that
-  version's "opening verses" started: 24: 1–3 | 4–6 | 7–10 · 48: 1–5 | 6–9 | 10–15 · 82: 1–3 | 4–5 | 6–8 ·
+- **Psalms keep the first version's division: its section starts, about equal thirds by verse count** (audio-1 sang
+  "the opening verses of each third"; corrected in audio-2-fix — this bullet first said "the sense break nearest each
+  third", which three of the breaks are not). 24: 1–3 | 4–6 | 7–10 · 48: 1–5 | 6–9 | 10–15 · 82: 1–3 | 4–5 | 6–8 ·
   94: 1–7 | 8–15 | 16–23 · 81: 1–6 | 7–11 | 12–17 · 93: 1–2 | 3–4 | 5 · 92: 1–6 | 7–12 | 13–16. Superscriptions are
-  sung (81:1, 48:1). — The Mishnah fixes three sections, not where they fall. The alternative was equal verse counts,
-  which cut through sense units (e.g. 24:3/4, a question and its answer).
+  sung (81:1, 48:1). Most breaks also fall at a sense break, but 24:3|4 separates the question "Who may go up the
+  mountain of the Lord?" from its answer, with a blast and a prostration between them; 48:5|6 cuts the kings' story
+  (5–8); 82:3|4 the paired commands (3–4). — The Mishnah fixes three sections, not where they fall, and the user asked to
+  keep the earlier division. The alternative, breaks at Selah and sense units (24: 1–2 | 3–6 | 7–10, 48: 1–4 | 5–9 |
+  10–15, 82: 1–2 | 3–5 | 6–8), is logged in audio-2-fix.md for the user to decide.
 - **Shabbat afternoon (Rosh HaShanah 31a, R' Yochanan; one per Shabbat, "each Shabbat they said one"):** "Az yashir"
   is Shemot 15:1–10, up to "Mi chamocha". "Mi chamocha" is 15:11–18, to the end of the song (Rashi). "Az yashir Yisrael"
   is Bamidbar 21:17–20 (Rashi: "of Ali be'er"). Their three parts: 1–3 | 4–7 | 8–10 (about equal length; the sense

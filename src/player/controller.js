@@ -72,7 +72,7 @@ export function createController(ctx, physics) {
     if (!inside && top === null) return false; // outside every collider
     const p = physics.findStand(feet, 8);
     if (p) feet.copy(p);
-    else feet.y = physics.standFloor(feet.x, feet.z, feet.y, true) ?? top ?? feet.y;
+    else feet.y = physics.nearestFloor(feet.x, feet.z, feet.y) ?? top ?? feet.y;
     vel.set(0, 0, 0);
     s.grounded = true;
     s.voidY = null;

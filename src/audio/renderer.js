@@ -4,8 +4,8 @@
 // cues can be rendered before the AudioContext exists.
 
 const HEAVY = new Set(['choir-psalm', 'choir', 'crowd-murmur']);
-// the Levites' song has its own lane: a whole section renders for seconds (13–71 s of audio), and must not hold up the
-// crowd beds behind it
+// the Levites' song has its own lane: it renders for seconds (a section is 13–71 s of audio, rendered verse by verse),
+// and must not hold up the crowd beds behind it
 const MUSIC = new Set(['choir-psalm', 'choir']);
 const laneOf = (id) => (MUSIC.has(id) ? 'music' : HEAVY.has(id) ? 'heavy' : 'light');
 
@@ -78,6 +78,14 @@ export class Renderer {
     this.lanes = { light: new Lane('light', this), heavy: new Lane('heavy', this), music: new Lane('music', this) };
     this.workerFailed = false;
     this.stats = { renders: 0, ms: 0, bytes: 0, failures: 0 };
+    // the song's render speed: Worker seconds per second of audio (running mean; 0.5 until measured — 0.15–0.95 seen)
+    this.musicRate = 0.5;
+  }
+
+  /** seconds until a render of `seconds` of audio for id would be done if it started now (a cold Worker adds ~1.5 s) */
+  estimate(id, seconds) {
+    const lane = this.lanes[laneOf(id)];
+    return (lane.worker || this.workerFailed ? 0 : 1.5) + (lane.name === 'music' ? this.musicRate : 0.3) * seconds;
   }
 
   get queue() { return [...this.lanes.light.queue, ...this.lanes.heavy.queue, ...this.lanes.music.queue]; }
@@ -150,6 +158,7 @@ export class Renderer {
     // a finished render counts as just used: a long render requested more than 15 s ago must not be the first evicted
     if (e) { e.buffer = buf; e.bytes = buf.length * buf.numberOfChannels * 4; e.used = performance.now(); }
     this.stats.renders++; this.stats.ms += r.ms || 0;
+    if (MUSIC.has(job.id) && r.ms > 0 && buf.duration > 1) this.musicRate = this.musicRate * 0.6 + (r.ms / 1000 / buf.duration) * 0.4;
     job.resolve(buf);
     this.evict();
   }

@@ -1,32 +1,42 @@
-// Synthesis registry: cue / loop / IR id → rendered channels. Pure (no DOM, no Web Audio); called from the
+// Synthesis registry: cue / loop / IR id â†’ rendered channels. Pure (no DOM, no Web Audio); called from the
 // Worker (worker.js), the main-thread fallback, and node tests.
 //
-// synthesize({ kind: 'cue'|'loop'|'ir', id, opts, sr, seed, tier }) → { channels: Float32Array[], sampleRate, stats }
-// Cues are loudness-normalised (loudest 400 ms window, K-weighted as in ITU-R BS.1770 → -16 dB) so the
+// synthesize({ kind: 'cue'|'loop'|'ir', id, opts, sr, seed, tier }) â†’ { channels: Float32Array[], sampleRate, stats }
+// Cues are loudness-normalised (loudest 400 ms window, K-weighted as in ITU-R BS.1770 â†’ -16 dB) so the
 // mixer's per-cue levels are meaningful; loops are cross-faded seamless, sparse ones normalised like cues.
 import { Rng, Biquad, hash, finish, loopify, secs, toDb, db, analyze } from './dsp.js';
 import { trumpets, cymbal, kinnorPhrase, nevelPhrase, chalilPhrase, bells } from './instruments.js';
 import { gateBoom, greatGateOpen, magrefah, muchni, knock, footsteps, keys, crowdProstrate } from './foley.js';
 import { barkai, gevini, shalomCall, grinderChant, bleat, babble } from './calls.js';
 import { fire, torch, water, wind, insects, dovesCue, dovesBed, sheepBed } from './nature.js';
-import { renderPsalm, PSALM_BY_DAY } from './music.js';
+import { renderPsalm, choirCalibration, PSALM_BY_DAY } from './music.js';
 import { impulse } from './ir.js';
 
 const mono = (b) => [b];
 // Every tier renders at least the attested minimum on the duchan: 12 men, 9 kinnorot, 2 nevalim (Arachin 2:3-6).
 // Weak tiers save worker time per voice instead (control rate, no parallel high-formant branch).
-const TIER_CHOIR = {
+export const TIER_CHOIR = {
   low: { men: 12, boys: 2, kinnorot: 9, nevalim: 2, cr: 32, hiGain: 0 },
   medium: { men: 12, boys: 3, kinnorot: 9, nevalim: 2, cr: 24 },
   high: { men: 12, boys: 4, kinnorot: 9, nevalim: 2 },
   ultra: { men: 14, boys: 6, kinnorot: 9, nevalim: 2 },
 };
 
+/** the choir's level: its calibration phrase (music.js choirCalibration) at this K-weighted level puts a section's
+ *  loudest 400 ms near -16 dB, as the per-buffer normalisation of the other cues does (dev/songs-test.mjs fits it) */
+export const CHOIR_REF_DB = -21;
+
+/** â†’ [buffer] with .gain: the choir's calibrated gain, the same for every verse of a section (synthesize applies it) */
 function choir(sr, rng, o, tier) {
   const t = TIER_CHOIR[tier] || TIER_CHOIR.medium;
   const psalm = o.psalm || PSALM_BY_DAY[o.weekday ?? 1] || 48;
-  // o.song (Ha'azinu, the Shabbat afternoon songs) wins over the psalm (src/audio/songs.js songId)
-  return renderPsalm({ sr, seed: rng.int(1, 1e9), psalm, song: o.song, section: o.section || 0, style: o.style, fluteDay: !!o.fluteDay, ...t, ...(o.men ? { men: o.men } : {}) }).buffer;
+  // o.song (Ha'azinu, the Shabbat afternoon songs) wins over the psalm (src/audio/songs.js songId); o.chunk: one verse
+  // of the section (chant.js melodyChunks); o.tempo as timeline.js sectionTiming times it
+  const p = { sr, seed: rng.int(1, 1e9), psalm, song: o.song, section: o.section || 0, style: o.style, fluteDay: !!o.fluteDay, ...t, ...(o.men ? { men: o.men } : {}) };
+  const cal = choirCalibration(p);
+  const chs = [renderPsalm({ ...p, ...(Number.isInteger(o.chunk) ? { chunk: o.chunk } : {}), ...(o.tempo > 0 ? { tempo: o.tempo } : {}), stringsGain: cal.stringsGain }).buffer];
+  chs.gain = db(CHOIR_REF_DB - cal.loudDb);
+  return chs;
 }
 
 export const CUES = {
@@ -42,7 +52,7 @@ export const CUES = {
   gevini: (sr, r, o) => mono(gevini(sr, r, o)),
   'shalom-call': (sr, r, o) => mono(shalomCall(sr, r, o)),
   cymbal: (sr, r, o) => mono(cymbal(sr, r, o)),
-  'choir-psalm': (sr, r, o, tier) => mono(choir(sr, r, o, tier)),
+  'choir-psalm': (sr, r, o, tier) => choir(sr, r, o, tier),
   kinnor: (sr, r, o) => mono(kinnorPhrase(sr, r, o)),
   nevel: (sr, r, o) => mono(nevelPhrase(sr, r, o)),
   chalil: (sr, r, o) => mono(chalilPhrase(sr, r, o)),
@@ -57,7 +67,7 @@ export const CUES = {
 
 /**
  * Loudness normalisation: loudest 400 ms window of the K-weighted signal (BS.1770: +4 dB shelf above
- * ~1.7 kHz, highpass at 38 Hz) → target, never letting a sample exceed -1 dBFS. Flat RMS would count 30-80 Hz
+ * ~1.7 kHz, highpass at 38 Hz) â†’ target, never letting a sample exceed -1 dBFS. Flat RMS would count 30-80 Hz
  * energy as loud and leave boomy cues far quieter than their level estimates.
  */
 function normGain(chs, sr, target) {
@@ -71,7 +81,7 @@ function normGain(chs, sr, target) {
   return Math.min(db(target - loudestWindowDb(kw, sr)), db(-1) / Math.max(1e-9, p));
 }
 
-// loops: [length (s), render(sr, rng, dur, opts, tier) → channels, norm: 'rms' (steady beds) | 'window' (sparse), (opts) → dB after norm]
+// loops: [length (s), render(sr, rng, dur, opts, tier) â†’ channels, norm: 'rms' (steady beds) | 'window' (sparse), (opts) â†’ dB after norm]
 const TIER_BABBLE = { low: 8, medium: 12, high: 16, ultra: 20 };
 export const LOOPS = {
   fire: [12, (sr, r, d, o) => fire(sr, r, d, o)],
@@ -84,7 +94,7 @@ export const LOOPS = {
   sheep: [20, (sr, r, d) => sheepBed(sr, r, d), 'window'],
   // the bed's power follows the calling rate: fewer chirps on a cool night, not louder ones (4th field: dB after norm)
   'night-insects': [16, (sr, r, d, o) => insects(sr, r, d, { temp: o.temp }), 'rms', (o) => 10 * Math.log10(Math.max(0.25, Math.min(1.3, (7.2 * (o.temp ?? 24) - 32) / 140.8)))],
-  choir: [0, (sr, r, d, o, tier) => [choir(sr, r, { ...o, section: o.section ?? 0 }, tier)], 'window'],
+  choir: [0, (sr, r, d, o, tier) => choir(sr, r, { ...o, section: o.section ?? 0 }, tier), 'window'],
   bells: [0, (sr, r, d, o) => [bells(sr, r, { steps: 12, ...o })], 'window'],
 };
 
@@ -102,6 +112,13 @@ function loudestWindowDb(chs, sr, win = 0.4) {
 
 function gainTo(chs, g) { for (const c of chs) for (let i = 0; i < c.length; i++) c[i] *= g; return chs; }
 
+/** a render's own fixed gain (chs.gain: the choir's calibration), still never above -1 dBFS; else normalised to target */
+function levelGain(chs, sr, target) {
+  if (!Number.isFinite(chs.gain)) return normGain(chs, sr, target);
+  let p = 0; for (const c of chs) for (let i = 0; i < c.length; i++) { const a = Math.abs(c[i]); if (a > p) p = a; }
+  return Math.min(chs.gain, db(-1) / Math.max(1e-9, p));
+}
+
 export function synthesize({ kind, id, opts = {}, sr = 48000, seed, tier = 'medium', stats = false }) {
   const s = seed ?? hash(`${kind}:${id}:${opts.variant ?? ''}`) ^ ((opts.v | 0) * 0x9e3779b1);
   const rng = new Rng(s >>> 0);
@@ -114,7 +131,7 @@ export function synthesize({ kind, id, opts = {}, sr = 48000, seed, tier = 'medi
     const fn = CUES[id];
     if (!fn) throw new Error(`unknown cue ${id}`);
     chs = finish(fn(sr, rng, opts, tier), sr, 0.001, 0.05);
-    gainTo(chs, normGain(chs, sr, -16));
+    gainTo(chs, levelGain(chs, sr, -16));
   } else {
     const def = LOOPS[id];
     if (!def) throw new Error(`unknown loop ${id}`);
@@ -128,7 +145,7 @@ export function synthesize({ kind, id, opts = {}, sr = 48000, seed, tier = 'medi
       // musical loops: render once, fade the edges; the loop restarts after a breath
       chs = finish(def[1](sr, rng, 0, opts, tier), sr, 0.01, 0.6);
     }
-    if (def[2] === 'window') gainTo(chs, normGain(chs, sr, -16));
+    if (def[2] === 'window') gainTo(chs, levelGain(chs, sr, -16));
     else { // steady beds: long-term RMS -20 dBFS (peak-capped)
       let e = 0, m = 0, p = 0;
       for (const c of chs) for (let i = 0; i < c.length; i++) { e += c[i] * c[i]; m++; p = Math.max(p, Math.abs(c[i])); }

@@ -1,5 +1,5 @@
 // Collision world: one MeshBVH over every static collider (world space), plus the queries the player,
-// nav and other systems use.  ctx.physics = { floorAt, floorsAt, standFloor, insideAt, findStand, raycast,
+// nav and other systems use.  ctx.physics = { floorAt, floorsAt, standFloor, levelFloor, nearestFloor, insideAt, findStand, raycast,
 // bvh, rebuild, ... }.
 //
 // Per-frame queries (capsule push-out, ground probe) and the column queries traverse the BVH through
@@ -14,6 +14,20 @@ import { getTerrain } from '../world/terrain/height.js';
 /** collider tags never collided with: door leaves / curtains move, observers pass them (ARCHITECTURE §12) */
 const SKIP_TAG = /\b(door|doors|leaf|leaves|curtain|curtains|parochet|nocollide)\b/i;
 export const WALK_NY = NAV_DEFAULTS.walkNy;
+/**
+ * levelFloor (amot): the band round the expected feet height y (a floor higher than y + ABOVE is a cap, roof or beam);
+ * the feet's own level (y − NEAR_BELOW … y + ABOVE: a surface there is under the feet, one lower is the ground under a
+ * stair the figure is on); the reach above y for a stair tread, ledge or raised floor (STEP, then REACH); the ring
+ * radii that find open floor at the feet's level beside a column, pillar, vessel or pile (BESIDE, then BESIDE_FAR); a
+ * floor below beats one above unless it is more than DOWN_BIAS times as far.
+ */
+const LEVEL_ABOVE = 0.8, LEVEL_BELOW = 2, LEVEL_NEAR_BELOW = 0.5, LEVEL_STEP = 1.5, LEVEL_REACH = 2.5;
+const LEVEL_BESIDE = 1, LEVEL_BESIDE_FAR = 2.5, LEVEL_DOWN_BIAS = 2;
+/**
+ * levelFloor (amot): a ring floor this far over the level found and under the floor over the spot is a step between;
+ * an underside at least this far over open ground makes it the ground under a table (tables: 1.1–1.4)
+ */
+const LEVEL_GAP = 0.35, LEVEL_UNDER_MIN = 0.5;
 const shapecast = BVH.prototype.shapecast;
 const warned = new Set();
 const warnOnce = (msg) => { if (!warned.has(msg)) { warned.add(msg); console.warn(msg); } };
@@ -106,6 +120,9 @@ export function createPhysics(ctx) {
   const tp = new Vector3(), cp = new Vector3(), dv = new Vector3(), nv = new Vector3();
   const tri = new ExtendedTriangle();
   const col = { ys: new Float32Array(64), ny: new Float32Array(64), ks: new Uint8Array(64), bl: new Float32Array(2), out: new Float32Array(8) };
+  // levelFloor scratch: the column's standable floors, and its walkable surfaces at the feet's level (descending)
+  const lvF = new Float32Array(8), lvS = new Float32Array(16), lvR = new Float32Array(128), lvDown = new Float64Array(1);
+  const RING_NEAR = [a(LEVEL_BESIDE) / 2, a(LEVEL_BESIDE)], RING_FAR = [a(LEVEL_BESIDE_FAR)];
   const cfgFloors = { ...NAV_DEFAULTS, maxLevels: 8 };
   let P = null, I = null; // BVH positions (the soup) and its (reordered) index
   // the site's terrain height field (world/terrain/height.js) — ground beyond the terrain collider's edge
@@ -214,6 +231,99 @@ export function createPhysics(ctx) {
     }
     return columnFloors(col.ys, col.ks, m, col.bl, 0, cfgFloors, col.out);
   }
+  /** standable floor: datum floors preferred unless exact, then nearest hintY (lowest without); else the top surface */
+  function pickStand(x, z, hintY, exact) {
+    const k = floorsInto(x, z, 1e4);
+    if (!k) return phys.floorAt(x, z, 1e4, WALK_NY);
+    const floors = Array.from(col.out.subarray(0, k));
+    let set = floors;
+    if (!exact) {
+      const datums = Object.entries(ctx.site?.datums || {})
+        .filter(([key, v]) => Number.isFinite(v) && !/crown|roof|top|parapet|ceiling/i.test(key)).map(([, v]) => a(v));
+      const pref = floors.filter((y) => datums.some((d) => Math.abs(d - y) < 0.25));
+      if (pref.length) set = pref;
+    }
+    if (hintY == null) return set[0];
+    return set.reduce((b, y) => (Math.abs(y - hintY) < Math.abs(b - hintY) ? y : b));
+  }
+
+  // ---- levelFloor helpers (lvF: k standable floors, ascending; lvS: walkable surfaces, descending) ----
+  /**
+   * up-facing walkable surfaces of the column in [lo, hi] into lvS, highest first (coincident faces once); count. The
+   * highest down-facing face there (the bottom of a solid standing at that level: a vessel's base) into lvDown[0].
+   */
+  function levelSurfaces(x, z, lo, hi) {
+    const n = column(x, z, lo, hi);
+    let m = 0;
+    lvDown[0] = NaN;
+    for (let i = 0; i < n && m < lvS.length; i++) {
+      if (col.ny[i] < -0.02 && !(col.ys[i] <= lvDown[0])) lvDown[0] = col.ys[i];
+      if (col.ny[i] < WALK_NY) continue;
+      const y = col.ys[i];
+      let dup = false;
+      for (let j = 0; j < m; j++) if (Math.abs(lvS[j] - y) < 1e-3) { dup = true; break; }
+      if (dup) continue;
+      let j = m++;
+      while (j > 0 && lvS[j - 1] < y) { lvS[j] = lvS[j - 1]; j--; }
+      lvS[j] = y;
+    }
+    return m;
+  }
+  /**
+   * Open ground with something low over it (a table top, a beam, a stair's soffit): not inside a closed solid, and an
+   * underside lies between ½ amah over it (a block set a hair above the pavement is a seam, not a table: 0.064 amah
+   * north of the Heichal) and the next standable floor above (or a body height). A stair's buried face is inside its
+   * solid; the court under an open-shell stair has the treads over it but no underside.
+   */
+  function openUnder(x, z, s, k) {
+    if (phys.insideAt(x, s + 0.02, z)) return false;
+    let next = s + a(4);
+    for (let i = 0; i < k; i++) if (lvF[i] > s + 1e-3) { if (lvF[i] < next) next = lvF[i]; break; }
+    const n = column(x, z, s + a(LEVEL_UNDER_MIN), next - 1e-3);
+    for (let i = 0; i < n; i++) if (col.ny[i] < -0.02) return true;
+    return false;
+  }
+  /** lowest standable floor in (lim, top], or null (top inclusive past float32 rounding: 1.5 amot is 0.72000003 m) */
+  function floorUpTo(k, lim, top) {
+    for (let i = 0; i < k; i++) if (lvF[i] > lim && lvF[i] <= top + 1e-4) return lvF[i];
+    return null;
+  }
+  /**
+   * The figure overlaps a column, pillar, vessel or pile and stands at its foot: the spot's column has a surface at
+   * the feet's level [lo, hi] (m surfaces in lvS, or a solid's bottom face in lvDown), and a ring of the given radii
+   * round (x, z) (8 directions each) finds open floor at that surface's height. Not when a ring floor lies between that
+   * level and fa (the floor over the spot): those are the steps of a stair the spot is on. Returns the column's own
+   * highest surface there (a plinth, the pavement under the pillar), or the ring's floor by a solid's bottom face; null.
+   * A ring floor over the band (above hi + gap) and under fa − gap is such a step whatever the level found (≤ hi), so
+   * it ends the scan at once: on a stair the first ring point downhill finds the next tread (player-3-fix r2).
+   */
+  function besideLevel(x, z, y, lo, hi, radii, m, fa) {
+    const down = lvDown[0], gap = a(LEVEL_GAP);
+    if (!m && !(down >= lo && down <= hi)) return null; // open air at the level (over a lower tread): nothing to stand beside
+    const atLevel = (f) => {
+      if (f < lo || f > hi) return false;
+      for (let i = 0; i < m; i++) if (Math.abs(f - lvS[i]) <= gap) return true;
+      return Math.abs(f - down) <= gap;
+    };
+    const stepLo = hi + gap, stepHi = fa - gap;
+    let best = null, bd = Infinity, n = 0;
+    for (let ri = 0; ri < radii.length; ri++) {
+      const r = radii[ri];
+      for (let d = 0; d < 8; d++) {
+        const an = ((d + ri * 0.5) * Math.PI) / 4;
+        const k = floorsInto(x + Math.cos(an) * r, z + Math.sin(an) * r, 1e4);
+        for (let i = 0; i < k; i++) {
+          const f = col.out[i];
+          if (f > stepLo && f < stepHi) return null;
+          if (n < lvR.length) lvR[n++] = f;
+          if (atLevel(f) && Math.abs(f - y) < bd) { bd = Math.abs(f - y); best = f; }
+        }
+      }
+    }
+    if (best === null) return null;
+    for (let i = 0; i < n; i++) if (lvR[i] > best + gap && lvR[i] < fa - gap) return null;
+    return m ? lvS[0] : best;
+  }
 
   // ---- ground probe: 7 vertical rays (centre + ring) in one traversal ----
   const PR = 7;
@@ -304,21 +414,59 @@ export function createPhysics(ctx) {
      * The floor an observer stands on at (x, z): among the standable floors, prefer the site's walking
      * datums (Mount 0, Ezrat Nashim 6, Ezrat Yisrael 13.5, Azarah 16, Heichal 22; not the crown) unless
      * `exact`; then the one nearest hintY (the lowest without a hint). Falls back to the top surface.
+     * `exact` with a hint keeps to the hint's level: see levelFloor (hintY is the expected feet height).
      */
     standFloor(x, z, hintY = null, exact = false) {
-      const k = floorsInto(x, z, 1e4);
-      if (!k) return phys.floorAt(x, z, 1e4, WALK_NY);
-      const floors = Array.from(col.out.subarray(0, k));
-      let set = floors;
-      if (!exact) {
-        const datums = Object.entries(ctx.site?.datums || {})
-          .filter(([key, v]) => Number.isFinite(v) && !/crown|roof|top|parapet|ceiling/i.test(key)).map(([, v]) => a(v));
-        const pref = floors.filter((y) => datums.some((d) => Math.abs(d - y) < 0.25));
-        if (pref.length) set = pref;
-      }
-      if (hintY == null) return set[0];
-      return set.reduce((b, y) => (Math.abs(y - hintY) < Math.abs(b - hintY) ? y : b));
+      if (exact && hintY != null) return phys.levelFloor(x, z, hintY);
+      return pickStand(x, z, hintY, exact);
     },
+
+    /**
+     * The floor at (x, z) for feet expected at height y (world). Amot; "the feet's level" is y − 0.5 … y + 0.8:
+     *  1. the standable floor nearest y in the band y − 2 … y + 0.8;
+     *  2. open ground at the feet's level with something low over it (the pavement under a table or beam: not inside
+     *     a solid, an underside over it);
+     *  3. the lowest standable floor up to 1.5 above y (a stair tread over a chord from foot to head, a ledge, a
+     *     raised floor);
+     *  4. open floor at the feet's level ½ or 1 amah away (the figure overlaps a column, a pillar, a vessel's base or
+     *     a pile's edge): the column's own surface there (a plinth), or that floor. Not on a stair: there the rings
+     *     also find the steps between that level and the floor over the spot;
+     *  5. the lowest standable floor up to 2.5 above y (a chord far under a tread);
+     *  6. as 4, 2½ amot away (a thick column or base);
+     *  7. the nearest standable floor, the one below unless it is more than twice as far as the one above;
+     *  8. a walkable surface at the feet's level (nothing standable at all), else the top surface.
+     * So a roof, cedar cap, beam or table top over a spot at y is never chosen while anything lies at y's level, and a
+     * stair's buried faces or the court under it never while a tread lies within 2.5 amot above.
+     */
+    levelFloor(x, z, y) {
+      const k = Math.min(floorsInto(x, z, 1e4), lvF.length);
+      for (let i = 0; i < k; i++) lvF[i] = col.out[i];
+      const lim = y + a(LEVEL_ABOVE), lo = y - a(LEVEL_BELOW), feet = y - a(LEVEL_NEAR_BELOW);
+      let best = null, bd = Infinity;
+      for (let i = 0; i < k; i++) {
+        const f = lvF[i];
+        if (f >= lo && f <= lim && Math.abs(f - y) < bd) { bd = Math.abs(f - y); best = f; }
+      }
+      if (best !== null) return best;
+      const m = levelSurfaces(x, z, feet, lim);
+      for (let i = 0; i < m; i++) if (openUnder(x, z, lvS[i], k)) return lvS[i];
+      const fa = floorUpTo(k, lim, Infinity) ?? Infinity; // the floor over the spot
+      let r = floorUpTo(k, lim, y + a(LEVEL_STEP));
+      if (r === null) r = besideLevel(x, z, y, feet, lim, RING_NEAR, m, fa);
+      if (r === null) r = floorUpTo(k, lim, y + a(LEVEL_REACH));
+      if (r === null) r = besideLevel(x, z, y, feet, lim, RING_FAR, m, fa);
+      if (r !== null) return r;
+      let below = null, above = null;
+      for (let i = 0; i < k; i++) { if (lvF[i] < y) below = lvF[i]; else if (above === null) above = lvF[i]; }
+      if (below !== null && above !== null) return y - below <= LEVEL_DOWN_BIAS * (above - y) ? below : above;
+      return below ?? above ?? (m ? lvS[0] : phys.floorAt(x, z, 1e4, WALK_NY));
+    },
+
+    /**
+     * The standable floor nearest y on ANY level (no datum preference, no level band; the lowest without y),
+     * else the top surface. The player's own choice of floor (goTo targets with a Z, stuck-hops, view probes).
+     */
+    nearestFloor(x, z, y = null) { return pickStand(x, z, y, true); },
 
     /** Is the point (x, y, z) inside a closed solid? (column parity by winding, counted from below) */
     insideAt(x, y, z) {

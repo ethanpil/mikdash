@@ -7,7 +7,7 @@
 //   strikes the cymbal, the Levites begin section 1 → set 1 beside Ben Arza → section 2 → set 2 → section 3.
 //   "At each teki'ah, a prostration": the people prostrate at each set (the crowd-prostrate cue starts 2.2 s before
 //   the set's buffer ends). sg1612 (Shiltei HaGiborim): the cymbal at every break.
-import { psalmMelody, syllabify, SECTION_TAIL } from './synth/chant.js';
+import { psalmMelody, syllabify, melodyChunks, SECTION_TAIL } from './synth/chant.js';
 import { songId, sectionVerses, sectionText, songHeading, SONGS } from './songs.js';
 
 // trumpet-set buffer (synth/instruments.js trumpets(), pattern 'set'): teki'ah 3.1 s, 0.55 s, teru'ah = 9 short blasts
@@ -39,24 +39,27 @@ export const SET_AFTER_SECTION = SECTION_TAIL - 2.6;
 const cache = new Map();
 /**
  * A sung section's timing (s, from the start of its choir-psalm buffer): { id, section, duration (the buffer),
- * singEnd (last note), verses: [{ key, ref {en,he}, he, en, t0, t1 }], heading {en,he} }. Memoised.
+ * singEnd (last note), verses: [{ key, ref {en,he}, he, en, t0, t1 }], heading {en,he}, chunks: [{ k, t0, t1 }] (the
+ * verse-by-verse render: chunk k's buffer spans [t0, t1) of the section — synth/chant.js melodyChunks) }. Memoised.
  */
 export function sectionTiming(opts = {}, section = opts.section ?? 0) {
-  const id = songId(opts), s = Math.max(0, Math.min(2, section | 0)), tempo = opts.tempo || 1;
+  const id = songId(opts), s = Math.max(0, Math.min(2, section | 0)), tempo = opts.tempo > 0 ? +opts.tempo : 1;
   const key = `${id}:${s}:${tempo}:${opts.style === 'sg1612' ? 'sg' : ''}`;
   let r = cache.get(key);
   if (r) return r;
   const verses = sectionVerses(id, s);
   const { events, length } = psalmMelody(sectionText(id, s), { tempo });
   // events are one per syllable in order; each verse's syllables follow on
+  const sizes = verses.map((v) => syllabify(v.tr).length);
   let i = 0;
-  const vs = verses.map((v) => {
-    const n = syllabify(v.tr).length;
+  const vs = verses.map((v, k) => {
+    const n = sizes[k];
     const a = events[i], b = events[i + n - 1];
     i += n;
     return { key: v.key, ref: v.ref, he: v.he, en: v.en, t0: +a.t.toFixed(3), t1: +(b.t + b.dur - b.breathAfter).toFixed(3) };
   });
-  r = { id, section: s, duration: length + SECTION_TAIL, singEnd: +vs[vs.length - 1].t1.toFixed(3), verses: vs, heading: songHeading(id, s, opts.style) };
+  const chunks = melodyChunks(events, length, sizes).map((c) => ({ k: c.k, t0: c.t0, t1: c.t1 }));
+  r = { id, section: s, duration: length + SECTION_TAIL, singEnd: +vs[vs.length - 1].t1.toFixed(3), verses: vs, heading: songHeading(id, s, opts.style), chunks };
   cache.set(key, r);
   return r;
 }

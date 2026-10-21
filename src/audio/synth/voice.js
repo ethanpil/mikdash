@@ -164,7 +164,8 @@ function consFB(table, cons, nextVowel, tract) {
 
 /**
  * Build voice segments from note events.
- * notes: [{ t (vowel onset, s), dur (to next vowel onset), syl, f0 | f0s: [[frac, f0], ...], amp?, hold? }]
+ * notes: [{ t (vowel onset, s), dur (to next vowel onset), syl, f0 | f0s: [[frac, f0], ...], amp?, hold?, ghost? }]
+ * (ghost: not sung — only shapes the end of the note before it, as the next verse does when a chunk is rendered alone)
  * Each segment: { t0, t1, f0, voice, asp, fric: {f,q,amp}|null, burst: {...}|null, F, B, tap, onset }
  */
 export function buildSegments(notes, opt) {
@@ -175,7 +176,7 @@ export function buildSegments(notes, opt) {
   const onsetDur = (p) => (p ? p.onset.reduce((s, c) => s + (C[c]?.dur || 0.05) * rate, 0) : 0);
   for (let n = 0; n < notes.length; n++) {
     const e = notes[n];
-    if (e.rest) continue;
+    if (e.rest || e.ghost) continue;
     const p = parsed[n];
     // the next syllable's onset consonants are sung before its beat: end this syllable early enough
     const next = notes[n + 1];

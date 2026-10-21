@@ -6,7 +6,7 @@
 import { DataTexture, RGBAFormat, HalfFloatType, NearestFilter, DataUtils, Matrix4, Vector3 } from 'three';
 import { MAX_BONES, getRig } from './rig.js';
 import { PoseBuilder, LocalPose, poseToSkin, blendPose } from './pose.js';
-import { HUMAN_CLIPS } from './clips.js';
+import { HUMAN_CLIPS, SERVICE_CLIPS, SERVICE_RIGS, SERVICE_ANY } from './clips.js';
 import { QUAD_CLIPS, BIRD_CLIPS } from './animal-clips.js';
 import { clothCage, clothSkin } from './cloth.js';
 
@@ -40,7 +40,10 @@ export class AnimAtlas {
     if (this.entries.has(rigKey)) return this.entries.get(rigKey);
     const rig = getRig(rigKey);
     const set = clipSetFor(rig);
-    const names = Object.keys(set);
+    // the temple-service clips (people-3) only for the men's rigs that serve; women, boys and children skip them
+    // (≈ 0.5k frames each) — a missing pose falls back to 'stand' with a warning, as any unknown pose does
+    const skip = (n) => rig.kind === 'human' && !SERVICE_RIGS.has(rigKey) && SERVICE_CLIPS[n] && !SERVICE_ANY.has(n);
+    const names = Object.keys(set).filter((n) => !skip(n));
     const total = names.reduce((s, n) => s + set[n].frames, 0);
     const start0 = this.frames;
     const grown = new Float32Array((this.frames + total + SCRATCH) * FLOATS_PER_FRAME);

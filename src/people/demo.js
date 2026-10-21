@@ -5,6 +5,10 @@
 //   row D (Y 121): the animals;  row E (Y 127): individual offerings and the tamid at the slaughter place (semichah,
 //                  bound lamb held and slaughtered, kabbalah, flaying at the hook, a lamb led on a rope, tenufah,
 //                  kemitzah, melikah, stoking, salting); row F (Y 133): the nine limb-bearers of Tamid 4:3 (&carry=walk)
+//   row G (Y 139) / row H (Y 145) / row I (Y 151): the night, Moked and service poses, roles and props of
+//                  docs/decisions/people-3.md (elders, breeches, bathing, sit_floor, call, knock, lift_mitre, lock,
+//                  staff/strike, windlass, kiddush, rinse, carry_lamb, pour_low, wave_sudar, tend_lamp, warm, bathe,
+//                  wood, psachter, charred limbs); &serve=walk walks the walking variants
 //   row P (Y 99.5): every prop lying/standing free (hung carcasses at hook height)
 //   crowd (X 205–245, Y 120–146): Israelites and women (pose via &crowd=stand|prostrate|bow|kneel|walk — a walking
 //          region crowd flows along its headings and wraps inside the region); a small flock of lambs
@@ -119,6 +123,8 @@ export function buildDemo(ctx) {
     else { a.setProp(r); a.setPose('carry'); }
   });
 
+  serviceRows(P, one);
+
   // row P — every prop, free-standing (hung carcasses at hook height)
   const HUNG = new Set(['lamb_hung', 'carcass_flaying', 'carcass_hung']);
   P.props.forEach((name, i) => {
@@ -137,4 +143,64 @@ export function buildDemo(ctx) {
   });
   const flock = P.crowd({ roles: 'lamb', count: 6, region: { min: [228, 111], max: [236, 117] }, heading: 'random', pose: 'graze', seed: 9 });
   ctx.people.demo = { crowd, flock };
+}
+
+/** rows G–I: the people-3 additions (docs/decisions/people-3.md) */
+function serviceRows(P, one) {
+  const q = new URLSearchParams(typeof location !== 'undefined' ? location.search : '');
+  const put = (role, X, Y, h, pose, prop, hand, ph) => {
+    const a = P.spawn({ role, seed: Math.round(X * 13 + Y * 7) });
+    a.setSite(X, Y).setHeading(h);
+    if (Array.isArray(prop)) a.setProps(prop[0], prop[1]); else if (prop) a.setProp(prop, hand || 'right');
+    a.setPose(pose, ph != null ? one(ph) : undefined);
+    return a;
+  };
+  // row G — roles and the Moked's night
+  let Y = 139, X = 245;
+  const step = (d = 2.3) => (X += d);
+  put('kohen_elder', X, Y, 180, 'stand'); step();
+  put('kohen_elder_offduty', X, Y, 180, 'stand'); step();
+  put('kohen_breeches', X, Y, 180, q.get('serve') === 'walk' ? 'walk' : 'stand'); step();
+  put('kohen_bathing', X, Y, 180, 'stand'); step();
+  put('kohen_elder', X - 0.6, Y + 0.9, 90, 'lie'); step(2.6);             // on the ledge bedding (kesset folded double)
+  put('kohen_elder_offduty', X, Y, 200, 'sleep'); step(2.6);
+  put('kohen_offduty', X, Y, 180, 'sit_floor'); step();
+  put('levi', X, Y, 180, 'call'); step();
+  put('kohen', X, Y, 180, 'knock', null, null, 0.26); step();
+  // the officer lifting the migba'at off the head of the man before him (Yoma 25a)
+  const off = put('kohen', X, Y, 180, 'lift_mitre', 'migbaat', 'right', 0.6);
+  const man = put('kohen', X, Y - 1.05, 0, 'stand');
+  man.setHeadgear(false);
+  void off; step(2.6);
+  put('kohen_offduty', X, Y, 180, 'lock', 'keys', 'right', 0.45); step();
+  put('levi', X, Y, 180, q.get('serve') === 'walk' ? 'staff_walk' : 'staff', 'staff'); step();
+  put('levi', X, Y, 180, 'strike', 'staff', 'right', 0.5);
+  put('guard_levi', X - 0.4, Y - 2.4, 90, 'lie').setProp(null); step(2.6);
+  // row H — the service
+  Y = 145; X = 245;
+  put('kohen', X, Y, 180, 'windlass', null, null, 0.1); step(2.6);
+  put('kohen', X, Y, 180, 'windlass_raise', null, null, 0.1); step(2.6);
+  put('kohen', X, Y, 180, 'kiddush'); step();
+  put('kohen', X, Y, 180, 'rinse');
+  P.spawnProp('entrails')?.setSite(X, Y - 0.85, 0.72 / 0.48).setHeading(180); step();
+  put('kohen', X, Y, 180, q.get('serve') === 'walk' ? 'carry_lamb_walk' : 'carry_lamb', 'lamb_dead'); step(2.6);
+  put('kohen', X, Y, 180, 'pour_low', 'wine_jug', 'right', 0.45); step();
+  put('kohen', X, Y, 180, 'pour_low', 'machtah_silver', 'right', 0.45);
+  P.spawnProp('machtah_gold')?.setSite(X - 0.3, Y - 1.25).setHeading(0); step(2.6);
+  put('segan', X, Y, 180, 'wave_sudar', ['sudar', 'sudar'], null, 0.25); step();
+  put('kohen', X, Y, 180, 'tend_lamp', ['taper', 'kuz']); step();
+  put('kohen_bathing', X, Y, 180, 'warm'); step();
+  put('kohen_offduty', X, Y, 180, 'bathe', null, null, 0.2); step();
+  put('kohen', X, Y, 180, 'carry', 'folded_garments'); step();
+  put('kohen', X, Y, 180, 'carry', 'kaf_covered'); step();
+  put('kohen', X, Y, 180, 'stand', 'kaf_covered');
+  // row I — the wood and the pile
+  Y = 151; X = 245;
+  put('kohen', X, Y, 180, q.get('serve') === 'walk' ? 'carry_shoulder_walk' : 'carry_shoulder', 'gizrin_branch'); step();
+  put('kohen', X, Y, 180, 'carry_shoulder', 'branch_bundle'); step();
+  put('kohen', X, Y, 180, 'carry', 'gizrin_branch'); step();
+  for (const [name, dx, dy] of [['gizrin_branch', 0, 0], ['branch_bundle', 0.7, 0], ['psachter', 2.2, 0], ['psachter_inverted', 4.2, 0]]) P.spawnProp(name)?.setSite(X + dx, Y).setHeading(160);
+  X += 6;
+  ['limb_charred', 'limb_head_charred', 'limb_foreleg_charred', 'limb_oketz_charred', 'limb_chazeh_charred', 'limb_gerah_charred', 'limb_dofen_charred', 'lamb_dead']
+    .forEach((name, i) => P.spawnProp(name)?.setSite(X + i * 0.7, Y).setHeading(170 + i * 15));
 }

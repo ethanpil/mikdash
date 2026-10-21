@@ -7,10 +7,12 @@
 // English: our own plain rendering, close to the Hebrew (not a published translation). Divine Names: "the Lord" for
 // the Tetragrammaton (and Yah, Adonai), "God" for Elohim and El — as the captions' Hebrew writes them ה׳ / אֱלֹקִים / קֵל.
 //
-// Sections (docs/decisions/audio-2.md): the Mishnah fixes three sections, not where they break. Psalms: the sense
-// break nearest each third — the starts the first audio version sang the opening verses of. The songs: each week's
-// unit (Rashi on RH 31a: "Az yashir" to "Mi chamocha", "Mi chamocha" to the end of the song, the Song of the Well;
-// Ha'azinu in Rambam's six, Tefillah 13:5 — the synagogue division the Gemara equates with the musaf's) in three
+// Sections (docs/decisions/audio-2-fix.md): the Mishnah fixes three sections, not where they break. Psalms: the first
+// audio version's section starts kept (it sang "the opening verses of each third"): about equal thirds by verse count.
+// Most breaks also fall at a sense break, but three do not: 24:3|4 parts the question "who may go up the mountain of
+// the Lord?" from its answer, 48:5|6 cuts the kings' story (5–8), 82:3|4 the paired commands (3–4). The songs: each
+// week's unit (Rashi on RH 31a: "Az yashir" to "Mi chamocha", "Mi chamocha" to the end of the song, the Song of the
+// Well; Ha'azinu in Rambam's six, Tefillah 13:5 — the synagogue division the Gemara equates with the musaf's) in three
 // sense units of about equal length.
 import { HEB } from './songs-text.js';
 
@@ -79,7 +81,7 @@ export const EN = {
   'Ps 81:1': 'For the conductor, on the gittit, of Asaf.',
   'Ps 81:2': 'Sing out to God our strength; shout for joy to the God of Jacob.',
   'Ps 81:3': 'Raise a song and sound the drum, the sweet kinnor with the nevel.',
-  'Ps 81:4': 'Blow the shofar at the new moon, at the full moon, for our festival day.',
+  'Ps 81:4': 'Blow the shofar at the new moon, at the time the moon is covered, for our festival day.',
   'Ps 81:5': 'For it is a statute for Israel, a law of the God of Jacob.',
   'Ps 81:6': 'He set it as a testimony in Joseph when he went out over the land of Egypt; a language I did not know I heard.',
   'Ps 81:7': 'I removed his shoulder from the burden; his hands were freed from the basket.',
@@ -235,11 +237,12 @@ export function resolveSong(song, week = 0) {
 }
 
 /**
- * Canonical song id from libation / cue options: { song } (see resolveSong), else { psalm }, else { weekday }
- * (0 = Sunday … 6 = Shabbat). Unknown → 'psalm-48'.
+ * Canonical song id from libation / cue options: { song } (see resolveSong; a cycle without week takes the week of
+ * o.date {y, m, d} as shabbatWeek counts it, else week 0), else { psalm }, else { weekday } (0 = Sunday … 6 = Shabbat).
+ * Unknown → 'psalm-48'.
  */
 export function songId(o = {}) {
-  const s = resolveSong(o.song, o.week);
+  const s = resolveSong(o.song, Number.isInteger(o.week) ? o.week : o.date ? shabbatWeek(o.date) : 0);
   if (s) return s;
   if (SONGS[`psalm-${o.psalm}`]) return `psalm-${o.psalm}`;
   if (Number.isInteger(o.weekday) && PSALM_DAYS[o.weekday]) return `psalm-${PSALM_DAYS[o.weekday]}`;

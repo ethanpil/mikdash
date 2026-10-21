@@ -1,10 +1,12 @@
 // Live check of the song's render cache (run with the sim harness, low tier: the tightest budget):
 //   node src/sim/dev/run.mjs --q low --out shots/audio-2-fix --script src/audio/dev/cache-live.js "t=sunrise+60"
-// A. one cache entry per section: prefetchLibation({}) (the psalm of the day), a choreography's cue that names the
-//    psalm, and the 'choir' loop all use the same key (no 'weekday' in it);
+// A. one cache entry per verse of each section (sections render verse by verse — audio-2-fix): prefetchLibation({})
+//    (the psalm of the day), a choreography's cue that names the psalm, and the 'choir' loop all use the same keys (no
+//    'weekday' in them);
 // B. follow-on: cueing a section of a song not prefetched queues that song's later sections at once;
-// C. holds: Psalm 94's three sections (~23 MB at 32 kHz, beside ~19 MB of beds in a 40 MB budget) prefetched on low
-//    are all still cached two minutes after they finished, through other renders that push the cache over budget.
+// C. holds: Psalm 94's three sections (~28 MB of verse chunks at 32 kHz, beside ~19 MB of beds in a 40 MB budget)
+//    prefetched on low are all still cached two minutes after they finished, through other renders that push the cache
+//    over budget.
 const A = ctx.audio, E = A.engine, R = E.renderer;
 const wait = (s) => sleep(s * 1000);
 const out = { tier: E.tier, budgetMB: R.budget / 1048576 };
@@ -28,16 +30,17 @@ await drain(240);
   const before = choirKeys().map((x) => x.k);
   const hs = [0, 1, 2].map((s) => A.cue('choir-psalm', null, { psalm: day, section: s, style, gain: 0, caption: false }));
   const L = A.loop('choir', null, { psalm: day, section: 1, style, gain: 0 });
-  // the loop renders (or finds) its buffer only when it becomes audible: its key, as it would ask for it
+  // the loop renders (or finds) its verses only when it becomes audible: their keys, as it would ask for them
   const lv = [...E.loops].find((x) => x.handle === L);
-  const loopKey = R.key('cue', 'choir-psalm', lv.rsOpts, E.rateFor('choir-psalm'));
+  const loopKeys = lv.parts.map((p) => R.key('cue', 'choir-psalm', p.sOpts, E.rateFor('choir-psalm')));
   await wait(0.3);
   const after = choirKeys().map((x) => x.k);
   hs.forEach((h) => h.stop(0)); L.stop(0);
-  out.A = { psalm: day, before, after, loopKeyCached: R.cache.has(loopKey) };
-  check(before.length === 3, `A: prefetch made ${before.length} section entries, not 3`);
+  const verses = [0, 1, 2].reduce((n, s) => n + A.sectionTiming({ psalm: day, style }, s).chunks.length, 0);
+  out.A = { psalm: day, verses, before: before.length, after: after.length, loopKeysCached: loopKeys.filter((k) => R.cache.has(k)).length, loopVerses: loopKeys.length };
+  check(before.length === verses, `A: prefetch made ${before.length} entries, not one per verse (${verses})`);
   check(after.length === before.length, `A: a cue naming the psalm added ${after.length - before.length} entries`);
-  check(R.cache.has(loopKey), 'A: the loop would render its own copy of the section');
+  check(loopKeys.every((k) => R.cache.has(k)), 'A: the loop would render its own copy of the section');
   check(after.every((k) => !k.includes('weekday')), 'A: weekday in a cache key');
   clearSong();
 }
@@ -61,9 +64,10 @@ await drain(240);
   // other sounds as the day goes on: every variant of the common cues (renders that push the cache over budget)
   for (const id of ['magrefah', 'gate-boom', 'barkai', 'gevini', 'knock', 'muchni', 'shalom-call', 'great-gate-open', 'trumpet-tekiah']) A.prefetch([id]);
   await wait(120);
-  const ks = choirKeys();
-  out.C.after2min = { sections: ks, totalMB: +(R.stats.bytes / 1048576).toFixed(1) };
-  check(ks.filter((x) => x.k.includes('"psalm":94') && x.ready).length === 3, 'C: a prefetched Psalm 94 section was evicted within 2 minutes');
+  const ks = choirKeys(), verses = [0, 1, 2].reduce((n, s) => n + A.sectionTiming({ psalm: 94 }, s).chunks.length, 0);
+  const ready = ks.filter((x) => x.k.includes('"psalm":94') && x.ready);
+  out.C.after2min = { verses, ready: ready.length, songMB: +ready.reduce((a, x) => a + x.MB, 0).toFixed(1), totalMB: +(R.stats.bytes / 1048576).toFixed(1) };
+  check(ready.length === verses, 'C: a prefetched Psalm 94 verse was evicted within 2 minutes');
 }
 out.fails = fails;
 out.ok = !fails.length;

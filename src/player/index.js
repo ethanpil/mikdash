@@ -2,10 +2,10 @@
 // ctx.colliders, a multi-level nav grid + A*, and guided goTo().
 //
 //   ctx.physics = { floorAt(x, z) -> walking floor y|null (not roof tops), floorAt(x, z, fromY, minNy?, far?)
-//                   -> highest surface below fromY, floorsAt(x, z) -> y[], standFloor(x, z, hintY?, exact?),
+//                   -> highest surface below fromY, floorsAt(x, z) -> y[], standFloor(x, z, hintY?, exact?), levelFloor(x, z, y), nearestFloor(x, z, y?),
 //                   insideAt(x, y, z), findStand(p, r), raycast(origin, dir, far) -> {point, distance, normal,
 //                   faceIndex}|null, bvh, rebuild() -> Promise, stats }
-//   ctx.nav     = { findPath(fromWorld, toWorld) -> Vector3[]|null, ready: Promise, nearest(p), landing(p, goal),
+//   ctx.nav     = { findPath(fromWorld, toWorld, opts?) -> Vector3[]|null, ready: Promise, nearest(p), landing(p, goal),
 //                   floorsAt(x,z), rebuild(), stats, lastQueryMs }
 //   ctx.player  = { position (feet), eye, heading, pitch (deg), mode 'walk'|'fly'|'auto', goTo(target, speed)
 //                   -> Promise<boolean>, cancel(), teleport(target), setMode, setLook, setInputEnabled, ... }

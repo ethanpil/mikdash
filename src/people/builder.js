@@ -14,7 +14,7 @@ export const PAT = {
   NONE: 0, SKIN: 1, LINEN_BOX: 2, WOOL: 3, METAL: 4, AVNET: 5, TECHELET: 6, EPHOD: 7, LINEN: 8, HAIR: 9,
   FLEECE: 10, WOOD: 11, HORN: 12, GEM: 13, TZITZ: 14, WOOL_CLAVI: 15, REED: 16, MEAT: 17, CORD: 18, FACE: 19,
   FAT: 20, COAT: 21, EYE: 22, HAIR_SHELL: 23, FLEECE_SHELL: 24, FACE1: 25, WOUND: 26, AEYE: 27, ROPE: 28, SALT: 29,
-  BREAD: 30, FLOUR: 31, LIQUID: 32, FEATHER: 33, NAIL: 34, COAT_LONG: 35, MUZZLE: 36, HIDE: 38,
+  BREAD: 30, FLOUR: 31, LIQUID: 32, FEATHER: 33, NAIL: 34, COAT_LONG: 35, MUZZLE: 36, HIDE: 38, CHAR: 39, BARK: 40,
 };
 
 const _c = new Color();
@@ -135,6 +135,12 @@ export class MeshBuilder {
     this.sw.push(...ww);
     return this.count - 1;
   }
+  /**
+   * Bend the normals of vertices [from, to) after they are computed: fn(p, n) → n (Vector3s, n normalised, may be
+   * modified in place) — e.g. a limb's top shaded like the surface it grows out of, so no crease shows where it
+   * enters (bare shoulders).
+   */
+  normalFix(from, to, fn) { (this.nfix ||= []).push([from, to, fn]); return this; }
   tri(a, b, c) { this.idx.push(a, b, c); }
   quad(a, b, c, d) { this.idx.push(a, b, c, a, c, d); }
 
@@ -362,6 +368,7 @@ export class MeshBuilder {
     }
     for (const i of o.idx) this.idx.push(i + base);
     for (const [a, b] of o.seams) this.seams.push([a + base, b + base]);
+    if (o.nfix) for (const [f, t, fn] of o.nfix) this.normalFix(f + base, t + base, fn);
   }
 
   /** mirror across x (for left-hand prop variants): x → -x and flip winding */
@@ -415,6 +422,17 @@ export class MeshBuilder {
       const l = Math.hypot(x, y, z) || 1;
       N.setXYZ(a, x / l, y / l, z / l);
       N.setXYZ(b, x / l, y / l, z / l);
+    }
+    if (this.nfix) {
+      const pp = new Vector3(), nn = new Vector3();
+      for (const [from, to, fn] of this.nfix) {
+        for (let i = from; i < Math.min(to, n); i++) {
+          pp.set(this.pos[i * 3], this.pos[i * 3 + 1], this.pos[i * 3 + 2]);
+          nn.set(N.getX(i), N.getY(i), N.getZ(i));
+          const r = fn(pp, nn).normalize();
+          N.setXYZ(i, r.x, r.y, r.z);
+        }
+      }
     }
     g.computeBoundingSphere();
     return g;

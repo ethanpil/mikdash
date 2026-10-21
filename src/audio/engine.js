@@ -221,7 +221,7 @@ export class AudioEngine {
         if (v.nodes?.pan) this.placePanner(v, 0.02);
       },
       setGain: (g, t = 0.1) => { v.userGain = g; this.applyGain(v, t); },
-      get duration() { return v.buffer?.duration ?? null; },
+      get duration() { return v.buffer?.duration ?? v.secDur ?? null; },
     };
     v.handle = handle;
     const capKey = def.caption?.(opts);
@@ -233,9 +233,11 @@ export class AudioEngine {
     const offset0 = Math.max(0, +opts.offset || 0);
     if (def.lyrics) {
       const timing = sectionTiming(opts), due = perfNow() + (opts.delay || 0);
-      this.music.add({ v, sOpts, end: due + timing.duration - offset0 }); // a 'choir' loop of this section follows on
+      v.timing = timing; v.secDur = timing.duration; v.offset0 = offset0;
+      v.mentry = { v, sOpts, end: due + timing.duration - offset0 }; // a 'choir' loop of this section follows on
+      this.music.add(v.mentry);
       // the verses run on the real clock from the moment they are due — the text is not held up by a slow render, and
-      // shows with sound locked — and follow the buffer's own playhead once it sounds (tickTracks)
+      // shows with sound locked — and follow the section's own clock once it sounds (tickTracks)
       if (lyrics) this.startTrack(v, { t0: due, offset: offset0, heading });
     }
     if (!this.ac || this.ac.state !== 'running') {
@@ -244,20 +246,17 @@ export class AudioEngine {
       endResolve(false);
       return handle;
     }
+    if (def.lyrics) { this.playSection(v); return handle; }
     const t0 = this.ac.currentTime;
     this.inflight.add(v); // a time jump must also cancel cues whose buffer is still rendering (§9)
     this.renderer.get('cue', id, sOpts, this.rateFor(id), { priority: 10 + def.priority }).then((buf) => {
       this.inflight.delete(v);
       if (v.stopped || !this.ac) { endResolve(false); return; }
       const late = this.ac.currentTime - t0, delay = opts.delay || 0;
-      // a sung section that rendered late joins in progress (its verses keep their clock); otherwise a blast heard a
-      // few seconds late still means something, much later it would be a wrong moment
-      const catchUp = def.lyrics && opts.catchUp !== false;
-      let offset = offset0;
-      if (catchUp) { if (late - delay > 0.25) offset += late - delay; }
-      // (a dropped cue is marked stopped: a 'choir' loop must not wait for its end)
-      else if (late > (opts.maxLatency ?? (def.cat === 'music' || def.cat === 'voice' ? 15 : 10))) { v.stopped = true; endResolve(false); return; }
-      if (offset >= buf.duration - 0.5) { v.stopped = true; endResolve(false); return; }
+      // a blast heard a few seconds late still means something, much later it would be a wrong moment (sung sections
+      // join in progress instead: playSection)
+      if (late > (opts.maxLatency ?? (def.cat === 'music' || def.cat === 'voice' ? 15 : 10))) { v.stopped = true; endResolve(false); return; }
+      if (offset0 >= buf.duration - 0.5) { v.stopped = true; endResolve(false); return; }
       v.buffer = buf;
       // the start time is fixed on the audio clock now; a delayed cue claims its voice slot only just
       // before it sounds (scheduled sequences must not crowd out what is playing in between)
@@ -265,9 +264,7 @@ export class AudioEngine {
       const go = () => {
         if (v.stopped || !this.ac) { endResolve(false); return; }
         if (!this.admit(v)) { v.stopped = true; endResolve(false); return; }
-        const at = Math.max(when, this.ac.currentTime);
-        const off = catchUp ? offset + (at - when) : offset;
-        this.startVoice(v, buf, at, off, opts.fadeIn ?? (catchUp && off > 0.3 ? 0.6 : 0.004));
+        this.startVoice(v, buf, Math.max(when, this.ac.currentTime), offset0, opts.fadeIn ?? 0.004);
         // subtitles only if the call is audible where the observer stands when it sounds
         if (!def.lyrics && wantCaption) setTimeout(() => { if (!v.stopped && this.audibleEnough(v)) this.caption(capKey, buf.duration, v); }, Math.max(0, (when - this.ac.currentTime) * 1000));
         if (id === 'magrefah') this.onMagrefah?.(v);
@@ -357,12 +354,24 @@ export class AudioEngine {
   }
 
   startVoice(v, buffer, when, offset, fadeIn) {
+    const src = new AudioBufferSourceNode(this.ac, { buffer, loop: v.kind === 'loop', playbackRate: v.rate || 1 });
+    v.startTime = when - offset / (v.rate || 1);
+    const nodes = this.chain(v, when, fadeIn);
+    nodes.src = src;
+    src.connect(nodes.g);
+    src.start(when, offset);
+    if (v.kind === 'cue') {
+      this.voices.add(v);
+      src.onended = () => { this.voices.delete(v); this.disconnect(nodes); v.nodes = null; v.endResolve?.(true); };
+    }
+  }
+
+  /** a voice's processing chain (gain, air, occlusion, panner, reverb send), its gain rising from `when` over fadeIn */
+  chain(v, when, fadeIn) {
     const ac = this.ac;
     if (v.pending) { v.pending = 0; this.pending.delete(v); }
-    const src = new AudioBufferSourceNode(ac, { buffer, loop: v.kind === 'loop', playbackRate: v.rate || 1 });
     const g = new GainNode(ac, { gain: 0 });
-    src.connect(g);
-    const nodes = { src, g };
+    const nodes = { g };
     if (v.def.bed && !v.spatial) {
       g.connect(this.bedIn);
     } else if (v.spatial) {
@@ -381,16 +390,138 @@ export class AudioEngine {
       g.connect(nodes.send).connect(this.revIn);
     }
     v.nodes = nodes;
-    v.startTime = when - offset / (v.rate || 1);
     if (v.spatial) { this.placePanner(v, 0); this.updateAcoustics(v, true); }
     const target = v.levelLin * v.userGain * (v.fade ?? 1);
     g.gain.setValueAtTime(0, when);
     g.gain.linearRampToValueAtTime(target, when + Math.max(0.002, fadeIn));
-    src.start(when, offset);
-    if (v.kind === 'cue') {
-      this.voices.add(v);
-      src.onended = () => { this.voices.delete(v); this.disconnect(nodes); v.nodes = null; v.endResolve?.(true); };
+    return nodes;
+  }
+
+  // ---------------------------------------------------------------- sung sections, verse by verse
+  // A section is rendered and played as its verse chunks (timeline.js sectionTiming().chunks): each chunk is its own
+  // buffer, started at its place on the section's clock (v.startTime: the audio-clock time of the section's zero) as
+  // soon as it is rendered. Someone who arrives mid-section waits for one verse, not for the whole section: the chunk
+  // being sung renders first (or the next one, when it could not be ready before its verse ends), and a chunk that
+  // arrives late joins in progress with a short fade.
+
+  /** the chunk records of a section: [{ k, t0, t1, end (its singing ends), sOpts, buf, pass }] */
+  sectionParts(sOpts, T) {
+    const { chunk, ...base } = sOpts;
+    return T.chunks.map((c, i) => ({ k: c.k, t0: c.t0, t1: c.t1, end: T.verses[i]?.t1 ?? T.singEnd, sOpts: { ...base, chunk: c.k }, buf: null, pass: -Infinity }));
+  }
+
+  /**
+   * Request a section's chunks in the order they are needed from section position `pos` (s; negative: not yet begun).
+   * The chunk sung at pos goes first unless it could not be rendered before its singing ends: a cue then skips it, a
+   * loop (wrap) wants it for its next pass, after the others. Returns the requested parts, each with .promise.
+   */
+  fetchParts(parts, pos, { priority, hold = 0, pin = false, wrap = false }) {
+    const sr = this.rateFor('choir-psalm'), R = this.renderer;
+    const ahead = parts.filter((p) => p.t1 > pos), behind = wrap ? parts.filter((p) => p.t1 <= pos) : [];
+    const cur = ahead[0];
+    if (cur && cur.t0 < pos && pos + R.estimate('choir-psalm', cur.t1 - cur.t0) > cur.end - 1 && !R.peek('cue', 'choir-psalm', cur.sOpts, sr)) {
+      ahead.shift();
+      if (wrap) behind.push(cur);
     }
+    const order = [...ahead, ...behind];
+    order.forEach((p, i) => { p.promise = R.get('cue', 'choir-psalm', p.sOpts, sr, { priority: priority - i * 0.001, hold, pin }); });
+    return order;
+  }
+
+  /** render a sung section's chunks ahead, in order (opts: the cue's options; first: only that many) → their promises */
+  fetchSection(opts, { priority = 2, hold = 0, first = Infinity } = {}) {
+    const parts = this.sectionParts(this.synthOpts(CUE_LIB['choir-psalm'], opts, 0), sectionTiming(opts)).slice(0, first);
+    return this.fetchParts(parts, -1, { priority, hold }).map((p) => p.promise);
+  }
+
+  /**
+   * Play a choir-psalm cue (sound running): its clock is due at request + delay from opts.offset, and holds — a chunk
+   * that renders late joins in progress — unless opts.catchUp is false: then the section starts from opts.offset once
+   * its first chunk is ready (dropped after maxLatency, 15 s).
+   */
+  playSection(v) {
+    const opts = v.opts, ac = this.ac, delay = opts.delay || 0, rate = v.rate || 1, catchUp = opts.catchUp !== false;
+    const req = ac.currentTime;
+    v.startTime = req + delay - v.offset0 / rate;
+    v.parts = this.sectionParts(v.sOpts, v.timing);
+    const order = this.fetchParts(v.parts, v.offset0 - delay * rate, { priority: 10 + v.def.priority });
+    if (!order.length) { v.stopped = true; v.endResolve(false); return; }
+    this.inflight.add(v); // a time jump must also cancel cues whose buffer is still rendering (§9)
+    for (const p of order) p.promise.then((buf) => { p.buf = buf; if (v.nodes && !v.stopped) this.schedulePart(v, p); }, () => {});
+    order[0].promise.then(() => {
+      this.inflight.delete(v);
+      if (v.stopped || !this.ac) { v.endResolve(false); return; }
+      const late = this.ac.currentTime - req;
+      if (!catchUp && late > delay) {
+        if (late > (opts.maxLatency ?? 15)) { v.stopped = true; v.endResolve(false); return; }
+        v.startTime += late - delay; // starts now, from opts.offset
+        v.mentry.end += late - delay;
+      }
+      if ((this.ac.currentTime - v.startTime) * rate >= v.secDur - 0.5) { v.stopped = true; v.endResolve(false); return; }
+      // the voice slot is claimed just before the first chunk sounds (a scheduled sequence must not crowd out what plays
+      // in between)
+      const first = Math.max(this.ac.currentTime, v.startTime + order[0].t0 / rate);
+      const go = () => {
+        if (v.stopped || !this.ac) { v.endResolve(false); return; }
+        if (!this.admit(v)) { v.stopped = true; v.endResolve(false); return; }
+        this.chain(v, this.ac.currentTime, 0.004);
+        this.voices.add(v);
+        for (const p of v.parts) if (p.buf) this.schedulePart(v, p);
+      };
+      const lead = (first - this.ac.currentTime - 0.15) * 1000;
+      if (lead > 0) { v.pending = setTimeout(go, lead); this.pending.add(v); } else go();
+    }).catch((e) => { this.inflight.delete(v); v.stopped = true; this.warnOnce('render:choir-psalm', `[audio] render failed for choir-psalm: ${e.message}`); v.endResolve(false); });
+  }
+
+  /**
+   * Start chunk p of section voice v at its place on the section's clock (passStart: the loop pass's offset, s). Late:
+   * it joins in progress with a 0.5 s fade, unless less than 0.3 s of it is left. → whether it was started.
+   */
+  schedulePart(v, p, passStart = 0) {
+    const ac = this.ac, n = v.nodes;
+    if (!n || !p.buf || v.stopped || !ac) return false;
+    const rate = v.rate || 1, at = v.startTime + (passStart + p.t0) / rate, now = ac.currentTime + 0.01;
+    const off = at < now ? (now - at) * rate : 0, when = Math.max(at, now);
+    if (off > p.buf.duration - 0.3) return false;
+    const src = new AudioBufferSourceNode(ac, { buffer: p.buf, playbackRate: rate });
+    let out = src;
+    if (off > 0.05) {
+      out = new GainNode(ac, { gain: 0 });
+      out.gain.setValueAtTime(0, when);
+      out.gain.linearRampToValueAtTime(1, when + 0.5);
+      src.connect(out);
+    }
+    out.connect(n.g);
+    src.start(when, off);
+    const rec = { src, out };
+    (n.srcs ||= new Set()).add(rec);
+    src.onended = () => { n.srcs.delete(rec); try { out.disconnect(); if (out !== src) src.disconnect(); } catch { /* ok */ } };
+    this.onPart?.(v, p, when, off); // test hook (dev/song-live.js)
+    return true;
+  }
+
+  /** a section loop: start each ready chunk of the current pass, and of the next one in its last 4 s */
+  scheduleLoop(v) {
+    if (!v.nodes || !this.ac) return;
+    const rate = v.rate || 1, P = v.secDur, pos = (this.ac.currentTime - v.startTime) * rate;
+    const n0 = Math.max(0, Math.floor(pos / P));
+    for (const n of [n0, n0 + 1]) {
+      if (n * P - pos > 4) break;
+      for (const p of v.parts) {
+        if (!p.buf || p.pass >= n) continue;
+        this.schedulePart(v, p, n * P);
+        p.pass = n; // started, or too late for this pass
+      }
+    }
+  }
+
+  /** a section cue is over (or stopped): free its voice and chunks */
+  endSection(v, ok) {
+    this.voices.delete(v);
+    const n = v.nodes;
+    v.nodes = null;
+    if (n) this.disconnect(n);
+    v.endResolve?.(ok);
   }
 
   applyGain(v, t = 0.1) {
@@ -406,10 +537,19 @@ export class AudioEngine {
     n.g.gain.cancelScheduledValues(now);
     n.g.gain.setValueAtTime(n.g.gain.value, now);
     n.g.gain.linearRampToValueAtTime(0, now + fade);
-    try { n.src.stop(now + fade + 0.02); } catch { /* already stopped */ }
+    try { n.src?.stop(now + fade + 0.02); } catch { /* already stopped */ }
+    if (v.parts) {
+      for (const r of n.srcs || []) { try { r.src.stop(now + fade + 0.02); } catch { /* ok */ } }
+      setTimeout(() => { if (v.nodes === n) this.endSection(v, true); }, (fade + 0.1) * 1000);
+    }
   }
 
-  disconnect(n) { for (const k of Object.keys(n)) { try { n[k].disconnect(); } catch { /* ok */ } } }
+  disconnect(n) {
+    for (const k of Object.keys(n)) {
+      if (k === 'srcs') { for (const r of n.srcs) { try { r.src.stop(); } catch { /* ok */ } try { r.out.disconnect(); r.src.disconnect(); } catch { /* ok */ } } n.srcs.clear(); continue; }
+      try { n[k].disconnect(); } catch { /* ok */ }
+    }
+  }
 
   placePanner(v, smoothing = 0.03) {
     const p = this.sourcePos(v), pan = v.nodes.pan, now = this.ac.currentTime;
@@ -460,13 +600,16 @@ export class AudioEngine {
       // a section sung through, over and over, on its own clock (real seconds): it plays the choir-psalm cue's own
       // buffer, from opts.offset — or, when a choir-psalm cue of the same section is still sounding, from its end on
       v.rsOpts = this.synthOpts(CUE_LIB[def.shareCue], opts, 0);
+      delete v.rsOpts.chunk;
+      v.timing = sectionTiming(opts); v.secDur = v.timing.duration;
+      v.parts = this.sectionParts(v.rsOpts, v.timing); // played verse by verse, as the cue (activateSection)
       const now = perfNow();
       let anchor = now - Math.max(0, +opts.offset || 0);
       for (const m of this.music) if (!m.v.stopped && m.end > now + 0.5 && sameOpts(m.sOpts, v.rsOpts)) anchor = Math.max(anchor, m.end);
       v.anchor = anchor;
       // verse captions on request only: a loop never captioned before audio-2, and a caller staging another text over
       // this sound (G3's Shabbat stand-in) must not see the stand-in's verses named
-      if (def.lyrics && opts.caption === true) this.startTrack(v, { t0: anchor, period: sectionTiming(opts).duration });
+      if (def.lyrics && opts.caption === true) this.startTrack(v, { t0: anchor, period: v.secDur });
     }
     this.loops.add(v);
     const handle = {
@@ -482,8 +625,8 @@ export class AudioEngine {
       },
       stop: (fade = 1) => {
         this.loops.delete(v); v.removed = true; this.deactivate(v, fade);
-        // the shared section buffer stays pinned only while a loop still sings it
-        if (v.rsOpts && ![...this.loops].some((o) => o.rsOpts && sameOpts(o.rsOpts, v.rsOpts))) this.renderer.pin('cue', def.shareCue, v.rsOpts, this.rateFor(def.shareCue), false);
+        // the shared section chunks stay pinned only while a loop still sings them
+        if (v.parts && ![...this.loops].some((o) => o.rsOpts && sameOpts(o.rsOpts, v.rsOpts))) for (const p of v.parts) this.renderer.pin('cue', def.shareCue, p.sOpts, this.rateFor(def.shareCue), false);
       },
       get active() { return !!v.nodes; },
     };
@@ -493,30 +636,50 @@ export class AudioEngine {
 
   activate(v) {
     if (v.loading || !this.running) return;
-    const share = v.def.shareCue, kind = share ? 'cue' : 'loop', rid = share || v.id, ro = v.rsOpts || v.sOpts, sr = this.rateFor(rid);
-    const buf = this.renderer.peek(kind, rid, ro, sr);
+    if (v.parts) { this.activateSection(v); return; }
+    const sr = this.rateFor(v.id);
+    const buf = this.renderer.peek('loop', v.id, v.sOpts, sr);
     if (!buf) {
       v.loading = true;
-      this.renderer.get(kind, rid, ro, sr, { priority: 5 + (v.def.priority || 1), pin: true })
+      this.renderer.get('loop', v.id, v.sOpts, sr, { priority: 5 + (v.def.priority || 1), pin: true })
         .then(() => { v.loading = false; })
         .catch((e) => { v.loading = false; v.failed = true; this.warnOnce(`render:${v.id}`, `[audio] loop render failed ${v.id}: ${e.message}`); });
       return;
     }
     if (!this.admit(v)) return;
-    if (v.spatial) { // start at the right muffling, not open for the first ticks
-      if (v.area || v.follow) v.space = this.spaceAt(this.sourcePos(v));
-      v.floor = this.transmission(v.space);
-      v.occ = Math.max(v.occ || 0, v.floor);
+    this.occlusionFloor(v);
+    // resume the "virtual playhead" so culled-and-restored loops do not restart from zero
+    const offset = ((this.ac.currentTime / buf.duration + v.phase) % 1) * buf.duration;
+    this.startVoice(v, buf, this.ac.currentTime + 0.01, offset, 1.2);
+  }
+
+  /** start at the right muffling, not open for the first ticks */
+  occlusionFloor(v) {
+    if (!v.spatial) return;
+    if (v.area || v.follow) v.space = this.spaceAt(this.sourcePos(v));
+    v.floor = this.transmission(v.space);
+    v.occ = Math.max(v.occ || 0, v.floor);
+  }
+
+  /**
+   * A section loop comes into earshot. Its playhead is its own clock (v.anchor, real seconds; it may start in the future,
+   * after the cue it follows); its chunks are requested once, the one sung now first, and pinned while a loop sings them.
+   * It sounds as soon as any chunk is ready; the others join at their places as they arrive (scheduleLoop).
+   */
+  activateSection(v) {
+    const d = perfNow() + 0.01 - v.anchor; // s since the first pass began (< 0: not yet)
+    if (!v.requested) {
+      v.requested = true;
+      for (const p of this.fetchParts(v.parts, d < 0 ? d : d % v.secDur, { priority: 5 + (v.def.priority || 1), pin: true, wrap: true })) {
+        p.promise.then((buf) => { p.buf = buf; if (v.nodes) this.scheduleLoop(v); }, (e) => this.warnOnce(`render:${v.id}`, `[audio] loop render failed ${v.id}: ${e.message}`));
+      }
     }
-    if (share) this.renderer.pin(kind, rid, ro, sr, true);
-    // resume the "virtual playhead" so culled-and-restored loops do not restart from zero; a sung section's playhead
-    // is its own clock (it may start in the future, after the cue it follows)
-    let when = this.ac.currentTime + 0.01, offset, fadeIn = 1.2;
-    if (v.anchor !== undefined) {
-      const d = perfNow() + 0.01 - v.anchor;
-      if (d < 0) { when -= d; offset = 0; fadeIn = 0.01; } else { offset = d % buf.duration; if (offset < 0.3) fadeIn = 0.01; }
-    } else offset = ((this.ac.currentTime / buf.duration + v.phase) % 1) * buf.duration;
-    this.startVoice(v, buf, when, offset, fadeIn);
+    if (!v.parts.some((p) => p.buf) || !this.admit(v)) return;
+    this.occlusionFloor(v);
+    this.chain(v, this.ac.currentTime + 0.01, 0.05);
+    v.startTime = this.ac.currentTime + 0.01 - d / (v.rate || 1); // the first pass's zero on the audio clock
+    for (const p of v.parts) p.pass = -Infinity;
+    this.scheduleLoop(v);
   }
 
   deactivate(v, fade = 0.8) {
@@ -527,8 +690,13 @@ export class AudioEngine {
     n.g.gain.cancelScheduledValues(now);
     n.g.gain.setValueAtTime(n.g.gain.value, now);
     n.g.gain.linearRampToValueAtTime(0, now + fade);
-    try { n.src.stop(now + fade + 0.05); } catch { /* ok */ }
-    n.src.onended = () => this.disconnect(n);
+    if (n.src) {
+      try { n.src.stop(now + fade + 0.05); } catch { /* ok */ }
+      n.src.onended = () => this.disconnect(n);
+    } else { // a section loop: its chunks (also those set to start later) stop with the fade
+      for (const r of n.srcs || []) { try { r.src.stop(now + fade + 0.05); } catch { /* ok */ } }
+      setTimeout(() => this.disconnect(n), (fade + 0.15) * 1000);
+    }
   }
 
   // ---------------------------------------------------------------- spaces & reverb
@@ -591,6 +759,8 @@ export class AudioEngine {
     }
     this.tickTracks();
     if (!running) return;
+    // a sung section is over when its clock passes its end (its chunks are separate sources)
+    for (const v of this.voices) if (v.parts && v.nodes && this.ac.currentTime > v.startTime + v.secDur / (v.rate || 1) + 0.05) this.endSection(v, true);
     if (cam) {
       _f.set(0, 0, -1).applyQuaternion(_q);
       _u.set(0, 1, 0).applyQuaternion(_q);
@@ -631,6 +801,7 @@ export class AudioEngine {
       if (!v.nodes) { if (e > on && !(v.blockedUntil > now)) this.activate(v); }
       else if (e < off) { if (!v.quietSince) v.quietSince = now; else if (now - v.quietSince > 1500) this.deactivate(v, 0.6); }
       else v.quietSince = 0;
+      if (v.parts && v.nodes) this.scheduleLoop(v); // the next pass's chunks, 4 s ahead
     }
     // occlusion: the space-to-space transmission floor for every source (moving and area sources re-locate
     // their space each tick), plus round-robin rays for point sources on medium+ (walls within one space)

@@ -30,8 +30,9 @@ export const CUE_LIB = {
   gevini: C(106, 1, { cat: 'voice', priority: 3, send: 0.55, caption: () => 'gevini' }),
   'shalom-call': C(90, 1, { cat: 'voice', priority: 2, send: 0.55, synth: ['variant'], caption: (o) => (o.variant === 'all-well' ? 'shalom-all-well' : 'shalom-call') }),
   cymbal: C(110, 1, { cat: 'music', variants: 2, priority: 3, send: 0.7 }),
-  // lyrics: the section's verses are captioned as they are sung (timeline.js sectionLyrics), after a heading
-  'choir-psalm': C(89, 3, { cat: 'music', priority: 3, send: 0.75, synth: ['psalm', 'song', 'section', 'style', 'fluteDay', 'weekday', 'men'], lyrics: true, caption: (o) => songHeading(songId(o), o.section, o.style) }),
+  // lyrics: the section's verses are captioned as they are sung (timeline.js sectionLyrics), after a heading. The engine
+  // renders and plays a sung section verse by verse ('chunk', chant.js melodyChunks); without 'chunk' it is one buffer
+  'choir-psalm': C(89, 3, { cat: 'music', priority: 3, send: 0.75, synth: ['psalm', 'song', 'section', 'style', 'fluteDay', 'weekday', 'men', 'tempo', 'chunk'], lyrics: true, caption: (o) => songHeading(songId(o), o.section, o.style) }),
   kinnor: C(78, 1, { cat: 'music', variants: 3, send: 0.6 }),
   nevel: C(80, 1, { cat: 'music', variants: 2, send: 0.6 }),
   chalil: C(94, 1, { cat: 'music', variants: 2, priority: 2, send: 0.65 }),
@@ -62,10 +63,10 @@ export const LOOP_LIB = {
   doves: C(47, 4, { bed: true, cat: 'animal', send: 0.3 }),
   sheep: C(70, 2, { send: 0.4, cat: 'animal' }),
   'night-insects': C(48, 1, { bed: true, cat: 'insects', send: 0, synth: ['temp'] }),
-  // the section sung through, again and again: plays the choir-psalm cue's own buffer (shareCue), from its start or
-  // straight after a choir-psalm cue of the same section that is still sounding; its verses captioned as sung when the
-  // caller asks (opts.caption: true)
-  choir: C(89, 3, { send: 0.75, cat: 'music', synth: ['psalm', 'song', 'section', 'style', 'fluteDay', 'weekday', 'men'], priority: 3, shareCue: 'choir-psalm', lyrics: true }),
+  // the section sung through, again and again: plays the choir-psalm cue's own verse buffers (shareCue), from its start
+  // or straight after a choir-psalm cue of the same section that is still sounding; its verses captioned as sung when
+  // the caller asks (opts.caption: true)
+  choir: C(89, 3, { send: 0.75, cat: 'music', synth: ['psalm', 'song', 'section', 'style', 'fluteDay', 'weekday', 'men', 'tempo'], priority: 3, shareCue: 'choir-psalm', lyrics: true }),
   bells: C(72, 1, { send: 0.5, cat: 'fx', priority: 2 }),
 };
 

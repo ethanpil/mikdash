@@ -10,11 +10,12 @@
 //  * style 'sg1612': the Shiltei HaGiborim (Portaleone, Mantua 1612) Renaissance-lens layer (report §54):
 //    four-voice homophonic psalmody (falsobordone) in quarter-comma meantone with cadential musica ficta.
 //    A style layer, never the default.
-import { Rng, resonate, cents } from './dsp.js';
+import { Rng, Biquad, resonate, cents } from './dsp.js';
 import { buildSegments, renderVoice } from './voice.js';
-import { psalmMelody, SECTION_TAIL } from './chant.js';
-import { SONGS, songId, sectionText } from '../songs.js';
+import { psalmMelody, syllabify, melodyChunks, SECTION_TAIL } from './chant.js';
+import { SONGS, songId, sectionText, sectionVerses } from '../songs.js';
 import { pluck, reedNote, BODY } from './instruments.js';
+import { CHOIR_CAL } from './choir-cal.js';
 
 // The texts (Hebrew, chant syllables, English) and the three sections of each psalm and song are in ../songs.js.
 // Divine names are sung in their customary substitutes (Hashem, Elokim, Kel, Kah): a simulation, not liturgy.
@@ -59,29 +60,43 @@ const FB = {
 /**
  * Render a psalm section with voices and the Levites' strings. Mono Float32Array.
  * o: { sr, seed, psalm | song (src/audio/songs.js ids), section, style, men, boys, kinnorot, nevalim, fluteDay, tempo, text,
- *      cr, hiGain (per-voice cost: control rate, parallel high-formant branch — weak tiers) }
+ *      cr, hiGain (per-voice cost: control rate, parallel high-formant branch — weak tiers),
+ *      chunk (one verse only: chant.js melodyChunks — its buffer starts at that chunk's t0 on the section's clock),
+ *      stringsGain (the strings' level against the voices; default: their peaks matched, 0.32 — choirCalibration) }
+ * → { buffer, length (the whole section's), events, chunk, voicePeak, stringsPeak }
  */
 export function renderPsalm(o) {
   const sr = o.sr, rng = new Rng(o.seed || 48);
-  const text = o.text || sectionText(songId(o), Math.max(0, Math.min(2, o.section | 0)));
+  const section = Math.max(0, Math.min(2, o.section | 0));
+  const verses = o.text ? null : sectionVerses(songId(o), section);
+  const text = o.text || sectionText(songId(o), section);
   const style = o.style === 'sg1612' ? 'sg1612' : 'mishnah';
   const tuning = style === 'sg1612' ? 'meantone' : 'pyth';
   const { events, length } = psalmMelody(text, { tempo: o.tempo || 1 });
   const total = length + SECTION_TAIL;
-  const out = new Float32Array(Math.ceil(total * sr));
+  // one verse (o.chunk): its own events on its own buffer, which starts at the chunk's t0 on the section's clock
+  const chunks = Number.isInteger(o.chunk) && verses ? melodyChunks(events, length, verses.map((v) => syllabify(v.tr).length)) : null;
+  const chunk = chunks ? chunks[Math.max(0, Math.min(chunks.length - 1, o.chunk))] : null;
+  const t0 = chunk ? chunk.t0 : 0, e0 = chunk ? chunk.e0 : 0, e1 = chunk ? chunk.e1 : events.length;
+  const out = new Float32Array(Math.ceil((chunk ? chunk.t1 - chunk.t0 : total) * sr));
 
   const men = o.men ?? 12, boys = style === 'sg1612' ? 0 : (o.boys ?? 4);
   const types = ['bass', 'baritone', 'baritone', 'tenor'];
-  // per-singer realisation of the shared melody: own timing, intonation, vibrato, timbre
-  const singerNotes = (part, octave, lag, jitter, r) => events.map((e) => {
-    const names = part ? part(e) : e.notes;
-    const dt = lag + Math.max(-0.035, Math.min(0.035, r.gauss() * jitter));
-    return {
-      t: e.t + dt, dur: e.dur, syl: e.syl, gap: e.gap, breathAfter: e.breathAfter ? Math.min(0.28, e.breathAfter * 0.6) : 0,
-      f0s: names.map(([fr, nm, oc]) => [fr, freq(nm, (oc ?? 3) + octave, tuning)]),
-      amp: e.stress ? 1 : 0.86,
-    };
-  });
+  // per-singer realisation of the shared melody: own timing, intonation, vibrato, timbre. Drawn for every event of the
+  // section, so a chunk's notes are exactly the whole section's; the next verse's first note closes the chunk's last
+  // syllable (a ghost: not sung) as it does in the whole section
+  const singerNotes = (part, octave, lag, jitter, r) => {
+    const all = events.map((e) => {
+      const names = part ? part(e) : e.notes;
+      const dt = lag + Math.max(-0.035, Math.min(0.035, r.gauss() * jitter));
+      return {
+        t: e.t + dt - t0, dur: e.dur, syl: e.syl, gap: e.gap, breathAfter: e.breathAfter ? Math.min(0.28, e.breathAfter * 0.6) : 0,
+        f0s: names.map(([fr, nm, oc]) => [fr, freq(nm, (oc ?? 3) + octave, tuning)]),
+        amp: e.stress ? 1 : 0.86,
+      };
+    });
+    return chunk ? [...all.slice(e0, e1), ...(e1 < all.length ? [{ ...all[e1], ghost: true }] : [])] : all;
+  };
 
   const voices = [];
   if (style === 'mishnah') {
@@ -147,8 +162,10 @@ export function renderPsalm(o) {
   const kinBus = new Float32Array(out.length), nevBus = new Float32Array(out.length);
   const kin = o.kinnorot ?? 9, nev = sg ? 3 : o.nevalim ?? 2;
   const kp = sg ? { decay: 2.8, bright: 0.4, pick: [0.3, 0.45], click: 0.04, clickLp: 2200 } : { decay: 1.6, bright: 0.55, pick: [0.12, 0.22] };
-  const kr = rng.fork(777);
-  for (const e of events) {
+  // each event draws from its own stream, so a chunk plucks exactly as the whole section does
+  const kroot = rng.fork(777);
+  for (let i = e0; i < e1; i++) {
+    const e = events[i], kr = kroot.fork(i + 1), et = e.t - t0;
     const [, first] = e.notes[0];
     const key = sg ? (FB[e.cadence === 'm' && first === 'A' ? 'Am' : first] || FB.A) : null;
     if (e.stress || e.cadence || kr.chance(0.35)) {
@@ -156,21 +173,21 @@ export function renderPsalm(o) {
       for (let j = 0; j < n; j++) {
         const [fr, nm, oc] = sg ? [0, ...key[1 + (j % 3)]] : kr.pick(e.notes);
         const octave = sg ? oc : kr.chance(0.6) ? 4 : 5;
-        const t = e.t + fr * e.dur * 0.8 + kr.uni(-0.02, 0.05) + j * 0.012;
+        const t = et + fr * e.dur * 0.8 + kr.uni(-0.02, 0.05) + j * 0.012;
         pluck(kinBus, sr, kr, { t, f: freq(nm, octave, tuning), amp: kr.uni(0.25, 0.45), decay: kp.decay, bright: kp.bright, pick: kr.uni(kp.pick[0], kp.pick[1]), click: kp.click, clickLp: kp.clickLp });
       }
     }
-    if ((e.cadence || e === events[0] || (e.stress && kr.chance(0.3))) && nev > 0) {
+    if ((e.cadence || i === 0 || (e.stress && kr.chance(0.3))) && nev > 0) {
       if (sg) {
         // lutes: bass, tenor and alto of the chord, thumb then fingers; each note on a paired course
         for (let j = 0; j < nev; j++) key.slice(0, 3).forEach(([nm, oc], m) => {
-          const t = e.t + kr.uni(-0.01, 0.04) + j * 0.02 + m * 0.028, f = freq(nm, oc, tuning);
+          const t = et + kr.uni(-0.01, 0.04) + j * 0.02 + m * 0.028, f = freq(nm, oc, tuning);
           for (const c of [-1, 1]) pluck(nevBus, sr, kr, { t: t + (c > 0 ? kr.uni(0.003, 0.009) : 0), f: f * cents(c * kr.uni(1.5, 3.5)), amp: kr.uni(0.3, 0.42), decay: 2.2, bright: 0.7, pick: kr.uni(0.09, 0.14), click: 0.07, clickLp: 4500 });
         });
       } else {
         const names = e.cadence === 'f' ? [['D', 2], ['A', 2]] : [['D', 2], ['A', 2]].slice(0, kr.chance(0.5) ? 2 : 1);
         for (let j = 0; j < nev; j++) for (const [nm, oc] of names) {
-          pluck(nevBus, sr, kr, { t: e.t + kr.uni(-0.01, 0.06) + j * 0.03, f: freq(nm, oc, tuning) * (j ? 2 : 1), amp: kr.uni(0.45, 0.6), decay: 3.2, bright: 0.35, pick: 0.3 });
+          pluck(nevBus, sr, kr, { t: et + kr.uni(-0.01, 0.06) + j * 0.03, f: freq(nm, oc, tuning) * (j ? 2 : 1), amp: kr.uni(0.45, 0.6), decay: 3.2, bright: 0.35, pick: 0.3 });
         }
       }
     }
@@ -179,10 +196,52 @@ export function renderPsalm(o) {
   const nb = resonate(nevBus, sr, sg ? BODY.lute : BODY.nevel, 0.6);
   for (let i = 0; i < str.length; i++) str[i] += nb[i] * 0.8;
   // flute days only (Arachin 2:3): the chalil doubles the melody; never on an ordinary weekday
-  if (o.fluteDay) chalilLine(str, sr, rng.fork(55), events, tuning);
+  if (o.fluteDay) chalilLine(str, sr, rng.fork(55 + (chunk ? chunk.k : 0)), events.slice(e0, e1).map((e) => ({ ...e, t: e.t - t0 })), tuning);
   const sp = peakOf(str);
-  if (sp > 0) { const g = (voicePeak * 0.32) / sp; for (let i = 0; i < out.length; i++) out[i] += str[i] * g; }
-  return { buffer: out, length: total, events };
+  if (sp > 0) { const g = Number.isFinite(o.stringsGain) ? o.stringsGain : (voicePeak * 0.32) / sp; for (let i = 0; i < out.length; i++) out[i] += str[i] * g; }
+  return { buffer: out, length: total, events, chunk, voicePeak, stringsPeak: sp };
+}
+
+// One level for every verse of a section: a verse rendered alone cannot be normalised on its own (the loudest 400 ms
+// of a unison choir is a chance alignment of its voices, ±2 dB from verse to verse), so the strings' balance and the
+// output gain are calibrated once per choir (the same singers, tier and style) on a fixed phrase it sings, and applied
+// to the whole section and to each verse alike. Psalm 150:4, which names no Divine Name. The standard choirs' values are
+// precomputed (choir-cal.js, written by dev/songs-test.mjs --write-cal, which also checks them): no Worker time.
+export const REF_TEXT = 'ha-le-lu-hu ve-tof u-ma-chol, ha-le-lu-hu be-mi-nim ve-u-gav.';
+const CAL = new Map();
+/** the configuration a calibration depends on (renderPsalm's options without the text, chunk and tempo) */
+export function calConfig(o) {
+  const style = o.style === 'sg1612' ? 'sg1612' : 'mishnah';
+  return {
+    sr: o.sr, seed: o.seed || 48, style, section: style === 'sg1612' && (o.section | 0) >= 2 ? 2 : 0, men: o.men ?? 12, boys: style === 'sg1612' ? 0 : o.boys ?? 4,
+    kinnorot: o.kinnorot ?? 9, nevalim: o.nevalim ?? 2, fluteDay: !!o.fluteDay, cr: o.cr, hiGain: o.hiGain, // (unset: renderPsalm's defaults)
+  };
+}
+export const calKey = (p) => [p.sr, p.seed, p.style, p.section, p.men, p.boys, p.kinnorot, p.nevalim, p.fluteDay ? 1 : 0, p.cr ?? '-', p.hiGain ?? '-'].join('|');
+/**
+ * The choir's calibration (memoised per configuration): { stringsGain (as renderPsalm's default would set it on the
+ * reference), loudDb (K-weighted level of the reference, gated mean of its 400 ms windows within 20 dB of the loudest) }.
+ * o: renderPsalm's options (the text, chunk and tempo are ignored). fresh: compute it, never the precomputed table.
+ */
+export function choirCalibration(o, fresh = false) {
+  const p = calConfig(o), key = calKey(p);
+  let c = fresh ? null : CHOIR_CAL[key] || CAL.get(key);
+  if (c) return c;
+  const r = renderPsalm({ ...p, text: REF_TEXT });
+  c = { stringsGain: r.stringsPeak > 0 ? (r.voicePeak * 0.32) / r.stringsPeak : 0, loudDb: gatedLoudness(r.buffer, o.sr) };
+  if (!fresh) CAL.set(key, c);
+  return c;
+}
+
+/** K-weighted (BS.1770 pre-filter) level, dB: the mean power of the 400 ms windows within 20 dB of the loudest */
+export function gatedLoudness(x, sr) {
+  const k = Float32Array.from(x);
+  new Biquad('highshelf', 1681.97, 0.7071752, 4, sr).run(k);
+  new Biquad('highpass', 38.13547, 0.500327, 0, sr).run(k);
+  const w = Math.round(0.4 * sr), win = [];
+  for (let i = 0; i + w <= k.length; i += w >> 1) { let e = 0; for (let j = i; j < i + w; j++) e += k[j] * k[j]; win.push(e / w); }
+  const max = Math.max(...win), gate = max * 0.01, on = win.filter((e) => e >= gate);
+  return 10 * Math.log10(on.reduce((s, e) => s + e, 0) / Math.max(1, on.length) + 1e-12);
 }
 
 function chalilLine(out, sr, r, events, tuning) {

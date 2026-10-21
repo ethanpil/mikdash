@@ -36,7 +36,7 @@ import { CUE_LIB, LOOP_LIB } from './library.js';
 import { PSALM_BY_DAY } from './synth/meta.js';
 import { AMAH } from '../core/units.js';
 import { libationTimeline, sectionTiming } from './timeline.js';
-import { SONGS, resolveSong, shabbatSong } from './songs.js';
+import { SONGS, resolveSong, shabbatSong, shabbatWeek } from './songs.js';
 
 export { libationTimeline, sectionTiming, sectionLyrics, D_SET, SET_BLASTS } from './timeline.js';
 export { SONGS, songId, resolveSong, shabbatSong, sectionVerses } from './songs.js';
@@ -68,11 +68,14 @@ function concert(ctx, setting) {
   const music = (opts = {}) => {
     const o = { ...opts };
     if (o.song !== undefined && o.song !== null) {
-      const id = resolveSong(o.song, o.week), S = SONGS[id];
+      // a cycle named without its week ('haazinu', 'shirah'): this Shabbat's part of it, counted as shabbatSong() counts
+      const id = resolveSong(o.song, Number.isInteger(o.week) ? o.week : shabbatWeek(o.date ?? ctx.time?.date)), S = SONGS[id];
       if (!S) { if (!warned.has(o.song)) { warned.add(o.song); console.warn(`[audio] unknown song "${o.song}" — the psalm of the day is sung`); } delete o.song; }
       else if (S.kind === 'psalm') { o.psalm = S.psalm; delete o.song; } else { o.song = id; delete o.psalm; delete o.weekday; }
-      delete o.week;
+      delete o.week; delete o.date;
     }
+    // tempo 1 is the default: left out, so it is one cache entry with a cue that does not name it
+    if (!(o.tempo > 0) || +o.tempo === 1) delete o.tempo; else o.tempo = +o.tempo;
     if (o.psalm === undefined && o.song === undefined) {
       const wd = Number.isInteger(o.weekday) ? o.weekday : ctx.time?.dayType === 'shabbat' ? 6 : ctx.time?.weekday;
       o.psalm = PSALM_BY_DAY[wd] ?? PSALM_BY_DAY[1];
@@ -114,11 +117,13 @@ export async function init(ctx) {
     return o;
   };
 
-  /** pre-render a cue (variant 0, or all its variants); hold: performance.now() ms until which it is not evicted */
+  /** pre-render a cue (variant 0, or all its variants; a sung section verse by verse, as it plays); hold:
+   *  performance.now() ms until which it is not evicted */
   const fetchCue = (id, opts = {}, priority = 2, allVariants = false, hold = 0) => {
     const def = CUE_LIB[id];
     if (!def) return;
     const o = music(id, opts);
+    if (def.lyrics) { engine.fetchSection(o, { priority, hold }); return; }
     for (let v = 0; v < (allVariants ? def.variants || 1 : 1); v++) engine.renderer.get('cue', id, engine.synthOpts(def, o, v), engine.rateFor(id), { priority, hold });
   };
   /** how long a fetched concert is kept from eviction when nothing says when it ends (real ms) */
@@ -194,17 +199,19 @@ export async function init(ctx) {
     const choirOpts = (s) => ({ ...base, section: s });
     let stopped = false, startedResolve;
     const handles = [];
-    // every part is kept from eviction until the concert is over (the render wait is at most tens of seconds)
+    // every part is kept from eviction until the concert is over (the render wait is a few seconds)
     const hold = performance.now() + (T.done + 120) * 1000;
     const get = (id, o = {}, priority = 20) => engine.renderer.get('cue', id, engine.synthOpts(CUE_LIB[id], o, 0), engine.rateFor(id), { priority, hold });
+    const sing = (s, priority) => engine.fetchSection(choirOpts(s), { priority, hold });
     // started: when t = 0 (the first blast) sounds — { perf: performance.now() ms, sim: ctx.time.t (min) } — or null
     const started = new Promise((r) => { startedResolve = r; });
     const self = { stop: () => { stopped = true; handles.forEach((h) => h?.stop?.(0.5)); }, timeline: T, started };
     libations.add(self);
     self.done = (async () => {
-      // the blasts and the first section must be ready; sections 2-3 render meanwhile (a late one joins in progress)
-      const first = [get('trumpet-set'), get('cymbal'), get('crowd-prostrate'), get('choir-psalm', choirOpts(0))];
-      [1, 2].forEach((s) => get('choir-psalm', choirOpts(s), 19 - s)); // queued behind section 1 (same lane)
+      // the blasts and the first verse must be ready: the rest of the song renders verse by verse during the 15–40 s of
+      // the first set, the walk and the pour (a verse that is late joins in progress)
+      const first = [get('trumpet-set'), get('cymbal'), get('crowd-prostrate'), sing(0, 20)[0]];
+      [1, 2].forEach((s) => sing(s, 19 - s)); // queued behind section 1 (same lane)
       await Promise.all(first);
       if (stopped || !engine.running) return false;
       // every part is ready (or joins in progress): each cue is placed at its delay from now, so t = 0 is now
@@ -230,7 +237,7 @@ export async function init(ctx) {
   /**
    * Beds and the common cues. Medium and up: everything at unlock (all variants of the cues that must start on
    * time), at low priority. Low (phones): only the beds and the sounds of the next scheduled events. Every tier: the
-   * Levites' song is fetched shortly before each libation (scheduled()).
+   * opening of the day's song at idle priority, and the whole concert shortly before each libation (scheduled()).
    */
   let warmed = false;
   function warm(early) {
@@ -239,10 +246,12 @@ export async function init(ctx) {
     if (!early) warmed = true;
     const sr = engine.synthRate, R = engine.renderer;
     for (const [id, o] of amb.bedSpecs()) R.get('loop', id, o, sr, { priority: 4, pin: true });
+    // the opening of the day's song at idle priority, in the otherwise idle music Worker (started by it): on medium and
+    // up the first section, as before audio-2; on low its first verse. A jump to the song then finds it ready.
+    // scheduled() fetches the whole concert a few real minutes before it is due.
+    if (!early) engine.fetchSection(music('choir-psalm', { section: 0 }), { priority: 0, first: engine.tier === 'low' ? 1 : Infinity });
     if (engine.tier === 'low') { scheduled(true); return; }
     for (const id of ['trumpet-set', 'trumpet-tekiah', 'gate-boom', 'magrefah', 'great-gate-open', 'cymbal', 'barkai', 'gevini', 'shalom-call', 'crowd-prostrate', 'knock', 'muchni']) fetchCue(id, {}, 2, true);
-    // the song itself is not pre-rendered here on any tier: whole sections are minutes of audio and seconds of Worker
-    // time each; scheduled() fetches them a few real minutes before a concert
   }
 
   /**

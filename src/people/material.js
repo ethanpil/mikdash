@@ -62,6 +62,17 @@ mat4 pSkin() {
     if (pW.y > 0.0) m += pBoneM(int(pIdx.y + 0.5)) * pW.y;
     if (pW.z > 0.0) m += pBoneM(int(pIdx.z + 0.5)) * pW.z;
     if (pW.w > 0.0) m += pBoneM(int(pIdx.w + 0.5)) * pW.w;
+    // a mantle's side panel below the seat (human.js mantle): a share of it hangs from the pelvis (bone 1) instead of
+    // following the leg cage, as far as the pelvis stands upright — a seated man's mantle falls beside him; lying, the
+    // cage alone. pMat.y = −0.98·hang on the cloth, −1 − 20·hang − h on its fringe (VERT_BEGIN)
+    if (pMat.y < -0.005) {
+      float hg = pMat.y > -0.99 ? -pMat.y / 0.98 : floor(-pMat.y - 1.0) / 20.0;
+      if (hg > 0.01) {
+        mat4 pel = pBoneM(1);
+        hg *= smoothstep(0.7, 0.92, pel[1].y);
+        m = m * (1.0 - hg) + pel * hg;
+      }
+    }
     return m;
   #endif
 }
@@ -82,7 +93,8 @@ vec3 pPalette(int cls) {
 const VERT_BEGINNORMAL = /* glsl */`
 mat4 pSkinM = pSkin();
 #define P_SKINNED
-vec3 objectNormal = mat3(pSkinM) * vec3(normal);
+// a plumb fringe (pMat.y ≤ −1, see VERT_BEGIN) keeps its rest normal: it hangs in the figure's frame
+vec3 objectNormal = pMat.y < -0.995 ? vec3(normal) : mat3(pSkinM) * vec3(normal);
 #ifdef USE_TANGENT
 vec3 objectTangent = vec3( tangent.xyz );
 #endif
@@ -98,6 +110,16 @@ pPos += pMorph.xyz * pAnimB.y + normal * (pMorph.w * pAnimB.z);
 #endif
 vec3 transformed = (pSkinM * vec4(pPos, 1.0)).xyz;
 #ifndef P_PROP
+// a plumb fringe (the tzitzit): pMat.y = −1 − q − h, h = the vertex's height below its knot at rest (q: pSkin). The
+// knot is skinned with the cloth; the strand hangs straight down from it in the figure's frame whatever the cloth does
+// (the skirt cage turned it out horizontally over a seated man's knees), and what reaches the floor lies on it,
+// pointing outward from where it meets the floor (or from under the knot, when the corner itself lies below it)
+if (pMat.y < -0.995) {
+  float pH = fract(-pMat.y - 1.0);
+  transformed = (pSkinM * vec4(pPos + vec3(0.0, pH, 0.0), 1.0)).xyz - vec3(0.0, pH, 0.0);
+  float under = 0.004 - transformed.y;
+  if (under > 0.0) { transformed.y = 0.004; transformed.xz += normalize(transformed.xz + vec2(1e-4)) * min(under, pH) * 0.85; }
+}
 {
   int pg = int(pMat.w + 0.5) >> 3;
   if (pg > 0 && ((int(pAnimB.w + 0.5) >> (pg - 1)) & 1) == 0) transformed = vec3(0.0);
@@ -115,7 +137,7 @@ const VERT_COLOR = /* glsl */`
 #if defined( USE_COLOR )
 vColor = vec4(color * pPalette(int(pMat.w + 0.5) & 7), 1.0);
 #endif
-vPMat = pMat;
+vPMat = vec4(pMat.x, max(pMat.y, 0.0), pMat.zw);   // (a plumb fringe's hang height is not a metalness)
 vPUv = uv;
 vPFade = pAnimA.w;
 #ifndef P_PROP
@@ -395,6 +417,20 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
     pCol *= 0.74 + 0.3 * n + 0.08 * (ring - 0.5);
     pH += 0.0003 * n;
   }
+  if (pat == 40) { // bark of the pile's wood (Tamid 2:3): u round the branch, v along it. The roughness channel picks the
+    // bark: smooth fig (≤ 0.8) with lenticels and faint rings, or the furrowed ridges of walnut / oil-wood (≥ 0.92)
+    float deep = smoothstep(0.82, 0.92, vPMat.x);
+    float fur = pNoise(vec2(uv.x * 85.0, uv.y * 6.0) + vec2(pNoise(uv * vec2(9.0, 2.0)) * 3.0, 0.0));
+    float ridge = mix(0.5, 1.0 - abs(2.0 * fur - 1.0), P_NY(0.012));
+    float mot = pNoise(uv * vec2(14.0, 5.0) + 1.7);
+    float len = smoothstep(0.86, 0.94, pNoise(vec2(uv.x * 160.0, uv.y * 500.0))) * P_NY(0.005) * (1.0 - deep);
+    float rings = mix(0.5, pNoise(vec2(uv.x * 4.0, uv.y * 60.0)), P_NY(0.01)) * (1.0 - deep);
+    pCol *= mix(0.9 + 0.2 * mot + 0.06 * (rings - 0.5), 0.55 + 0.6 * ridge, deep);
+    pCol = mix(pCol, pCol * vec3(0.78, 0.76, 0.72), len);                      // lenticels: small faint dashes
+    pCol = mix(pCol, pCol * vec3(0.92, 1.02, 0.9), smoothstep(0.7, 0.85, mot) * 0.5);   // a greenish film in places
+    pRough = mix(0.72, 0.9, deep);
+    pH += mix(0.0002 * (mot - 0.5) - 0.0003 * len, 0.0018 * (ridge - 0.5), deep);
+  }
 #endif
 #if defined(P_G_BEAST) || defined(P_G_FLESH) || defined(P_G_PROP)
   if (pat == 12) { // horn / hoof: growth rings, ridged
@@ -556,6 +592,27 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
   }
 #endif
 #if defined(P_G_FLESH)
+  if (pat == 39) { // charred on the pyre: a cracked black crust over roasted meat, greasy where the fat ran (Tamid 2:1)
+    // a black, matt, blistered crust broken into plates by a network of fissures; deep in the fissures the roasted
+    // meat shows dark red-brown; grey-white ash settled on it; only small spots wet with fat. (A brown roast tone over
+    // half the surface and broad greasy patches read as smooth leather with a sheen, and lit the cut ends' edges white.)
+    vec2 w = uv * 42.0 + vec2(pNoise(uv * 17.0), pNoise(uv * 17.0 + 3.7)) * 2.4;
+    float cell = pNoise(w);
+    float crack = (1.0 - smoothstep(0.0, 0.085, abs(cell - 0.5))) * smoothstep(0.25, 0.55, pNoise(uv * 11.0 + 7.1)) * P_NY(0.014);
+    float blister = smoothstep(0.55, 0.9, pNoise(uv * 70.0 + 1.3)) * P_NY(0.004);
+    float n = mix(0.5, pNoise(uv * 150.0), P_NY(0.005));
+    pCol *= 0.45 + 0.5 * n;
+    float thin = smoothstep(0.62, 0.9, pNoise(uv * 4.5 + 5.3));               // here and there the crust is thinner
+    pCol = mix(pCol, vec3(0.016, 0.007, 0.004), thin * 0.35);
+    pCol = mix(pCol, vec3(0.012, 0.004, 0.002), crack * 0.9);                // the fissures: dark, a little red deep in them
+    pCol += vec3(0.01, 0.0015, 0.0) * crack * smoothstep(0.03, 0.0, abs(cell - 0.5));
+    float ash = smoothstep(0.72, 0.86, pNoise(uv * 48.0 + 11.7)) * smoothstep(0.35, 0.7, pNoise(uv * 5.0 + 3.1)) * P_NY(0.006);
+    pCol = mix(pCol, vec3(0.07, 0.067, 0.064), ash * 0.35);
+    float grease = smoothstep(0.8, 0.95, pNoise(uv * 9.0 + 2.0)) * (1.0 - ash) * (1.0 - crack);
+    pRough = mix(mix(0.9, 0.55, grease), 0.98, ash);
+    pH += 0.0016 * cell - 0.0016 * crack + 0.0005 * blister + 0.0002 * n + 0.0003 * ash;
+    pSheen = 0.0;
+  }
   if (pat == 38) { // the inner face of a flayed hide: pale fascia, fine vessels
     float v = 1.0 - abs(2.0 * pNoise(uv * vec2(30.0, 50.0)) - 1.0);
     pCol = mix(pCol, pCol * vec3(0.85, 0.5, 0.45), smoothstep(0.9, 0.98, v) * P_NY(0.006) * 0.6);
@@ -740,7 +797,7 @@ material.sheenRoughness = 0.6;
     }
     shader.fragmentShader = f;
   };
-  const key = `people:${defines.join(',')}:${physical ? 'phys' : 'std'}:v4`;
+  const key = `people:${defines.join(',')}:${physical ? 'phys' : 'std'}:v6`;
   mat.customProgramCacheKey = () => key;
   return mat;
 }
@@ -753,7 +810,7 @@ export function createPeopleDepthMaterials(atlas, prop = false) {
       shader.uniforms.uPBones = atlas.uniform;
       shader.vertexShader = patchVertex(shader.vertexShader, { depth: true });
     };
-    const key = `people-depth:${prop ? 'prop' : 'fig'}:v3`;
+    const key = `people-depth:${prop ? 'prop' : 'fig'}:v5`;
     m.customProgramCacheKey = () => key;
     return m;
   };

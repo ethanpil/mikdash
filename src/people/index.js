@@ -23,14 +23,27 @@
 //        setSite Z: a number = exact height; { near: Z } = the walking floor nearest Z (stairs, galleries, upper
 //        rooms); omitted = the walking floor (court/hall floors on the site datums — never a roof or beam above).
 //        Floors are re-resolved when the colliders are (re)built.
-//        Kohanic roles in 'sleep' / 'lie' wear their own clothes and lie on their folded garments (Tamid 1:1).
+//        Kohanic roles in 'sleep' / 'lie' wear their own clothes and lie on their folded garments (Tamid 1:1);
+//        kohanic roles in 'bathe' show their bathing figure.
+//   Night, Moked and service (docs/decisions/people-3.md): roles kohen_elder kohen_elder_offduty kohen_breeches
+//   kohen_bathing; poses sit_floor call knock lift_mitre lock staff staff_walk strike windlass kiddush rinse carry_lamb
+//   carry_lamb_walk pour_low wave_sudar tend_lamp warm bathe windlass_raise carry_log carry_log_walk;
+//   Actor.setHeadgear(on) (the officer lifts the mitre, Yoma 25a); ctx.people.stations = { windlass, windlassRaise,
+//   staff, mitreGrasp } (the fixtures' geometry the poses assume, with the wheel ↔ phase coupling); props staff
+//   migbaat psachter psachter_inverted kaf_covered gizrin_branch branch_bundle lamb_dead taper entrails
+//   folded_garments_ledge and limb*_charred; grip class 'pour'. Ritual vessels in actors' hands stay drawn at LOD 2.
+//   A prop may choose its own clip for a pose (PROPS[name].poses): gizrin_branch / branch_bundle turn carry_shoulder(_walk)
+//   into carry_log(_walk); kaf / kaf_covered turn stand / walk into stand_hold / walk_hold (the vessel level in a closed
+//   fist, that arm steady). The service clips are baked for the men's rigs only (man, elder), sit_floor and warm for all.
+//   Tzitzit hang plumb and a seated man's mantle sides hang from the pelvis (material.js, docs/decisions/people-3-fix.md).
+//   The sleepers' bedding covers are built ahead in idle time (props.js prewarmBedding, scheduled below).
 // Rendering: GPU-instanced; every figure is skinned in the vertex shader from a baked animation atlas. Beyond
 // quality.maxFigures the next figures (up to 3× more) are drawn as LOD3 silhouettes that dither out at the cap.
 import { PRIORITY } from '../core/engine.js';
 import { PeopleSystem } from './system.js';
 import { ROLE_NAMES, ANIMAL_NAMES, ROLES } from './roles.js';
-import { PROP_NAMES, setPropMetals } from './props.js';
-import { HUMAN_CLIPS } from './clips.js';
+import { PROP_NAMES, setPropMetals, prewarmBedding } from './props.js';
+import { HUMAN_CLIPS, MITRE_GRASP, STAFF, WINDLASS, WINDLASS_RAISE } from './clips.js';
 import { QUAD_CLIPS, BIRD_CLIPS } from './animal-clips.js';
 import { poseAlongPath } from './util.js';
 
@@ -58,6 +71,14 @@ export async function init(ctx) {
     for (const c of sys.crowds) c.fade = 0;
   });
   ctx.bus.on('quality:change', () => sys.reconfigure(ctx.quality));
+  // the sleepers' bedding covers are draped over the posed body (props.js): costly to build (≈ 0.2–0.7 s on the main
+  // thread at a first sleeper's draw), so they are built ahead — a first slice here behind the loader, the rest in idle
+  // time (browser only)
+  if (typeof requestAnimationFrame === 'function' && !prewarmBedding(120)) {
+    const idle = typeof requestIdleCallback === 'function' ? (f) => requestIdleCallback(f, { timeout: 500 }) : (f) => setTimeout(f, 60);
+    const step = () => { if (!prewarmBedding(6)) idle(step); };
+    idle(step);
+  }
 
   const phaseFor = (who, pose = 'walk', meters = 0) => {
     const arch = typeof who === 'string' ? sys.arch((ROLES[who] || ROLES.israelite).arch) : who?.arch;
@@ -88,6 +109,10 @@ export async function init(ctx) {
         { right: 'solet', left: null, pose: 'carry' }, { right: 'chavitin', left: null, pose: 'carry' }, { right: 'wine_jug', left: null, pose: 'carry' },
       ],
     },
+    // the fixtures' geometry the service poses assume (figure frame: metres, −z ahead, +x his right); the windlass
+    // stations carry the wheel angle ↔ pose phase coupling (phaseAt) for lowering (windlass) and raising
+    // (windlassRaise, pose windlass_raise) the kiyor; staff.strike.tip = where the blow lands
+    stations: { windlass: WINDLASS, windlassRaise: WINDLASS_RAISE, staff: STAFF, mitreGrasp: MITRE_GRASP },
     animalPoses: Object.keys(QUAD_CLIPS),
     birdPoses: Object.keys(BIRD_CLIPS),
     get actors() { return [...sys.actors]; },

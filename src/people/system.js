@@ -13,7 +13,7 @@ import { ARCHETYPES, ROLES, ANIMALS } from './roles.js';
 import { buildHumanGeometry } from './human.js';
 import { buildAnimalGeometry, halterPoint } from './animals.js';
 import { gripOffset } from './clips.js';
-import { PROPS, buildPropGeometry, propAttach, propTip } from './props.js';
+import { PROPS, HELD_VESSELS, buildPropGeometry, propAttach, propTip } from './props.js';
 import { createPeopleMaterial, createPeopleDepthMaterials } from './material.js';
 import { CLIP_ALIASES } from './clips.js';
 import { m2w, headingToYaw, AMAH } from '../core/units.js';
@@ -29,6 +29,33 @@ const WALK_SPEED = 1.25, RUN_SPEED = 3.6;
 const FLOW_FADE_M = 1.6;            // flowing crowds dither in/out within this distance of the region edge
 const OFFDUTY_POSES = new Set(['sleep', 'lie']);
 const OFFDUTY_ARCH = 'israelite';   // a kohen's own clothes (Tamid 1:1): ordinary tunic + mantle, head bare
+const BATH_POSES = new Set(['bathe']);
+const MASK_HEADGEAR = 8, MASK_BARE = 16; // human.js GRP.HEADGEAR / GRP.BARE as instance mask bits
+const TORCH_FLAME = { size: 0.32, intensity: 1, kind: 'torch' };
+
+/**
+ * The figure a role shows in a pose, when it is not its own archetype: kohanim never sleep in the holy garments — in
+ * 'sleep' / 'lie' they wear their own clothes and lie on the folded garments under their own mantle (Tamid 1:1; the
+ * elders on the ledge bedding); in 'bathe' a kohanic role shows its bathing figure. → { arch, prop } | null
+ */
+function poseVariant(def, pose) {
+  if (!def) return null;
+  if (def.offduty && OFFDUTY_POSES.has(pose)) return def._off || (def._off = { arch: def.offArch || OFFDUTY_ARCH, prop: { name: def.offProp || 'folded_garments', side: 'r' } });
+  if (def.bathArch && BATH_POSES.has(pose)) return def._bath || (def._bath = { arch: def.bathArch, prop: null });
+  return null;
+}
+/** the clip a prop asks for in a pose (PROPS[name].poses, e.g. wood on the shoulder → carry_log), if the rig has it */
+function propClip(arch, prop, pose) {
+  const pp = prop && PROPS[prop.name]?.poses?.[pose];
+  return pp ? arch.clip(pp) : null;
+}
+const _bathWarned = new Set();
+/** 'bathe' on a role with no bathing figure immerses it in its clothes: say so once per role */
+function warnBathe(role, def) {
+  if (!def || def.bathArch || /bathing/.test(def.arch) || _bathWarned.has(role)) return;
+  _bathWarned.add(role);
+  console.warn(`[people] pose "bathe" on role ${role}: it has no bathing figure (bathArch) and immerses in its clothes`);
+}
 
 const _m = new Matrix4();
 const _m2 = new Matrix4();
@@ -221,7 +248,7 @@ function makeMask(R, role) {
   let m = 0;
   if (R() < (role?.mantle ?? 1)) m |= 1;
   if (R() < (role?.headcloth ?? 0)) m |= 2;
-  m |= 4;
+  m |= 4 | MASK_HEADGEAR;   // the priestly headgear on (setHeadgear)
   return m;
 }
 /** site Z argument: number (exact) | { near: Z } (the floor nearest Z) | omitted (the walking floor) */
@@ -304,11 +331,15 @@ export class Actor {
     let n = CLIP_ALIASES[name] || name;
     if ((n === 'raise_hands') && this.roleDef?.lowBlessing) n = 'raise_hands_low';
     // kohanim never sleep in the holy garments: they fold them under their heads and cover themselves with
-    // their own clothes (Tamid 1:1) — the figure switches to its own clothes, the folded garments appear
-    const off = !!this.roleDef?.offduty && OFFDUTY_POSES.has(n);
-    this.arch = off ? this.sys.arch(OFFDUTY_ARCH) : this.baseArch;
-    this.autoProp = off ? 'folded_garments' : null;
-    let clip = this.arch.clip(n);
+    // their own clothes (Tamid 1:1) — the figure switches to its own clothes, the folded garments appear; a kohanic
+    // role in 'bathe' shows its bathing figure
+    const v = poseVariant(this.roleDef, n);
+    this.arch = v ? this.sys.arch(v.arch) : this.baseArch;
+    this.autoProp = v?.prop?.name || null;
+    if (BATH_POSES.has(n) && !this.arch.isAnimal) warnBathe(this.role, this.roleDef);
+    this._req = name;
+    // a prop may be held its own way in a pose (a log or bundle on the shoulder: carry_log)
+    let clip = (!v && propClip(this.arch, this.prop, n)) || this.arch.clip(n);
     if (!clip) {
       if (!this.sys._warnedPose.has(`${this.arch.key}:${n}`)) {
         this.sys._warnedPose.add(`${this.arch.key}:${n}`);
@@ -331,7 +362,10 @@ export class Actor {
   /** prop: a name from ctx.people.props or null; hand: 'right' | 'left' */
   setProp(name, hand = 'right') {
     if (name && !PROPS[name]) { console.warn(`[people] unknown prop "${name}"`); name = null; }
+    const was = this.prop?.name;
     this.prop = name ? { name, side: /^l/i.test(hand || '') ? 'l' : 'r' } : null;
+    // the pose's clip may depend on the prop (PROPS[name].poses): re-resolve it
+    if (this._req && this.arch && (name !== was) && (PROPS[name]?.poses || PROPS[was]?.poses)) this.setPose(this._req, this.auto ? undefined : this.phase);
     this.sys._syncFlames(this);
     return this;
   }
@@ -357,6 +391,15 @@ export class Actor {
   }
   /** the prop actually drawn: the one set, else the automatic one (the folded garments of a sleeping kohen) */
   get shownProp() { return this.prop || (this.autoProp ? { name: this.autoProp, side: 'r' } : null); }
+  /**
+   * The priestly headgear (migba'at / mitznefet and tzitz) on or off — the officer lifts the mitre off one man's head
+   * to start the count (Yoma 25a). Off, the hair shows (with strand shells close up). Other figures ignore it.
+   */
+  setHeadgear(on = true) {
+    this.mask = on ? (this.mask | MASK_HEADGEAR) & ~MASK_BARE : (this.mask & ~MASK_HEADGEAR) | MASK_BARE;
+    return this;
+  }
+  get headgear() { return !!(this.mask & MASK_HEADGEAR); }
   setVisible(b) { this.visible = !!b; this.object3D.visible = this.visible; this.sys._syncFlames(this); return this; }
   /** auto-advanced walking speed (m/s) for locomotion poses without an explicit phase */
   setSpeed(mps) { this.speed = mps; return this; }
@@ -475,7 +518,6 @@ export class Crowd {
     this.pointH = new Float32Array(n).fill(NaN);
     this.autoY = new Uint8Array(n); this.hintY = new Float32Array(n).fill(NaN);
     this.arch = new Array(n); this.roleDef = new Array(n); this.role = new Array(n);
-    this.offduty = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
       const role = pickRole();
       const animal = !ROLES[role];
@@ -483,7 +525,6 @@ export class Crowd {
       this.role[i] = role;
       this.roleDef[i] = def;
       this.arch[i] = sys.arch(def.arch);
-      this.offduty[i] = def.offduty ? 1 : 0;
       const p = pts[i];
       const w = m2w(p.X, p.Y, p.exact ?? p.near ?? 0, _v);
       if (p.exact == null) {
@@ -540,7 +581,8 @@ export class Crowd {
       // crowds switch instantly: one-shots (prostrate, bow, kneel) start from the standing pose anyway
       this.poseName = name;
       if (phase == null) this.phase = 0;
-      this.off_ = OFFDUTY_POSES.has(name);
+      this.off_ = OFFDUTY_POSES.has(name) || BATH_POSES.has(name);
+      if (BATH_POSES.has(name)) for (let i = 0; i < this.capacity; i++) if (!this.arch[i].isAnimal) warnBathe(this.role[i], this.roleDef[i]);
       if (c?.stride && !this.region && !this.sys._warnedFlow) {
         this.sys._warnedFlow = true;
         console.warn('[people] crowd: a points-crowd in a walking pose walks in place — use Actors (or a region crowd, which flows) for people who move');
@@ -561,8 +603,9 @@ export class Crowd {
   setVisible(b) { this.visible = !!b; this.sys._syncFlames(this); return this; }
   setCount(n) { this.count = Math.max(0, Math.min(this.capacity, n | 0)); this.sys._syncFlames(this); return this; }
   dispose() { this.count = 0; this.prop = null; this.sys._syncFlames(this); this.sys.crowds.delete(this); }
-  memberArch(i) { return this.off_ && this.offduty[i] ? this.sys.arch(OFFDUTY_ARCH) : this.arch[i]; }
-  memberProp(i) { return this.off_ && this.offduty[i] ? FOLDED : this.prop; }
+  memberVariant(i) { return this.off_ ? poseVariant(this.roleDef[i], this.poseName) : null; }
+  memberArch(i) { const v = this.memberVariant(i); return v ? this.sys.arch(v.arch) : this.arch[i]; }
+  memberProp(i) { const v = this.memberVariant(i); return v?.prop || (v ? null : this.prop); }
   _tick(dt) {
     if (this.fade > 0) this.fade = Math.max(0, this.fade - dt / 0.35);
     if (!this.capacity) return;
@@ -607,7 +650,6 @@ export class Crowd {
     return clamp(ph + (this.off[i] - 0.5) * 0.05, 0, 1);
   }
 }
-const FOLDED = { name: 'folded_garments', side: 'r' };
 
 // --------------------------------------------------------------------------------------------- system
 export class PeopleSystem {
@@ -760,6 +802,11 @@ export class PeopleSystem {
   _syncFlames(owner) {
     const fx = this.ctx.fx;
     const want = [];
+    const pname = owner.prop?.name || null;
+    // a prop swapped for another with a different flame (torch ↔ taper): relight from scratch
+    if (owner.flames.length && owner.flames[0].prop !== pname) {
+      for (const f of owner.flames.splice(0)) { try { fx?.remove?.(f.handle); } catch { /* ignore */ } f.anchor.removeFromParent(); }
+    }
     if (owner instanceof Crowd) {
       if (owner.visible && owner.prop && PROPS[owner.prop.name]?.tip) for (let i = 0; i < Math.min(owner.count, 24); i++) want.push(i);
     } else if (owner.visible && !owner.disposed && owner.prop && PROPS[owner.prop.name]?.tip) want.push(0);
@@ -772,9 +819,9 @@ export class PeopleSystem {
       const anchor = new Object3D();
       anchor.name = 'people:torch-anchor';
       this.root.add(anchor);
-      const f = { anchor, handle: null, i: want[owner.flames.length], stamp: -1, hidden: -1, lit: 1 };
+      const f = { anchor, handle: null, i: want[owner.flames.length], stamp: -1, hidden: -1, lit: 1, prop: pname };
       this._flameAt(owner, f); // at the hand from the start (fx samples the anchor when the fire is added)
-      try { f.handle = fx?.attachTorch?.(anchor, { size: 0.32, intensity: 1, kind: 'torch' }) || null; } catch (e) { console.warn('[people] fx.attachTorch failed', e); }
+      try { f.handle = fx?.attachTorch?.(anchor, { ...(PROPS[pname]?.flame || TORCH_FLAME) }) || null; } catch (e) { console.warn('[people] fx.attachTorch failed', e); }
       owner.flames.push(f);
     }
   }
@@ -937,12 +984,12 @@ export class PeopleSystem {
       if (owner instanceof Crowd) {
         const i = C.idx[ci];
         arch = owner.memberArch(i);
-        clip = arch.clip(owner.poseName) || arch.clip('stand');
+        clip = (!owner.off_ && propClip(arch, owner.prop, owner.poseName)) || arch.clip(owner.poseName) || arch.clip('stand');
         phase = owner.memberPhase(i, clip);
         this._crowdMatrix(owner, i, e16);
         tint = owner.tint.subarray(i * 4, i * 4 + 4);
         mask = owner.mask[i] | (clip.halter ? 24 : 0) | (clip.cord ? 32 : 0);
-        if (owner.off_ && owner.offduty[i]) mask &= ~1;   // asleep under his own mantle: not also wearing it
+        if (owner.memberVariant(i)?.prop) mask &= ~1;   // asleep under his own mantle: not also wearing it
         mA = owner.morph[i * 2]; mB = owner.morph[i * 2 + 1];
         prop = owner.memberProp(i);
         alpha = owner.fadeM[i];
@@ -960,7 +1007,7 @@ export class PeopleSystem {
         arch = a.arch; clip = a.clip; phase = a.phase;
         if (a.prev && a.fade > 0) { prevClip = a.prev.clip; prevPhase = a.prev.phase; fade = a.fade; }
         tint = a.tint; mask = a.mask;
-        if (a.autoProp === 'folded_garments') mask &= ~1;  // asleep under his own mantle (Tamid 1:1): not also wearing it
+        if (a.autoProp) mask &= ~1;  // asleep under his own mantle (Tamid 1:1): not also wearing it
         if (arch.isAnimal) mask = (mask & ~56) | (clip.halter ? 8 | (a.leader ? 0 : 16) : 0) | (clip.cord ? 32 : 0);
         mA = a.morph[0]; mB = a.morph[1];
         if (prevClip && this._crossfade(a, arch, clip, phase, prevClip, prevPhase, fade)) { prevClip = null; fade = -1; }
@@ -982,7 +1029,9 @@ export class PeopleSystem {
       if (lod === 0) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
       // props (none on LOD3 silhouettes except the big ones); a second prop (setProps) in the left hand
       const prop2 = owner instanceof Crowd ? null : owner.prop2;
-      const showP = (pr) => pr && (lod < 2 || (PROPS[pr.name]?.big && lod < 3) || (PROPS[pr.name]?.big && alpha > 0.5));
+      // ritual vessels in an actor's hands stay drawn at LOD 2 (crowds keep only the big props there)
+      const actorV = !(owner instanceof Crowd);
+      const showP = (pr) => pr && (lod < 2 || (PROPS[pr.name]?.big && lod < 3) || (PROPS[pr.name]?.big && alpha > 0.5) || (lod === 2 && actorV && HELD_VESSELS.has(pr.name)));
       if (showP(prop) || showP(prop2)) {
         const grip = clip.grip || 'fist';
         const list = [];
@@ -1076,7 +1125,7 @@ export class PeopleSystem {
       for (const f of owner.flames) {
         if (f.stamp !== frame) this._flameAt(owner, f);
         const want = f.hidden === frame || (owner instanceof Crowd && owner.fadeM[f.i] < 0.5) ? 0 : 1;
-        if (want !== f.lit) { f.lit = want; try { f.handle?.setIntensity?.(want); } catch { /* ignore */ } }
+        if (want !== f.lit) { f.lit = want; try { f.handle?.setIntensity?.(want * (PROPS[f.prop]?.flame?.intensity ?? 1)); } catch { /* ignore */ } }
       }
     };
     for (const a of this.actors) if (a.flames.length) each(a);

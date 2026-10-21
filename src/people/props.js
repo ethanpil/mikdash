@@ -18,7 +18,11 @@ import { Vector3, Matrix4, Euler, Quaternion, Color } from 'three';
 import { MeshBuilder, PAT, CLS } from './builder.js';
 import { gripOffset, HUMAN_CLIPS } from './clips.js';
 import { PoseBuilder, poseToSkin } from './pose.js';
+import { clothCage, clothSkin } from './cloth.js';
+import { RECIPES } from './human.js';
+import { MAX_BONES } from './rig.js';
 import { DEG, smooth, lerp } from './util.js';
+import { STAFF } from './clips.js';
 import { AMAH } from '../core/units.js';
 import { buildAnimalGeometry, quadHeadFrame } from './animals.js';
 import { getRig } from './rig.js';
@@ -61,7 +65,22 @@ export function setPropMetals(m) {
   for (const k of ['gold', 'goldGreen', 'goldRed', 'silver', 'copper', 'iron', 'bronze']) if (m[k]) MAT[k] = { ...MAT[k], color: m[k] };
 }
 
-const S = (B, key, extra = {}) => B.set({ ...MAT[key], cls: CLS.FIX, grp: 0, ...extra });
+// Charred variants (limbs on the pyre, Tamid 2:1 "the limbs not consumed since evening"): while CHAR is set every
+// flesh material is swapped for its roasted / charred look (cracked black crust, the PAT.CHAR pattern) and baked animal
+// parts (the head) are blackened — same geometry, so a limb can be swapped for its charred twin in place.
+let CHAR = false;
+const CHARRED = {
+  meat: { color: '#140c09', rough: 0.88 }, fell: { color: '#160d09', rough: 0.88 }, fat: { color: '#1c110b', rough: 0.85 },
+  sinew: { color: '#160d0a', rough: 0.88 }, bone: { color: '#24201c', rough: 0.9 }, hide: { color: '#170f0b', rough: 0.88 },
+  string: { color: '#1a1512', rough: 0.9 }, pitch: { color: '#14100d', rough: 0.9 },
+  fleeceProp: { color: '#120f0d', rough: 0.8 }, coatProp: { color: '#110d0b', rough: 0.7 }, horn: { color: '#1c1714', rough: 0.55 },
+};
+const S = (B, key, extra = {}) => {
+  if (CHAR && CHARRED[key]) return B.set({ ...MAT[key], ...extra, ...CHARRED[key], metal: 0, pat: PAT.CHAR, cls: CLS.FIX, grp: 0 });
+  return B.set({ ...MAT[key], cls: CLS.FIX, grp: 0, ...extra });
+};
+/** build fn as its charred twin */
+const charred = (fn) => (B, lod, cls) => { CHAR = true; try { fn(B, lod, cls); } finally { CHAR = false; } };
 const lathe = (B, prof, seg, opts = {}) => B.tube(prof.map(([r, y]) => ({ c: V(0, y, 0), rx: Math.max(r, 1e-4), rz: Math.max(r, 1e-4) })), { seg, bone: 0, ...opts });
 const sg = (lod, a, b) => (lod === 0 ? a : b);
 
@@ -133,6 +152,22 @@ const PAN = {
   yk: { ...panDims(3), handle: 0.5, wall: 0.0025, rod: 0.008 },         // YK: light, thin, long-handled
 };
 const panGrip = (p) => [0, p.h * 0.7 + p.handle * 0.75 * 0.22, p.d / 2 + p.handle * 0.75];
+
+// the kaf: a deep round gold vessel sized to hold exactly 3 kav (Tamid 5:4) with a short side handle (reconstruction)
+const KAF = (() => {
+  const base = [[0.001, 0], [0.08, 0], [0.112, 0.022], [0.128, 0.05], [0.134, 0.075], [0.136, 0.086], [0.14, 0.09]];
+  let v = 0;
+  for (let i = 1; i < base.length; i++) { const [r0, y0] = base[i - 1], [r1, y1] = base[i]; v += Math.PI * (y1 - y0) * (r0 * r0 + r0 * r1 + r1 * r1) / 3; }
+  const sc = Math.cbrt((3 * KAV_M3) / v);
+  const prof = base.map(([r, y]) => [r * sc, y * sc]);
+  const rim = prof[prof.length - 1];
+  return { prof, sc, rimR: rim[0], rimY: rim[1], h0: V(0, 0.05 * sc, 0.128 * sc), h1: V(0, 0.072 * sc, 0.128 * sc + 0.11), grip: [0, 0.07 * sc, 0.128 * sc + 0.1] };
+})();
+// the kaf held by its handle in a hanging hand (stand_hold / walk_hold, and any stand / walk): the pan pitched down 19°
+// about its handle grip, which is how far the hanging hand's fingers point forward of the vertical — the rim stays
+// level and the cover on (PAN_FIST alone tipped it 19° in stand, 34° at the walk's back swing)
+const KAF_FIST = PAN_FIST.clone().multiply(new Matrix4().makeRotationX(-19 * DEG));
+const KAF_POSES = { stand: 'stand_hold', walk: 'walk_hold' };
 
 // ---------------------------------------------------------------------------------------------- catalogue
 export const PROPS = {
@@ -261,13 +296,10 @@ export const PROPS = {
     },
     grips: { fist: { grip: [0, 0.188, 0], rot: ID() } },
   },
-  kaf: { // the ketoret spoon/ladle, gold, 3 kav (with the bazach in it)
-    build(B, lod) {
-      S(B, 'gold');
-      vessel(B, [[0.001, 0], [0.05, 0.0], [0.08, 0.03], [0.092, 0.06], [0.096, 0.065]], sg(lod, 18, 9));
-      rod(B, V(0, 0.05, 0.09), V(0, 0.07, 0.2), 0.009, 6);
-    },
-    grips: { fist: { grip: [0, 0.07, 0.19], rot: PAN_FIST } },
+  kaf: { // the ketoret kaf "like a large gold tarkav, holding three kav" with the bazach in it (Tamid 5:4)
+    build(B, lod) { kaf(B, lod); },
+    poses: KAF_POSES,
+    grips: { fist: { grip: KAF.grip, rot: KAF_FIST }, pour: { grip: KAF.grip, rot: PAN_FIST } },
   },
   bazach: { // the small dish of incense with its cover
     build(B, lod) {
@@ -334,7 +366,9 @@ export const PROPS = {
         B.box(V(x + 0.012, -0.08 - L + 0.015, 0), [0.024, 0.026, 0.006]);
       }
     },
-    grips: { free: { rot: eul(90, 0, 0), pos: [0, 0.006, 0.08] } },
+    // in the fist the hand holds the ring, the keys hanging on from the fingers' side (so in 'lock' the long key's
+    // shaft runs on into the lock)
+    grips: { fist: { grip: [0, -0.07, 0], rot: basis([0, 1, 0], [-1, 0, 0], [0, 0, 1]) }, free: { rot: eul(90, 0, 0), pos: [0, 0.006, 0.08] } },
   },
   scroll: { // a Torah scroll (Yoma 7:1 — each held his own at the reading)
     big: true,
@@ -349,12 +383,13 @@ export const PROPS = {
     },
     grips: { fist: { grip: [0.047, 0.0, 0], rot: ID() }, tray: { grip: [0, 0.06, 0], rot: ID() } },
   },
-  sudar: { // the segan's cloth signal (Tamid 7:3)
-    build(B, lod) {
+  sudar: { // the segan's cloth signal (Tamid 7:3): in the hand it hangs from a pinched corner; set down it lies flat
+    build(B, lod, cls) {
       S(B, 'linen');
-      plateGrid(B, 0.34, 0.46, (u, v) => V(u * 0.34 - 0.03, -v * 0.46, 0.025 * Math.sin(u * 9 + v * 2) * v), sg(lod, 8, 3), sg(lod, 6, 2));
+      if (cls === 'free') { plateGrid(B, 0.34, 0.46, (u, v) => V(u * 0.34 - 0.17, 0.004 + 0.003 * Math.sin(u * 9 + v * 4), v * 0.46 - 0.23), sg(lod, 8, 3), sg(lod, 6, 2)); return; }
+      sudarHanging(B, lod);
     },
-    grips: {},
+    grips: { fist: { grip: [0, 0.012, 0], rot: eul(0, 90, 0) }, free: { rot: ID(), pos: [0, 0, 0] } },
   },
   basket: { // bikkurim basket — peeled willow; fruit of the seven species heaped on top
     big: true,
@@ -398,12 +433,23 @@ export const PROPS = {
     grips: { fist: { grip: [0, 0.0, 0], rot: eul(0, 90, 0) }, free: { rot: eul(90, 0, 0), pos: [0, 0.002, 0] } },
   },
   folded_garments: { // "they took them off, folded them and laid them under their heads" (Tamid 1:1)
-    big: true,
+    big: true, cache: true,                  // (its sleeper covers are costly to build: see prewarmBedding)
     build(B, lod, cls) { foldedGarments(B, lod, cls); },
     grips: {
       pillow_side: { rot: eul(0, 0, 90) },   // inverse of the sleep pose's root roll (natural frame = world)
       pillow_back: { rot: eul(-90, 0, 0) },  // inverse of the lie pose's root pitch
+      tray: { grip: [0, 0, 0], rot: ID() },  // carried on both palms (the attendants of Tamid 5:3, a kohen dressing)
       free: { rot: ID(), pos: [0, 0, 0] },
+    },
+  },
+  // the elders of the beit av on the stone rovadin (Tamid 1:1): the same bundle and own mantle, the kesset folded double
+  // along its length so it lies within a 1-amah ledge
+  folded_garments_ledge: {
+    big: true, cache: true,
+    build(B, lod, cls) { foldedGarments(B, lod, cls, { narrow: true }); },
+    grips: {
+      pillow_side: { rot: eul(0, 0, 90) }, pillow_back: { rot: eul(-90, 0, 0) },
+      tray: { grip: [0, 0, 0], rot: ID() }, free: { rot: ID(), pos: [0, 0, 0] },
     },
   },
 };
@@ -552,44 +598,254 @@ function carcass(B, lod) {
   }
 }
 
-/** a wool mantle laid over a sleeper: draped over the body's height profile, falling to the mat at the sides */
-function cover(B, lod, lay) {
+// ---- the sleeper's own mantle over him (Tamid 1:1 "they covered themselves with their own clothes")
+// The cover is draped over the actual posed body: the off-duty figure (israelite / elder recipe, LOD0, without the
+// mantle it no longer wears) is skinned in the sleep / lie clip at several breathing phases and rasterised into a
+// height field in the pillow frame; the cloth then hangs from the highest points (a cone of slope SLOPE: wool falls
+// steeply off the shoulders and knees but tents over hollows), is smoothed, and kept ≥ CLEAR above the body
+// everywhere — hands, sleeves and belt ends stay under it. On the elders' 1-amah ledge (narrow) the mantle runs over
+// the body to ±0.245 m (the tread is ±0.24 m about a centred body) and falls straight down past both edges: over the
+// lip it hangs down the riser, on the wall side it is tucked down between body and riser.
+const COVER = { CELL: 0.025, CLEAR: 0.016, SLOPE: 2.6, FALL: 0.2, NARROW: 0.245 };
+// The fields are built by resumable jobs (generators that yield every few ms of work) so prewarmBedding() can spread
+// them over boot and idle time; a sleeper drawn before then drains whatever is left of its job at once.
+const _sleepers = new Map(), _sleeperGeo = new Map(), _figJobs = new Map(), _fieldJobs = new Map();
+/** the off-duty figure the cover is draped over (see sleeperField), built one LOD per step */
+function* figureJob(narrow) {
+  const rig = getRig(narrow ? 'elder' : 'man');
+  // the figure at LOD0, 1 and 2 together (the hero's fingers, toes and belt ends; the coarser builds' mitten hands and
+  // blunter feet reach a centimetre or two further), without his mantle (it is over him), a head-cloth or the head
+  // itself (above the cover's edge) — the costly parts of a hero build
+  const B = new MeshBuilder(rig);
+  for (const lod of [0, 1, 2]) {
+    const b = new MeshBuilder(rig);
+    b.skipGrp = new Set([1, 2]);
+    b.noHead = true;
+    RECIPES[narrow ? 'elder' : 'israelite'](b, rig, lod);
+    b.morph = null;
+    B.merge(b);
+    yield;
+  }
+  _sleeperGeo.set(narrow, B);
+}
+/** steps until the figure for `narrow` exists (shared by the side and back jobs: one build) */
+function* ensureFigure(narrow) {
+  while (!_sleeperGeo.has(narrow)) {
+    if (!_figJobs.has(narrow)) _figJobs.set(narrow, figureJob(narrow));
+    if (_figJobs.get(narrow).next().done) _figJobs.delete(narrow); else yield;
+  }
+}
+function* sleeperFieldJob(lay, narrow, key) {
+  yield* ensureFigure(narrow);
+  const rig = getRig(narrow ? 'elder' : 'man');
+  const B = _sleeperGeo.get(narrow);
+  const clip = HUMAN_CLIPS[lay === 'side' ? 'sleep' : 'lie'];
+  const P = new PoseBuilder(rig);
+  // the pillow frame's origin: the floor point under the head centre (props.js pillowPoint), in model space
+  P.reset(); clip.fn(P, rig, 0);
+  const hs = rig.dims.headS;
+  const C = new Vector3(0, 0.075 * hs, -0.008 * hs).applyQuaternion(P.worldQ('head')).add(P.worldPos('head'));
+  const { CELL } = COVER;
+  const x0 = -0.625, nx = Math.round(1.25 / CELL) + 1, t0 = -0.1, nt = Math.round(2.1 / CELL) + 1;
+  const F = new Float32Array(nx * nt).fill(-1);
+  const ext = new Float32Array(nt).fill(0);
+  const M = new Float32Array(MAX_BONES * 12);
+  const n = B.count;
+  const skip = new Uint8Array(n);
+  for (let i = 0; i < n; i++) { const grp = Math.floor(B.mat[i * 4 + 3] / 8); skip[i] = grp === 1 || grp === 2 ? 1 : 0; }   // his mantle (now over him), a head-cloth
+  const XC = new Float32Array(n), YC = new Float32Array(n), TC = new Float32Array(n);
+  const splat = (xc, y, tc) => {
+    const ix = Math.round((xc - x0) / CELL), it = Math.round((tc - t0) / CELL);
+    if (ix < 0 || ix >= nx || it < 0 || it >= nt) return;
+    const k = it * nx + ix;
+    if (y > F[k]) F[k] = y;
+    if (y > 0.015) ext[it] = Math.max(ext[it], Math.abs(xc));
+  };
+  for (const ph of [1 / 12, 3 / 12]) {           // the breath in and out (breathe(P, ph · 3) in both clips)
+    P.reset(); clip.fn(P, rig, ph); clothCage(P, rig);
+    M.fill(0); poseToSkin(rig, P.lp, M, 0); clothSkin(rig, M, 0);
+    for (let i = 0; i < n; i++) {
+      const px = B.pos[i * 3], py = B.pos[i * 3 + 1], pz = B.pos[i * 3 + 2];
+      let X = 0, Y = 0, Z = 0;
+      for (let q = 0; q < 4; q++) {
+        const w = B.sw[i * 4 + q];
+        if (w <= 0) continue;
+        const o = B.si[i * 4 + q] * 12;
+        X += w * (M[o] * px + M[o + 1] * py + M[o + 2] * pz + M[o + 3]);
+        Y += w * (M[o + 4] * px + M[o + 5] * py + M[o + 6] * pz + M[o + 7]);
+        Z += w * (M[o + 8] * px + M[o + 9] * py + M[o + 10] * pz + M[o + 11]);
+      }
+      X -= C.x; Z -= C.z;
+      XC[i] = lay === 'side' ? Z + 0.1 : X; TC[i] = lay === 'side' ? -X : -Z;
+      YC[i] = Y + Math.max(0, B.mo ? B.mo[i * 4 + 3] : 0);                   // + the fullest build's belly
+      if ((i & 16383) === 16383) yield;
+    }
+    // every triangle, sampled finer than a cell (vertices alone leave holes the cloth would sag into)
+    const I = B.idx;
+    for (let f = 0; f < I.length; f += 3) {
+      if (f % 9000 === 8997) yield;
+      const a = I[f], b = I[f + 1], c = I[f + 2];
+      if (skip[a] || skip[b] || skip[c]) continue;
+      const L = Math.max(Math.hypot(XC[a] - XC[b], TC[a] - TC[b]), Math.hypot(XC[b] - XC[c], TC[b] - TC[c]), Math.hypot(XC[c] - XC[a], TC[c] - TC[a]));
+      const m = Math.min(16, Math.max(1, Math.ceil(L / (CELL * 0.9))));
+      for (let u = 0; u <= m; u++) for (let w = 0; w <= m - u; w++) {
+        const wa = u / m, wb = w / m, wc = 1 - wa - wb;
+        splat(wa * XC[a] + wb * XC[b] + wc * XC[c], wa * YC[a] + wb * YC[b] + wc * YC[c], wa * TC[a] + wb * TC[b] + wc * TC[c]);
+      }
+    }
+  }
+  _sleepers.set(key, { F, ext, x0, nx, t0, nt, cell: CELL });
+  // both lays of this figure done: its merged build (several MB of plain arrays) is not needed any more
+  if (_sleepers.has(`side:${narrow ? 1 : 0}`) && _sleepers.has(`back:${narrow ? 1 : 0}`)) _sleeperGeo.delete(narrow);
+}
+/** the steps of a field's job (created once; shared by the prewarm and a first draw) */
+function fieldJob(lay, narrow) {
+  const key = `${lay}:${narrow ? 1 : 0}`;
+  if (!_fieldJobs.has(key)) _fieldJobs.set(key, sleeperFieldJob(lay, narrow, key));
+  return _fieldJobs.get(key);
+}
+function sleeperField(lay, narrow) {
+  const key = `${lay}:${narrow ? 1 : 0}`;
+  if (_sleepers.has(key)) return _sleepers.get(key);
+  const job = fieldJob(lay, narrow);
+  while (!job.next().done);
+  _fieldJobs.delete(key);
+  return _sleepers.get(key);
+}
+
+/** the cloth's height over the field: hung from the body (cone), smoothed, ≥ body + CLEAR; floor = the mat's top */
+function coverHeights(fd, floor, tMin) {
+  const ck = `${floor}:${tMin}`;
+  if (fd.cache?.[ck]) return fd.cache[ck];
+  const { F, nx, nt, cell } = fd, { CLEAR, SLOPE } = COVER;
+  const R = Math.ceil(0.3 / cell), W = 2 * R + 1;
+  const cone = new Float32Array(W * W);
+  for (let b = -R; b <= R; b++) for (let a = -R; a <= R; a++) cone[(b + R) * W + a + R] = SLOPE * cell * Math.hypot(a, b);
+  let D = new Float32Array(nx * nt).fill(floor);
+  for (let j = 0; j < nt; j++) for (let i = 0; i < nx; i++) {
+    const f = F[j * nx + i];
+    if (f < 0 || fd.t0 + j * cell < tMin - 0.04) continue;       // nothing of the head or neck above the edge
+    const h = f + CLEAR;
+    const r = Math.min(R, Math.ceil((h - floor) / (SLOPE * cell)));   // the cone meets the floor within r cells
+    for (let b = Math.max(0, j - r); b <= Math.min(nt - 1, j + r); b++) {
+      const row = b * nx, crow = (b - j + R) * W + R - i;
+      for (let a = Math.max(0, i - r); a <= Math.min(nx - 1, i + r); a++) {
+        const d = h - cone[crow + a];
+        if (d > D[row + a]) D[row + a] = d;
+      }
+    }
+  }
+  for (let pass = 0; pass < 2; pass++) {                           // soften (wool does not take every edge)
+    const E = new Float32Array(D.length);
+    for (let j = 0; j < nt; j++) for (let i = 0; i < nx; i++) {
+      let sum = 0, c = 0;
+      for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) {
+        const jj = Math.min(nt - 1, Math.max(0, j + b)), ii = Math.min(nx - 1, Math.max(0, i + a));
+        sum += D[jj * nx + ii]; c++;
+      }
+      E[j * nx + i] = sum / c;
+    }
+    D = E;
+  }
+  for (let k = 0; k < D.length; k++) if (F[k] >= 0) D[k] = Math.max(D[k], F[k] + CLEAR * 0.6);
+  (fd.cache ||= {})[ck] = D;
+  return D;
+}
+function sampleH(fd, D, xc, tc) {
+  const { nx, nt, cell } = fd;
+  const fx = Math.min(nx - 1.001, Math.max(0, (xc - fd.x0) / cell)), ft = Math.min(nt - 1.001, Math.max(0, (tc - fd.t0) / cell));
+  const i = Math.floor(fx), j = Math.floor(ft), u = fx - i, w = ft - j;
+  const g = (a, b) => D[b * nx + a];
+  return lerp(lerp(g(i, j), g(i + 1, j), u), lerp(g(i, j + 1), g(i + 1, j + 1), u), w);
+}
+/** the field's max over the rectangle ±dx, ±dt round (xc, tc) — the cover's own mesh cell */
+function sampleHmax(fd, D, xc, tc, dx, dt) {
+  let h = sampleH(fd, D, xc, tc);
+  const n = 2;
+  for (let a = -n; a <= n; a++) for (let b = -n; b <= n; b++) if (a || b) h = Math.max(h, sampleH(fd, D, xc + (a / n) * dx, tc + (b / n) * dt));
+  return h;
+}
+function sampleExt(fd, tc) {
+  const j = Math.round((tc - fd.t0) / fd.cell);
+  let e = 0;
+  for (let b = j - 2; b <= j + 2; b++) if (b >= 0 && b < fd.nt) e = Math.max(e, fd.ext[b]);
+  return e;
+}
+
+/** a wool mantle laid over a sleeper (see COVER) */
+function cover(B, lod, lay, o = {}) {
   const back = lay === 'back';
-  // along the body from the shoulders to past the feet, and across it; heights of the body under the cloth
-  const prof = back
-    ? [[0.2, 0.27], [0.45, 0.31], [0.7, 0.29], [0.95, 0.25], [1.15, 0.26], [1.35, 0.2], [1.58, 0.22], [1.74, 0.06]]
-    : [[0.2, 0.3], [0.45, 0.32], [0.7, 0.33], [0.9, 0.36], [1.1, 0.3], [1.3, 0.22], [1.45, 0.12]];
-  const hAt = (t) => { let k = 0; while (k < prof.length - 2 && t > prof[k + 1][0]) k++; const [a0, h0] = prof[k], [a1, h1] = prof[k + 1]; return lerp(h0, h1, Math.min(1, Math.max(0, (t - a0) / (a1 - a0)))); };
-  const L0 = prof[0][0], L1 = prof[prof.length - 1][0], half = back ? 0.42 : 0.45;
-  const nu = sg(lod, 14, 7), nv = sg(lod, 18, 8);
+  const narrow = !!o.narrow;
+  const fd = sleeperField(lay, narrow);
+  const floor = (o.y0 ?? 0.01) + 0.003;
+  const L0 = back ? 0.2 : 0.22;
+  const D = coverHeights(fd, floor, L0);
+  // the extent along the body: from the shoulders to past the feet
+  let tEnd = L0 + 0.5;
+  for (let j = 0; j < fd.nt; j++) if (fd.ext[j] > 0) tEnd = Math.max(tEnd, fd.t0 + j * fd.cell);
+  const L1 = tEnd + 0.22;                                            // over the feet and down beyond the toes
+  const half = back ? 0.45 : 0.5;
+  const nu = narrow ? sg(lod, 30, 14) : sg(lod, 36, 16), nv = sg(lod, 56, 22);
+  const dt = (L1 - L0) / nv;
+  const nf = narrow ? sg(lod, 4, 2) : 0;                              // rows of the fall at each edge (narrow)
+  const pt = (i, j, inner) => {
+    let t = lerp(L0, L1, j / nv);
+    // on the side: the hem at the head end is pulled up over the high shoulder and sags back where the cloth falls to
+    // the floor in front and behind — a curved edge, not a straight cut across the shoulders
+    if (!back && !narrow) t += 0.07 * (1 - smooth(floor + 0.03, floor + 0.22, sampleH(fd, D, lerp(-half, half, i / nu), L0))) * (1 - j / nv);
+    let x, y;
+    if (narrow) {
+      const hx = Math.max(COVER.NARROW, sampleExt(fd, t) + 0.012);
+      const top = nu - 2 * nf;
+      const ii = i - nf;
+      if (ii >= 0 && ii <= top) {
+        x = lerp(-hx, hx, ii / top);
+        y = sampleHmax(fd, D, x, t, hx / top, dt);
+      } else {
+        // over the edge: rolls over and falls straight down, a little wavy at the hem
+        const side = ii < 0 ? -1 : 1, q = (ii < 0 ? -ii : ii - top) / nf;
+        const yTop = sampleHmax(fd, D, side * hx, t, hx / top, dt);
+        const roll = Math.sin(Math.PI / 2 * Math.min(1, q * 2.2));
+        x = side * (hx + 0.012 * roll + 0.004 * q);
+        y = lerp(yTop, -COVER.FALL + 0.02 * Math.sin(t * 9 + side), smooth(0, 1, q)) - 0.01 * roll * (1 - q);
+      }
+    } else {
+      x = lerp(-half, half, i / nu);
+      y = sampleHmax(fd, D, x, t, half / nu, dt);
+      // where it lies flat on the floor: soft wrinkles; at the far edge the cloth ends a little uneven
+      const flat = 1 - smooth(floor + 0.004, floor + 0.05, y);
+      y += flat * 0.008 * (0.5 + 0.5 * Math.sin(x * 23 + t * 7)) * smooth(0.1, 0.3, Math.abs(x));
+    }
+    if (lod === 0) y += 0.004 * Math.sin(t * 17 + x * 5) * smooth(floor + 0.03, floor + 0.12, y);   // shallow folds on top
+    if (!back && j === 0) y -= 0.008 * smooth(floor + 0.02, floor + 0.06, y);                        // the edge rolls down
+    const yy = y - (inner ? 0.006 : 0);
+    // pillow_back: the body runs toward −z; pillow_side: toward −x (across is z)
+    return back ? V(x, yy, -t) : V(-t, yy, x - 0.1);
+  };
   for (const inner of [false, true]) {
     S(B, 'mat', { color: '#988670', rough: 0.95 });
     B.grid(nu, nv, (i, j) => {
-      const x = lerp(-half, half, i / nu), t = lerp(L0, L1, j / nv);
-      const h = hAt(t);
-      const body = back ? 0.2 : 0.2;
-      const y = 0.012 + (h - 0.012) * (1 - smooth(body * 0.75, half * 0.95, Math.abs(x))) ** 1.4 + 0.012 * Math.sin(x * 23 + t * 7) * smooth(0.1, 0.3, Math.abs(x));
-      const yy = y - (inner ? 0.006 : 0);
-      // pillow_back: the body runs toward −z; pillow_side: toward −x (across is z)
-      const p = back ? V(x, yy, -t) : V(-t, yy, x - 0.1);
-      return { p, u: x, v: t, w: 0, shade: inner ? 0.5 : 1 - 0.15 * smooth(body, half, Math.abs(x)) };
-    }, { inside: back ? V(0, -1, -0.9) : V(-0.8, -1, 0), invert: inner });
+      const p = pt(i, j, inner);
+      const h = p.y, edge = Math.min(i, nu - i) / nu;
+      return { p, u: (i / nu) * 0.9, v: (j / nv) * 1.6, w: 0, shade: inner ? 0.5 : 1 - 0.18 * smooth(0.12, 0, h) * smooth(0.25, 0.05, edge) };
+    }, { inside: back ? V(0, -1, -0.9) : V(-0.8, -1, -0.1), invert: inner });
   }
 }
 
 /** the four white garments folded into a bundle (+ his own mat, the kesset, under the body when used as a pillow) */
-function foldedGarments(B, lod, cls) {
+function foldedGarments(B, lod, cls, o = {}) {
   const lay = cls === 'pillow_side' ? 'side' : cls === 'pillow_back' ? 'back' : null;
   let y0 = 0;
-  if (lay) { // "each one's kesset on the ground" (Tamid 1:1): a thin wool mat under the sleeper
+  if (lay) { // "each one's kesset on the ground" (Tamid 1:1): a thin wool mat under the sleeper (folded double on a ledge)
     S(B, 'mat');
-    const c = lay === 'side' ? V(-0.72, 0.005, -0.1) : V(0, 0.005, -0.74);
-    const size = lay === 'side' ? [1.95, 0.01, 0.78] : [0.78, 0.01, 1.95];
+    const w = o.narrow ? 0.39 : 0.78, t = o.narrow ? 0.02 : 0.01;
+    const c = lay === 'side' ? V(-0.72, t / 2, -0.1) : V(0, t / 2, -0.74);
+    const size = lay === 'side' ? [1.95, t, w] : [w, t, 1.95];
     slab(B, c, size, { nu: sg(lod, 12, 6), nv: 4, round: 0.15 });
-    y0 = 0.01;
+    y0 = t;
   }
   // "they covered themselves with their own clothes" (Tamid 1:1): his mantle spread over him from the shoulders
-  if (lay) cover(B, lod, lay);
+  if (lay) cover(B, lod, lay, { ...o, y0 });
   // folded ketonet (largest), michnasayim, the migba'at's coil and the avnet's coil on top
   S(B, 'linen', { pat: PAT.LINEN_BOX });
   const fold = (p) => 1 - 0.08 * Math.max(0, Math.cos(p.x * 21));
@@ -629,8 +885,10 @@ function meatLoft(B, lod, prof, o = {}) {
   for (const end of o.cutEnds || [0, 1]) {
     const R = rings[end ? rings.length - 1 : 0];
     S(B, 'meat');
-    B.ellipsoid(R.c.clone().add(V(0, 0, end ? -0.001 : 0.001)), [R.rx * 0.97, R.rz * 0.97, 0.003], { nu: sg(lod, 14, 7), nv: 2, bone: 0, lat: end ? [0.5, 1] : [0, 0.5],
-      xf: new Matrix4().makeRotationX(Math.PI / 2 * (end ? -1 : 1)) });
+    // the cut face: a thin closed lens over the loft's open end, covering its ±5 % ripple (a half-lens faced into the
+    // loft at the far end and was culled, so the ground showed through the open end: the 'white rims' of the cut ends)
+    B.ellipsoid(R.c.clone().add(V(0, 0, end ? -0.001 : 0.001)), [R.rx * 1.06, R.rz * 1.06, 0.003], { nu: sg(lod, 14, 7), nv: sg(lod, 4, 3), bone: 0,
+      xf: new Matrix4().makeRotationX(Math.PI / 2) });
   }
   return rings;
 }
@@ -647,7 +905,8 @@ function limbHead(B, lod) {
   const I = rig.index;
   const headBones = new Set([I.head, I.jaw, I.ear_l, I.ear_r]);
   const base = B.count;
-  const res = bakeAnimal(B, 'lamb', lod, () => {}, {
+  // charred on the pyre the ears shrivel and fold back flat against the skull (standing out they read as plates)
+  const res = bakeAnimal(B, 'lamb', lod, (P) => { if (CHAR) { P.rot('ear_l', 55, 0, 45); P.rot('ear_r', 55, 0, 45); } }, {
     tint: [0.3, 0.3, 0.4, 0.4],
     only: (si, sw, i) => { let w = 0; for (let k = 0; k < 4; k++) if (headBones.has(si[i * 4 + k])) w += sw[i * 4 + k] / 255; return w > 0.6; },
   });
@@ -686,9 +945,10 @@ function limbForeleg(B, lod) {
 function limbOketz(B, lod) {
   const prof = [[0.06, 0.06, 0.04, 0.05], [0.02, 0.07, 0.045, 0.052], [-0.03, 0.065, 0.042, 0.05], [-0.06, 0.05, 0.036, 0.046]];
   meatLoft(B, lod, prof);
-  // the alyah hangs over the finger end
+  // the alyah hangs over the finger end, growing out of the rump (seated against its end: apart, the ground showed
+  // through the gap between them — a white crescent on the charred piece)
   S(B, 'fat');
-  B.ellipsoid(V(0, -0.02, -0.11), [0.075, 0.1, 0.04], { nu: sg(lod, 14, 8), nv: sg(lod, 10, 5), bone: 0,
+  B.ellipsoid(V(0, -0.012, -0.088), [0.075, 0.1, 0.04], { nu: sg(lod, 14, 8), nv: sg(lod, 10, 5), bone: 0,
     xf: new Matrix4().makeRotationX(0.35), deform: (l) => { l.z += 0.012 * Math.exp(-((l.x / 0.015) ** 2)); return l; } });
   // kidneys and the lobe of the liver
   S(B, 'meat', { color: '#5a1c16', rough: 0.2 });
@@ -797,8 +1057,9 @@ function bakeAnimal(B, kind, lod, poseFn, o = {}) {
     const pc = palCol(cls);
     B.pos.push(x, y, z);
     B.uv.push(uv[i * 2], uv[i * 2 + 1]);
-    B.col.push(col[i * 3] * (pc ? pc.r : 1), col[i * 3 + 1] * (pc ? pc.g : 1), col[i * 3 + 2] * (pc ? pc.b : 1));
-    B.mat.push(mat[i * 4], mat[i * 4 + 1], mat[i * 4 + 2], 0);
+    const ch = CHAR ? [0.06, 0.042, 0.034] : [1, 1, 1];   // singed wool and skin on the pyre
+    B.col.push(col[i * 3] * (pc ? pc.r : 1) * ch[0], col[i * 3 + 1] * (pc ? pc.g : 1) * ch[1], col[i * 3 + 2] * (pc ? pc.b : 1) * ch[2]);
+    if (CHAR) B.mat.push(0.9, 0, PAT.CHAR, 0); else B.mat.push(mat[i * 4], mat[i * 4 + 1], mat[i * 4 + 2], 0);
     B.si.push(0, 0, 0, 0); B.sw.push(1, 0, 0, 0);
   }
   for (let i = 0; i < idx.length; i += 3) {
@@ -1062,10 +1323,398 @@ export const OFFERING_PROPS = {
   wine_jug: { build(B, lod) { jugWine(B, lod); }, grips: { fist: { grip: [0, 0.14, 0.08], rot: ID() }, palm: { grip: [0, 0, 0], rot: PALM }, tray: { grip: [0, 0, 0], rot: ID() } } },
   salt: { build(B, lod) { saltBowl(B, lod); }, grips: { palm: { grip: [0, 0, 0], rot: PALM }, tray: { grip: [0, 0, 0], rot: ID() } } },
 };
-// props that can stand on the palms in a two-handed carry
-for (const k of ['solet', 'chavitin', 'salt', 'wine_jug', 'marcheshet', 'machavat', 'entrails_bazach', 'cup_gold']) VESSELS.add(k);
+// ---------------------------------------------------------------------------------------------- people-3 props
+// (docs/decisions/people-3.md)
 
-Object.assign(PROPS, OFFERING_PROPS);
+/** the kaf (Tamid 5:4), optionally with its domed cover and the cloth (metotelet) laid over it */
+function kaf(B, lod, o = {}) {
+  S(B, 'gold');
+  vessel(B, KAF.prof, sg(lod, 22, 11), 0.003);
+  if (lod === 0) curve(B, Array.from({ length: 25 }, (_, i) => { const a = (i / 24) * Math.PI * 2; return V(Math.cos(a) * KAF.rimR, KAF.rimY, Math.sin(a) * KAF.rimR); }), Array(25).fill(0.0035), 5);
+  rod(B, KAF.h0, KAF.h1, 0.0085, sg(lod, 8, 5));
+  B.ellipsoid(KAF.h1, [0.012, 0.012, 0.012], { nu: 8, nv: 5, bone: 0 });
+  if (!o.covered) return;
+  // the cover: a low gold dome with a knob, seated on the rim
+  const R = KAF.rimR + 0.004, Y = KAF.rimY;
+  const lid = [[R, Y - 0.004], [R, Y + 0.004], [R * 0.86, Y + 0.022], [R * 0.55, Y + 0.04], [R * 0.2, Y + 0.048], [0.012, Y + 0.05], [0.015, Y + 0.062], [0.001, Y + 0.068]];
+  lathe(B, lid, sg(lod, 22, 11), { capB: 'flat' });
+  // "and a kind of metotelet on it from above" — a linen cloth laid over the cover (tented over the knob), its corners
+  // falling over the rim
+  const lidTop = (r) => {
+    if (r < 0.022) return Y + 0.076 - 0.25 * r;                       // over the knob
+    const pr = lid.slice(1, 5);                                        // R … 0.2R, descending radii
+    if (r <= pr[3][0]) return lerp(Y + 0.071, pr[3][1], smooth(0.022, pr[3][0], r));
+    let k = 0;
+    while (k < pr.length - 2 && r < pr[k + 1][0]) k++;
+    const [r0, y0] = pr[k], [r1, y1] = pr[k + 1];
+    return lerp(y0, y1, (r0 - r) / Math.max(1e-6, r0 - r1));
+  };
+  S(B, 'linen', { color: '#ece6d8' });
+  const half = R * 1.16, n = sg(lod, 16, 7);
+  plateGrid(B, half * 2, half * 2, (u, v) => {
+    const x = (u - 0.5) * 2 * half, z = (v - 0.5) * 2 * half, r = Math.hypot(x, z) || 1e-6;
+    let y, rr = r;
+    if (r <= R) y = lidTop(r) + 0.005;
+    else { rr = R + 0.006 + 0.008 * Math.min(1, (r - R) / 0.05); y = Y + 0.009 - (r - R) * 0.78; }
+    const fold = lod === 0 ? 0.004 * Math.sin(Math.atan2(z, x) * 7) * smooth(R * 0.8, R * 1.3, r) : 0;
+    return V((x / r) * (rr + fold), y, (z / r) * (rr + fold));
+  }, n, n);
+}
+
+/** the staff (makel) of the Ish Har HaBayit (Middot 1:2): smooth hand-worn wood, held STAFF.grip below its top */
+function staff(B, lod) {
+  const below = STAFF.len - STAFF.grip;
+  S(B, 'woodDark', { color: '#5b4129', rough: 0.55 });
+  B.tube([{ c: V(0, -below, 0), rx: 0.0125, rz: 0.0125 }, { c: V(0, -below * 0.5, 0), rx: 0.0148, rz: 0.0148 }, { c: V(0, STAFF.grip - 0.012, 0), rx: 0.0165, rz: 0.0165 }], {
+    seg: sg(lod, 9, 5), bone: 0, capA: 'flat', capB: 'dome', domeH: 0.7,
+    radial: lod === 0 ? (th, j) => 1 + 0.06 * Math.sin(th * 2 + j * 2.3) * (j === 1 ? 1 : 0.3) : null,
+  });
+  if (lod === 0) for (const y of [-0.62, -0.31, -0.86]) B.ellipsoid(V(0.012, y, 0.003), [0.006, 0.012, 0.006], { nu: 6, nv: 4, bone: 0 });   // knots
+}
+
+/** the migba'at off the head, held by its crown (Yoma 25a): the wound linen dome of the kohen hedyot */
+function migbaatProp(B, lod) {
+  S(B, 'linen', { color: '#efebe1', rough: 0.86 });
+  const prof = [[0.0, 1.08, 1.06], [0.02, 1.15, 1.12], [0.05, 1.18, 1.14], [0.08, 1.16, 1.12], [0.104, 1.08, 1.04], [0.122, 0.94, 0.9], [0.136, 0.74, 0.71], [0.146, 0.48, 0.46], [0.152, 0.12, 0.12]];
+  const rx0 = 0.074, rz0 = 0.096;
+  const rows = lod === 0 ? 34 : 7;
+  const rings = [];
+  for (let j = 0; j < rows; j++) {
+    const yy = (j / (rows - 1)) * 0.152;
+    let k = 0;
+    while (k < prof.length - 2 && yy > prof[k + 1][0]) k++;
+    const t = (yy - prof[k][0]) / (prof[k + 1][0] - prof[k][0]);
+    rings.push({ c: V(0, yy, 0), rx: rx0 * lerp(prof[k][1], prof[k + 1][1], t), rz: rz0 * lerp(prof[k][2], prof[k + 1][2], t), yy });
+  }
+  const pitch = 0.022, slant = 3.2;
+  const ph = (th, j) => { const q = (rings[j].yy + (th / (Math.PI * 2)) * pitch * slant) / pitch; return q - Math.floor(q); };
+  B.tube(rings, { seg: sg(lod, 48, 12), bone: 0, capB: 'flat',
+    radial: lod === 0 ? (th, j) => 1 + 0.04 * Math.sqrt(Math.sin(Math.PI * ph(th, j))) * (1 - smooth(0.12, 0.152, rings[j].yy)) : null,
+    shade: (th, j) => 1 - 0.22 * (1 - smooth(0, 0.16, ph(th, j))) * (1 - smooth(0.12, 0.152, rings[j].yy)) });
+  // the inside, seen when it is lifted off: a shallower inner shell
+  S(B, 'linen', { color: '#d9d3c5', rough: 0.9 });
+  B.tube(rings.slice(0, -2).map((q) => ({ c: q.c.clone().add(V(0, -0.006, 0)), rx: q.rx * 0.93, rz: q.rz * 0.93 })), { seg: sg(lod, 24, 10), bone: 0, invert: true, capB: 'flat' });
+}
+
+/** the psachter: "a large vessel holding a letech, with two chains — one he pulls by and goes down, one he holds from
+ *  above so it does not roll" (Tamid 5:5). Copper like every vessel of the outer altar (Shemot 27:3); a letech = 15
+ *  se'ah (≈ 124 l at R' Chaim Naeh), scaled with the amah. Mouth down (inverted) it covers the coals on Shabbat. */
+const PSACHTER = (() => {
+  const base = [[0.001, 0], [0.2, 0], [0.26, 0.04], [0.31, 0.16], [0.345, 0.34], [0.36, 0.47], [0.37, 0.49]];
+  let v = 0;
+  for (let i = 1; i < base.length; i++) { const [r0, y0] = base[i - 1], [r1, y1] = base[i]; v += Math.PI * (y1 - y0) * (r0 * r0 + r0 * r1 + r1 * r1) / 3; }
+  const sc = Math.cbrt((90 * KAV_M3) / v);
+  return { prof: base.map(([r, y]) => [r * sc, y * sc]) };
+})();
+/** a chain along a polyline: links every 4.4 cm, alternate links turned a quarter (LOD0); a cord-like tube (LOD1).
+ *  Copper, darkened with use: no iron may touch the altar — "iron disqualifies by touch", they would not even plaster
+ *  it with an iron trowel "lest it touch" (Middot 3:4) — and this chain is dragged down the ramp (Tamid 5:5). */
+function chain(B, pts, lod) {
+  S(B, 'copper', { color: '#5e3a28', rough: 0.55 });
+  if (lod > 0) { curve(B, pts, pts.map(() => 0.006), 4); return; }
+  const L = 0.044;
+  let acc = 0, k = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], seg = a.distanceTo(b);
+    const dir = b.clone().sub(a).normalize();
+    const ref = Math.abs(dir.y) > 0.9 ? V(1, 0, 0) : V(0, 1, 0);
+    const n1 = ref.clone().addScaledVector(dir, -ref.dot(dir)).normalize();
+    const n2 = new Vector3().crossVectors(dir, n1);
+    for (let t = L - acc; t <= seg; t += L, k++) {
+      const c = a.clone().addScaledVector(dir, t - L / 2);
+      const side = k % 2 ? n1 : n2;
+      const loop = [];
+      for (let q = 0; q <= 8; q++) { const an = (q / 8) * Math.PI * 2; loop.push(c.clone().addScaledVector(dir, Math.cos(an) * 0.027).addScaledVector(side, Math.sin(an) * 0.013)); }
+      curve(B, loop, loop.map(() => 0.0042), 4);
+    }
+    acc = (acc + seg) % L;
+  }
+}
+function psachter(B, lod, inverted = false) {
+  const { prof } = PSACHTER;
+  const H = prof[prof.length - 1][1], Rr = prof[prof.length - 1][0];
+  const flip = (p) => (inverted ? V(p.x, H + 0.012 - p.y, p.z) : p);
+  const m0 = B.count;
+  S(B, 'copper', { color: '#8d5537', rough: 0.48 });
+  lathe(B, prof, sg(lod, 32, 14), { capA: 'flat', radial: lod === 0 ? (th, j) => 1 + 0.004 * Math.sin(th * 13 + j * 2.1) : null });
+  S(B, 'copper', { color: '#2b211c', rough: 0.85 });            // sooty inside: it brings the ashes down from the altar
+  lathe(B, prof.slice(1).reverse().map(([r, y]) => [Math.max(0.001, r - 0.006), y]).concat([[0.001, 0.008]]), sg(lod, 32, 14), { invert: true });
+  S(B, 'copper', { color: '#9a5f3d', rough: 0.4 });
+  curve(B, Array.from({ length: 33 }, (_, i) => { const a = (i / 32) * Math.PI * 2; return V(Math.cos(a) * (Rr + 0.004), H + 0.002, Math.sin(a) * (Rr + 0.004)); }), Array(33).fill(0.011), sg(lod, 6, 4));
+  // two rings riveted below the rim, opposite each other (±x), each carrying a chain
+  const ends = [];
+  for (const sx of [-1, 1]) {
+    const c = V(sx * (Rr + 0.022), H - 0.05, 0);
+    S(B, 'copper', { color: '#5e3a28', rough: 0.55 });
+    curve(B, Array.from({ length: 13 }, (_, i) => { const a = (i / 12) * Math.PI * 2; return c.clone().add(V(0, Math.cos(a) * 0.026, Math.sin(a) * 0.026)); }), Array(13).fill(0.005), 4);
+    ends.push(c);
+  }
+  // mouth down when inverted (a point reflection in y keeps the winding when x is mirrored too — only y is flipped,
+  // so swap every triangle's winding)
+  if (inverted) {
+    for (let i = m0; i < B.count; i++) { const p = flip(V(B.pos[i * 3], B.pos[i * 3 + 1], B.pos[i * 3 + 2])); B.pos[i * 3] = p.x; B.pos[i * 3 + 1] = p.y; B.pos[i * 3 + 2] = p.z; }
+    for (let i = 0; i < B.idx.length; i += 3) if (B.idx[i] >= m0) { const t = B.idx[i + 1]; B.idx[i + 1] = B.idx[i + 2]; B.idx[i + 2] = t; }
+  }
+  // the chains: from each ring down the side and out across the floor (≈ 1.6 m each), lying as a dropped chain does —
+  // a sagging fall to the floor, then an irregular meander with a loop where it fell on itself
+  for (const [k, c0] of ends.entries()) {
+    const sx = k ? 1 : -1, c = flip(c0);
+    const pts = [c];
+    const drop = Math.max(0.05, c.y - 0.012);
+    for (let i = 1; i <= 5; i++) { const u = i / 5; pts.push(V(c.x + sx * (0.015 + 0.09 * u * u), c.y - drop * Math.sin(u * Math.PI / 2), 0.01 + 0.04 * u)); }
+    let x = pts[pts.length - 1].x, z = pts[pts.length - 1].z, a = sx > 0 ? 0.2 : Math.PI - 0.2;
+    const R = (i) => { const q = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453; return q - Math.floor(q); };
+    for (let i = 0; i < 26; i++) {
+      a += (R(i) - 0.5) * 1.1 + (i > 9 && i < 15 ? sx * 0.62 : 0);    // wanders; a loop part-way
+      x += Math.cos(a) * 0.05; z += Math.sin(a) * 0.05;
+      pts.push(V(x, 0.012 + 0.006 * (i > 9 && i < 15 ? Math.sin((i - 9) * 0.9) : 0), z));
+    }
+    chain(B, pts, lod);
+  }
+}
+
+/** bark on a branch tube (PAT.BARK, people material): the roughness channel selects the bark — ≤ 0.8 the smooth grey
+ *  bark of the fig with lenticels, ≥ 0.92 the furrowed bark of walnut and oil-wood (Tamid 2:3) */
+const BARK = {
+  fig: { color: '#7c766d', rough: 0.78, pat: PAT.BARK },
+  walnut: { color: '#5c5248', rough: 0.95, pat: PAT.BARK },
+  oil: { color: '#6a5f50', rough: 0.93, pat: PAT.BARK },
+};
+const hash1 = (i) => { const x = Math.sin(i * 12.9898 + 78.233) * 43758.5453; return x - Math.floor(x); };
+/** a round branch along z from a to b (bent through `bow`), tapering r0 → r1, with bark and pale cut ends */
+function branch(B, lod, o) {
+  const { a, b, r0, r1, bark, seed = 1 } = o;
+  const n = sg(lod, o.rows ?? 9, 3);
+  const dir = b.clone().sub(a), L = dir.length();
+  const side = V(-dir.z, 0, dir.x).normalize(), up = new Vector3().crossVectors(side, dir).normalize();
+  const pts = [], rad = [];
+  for (let j = 0; j <= n; j++) {
+    const t = j / n;
+    const bend = Math.sin(Math.PI * t);
+    const wob = 0.006 * Math.sin(t * 7.3 + seed) * L;
+    pts.push(a.clone().addScaledVector(dir, t).addScaledVector(up, (o.bow || 0) * L * bend + wob).addScaledVector(side, (o.sway || 0) * L * bend));
+    // taper, with a swelling at the collars where shoots were lopped
+    let r = lerp(r0, r1, t) * (1 + 0.07 * Math.exp(-(((t - 0.3) / 0.06) ** 2)) + 0.05 * Math.exp(-(((t - 0.72) / 0.05) ** 2)));
+    rad.push(r);
+  }
+  S(B, 'wood', BARK[bark]);
+  const deep = bark !== 'fig';
+  const rings = curve(B, pts, rad, sg(lod, deep ? 16 : 14, 6), {
+    radial: lod === 0 ? (th, j) => 1 + (deep ? 0.06 * (Math.abs(Math.sin(th * 7 + j * 0.4 + seed)) - 0.6) : 0.012 * Math.sin(th * 5 + j * 1.9 + seed)) + 0.02 * Math.sin(th * 2 + seed * 3) : null,
+    shade: (th, j) => (deep ? 0.86 + 0.14 * Math.abs(Math.sin(th * 7 + j * 0.4 + seed)) : 0.92 + 0.08 * Math.sin(th * 3 + j + seed)),
+  });
+  void rings;
+  // the cut ends: pale wood with growth rings inside a dark rim of bark
+  for (const [end, sgn] of [[0, -1], [n, 1]]) {
+    const c = pts[end], R0 = rad[end] * 0.96, m = sg(lod, 14, 7);
+    const ax = (end ? pts[n].clone().sub(pts[n - 1]) : pts[0].clone().sub(pts[1])).normalize();
+    const e1 = V(0, 1, 0).addScaledVector(ax, -ax.y).normalize(), e2 = new Vector3().crossVectors(ax, e1);
+    S(B, 'wood', { color: bark === 'walnut' ? '#9c7a55' : '#c7a676', rough: 0.8 });
+    B.grid(m, 2, (i, j) => {
+      const an = (i / m) * Math.PI * 2, rr = R0 * (j / 2);
+      return { p: c.clone().addScaledVector(e1, Math.cos(an) * rr).addScaledVector(e2, Math.sin(an) * rr).addScaledVector(ax, 0.0008), u: rr + 0.003 * Math.sin(an * 3), v: an * 0.01, w: 0, shade: j === 2 ? 0.55 : 1 };
+    }, { wrap: true, inside: c.clone().addScaledVector(ax, -1) });
+    void sgn;
+  }
+  return { pts, rad };
+}
+
+/** a gizer of the pile (Tamid 2:3 "murbiyot of fig, walnut and oil-wood"): a round fig branch ≈ 1 amah long, the smooth
+ *  grey bark of the fig with lenticels, a slight bend, the cut ends pale with growth rings, two lopped side shoots.
+ *  Natural frame: along z, resting on y = 0. */
+function gizrinBranch(B, lod) {
+  const L = AMAH, r = 0.06;
+  const { pts, rad } = branch(B, lod, { a: V(0, r * 1.02, -L / 2), b: V(0.01, r * 0.98, L / 2), r0: r * 1.04, r1: r * 0.92, bark: 'fig', bow: 0.03, sway: 0.02, seed: 2.1, rows: 10 });
+  if (lod === 0) {   // lopped side shoots, the stubs' cut faces pale
+    for (const [t, an] of [[0.3, 0.7], [0.72, 2.5]]) {
+      const j = Math.round(t * (pts.length - 1)), c = pts[j], rr = rad[j];
+      const dir = V(Math.cos(an), Math.sin(an), 0.45).normalize();
+      S(B, 'wood', BARK.fig);
+      curve(B, [c.clone().addScaledVector(dir, rr * 0.5), c.clone().addScaledVector(dir, rr + 0.03)], [0.019, 0.015], 7);
+      S(B, 'wood', { color: '#c7a676', rough: 0.8 });
+      B.ellipsoid(c.clone().addScaledVector(dir, rr + 0.0305), [0.014, 0.014, 0.014], { nu: 7, nv: 2, lat: [0, 0.5], bone: 0, xf: new Matrix4().lookAt(V(0, 0, 0), dir, V(0, 1, 0)).multiply(new Matrix4().makeRotationX(Math.PI / 2)) });
+    }
+  }
+}
+
+/** a bundle of thinner branches of the three woods tied with cord at two places (small wood for the pile) */
+function branchBundle(B, lod) {
+  const n = sg(lod, 12, 6);
+  const kinds = ['fig', 'walnut', 'oil'];
+  for (let i = 0; i < n; i++) {
+    const an = i * 2.4, rr = 0.022 + 0.045 * Math.sqrt(hash1(i));
+    const x = Math.cos(an) * rr, y = 0.07 + Math.sin(an) * rr * 0.8;
+    const L = 0.6 + 0.16 * hash1(i + 9), r = 0.011 + 0.011 * hash1(i + 3);
+    const z0 = (hash1(i + 11) - 0.5) * 0.08;
+    const tilt = V((hash1(i + 5) - 0.5) * 0.1, (hash1(i + 7) - 0.5) * 0.06, 1).normalize();
+    const c = V(x, y, z0);
+    const kind = kinds[i % 3];
+    branch(B, lod, { a: c.clone().addScaledVector(tilt, -L / 2), b: c.clone().addScaledVector(tilt, L / 2), r0: r, r1: r * 0.72, bark: kind, bow: (hash1(i + 13) - 0.5) * 0.05, sway: (hash1(i + 17) - 0.5) * 0.05, seed: i * 1.7, rows: 5 });
+    if (lod === 0 && i % 3 === 0) {   // a forked twig at the thin end
+      const tip = c.clone().addScaledVector(tilt, L / 2 - 0.06);
+      S(B, 'wood', BARK[kind]);
+      curve(B, [tip, tip.clone().add(V(0.025 * (hash1(i) - 0.5), 0.018, 0.08))], [r * 0.5, r * 0.28], 5, { capB: 'flat' });
+    }
+  }
+  // two cords, each wound twice and knotted
+  S(B, 'string', { color: '#9a8461', pat: PAT.ROPE, rough: 0.9 });
+  for (const z of [-0.17, 0.17]) {
+    curve(B, Array.from({ length: 25 }, (_, i) => { const an = (i / 12) * Math.PI * 2; return V(Math.cos(an) * 0.082, 0.07 + Math.sin(an) * 0.068, z + 0.008 * (i / 24 - 0.5)); }), Array(25).fill(0.0055), sg(lod, 5, 3));
+    if (lod === 0) B.ellipsoid(V(0.07, 0.11, z), [0.012, 0.01, 0.012], { nu: 7, nv: 4, bone: 0 });
+  }
+}
+
+/** the slaughtered lamb, limp, unflayed (carried to the hook in the arms — Tamid 4:2; or laid down). Baked from the
+ *  live rig: on its left side, the head hanging, legs dangling (carried) or lying out on the floor (free). Natural
+ *  frame: the trunk across x (head toward −x), back toward +z, the origin under the middle of the trunk. */
+function lambDead(B, lod, cls) {
+  const carried = cls !== 'free';
+  const droop = carried ? 62 : 18;
+  const base = B.count;
+  const res = bakeAnimal(B, 'lamb', lod, (P) => {
+    // lamb x → +y, lamb y → +z, lamb z → +x: lying on its left side, back toward +z, head toward −x
+    P.setQ(P.i('root'), new Quaternion().setFromRotationMatrix(basis([0, 1, 0], [0, 0, 1], [1, 0, 0])));
+    for (const s of ['l', 'r']) {
+      const a = droop * (s === 'r' ? 1.1 : 0.8);
+      P.rot(`f${s}_up`, carried ? -6 : -14, 0, -a); P.rot(`f${s}_lo`, carried ? -14 : -6, 0, -8); P.rot(`f${s}_ft`, -20, 0, 0);
+      P.rot(`h${s}_up`, carried ? 10 : 22, 0, -a); P.rot(`h${s}_lo`, carried ? 14 : 6, 0, -8); P.rot(`h${s}_ft`, 10, 0, 0);
+    }
+    // carried, the dead lamb's neck hangs limp beside the carrier's left forearm, the head below it, the muzzle down
+    // (a raised neck read as a live animal held out): lying on its left side the neck falls by lateral flexion — about
+    // the lamb's dorsal (y) axis — and turns a little away from the carrier
+    if (carried) { P.rot('neck', -10, 44, 0); P.rot('neck2', -6, 44, 0); P.rot('head', 0, 34, 0); } else {
+      P.rot('neck', 6, 0, 12); P.rot('neck2', 4, 0, 8); P.rot('head', -12, 0, 6);
+    }
+    P.rot('jaw', 10, 0, 0); P.rot('tail', 0, 0, -30); P.rot('ear_l', 0, 0, carried ? -20 : 30); P.rot('ear_r', 0, 0, carried ? -20 : 30);
+  }, { tint: [0.3, 0.3, 0.4, 0.4] });
+  if (!res) return;
+  const { P, rig } = res;
+  const mid = P.worldPos('pelvis').lerp(P.worldPos('chest'), 0.5);
+  const barrel = Math.abs(P.worldPos('pelvis').x - P.worldPos('chest').x) * 0.5 + 0.04;
+  let bottom = Infinity, back = -Infinity;
+  for (let i = base; i < B.count; i++) {
+    bottom = Math.min(bottom, B.pos[i * 3 + 1]);
+    // the back's line from the barrel only (the head and legs must not set it: they held the body 0.14 m out)
+    if (Math.abs(B.pos[i * 3] - mid.x) < barrel) back = Math.max(back, B.pos[i * 3 + 2]);
+  }
+  // carried: the origin on the line where the back lies against the carrier and the left flank on his forearms
+  const oy = carried ? mid.y - rig.dims.W * 1.22 : bottom, oz = carried ? back : mid.z;
+  for (let i = base; i < B.count; i++) { B.pos[i * 3] -= mid.x; B.pos[i * 3 + 1] -= oy; B.pos[i * 3 + 2] -= oz; }
+}
+
+/** a lighting taper (a splinter with a twisted linen wick, burning) for the Menorah's lamps — reconstruction of the
+ *  tool; natural frame along +y, the burning end at the top */
+function taper(B, lod) {
+  S(B, 'wood', { color: '#a68a62', rough: 0.7 });
+  rodY(B, -0.08, 0.22, 0.0042, 0.0034, sg(lod, 6, 4), { capA: 'flat' });
+  S(B, 'string', { color: '#d9cfb6', pat: PAT.CORD });
+  rodY(B, 0.205, 0.245, 0.0058, 0.005, sg(lod, 6, 4), { capB: 'dome' });
+  S(B, 'pitch', { color: '#1d1611' });
+  rodY(B, 0.238, 0.25, 0.0052, 0.003, 5, { capB: 'dome' });
+}
+
+/** the innards (kerev) laid out on the marble table to be rinsed (Tamid 4:2): a heap of loops — the narrow small
+ *  intestine in many tight coils, the wider large intestine in a few, glossy pink-grey with the mesentery's fat — and
+ *  the stomach, a lumpy sac. Natural frame: resting on y = 0, ≈ 0.4 × 0.3 m. */
+function entrails(B, lod) {
+  const guts = [
+    { r: 0.0105, n: sg(lod, 120, 40), s: 22, color: '#d4a596', seed: 0.7, amp: [0.13, 0.1], h: 0.035 },
+    { r: 0.017, n: sg(lod, 48, 18), s: 9, color: '#c99a87', seed: 2.3, amp: [0.11, 0.08], h: 0.03 },
+  ];
+  for (const g of guts) {
+    S(B, 'fat', { color: g.color, rough: 0.16, pat: PAT.NONE });       // smooth, wet serosa (the fat pattern's streaks read as cut meat)
+    const pts = [], rad = [];
+    for (let i = 0; i <= g.n; i++) {
+      const u = (i / g.n) * g.s;
+      // a Lissajous tangle with a slow drift: loops lying over each other on a low mound
+      const x = g.amp[0] * (0.62 * Math.sin(1.31 * u + g.seed) + 0.38 * Math.sin(3.7 * u + 2 * g.seed));
+      const z = g.amp[1] * (0.6 * Math.sin(1.73 * u + 0.5 + g.seed) + 0.4 * Math.cos(4.3 * u + g.seed));
+      const mound = 1 - Math.min(1, Math.hypot(x / 0.16, z / 0.12));
+      const y = g.r + g.h * mound + 0.012 * (0.5 + 0.5 * Math.sin(2.9 * u + g.seed * 2));
+      pts.push(V(x + 0.03, y, z));
+      rad.push(g.r * (0.85 + 0.3 * (0.5 + 0.5 * Math.sin(u * 5.1 + g.seed))));    // contractions along the gut
+    }
+    curve(B, pts, rad, sg(lod, 10, 5), { shade: (th, j) => 0.86 + 0.14 * Math.sin(j * 0.9 + g.seed) });
+  }
+  // the fat of the mesentery between the loops: pale, lumpy webbing under them
+  S(B, 'fat', { color: '#e6d9bf', rough: 0.3 });
+  for (const [x, z, w] of [[0.0, 0.02, 0.05], [0.08, -0.04, 0.04], [-0.06, -0.05, 0.035]]) {
+    B.ellipsoid(V(x + 0.03, 0.018, z), [w, 0.01, w * 0.8], { nu: sg(lod, 10, 6), nv: sg(lod, 5, 3), bone: 0,
+      deform: (l) => { l.y += 0.005 * Math.sin(l.x * 120) * Math.cos(l.z * 90); return l; } });
+  }
+  // the stomach: a lumpy sac with its folds
+  S(B, 'fat', { color: '#c9b9a0', rough: 0.24 });
+  B.ellipsoid(V(-0.13, 0.04, 0.09), [0.085, 0.04, 0.06], { nu: sg(lod, 14, 7), nv: sg(lod, 8, 4), bone: 0, xf: new Matrix4().makeRotationY(0.5),
+    deform: (l) => { l.y += 0.007 * Math.sin(l.x * 70) * Math.sin(l.z * 60); l.x *= 1 + 0.15 * Math.sin(l.z * 30); return l; } });
+}
+
+/** a cloth held by one corner: the diagonal hangs, the side corners droop, soft folds (natural frame: the held corner
+ *  at the origin, hanging along −y, spread along x) */
+function sudarHanging(B, lod) {
+  const n = sg(lod, 14, 5);
+  // the square collapses under its own weight into a narrow drape: the diagonal hangs straight down, the two free
+  // corners fall in beside it, deep soft folds run down from the pinch
+  plateGrid(B, 0.42, 0.42, (s1, t1) => {
+    const d = s1 - t1, m = (s1 + t1) / 2;
+    const spread = 0.085 * Math.sin(Math.PI * Math.min(1, m * 1.15)) + 0.012;
+    const x = d * spread * 2.2;
+    const y = -(s1 + t1) * 0.27 - 0.06 * d * d - 0.03 * m;
+    const z = 0.038 * Math.sin(d * 7.5) * smooth(0, 0.35, m) + 0.012 * Math.sin(9 * m + 2 * d);
+    return V(x, y, z);
+  }, n, n);
+}
+
+const GRIP_TRAY = { grip: [0, 0, 0], rot: ID() };
+export const SERVICE_PROPS = {
+  staff: { big: true, build(B, lod) { staff(B, lod); }, grips: { fist: { grip: [0, 0, 0], rot: ID() }, free: { rot: eul(0, 0, 90), pos: [0, 0.016, 0] } } },
+  migbaat: { build(B, lod) { migbaatProp(B, lod); }, grips: { fist: { grip: [0, 0.128, 0], rot: basis([0, -1, 0], [0, 0, 1], [-1, 0, 0]) }, tray: GRIP_TRAY, free: { rot: ID(), pos: [0, 0, 0] } } },
+  psachter: { big: true, build(B, lod) { psachter(B, lod, false); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } },
+  psachter_inverted: { big: true, build(B, lod) { psachter(B, lod, true); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } },
+  kaf_covered: { build(B, lod) { kaf(B, lod, { covered: true }); }, poses: KAF_POSES, grips: { fist: { grip: KAF.grip, rot: KAF_FIST }, free: { rot: ID(), pos: [0, 0, 0] } } },
+  // on the shoulder the load rests ON it (its underside 2 cm below the anchor, which is ≈ 2 cm above the shoulder's
+  // cloth), shifted out onto the acromion so it clears the head; carried there with carry_shoulder(_walk) it is held by
+  // the right hand under its front end (the clip carry_log(_walk), chosen by `poses`)
+  gizrin_branch: {
+    big: true, build(B, lod) { gizrinBranch(B, lod); },
+    poses: { carry_shoulder: 'carry_log', carry_shoulder_walk: 'carry_log_walk' },
+    grips: { shoulder: { grip: [-0.02, 0.018, 0.02], rot: ID() }, tray: { grip: [0, -0.02, 0], rot: eul(0, 90, 0) }, free: { rot: ID(), pos: [0, 0, 0] } },
+  },
+  branch_bundle: {
+    big: true, build(B, lod) { branchBundle(B, lod); },
+    poses: { carry_shoulder: 'carry_log', carry_shoulder_walk: 'carry_log_walk' },
+    grips: { shoulder: { grip: [-0.04, 0.0, 0.03], rot: ID() }, tray: { grip: [0, 0, 0], rot: eul(0, 90, 0) }, free: { rot: ID(), pos: [0, 0, 0] } },
+  },
+  // carried (carry_lamb): the left flank on the forearms ≈ 0.92 m up, the back against the belly (z ≈ −0.15 m); the
+  // fleeced yearling is ≈ 0.49 m thick, so its top comes to the carrier's collarbones
+  lamb_dead: { flesh: true, big: true, build(B, lod, cls) { lambDead(B, lod, cls); }, grips: { tray: { grip: [0, -0.015, -0.12], rot: ID() }, free: { rot: ID(), pos: [0, 0, 0] } } },
+  taper: { tip: [0, 0.255, 0], flame: { size: 0.035, intensity: 0.6, kind: 'lamp' }, build(B, lod) { taper(B, lod); }, grips: { fist: { grip: [0, 0, 0], rot: ID() }, free: { rot: eul(0, 0, 90), pos: [0, 0.005, 0] } } },
+  entrails: { flesh: true, build(B, lod) { entrails(B, lod); }, grips: { tray: GRIP_TRAY, palm: { grip: [0, 0, 0], rot: PALM }, free: { rot: ID(), pos: [0, 0, 0] } } },
+};
+// charred twins of the limbs, for the pyre (free on the fire; the same grips as the fresh limbs)
+for (const k of ['limb', 'limb_head', 'limb_foreleg', 'limb_oketz', 'limb_chazeh', 'limb_gerah', 'limb_dofen']) {
+  const src = PROPS[k] || OFFERING_PROPS[k];
+  SERVICE_PROPS[`${k}_charred`] = { ...src, flesh: true, build: charred(src.build) };
+}
+// 'pour' grip (pour_low): the vessel upright in a fist whose thumb points along the pour and whose fingers point down,
+// held at its handle (jugs), neck (flasks) or back rim (basins), so tipping the thumb down pours over the front lip
+const POUR = {
+  kuz: [0, 0.16, 0.088], wine_jug: [0, 0.15, 0.085], flask: [0, 0.188, 0], oil_flask: [0, 0.11, 0], cup_gold: [0, 0.02, 0],
+  bowl: [0, 0.06, 0.1], mizrak_gold: [0, 0.115, 0.115], mizrak_silver: [0, 0.115, 0.115], teni: [0, 0.13, 0.12],
+};
+for (const [k, g] of Object.entries(POUR)) {
+  const p = PROPS[k] || OFFERING_PROPS[k];
+  p.grips = { ...p.grips, pour: { grip: g, rot: PAN_FIST } };
+}
+// ritual vessels kept in the hands of actors down to LOD 2 (system.js): they must not vanish at medium distance; the
+// sudar too — the segan's waved cloth is a signal seen across the court (Tamid 7:3: Ben Arza and the Levites act on it)
+export const HELD_VESSELS = new Set(['mizrak_gold', 'mizrak_silver', 'machtah_silver', 'machtah_gold', 'machtah_gold_yk', 'kaf', 'kaf_covered',
+  'bazach', 'kuz', 'teni', 'flask', 'bowl', 'cup_gold', 'wine_jug', 'oil_flask', 'solet', 'chavitin', 'entrails_bazach', 'machavat', 'marcheshet',
+  'sudar']);
+
+// props that can stand on the palms in a two-handed carry
+for (const k of ['solet', 'chavitin', 'salt', 'wine_jug', 'marcheshet', 'machavat', 'entrails_bazach', 'cup_gold', 'kaf_covered']) VESSELS.add(k);
+
+Object.assign(PROPS, OFFERING_PROPS, SERVICE_PROPS);
 
 // ---------------------------------------------------------------------------------------------- placement
 const M_R = basis([0, -1, 0], [0, 0, -1], [1, 0, 0]);   // fist frame → right hand-local
@@ -1078,7 +1727,7 @@ function gripOf(name, cls) {
   if (cls === 'free') return { grip: [0, 0, 0], rot: ID(), pos: [0, 0, 0] };
   // vessels carried in both hands sit upright on the palms (natural frame, base on the hands)
   if (cls === 'tray') return VESSELS.has(name) ? { grip: [0, 0, 0], rot: ID(), pos: [0, 0, 0] } : null;
-  if (cls === 'shoulder' || cls === 'palm' || cls.startsWith('pillow')) return null;
+  if (cls === 'shoulder' || cls === 'palm' || cls === 'pour' || cls.startsWith('pillow')) return null;
   return { grip: [0, 0, 0], rot: ID(), pos: [0, 0, 0] };
 }
 
@@ -1090,18 +1739,50 @@ function placementMatrix(name, cls, side) {
   const m = new Matrix4().makeTranslation(-g.grip[0], -g.grip[1], -g.grip[2]);
   m.premultiply(g.rot);
   if (cls === 'free') m.premultiply(new Matrix4().makeTranslation(...g.pos));
-  else if (cls === 'fist' || cls === 'palm' || !gripOf(name, cls)) m.premultiply(side === 'l' ? M_L : M_R);
+  else if (cls === 'fist' || cls === 'palm' || cls === 'pour' || !gripOf(name, cls)) m.premultiply(side === 'l' ? M_L : M_R);
   else if (side === 'l' && !cls.startsWith('pillow')) m.premultiply(new Matrix4().makeScale(-1, 1, 1));
   return m;
 }
 
 /** geometry of a prop placed for (grip class, side) in the attach bone's frame */
 export function buildPropGeometry(name, cls, side, lod) {
-  const B = new MeshBuilder(null);
   const real = cls === 'free' ? 'free' : gripClass(name, cls);
+  const key = PROPS[name].cache ? `${name}:${real}:${side}:${lod}` : null;
+  if (key && _propGeos.has(key)) return _propGeos.get(key).clone();   // (each caller owns and may dispose its copy)
+  const B = new MeshBuilder(null);
   PROPS[name].build(B, lod, real);
   B.applyMatrix(placementMatrix(name, real, side));
-  return B.build();
+  const g = B.build();
+  if (!key) return g;
+  _propGeos.set(key, g);
+  return g.clone();
+}
+const _propGeos = new Map();
+
+/**
+ * Build the sleepers' bedding ahead of the first sleeper: the four height fields (folded_garments /
+ * folded_garments_ledge × lie / sleep) and the bedding props' LOD1 and LOD0 geometry, in steps of a few ms — run
+ * for up to `budgetMs` per call; true when all is built. Drawn before then, a sleeper finishes its own part at once.
+ */
+export function prewarmBedding(budgetMs = 8) {
+  _prewarm ||= prewarmJob();
+  const t0 = performance.now();
+  do { if (_prewarm.next().done) return true; } while (performance.now() - t0 < budgetMs);
+  return false;
+}
+let _prewarm = null;
+function* prewarmJob() {
+  for (const [prop, narrow] of [['folded_garments', false], ['folded_garments_ledge', true]]) {
+    for (const [lay, cls] of [['side', 'pillow_side'], ['back', 'pillow_back']]) {
+      const key = `${lay}:${narrow ? 1 : 0}`;
+      if (!_sleepers.has(key)) {
+        const job = fieldJob(lay, narrow);
+        while (!job.next().done) yield;
+        _fieldJobs.delete(key);
+      }
+      for (const lod of [1, 0]) { buildPropGeometry(prop, cls, 'r', lod).dispose(); yield; }
+    }
+  }
 }
 
 /** flame/tip point (geometry frame) of a prop, or null */
@@ -1136,7 +1817,7 @@ export function propAttach(name, cls, side, rig) {
   let out = null;
   if (rig.kind === 'human') {
     const d = rig.dims, k = d.H / 1.67, sgn = side === 'l' ? -1 : 1;
-    if (real === 'fist' || real === 'palm') {
+    if (real === 'fist' || real === 'palm' || real === 'pour') {
       const b = rig.index[`hand_${side}`];
       const g = gripOffset(rig, side);
       const r = rig.rest[b];
@@ -1160,4 +1841,6 @@ export function propAttach(name, cls, side, rig) {
 }
 
 export const PROP_NAMES = Object.keys(PROPS);
+/** dev tools only (src/people/dev): the sleepers' bedding internals */
+export const _bedding = { sleeperField, coverHeights, sampleH, COVER };
 export { Color, Quaternion };
