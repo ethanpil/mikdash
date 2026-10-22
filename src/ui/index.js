@@ -54,7 +54,8 @@ export async function init(ctx) {
 
   // the screenshot tool's --keep-ui mode waits for __mikdashReady, which main.js only sets for shot=1.
   // Wait for the fonts so shots show the real faces, but never longer than 5 s (offline / slow fonts host).
-  ctx.bus.on('ready', () => {
+  // (perf-1: from the first drawn frame — main.js compiles the shaders between 'ready' and 'firstFrame')
+  ctx.bus.on('firstFrame', () => {
     let n = 0;
     const wait = () => {
       if (++n < 30) { requestAnimationFrame(wait); return; }

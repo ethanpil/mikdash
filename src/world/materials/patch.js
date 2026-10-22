@@ -29,6 +29,7 @@ import { ShaderChunk, Material } from 'three';
 const VERT_PARS = /* glsl */`
 varying vec3 vMkWorld;
 varying vec2 vMkUv;
+uniform float mkUvSwap; // 1: the grain-along-v views (uvSwap) read every map at uv.yx (perf-1: a uniform, not a variant)
 `;
 
 const VERT_MAIN = /* glsl */`
@@ -41,11 +42,7 @@ const VERT_MAIN = /* glsl */`
     mkW = instanceMatrix * mkW;
   #endif
   vMkWorld = ( modelMatrix * mkW ).xyz;
-  #ifdef MK_UVSWAP
-  vMkUv = uv.yx;
-  #else
-  vMkUv = uv;
-  #endif
+  vMkUv = mkUvS;
 }
 `;
 
@@ -271,13 +268,14 @@ function patchShader(shader, uniforms, detail, opt) {
   const mainRe = /void\s+main\s*\(\s*\)\s*\{/;
   if (!vs.includes('#include <worldpos_vertex>') || !vs.includes('#include <common>')
     || !fs.includes('#include <map_fragment>') || !mainRe.test(fs)) return false;
-  const swap = opt.uvSwap && vs.includes('#include <uv_vertex>');
-  vs = vs.replace(mainRe, (m) => `${swap ? '#define MK_UVSWAP\n' : ''}${m}`)
+  // perf-1: every patched material reads its UVs through mkUvS (uv, or uv.yx where mkUvSwap = 1), so the grain-along-v
+  // views share the programs of the plain keys (a lit program costs ≈ 1–2 s to compile on ANGLE/D3D11)
+  vs = vs.replace(mainRe, (m) => `${m}\n  vec2 mkUvS = mkUvSwap > 0.5 ? uv.yx : uv;`)
     .replace('#include <common>', `#include <common>\n${VERT_PARS}`)
     .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>\n${VERT_MAIN}`);
-  if (swap) {
-    // every map UV from the swapped attribute (channel 0 only: the library's materials use no other channel)
-    vs = vs.replace('#include <uv_vertex>', ShaderChunk.uv_vertex.replace(/vec3\(\s*(?:uv|[A-Z]+_UV)\s*,\s*1\s*\)/g, 'vec3( uv.yx, 1 )'));
+  if (vs.includes('#include <uv_vertex>')) {
+    // every map UV from the (possibly swapped) attribute (channel 0 only: the library's materials use no other channel)
+    vs = vs.replace('#include <uv_vertex>', ShaderChunk.uv_vertex.replace(/vec3\(\s*(?:uv|[A-Z]+_UV)\s*,\s*1\s*\)/g, 'vec3( mkUvS, 1 )'));
   }
   const blend = opt.blend && fs.includes('#include <color_fragment>') && fs.includes('#include <roughnessmap_fragment>')
     && fs.includes('#include <normal_fragment_maps>') && fs.includes('#include <aomap_fragment>');
@@ -316,6 +314,7 @@ function patchShader(shader, uniforms, detail, opt) {
   shader.vertexShader = vs;
   shader.fragmentShader = fs;
   Object.assign(shader.uniforms, uniforms);
+  shader.uniforms.mkUvSwap = { value: opt.uvSwap ? 1 : 0 };
   return true;
 }
 
@@ -330,7 +329,9 @@ export function applyPatch(material, uniforms, state, opt = {}) {
   const o = { blend: !!opt.blend, glow: !!opt.glow, outdoor: !!opt.outdoor, comb: !!opt.comb, courses: !!opt.courses, uvSwap: !!opt.uvSwap };
   // the fallback opt-out (env without MK_NO_ROOMS) follows userData.mkInterior, which setOutdoorOpt() flips too
   const out = () => o.outdoor && state.outdoor !== false && material.userData.mkInterior === false && !envHasNoRooms();
-  const flags = () => `${o.blend ? 'B' : ''}${o.glow ? 'E' : ''}${out() ? 'O' : ''}${o.comb ? 'C' : ''}${o.courses ? 'R' : ''}${o.uvSwap ? 'S' : ''}`;
+  // perf-1: the key names only what changes the program — the comb is compiled only with detail (MK_COMB), and the UV
+  // swap is a uniform (in code only with the patch off, ?matfx=0)
+  const flags = () => `${o.blend ? 'B' : ''}${o.glow ? 'E' : ''}${out() ? 'O' : ''}${o.comb && state.detail ? 'C' : ''}${o.courses ? 'R' : ''}${o.uvSwap && !state.enabled ? 'S' : ''}`;
   material.onBeforeCompile = function onBeforeCompileMk(shader, renderer) {
     if (chained) chained.call(this, shader, renderer);
     if (!state.enabled) {

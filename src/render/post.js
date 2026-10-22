@@ -55,10 +55,25 @@ void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor)
   }
 }
 
-export function buildPost(ctx, fx, quality, toneMapper) {
+export function buildPost(ctx, fx, quality, toneMapper, prepass = null) {
   const { renderer: r, scene, camera } = ctx;
   const composer = new EffectComposer(r, { frameBufferType: HalfFloatType, multisampling: 0, stencilBuffer: false });
-  composer.addPass(new RenderPass(scene, camera));
+  const scenePass = new RenderPass(scene, camera);
+  if (prepass) {
+    // perf-1: the opaque world's depth first (render/prepass.js), right after the pass's clear; the scene keeps it
+    const draw = scenePass.render.bind(scenePass);
+    scenePass.render = (renderer, inputBuffer, outputBuffer, dt, stencil) => {
+      if (!prepass.enabled) { draw(renderer, inputBuffer, outputBuffer, dt, stencil); return; }
+      const clear = scenePass.clearPass.enabled;
+      if (clear) scenePass.clearPass.render(renderer, inputBuffer);
+      renderer.setRenderTarget(scenePass.renderToScreen ? null : inputBuffer);
+      scenePass.clearPass.enabled = false;
+      try {
+        prepass.drawScene(renderer, scene, camera, () => draw(renderer, inputBuffer, outputBuffer, dt, stencil));
+      } finally { scenePass.clearPass.enabled = clear; }
+    };
+  }
+  composer.addPass(scenePass);
   const db = r.getDrawingBufferSize(new Vector2());
   const out = { composer, ao: null, bloom: null, shafts: null, shaftPass: null };
 
@@ -132,6 +147,34 @@ export function buildPost(ctx, fx, quality, toneMapper) {
       if (out.grade && wb?.isVector3) out.grade.uniforms.get('wb').value.copy(wb);
     },
     render(dt) { composer.render(dt); },
+    /**
+     * perf-1: the passes' own materials (and their effects' inner passes'), each with whether it draws onto the canvas,
+     * for render/warmup.js to compile in parallel before the first frame instead of one after another inside it
+     */
+    warmupMaterials() {
+      const out = new Map();
+      const geo = new Map(); // perf-fix-1: a material drawn by a pass's own mesh compiles on that mesh's geometry
+      const seen = new Set();
+      const walk = (o, toScreen, depth) => {
+        if (!o || typeof o !== 'object' || seen.has(o) || depth > 4) return;
+        seen.add(o);
+        if (o.isMaterial) { if (!out.has(o)) out.set(o, toScreen); return; }
+        const fm = o.fullscreenMaterial; // a pass's material is a getter (its screen mesh's)
+        if (fm?.isMaterial && !out.has(fm)) out.set(fm, !!o.renderToScreen);
+        // perf-fix-1: a pass's own full-screen mesh (N8AO's FullScreenTriangle quads keep theirs in `_mesh`): its
+        // material was missed (the walk stops at objects), and N8AO's AO / denoise / compositer programs (≈ 2 s on high)
+        // linked in the first frame. Parentless only: a mesh in a scene (FX) is compiled with its scene
+        if (o.isMesh && !o.parent && o.material?.isMaterial && !out.has(o.material)) { out.set(o.material, toScreen); geo.set(o.material, o.geometry); }
+        if (o.isObject3D || o.isTexture || o.isWebGLRenderTarget || o.isWebGLRenderer || o.isBufferGeometry || ArrayBuffer.isView(o)) return;
+        const vals = o instanceof Map ? [...o.values()] : Array.isArray(o) ? o : Object.values(o);
+        for (const v of vals) walk(v, toScreen, depth + 1);
+      };
+      for (const p of composer.passes) {
+        if (p.fullscreenMaterial) out.set(p.fullscreenMaterial, !!p.renderToScreen);
+        walk(p, false, 0);
+      }
+      return [...out].map(([material, toScreen]) => ({ material, toScreen, geometry: geo.get(material) || composer.passes[0]?.screen?.geometry || null }));
+    },
     setSize(w, h) { composer.setSize(w, h, false); },
     dispose() { composer.dispose(); },
   };

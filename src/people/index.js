@@ -57,6 +57,8 @@ import { PRIORITY } from '../core/engine.js';
 import { PeopleSystem } from './system.js';
 import { ROLE_NAMES, ANIMAL_NAMES, ROLES } from './roles.js';
 import { PROP_NAMES, setPropMetals, prewarmBedding } from './props.js';
+import { whenPrebaked } from './prebake.js';
+import { compileScene, rendersOffscreen, parallelCompile } from '../render/warmup.js';
 import { HUMAN_CLIPS, MITRE_GRASP, STAFF, WINDLASS, WINDLASS_RAISE, CRANK, WAVE_UNDER, KNEAD, EAT } from './clips.js';
 import { QUAD_CLIPS, BIRD_CLIPS } from './animal-clips.js';
 import { poseAlongPath } from './util.js';
@@ -85,6 +87,29 @@ export async function init(ctx) {
     for (const c of sys.crowds) c.fade = 0;
   });
   ctx.bus.on('quality:change', () => sys.reconfigure(ctx.quality));
+  // perf-1: the figure programs the first view most likely needs are issued now — the GPU process links them on its
+  // worker threads while the boot goes on (each costs 1.5–5 s on ANGLE/D3D11) — and every other variant once the
+  // first view is up, so a figure or prop that comes near later finds its program ready
+  // perf-fix-1: only with KHR_parallel_shader_compile (without it a program issued ahead links synchronously at its first
+  // query, as before perf-1 a program linked at its first draw)
+  if (parallelCompile(ctx.renderer)) {
+    const warm = (all) => compileScene(ctx.renderer, sys.warmupObjects(all), ctx.camera, ctx.scene, rendersOffscreen(ctx));
+    warm(false);
+    // the other variants one per frame (creating a program object preprocesses ~140 KB of GLSL: 0.1–0.25 s of this
+    // thread each). perf-fix-1: once most of the first view's programs are linked ('warmup:tail', main.js), while this
+    // thread idles behind the loading screen, instead of stuttering the first seconds of play; a screenshot keeps them
+    // after the view (main.js's later warm-up rounds would wait for them)
+    let started = false;
+    const background = () => {
+      if (started) return;
+      started = true;
+      const objs = [...sys.warmupObjects(true).children];
+      const step = () => { const o = objs.shift(); if (!o) return; compileScene(ctx.renderer, o, ctx.camera, ctx.scene, rendersOffscreen(ctx)); requestAnimationFrame(step); };
+      step();
+    };
+    if (!ctx.params?.shot) ctx.bus.on('warmup:tail', background);
+    ctx.bus.on('firstFrame', () => setTimeout(background, 1000));
+  }
   // the sleepers' bedding covers are draped over the posed body (props.js): costly to build (≈ 0.2–0.7 s on the main
   // thread at a first sleeper's draw), so they are built ahead — a first slice here behind the loader, the rest in idle
   // time (browser only)
@@ -136,6 +161,9 @@ export async function init(ctx) {
     root: sys.root,
     system: sys,
   };
+
+  // the clips baked in the worker since the boot began (prebake.js): figures spawned from here on find their rig ready
+  await whenPrebaked(10000);
 
   if (ctx.params?.debug?.has?.('people')) {
     try {

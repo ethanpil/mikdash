@@ -203,13 +203,18 @@ export class Baker {
     await this.start(kinds);
   }
 
-  /** Compile one `later` group (once): a promise. */
-  compileGroup(i) {
+  /**
+   * Compile one `later` group (once): a promise. perf-fix-2: `pace` (optional, () => Promise) is awaited before each kind's
+   * program is issued, one at a time: creating a program preprocesses its GLSL on this thread, and a whole group issued
+   * at once held a frame of play for up to ≈ 1 s on the HD 4600
+   */
+  compileGroup(i, pace = null) {
     const g = this.groups[i];
     if (!g) return Promise.resolve();
     if (!g.promise) {
       const t0 = performance.now();
-      g.promise = this.compileKinds(g, false).then(() => {
+      const issue = pace ? (async () => { const all = []; for (const k of g) { await pace(); all.push(this.compileKinds([k], false)); } await Promise.all(all); })() : this.compileKinds(g, false);
+      g.promise = issue.then(() => {
         for (const k of g) this.waiting.delete(k);
         this.stats.laterMs += performance.now() - t0;
       });
@@ -355,6 +360,21 @@ export class Baker {
     return rt;
   }
 
+  /**
+   * perf-fix-2: the production bundle skips three's shader checks (core/engine.js), so a generator's link status is
+   * queried here, once per program and BEFORE its first draw — where three's own first-use queries wait anyway (after
+   * the draw it waited for that bake to run on the GPU: ≈ 1 s later 'ready' on the HD 4600) — so a failed generator
+   * still falls back to the flat look
+   */
+  checkLinked(mat) {
+    if (this.renderer.debug.checkShaderErrors) return;
+    const prog = this.renderer.properties.get(mat).currentProgram;
+    if (!prog?.program || (this._linked ||= new WeakSet()).has(prog)) return;
+    const gl = this.renderer.getContext();
+    if (gl.getProgramParameter(prog.program, gl.LINK_STATUS) === false) throw new Error(`${mat.name} failed to compile`);
+    this._linked.add(prog);
+  }
+
   /** Throw if a generator program failed to link (three logs the shader error itself). */
   check(mat) {
     const prog = this.renderer.properties.get(mat).currentProgram;
@@ -470,6 +490,7 @@ export class Baker {
       scratch.scissor.set(0, 0, w, h);
       renderer.setRenderTarget(scratch);
       this.mesh.material = gen;
+      this.checkLinked(gen);
       renderer.render(this.scene, this.cam);
       this.check(gen);
       this.compiledKinds.add(set.kind);
@@ -485,6 +506,7 @@ export class Baker {
       fu.uNormalGain.value = set.normalGain ?? 1;
       renderer.setRenderTarget(r0.rt);
       this.mesh.material = fin;
+      this.checkLinked(fin);
       renderer.render(this.scene, this.cam);
       this.check(fin);
       fu.tP.value = null;
@@ -500,6 +522,7 @@ export class Baker {
       renderer.autoClear = prevAutoClear;
     }
     this.stats.bakeMs += performance.now() - t0;
+    this.stats.bakes = (this.stats.bakes || 0) + 1; // perf-fix-2: textures re-drawn in place (render/shadow-cache.js)
     return r0;
   }
 

@@ -7,7 +7,7 @@
 // (candela, cd/m²) by ctx.env.preExposure. ctx.env.exposure is what the tone mapper applies on top (≈1).
 import {
   DirectionalLight, Mesh, BoxGeometry, Scene, CubeCamera, WebGLCubeRenderTarget, HalfFloatType, LinearFilter,
-  PMREMGenerator, FogExp2, Color, Vector2, Vector3, Matrix3, MathUtils, ShaderChunk,
+  PMREMGenerator, FogExp2, Color, Vector2, Vector3, Matrix3, MathUtils, ShaderChunk, BufferGeometry, Float32BufferAttribute,
 } from 'three';
 import { PRIORITY } from '../core/engine.js';
 import { ATMO, mieCoefficients, transmittanceCPU, zenithOpticalDepth, luminance, nightFloorShape } from './atmosphere.js';
@@ -117,19 +117,73 @@ function hash01(str) {
   return ((h >>> 0) % 10000) / 10000;
 }
 
+// perf-1: env's fixed passes (atmosphere LUTs, PMREM) are created and their programs issued at the start of the boot,
+// while the world is built (main.js) — compiled synchronously at init they held env's init for ≈ 2 s on the HD 4600
+let pre = null;
+export function prewarm(ctx) {
+  if (pre) return;
+  const renderer = ctx.renderer;
+  const qkey = ctx.quality?.key in TIERS ? ctx.quality.key : 'medium';
+  const tier = TIERS[qkey];
+  const luts = new AtmosphereLUTs(renderer, tier);
+  const pmrem = new PMREMGenerator(renderer);
+  pre = { qkey, luts, pmrem };
+  // every pass renders into a target: compile against one (three keys programs by output colour space / tone mapping)
+  const prev = renderer.getRenderTarget();
+  try {
+    renderer.setRenderTarget(luts.transRT);
+    const s = new Scene();
+    for (const m of [luts.transMat, luts.msMat, luts.skyMat, luts.statsMat]) {
+      const q = new Mesh(luts.quad.geometry, m);
+      q.frustumCulled = false;
+      s.add(q);
+    }
+    renderer.compile(s, luts.cam);
+    // the cube → cubeUV and GGX programs of this tier's environment size (PMREM private API of three r186: skipped if
+    // it changes; fromCubemap then compiles them as before)
+    // (compiled on a quad: three's own _compileMaterial uses an empty geometry, whose program key lacks the position
+    // attribute, so the program it builds is never the one drawn)
+    pmrem.compileCubemapShader();
+    if (typeof pmrem._setSize === 'function' && typeof pmrem._allocateTargets === 'function') {
+      pmrem._setSize(tier.envSize);
+      pmrem._allocateTargets().dispose();
+      const p = new Scene();
+      const g = new BufferGeometry().setAttribute('position', new Float32BufferAttribute(new Float32Array(9), 3));
+      for (const m of [pmrem._cubemapMaterial, pmrem._ggxMaterial]) if (m) p.add(Object.assign(new Mesh(g, m), { frustumCulled: false }));
+      renderer.compile(p, luts.cam);
+    }
+  } catch (e) {
+    console.warn('[env] prewarm failed', e);
+  } finally {
+    renderer.setRenderTarget(prev);
+  }
+}
+
 export async function init(ctx) {
   const { renderer, scene, camera } = ctx;
   const qkey = ctx.quality?.key in TIERS ? ctx.quality.key : 'medium';
   let tier = TIERS[qkey]; // replaced on 'quality:change' (applyTier)
+  const warm = pre?.qkey === qkey ? pre : null;
+  pre = null;
   installFogChunks();
   // three's PMREM shader triggers a benign ANGLE/D3D constant-folding warning (X4122) at our first compile;
   // render/ owns the idempotent filter for such logs (it should move to main.js boot — see report)
   try { (await import('../render/log-filter.js')).installShaderLogFilter?.(); } catch { /* optional */ }
 
   // ---------------------------------------------------------------- atmosphere LUTs
-  const luts = new AtmosphereLUTs(renderer, tier);
+  const luts = warm?.luts || new AtmosphereLUTs(renderer, tier);
   luts.init();
-  luts.buildTable(); // per-source statistics: jumps and time-lapse need no GPU read-back (false → read back as before)
+  // per-source statistics: jumps and time-lapse need no GPU read-back (false → read back as before). perf-1: built
+  // after the first view, a few altitudes a frame (until then the statistics are read back, as without a table)
+  // perf-fix-1: started with the shader warm-up (main.js: 'ready' → programs linking → 'firstFrame'), when this thread and
+  // the GPU idle while the programs link; landed before the first view, the boot meters from the table as before perf-1
+  // (a forced refresh, as 'ready' did) — the reads after the first view also stuttered play (0.15–0.25 s each)
+  let shown = false;
+  ctx.bus.on('firstFrame', () => { shown = true; });
+  ctx.bus.on('ready', () => {
+    if (luts.table) return;
+    luts.buildTableAsync().then((ok) => { if (ok && !shown) { st.force = true; st.envDirty = true; } });
+  });
   const obsR = ATMO.groundRadius + ATMO.observerAltitude;
   const mie = mieCoefficients(ATMO);
   const tauZenith = zenithOpticalDepth(ATMO);
@@ -181,7 +235,7 @@ export async function init(ctx) {
   let cubeRT = new WebGLCubeRenderTarget(tier.envSize, CUBE_OPTS);
   const cubeCam = new CubeCamera(0.1, 10, cubeRT);
   envScene.add(cubeCam);
-  const pmrem = new PMREMGenerator(renderer);
+  const pmrem = warm?.pmrem || new PMREMGenerator(renderer);
   let pmremRT = null;
 
   // ---------------------------------------------------------------- interiors + scene probes (lighting-polish)
@@ -303,6 +357,7 @@ export async function init(ctx) {
   const worldToGal = new Matrix3();
   const ncp = new Vector3();
   const tmp = new Vector3();
+  const tmp2 = new Vector3();
   const lutSunE = new Vector3(), lutMoonE = new Vector3(), lutGround = new Vector3();
   // statistics table (lighting-polish-fix): sources of the current sky for luts.estimate
   const estSun = { alt: 0, az: 0, E: [0, 0, 0] }, estMoon = { alt: 0, az: 0, E: [0, 0, 0] };
@@ -413,6 +468,12 @@ export async function init(ctx) {
   // m, texels; the half-extent (m) with the Sun above 14° and the share of it the map reaches ahead of the viewer
   // (api._shadowTune: dev A/B)
   const shadowTune = { depth: 0.015, normal: 0.7, extent: 80, ahead: 0.35 };
+  // perf-fix-1: while render/ caches the static casters' shadow depth (render/shadow-cache.js, setShadowHold) the framing
+  // is kept until the light turns by more than HOLD_DEG, the extent changes by more than HOLD_R, or the ideal centre
+  // drifts more than R / HOLD_STEP from it in any light-space axis (a step of the walk, a turn of the head): the map then
+  // reaches R − R / 16 around the ideal centre instead of R, the light lags by ≤ 0.05°; a framing is computed as before
+  const HOLD_DEG = 0.05, HOLD_R = 0.02, HOLD_STEP = 16;
+  const held = { on: false, valid: false, dir: new Vector3(), R: 0, D: 0, size: 0, c: new Vector3(), bx: new Vector3(), by: new Vector3() };
   function updateShadowCamera(sunAltDeg) {
     if (!st.shadowsManaged || !key.castShadow) return;
     const R = MathUtils.lerp(shadowTune.extent, 220, smooth(14, 3, sunAltDeg)); // whole Mount when shadows are long
@@ -420,14 +481,24 @@ export async function init(ctx) {
     const size = key.shadow.mapSize.x;
     const texel = (2 * R) / size;
     const dir = st.keyDir;
+    const fwd = tmp.set(0, 0, -1).applyQuaternion(camera.quaternion).setY(0);
+    if (fwd.lengthSq() > 1e-6) fwd.normalize().multiplyScalar(R * shadowTune.ahead);
+    if (held.on && held.valid && held.D === D && held.size === size && Math.abs(R / held.R - 1) < HOLD_R
+      && held.dir.angleTo(dir) < HOLD_DEG * DEG) {
+      const g = held.R / HOLD_STEP;
+      const ideal = tmp2.copy(camera.position).add(fwd).sub(held.c);
+      if (Math.abs(ideal.dot(held.bx)) <= g && Math.abs(ideal.dot(held.by)) <= g && Math.abs(ideal.dot(held.dir)) <= g) return;
+    }
     // the shadow camera's basis (same as Object3D.lookAt with up = +y)
     sBasisX.crossVectors(UP, dir);
     if (sBasisX.lengthSq() < 1e-8) sBasisX.set(1, 0, 0);
     sBasisX.normalize();
     sBasisY.crossVectors(dir, sBasisX).normalize();
-    const fwd = tmp.set(0, 0, -1).applyQuaternion(camera.quaternion).setY(0);
-    if (fwd.lengthSq() > 1e-6) fwd.normalize().multiplyScalar(R * shadowTune.ahead);
     sCenter.copy(camera.position).add(fwd);
+    if (held.on) {
+      held.valid = true; held.dir.copy(dir); held.R = R; held.D = D; held.size = size;
+      held.c.copy(sCenter); held.bx.copy(sBasisX); held.by.copy(sBasisY);
+    }
     // snap the centre to whole texels in light space (no shimmering when walking)
     const x = Math.round(sCenter.dot(sBasisX) / texel) * texel;
     const y = Math.round(sCenter.dot(sBasisY) / texel) * texel;
@@ -896,10 +967,26 @@ export async function init(ctx) {
     get shadowsManaged() { return st.shadowsManaged; },
     /** false: the render task drives sunLight.shadow (e.g. CSM); env stops moving the shadow camera */
     setShadowsManaged(on) { st.shadowsManaged = !!on; },
+    /** perf-fix-1: keep the key light's shadow framing within small drifts (render/shadow-cache.js caches its static depth) */
+    setShadowHold(on) { held.on = !!on; held.valid = false; },
+    /**
+     * perf-fix-2: point every linked program at env's fog uniforms and interiors block now (the boot's shader warm-up
+     * calls it as programs link), so these synchronous per-program queries run in the warm-up's idle time, not in a frame
+     */
+    bindPrograms() { fogU.apply(); interiors?.apply(); },
     setHorizonProfile,
     horizonElevation: (az, y = camera.position.y) => horizonAngle(az, y),
     /** force a full refresh (LUT, stats, PMREM) on the next frame; pass true to do it now */
     update(now = false) { st.force = true; st.envDirty = true; if (now) update(0); },
+    /**
+     * perf-fix-1: issue the env pass's sky program as refreshEnvMap draws it (cube target, env's render state) for the
+     * boot's shader warm-up (main.js); returns the Set of materials. It linked synchronously at its first use otherwise.
+     */
+    warmupMaterials() {
+      let set = new Set();
+      luts.withState(() => { renderer.setRenderTarget(cubeRT); set = renderer.compile(envScene, cubeCam.children[0]); });
+      return set;
+    },
     /** internal (dev scripts): the key light's shadow biases { depth (m), normal (texels) } */
     get _shadowTune() { return shadowTune; },
     /** internal (dev scripts): the atmosphere LUTs and the statistics table */

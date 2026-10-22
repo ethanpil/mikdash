@@ -19,6 +19,11 @@ export const AMAH_STANDARDS = {
 
 function readAmahKey() {
   try {
+    // a Worker of this page (perf-1: people/bake.worker.js) has no page URL or storage: it is told by its name
+    if (typeof WorkerGlobalScope !== 'undefined') {
+      const w = /\bamah=(\w+)/.exec(String(globalThis.name || ''));
+      if (w && AMAH_STANDARDS[w[1]]) return w[1];
+    }
     const q = new URLSearchParams(globalThis.location?.search || '').get('amah');
     if (q && AMAH_STANDARDS[q]) return q;
     const s = globalThis.localStorage?.getItem('mikdash.amah');

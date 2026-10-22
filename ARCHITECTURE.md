@@ -111,7 +111,8 @@ against the Mishnaic chains (Middot 5:1–2, 4:6–7, 2:5–6, 3:1, 3:6 …) and
   World-scaled UVs (1 UV = 1 m) — `applyWorldUV`, `siteBoxGeometry`.
 * Detail by `ctx.quality.detail` (0 low … 3 ultra): e.g. capitals/moldings/drafted margins/relief only ≥1;
   instancing for repeated elements (columns, rings, steps).
-* Budgets (whole world): ≤ 350 draw calls at detail 0, ≤ 900 at 3; ≤ 1.5 M triangles at detail 0, ≤ 6 M at 3.
+* Budgets (whole world, MAIN VIEW PASS — shadow, cube-shadow and depth pre-passes are measured separately and must not
+  stall frames): ≤ 350 draw calls at detail 0, ≤ 900 at 3; ≤ 1.5 M triangles at detail 0, ≤ 6 M at 3.
 * Register **anchors** for important points (`ctx.addAnchor('altar.top', { pos: [X,Y,Z], heading, label })`)
   and **fires/lamps** (`ctx.addFire({ id, kind, pos, size, schedule })`) — the render task turns fires into
   flames + lights. Movable parts the sim animates (gates' doors, curtains, the kiyor rising on the muchni,
@@ -281,6 +282,10 @@ standard, volume, mouse sensitivity/invert, FOV, labels, aggadah layer. Mobile-f
   labels aggadah reducedMotion captions musicStyle`. Wants `ctx.zones.current` = zone id string,
   `ctx.zones.content` = ZONE_CONTENT, `ctx.schedule.active/upcoming/at` returning EVENTS objects (optional `t0/t1`).
 
+* **Boot:** `ctx.bootTimes` (context, world, sys:*, ready, compiled, firstFrame, firstImage); shader warm-up with
+  KHR_parallel_shader_compile in priority order (render/warmup.js, `ctx.env.bindPrograms()`); later material groups bake
+  from 'firstFrame' in normal play ('ready' in shot mode); three's shader checks are off in production (`?shadercheck=1`).
+
 ## 15. Verification
 
 * `npm run build` must pass. `node tools/shot.mjs [--q low|medium|high|ultra] "at=X,Y&look=H,P&t=…"` renders
@@ -288,3 +293,5 @@ standard, volume, mouse sensitivity/invert, FOV, labels, aggadah layer. Mobile-f
   (This machine: Intel HD 4600 — a realistic low-end device. Shots of heavy scenes take a while.)
 * Check console output is clean (no errors, no repeated warnings).
 * Performance: low tier must stay interactive on this iGPU; report draw calls & triangles for your part.
+* `node tools/warmup-check.mjs` boots every tier cold in production (shot + play) — the only check of cold boot.
+  `node tools/shot.mjs --prod` measures the production bundle.

@@ -164,7 +164,8 @@ export function mountUi(ctx) {
   root.classList.add('mk-intro-open');
   root.append(intro.el);
   app.introOpen = () => intro.open;
-  ctx.bus.on('ready', () => {
+  // perf-1: with the first drawn frame (main.js compiles the shaders between 'ready' and 'firstFrame')
+  ctx.bus.on('firstFrame', () => {
     if (resume) intro.enter(); else intro.show();
     // build the map's model, list and plan in idle time, so the first M opens at once
     const warm = () => { try { getPanel('map')?.prewarm?.(); } catch (e) { console.error('[ui] map prewarm failed', e); } };

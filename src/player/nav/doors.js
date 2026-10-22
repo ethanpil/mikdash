@@ -35,7 +35,7 @@ export function createDoors(ctx) {
     const own = [];
     o.traverse((c) => { if (c !== o && c.isMesh) own.push(c); });
     const sibs = (o.parent?.children ?? []).filter((c) => c !== o);
-    const objs = sibs.filter((c) => !c.isInstancedMesh);
+    const objs = sibs.filter((c) => !c.isInstancedMesh || c.userData.mkSingle); // mkSingle: a plain mesh drawn as one instance (render/warmup.js)
     const inst = sibs.filter((c) => c.isInstancedMesh && c.instanceMatrix?.usage === DynamicDrawUsage);
     const boxes = [];
     // a door whose leaf groups can stand at different amounts (the Heichal great gate: openGroup('outer'|'inner')) is

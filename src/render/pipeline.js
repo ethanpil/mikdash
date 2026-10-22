@@ -5,6 +5,8 @@
 import { NoToneMapping, AgXToneMapping, ACESFilmicToneMapping, NeutralToneMapping, CustomToneMapping } from 'three';
 import { installGradeChunk } from './tonemap.js';
 import { exposure } from './env-link.js';
+import { DepthPrepass } from './prepass.js';
+import { tiledGpu } from './detect.js';
 
 installGradeChunk();
 
@@ -33,6 +35,11 @@ export class Pipeline {
     this.exposureTotal = 1;
     const req = ctx.params?.raw?.get?.('tm');
     this.toneMapper = TONE_MAPPERS[req] ? req : DEFAULT_TONE_MAPPER;
+    // perf-1: the opaque world's depth first (render/prepass.js); ?prepass=0 turns it off. perf-fix-1: off by default on
+    // tile-based GPUs (phones, Apple), which reject hidden fragments themselves (measured on ANGLE/D3D11 only); ?prepass=1
+    this.prepass = new DepthPrepass();
+    const pre = ctx.params?.raw?.get?.('prepass');
+    this.prepass.enabled = pre === '0' ? false : pre === '1' ? true : !tiledGpu(ctx.renderer);
   }
 
   get composer() { return this.post?.composer || null; }
@@ -43,7 +50,7 @@ export class Pipeline {
     let next = null;
     if (quality.post) {
       const { buildPost } = await import('./post.js');
-      next = buildPost(this.ctx, this.fx, quality, tm.post);
+      next = buildPost(this.ctx, this.fx, quality, tm.post, this.prepass);
     }
     this.dispose();
     this.quality = quality;
@@ -69,9 +76,9 @@ export class Pipeline {
   render(dt) {
     if (this.post) { this.post.render(dt); return; }
     const { renderer: r, scene, camera } = this.ctx;
-    r.autoClear = true;
-    r.render(scene, camera);
+    r.clear();
     r.autoClear = false;
+    this.prepass.drawScene(r, scene, camera);
     r.render(this.fx.scene, camera);
     r.autoClear = true;
   }

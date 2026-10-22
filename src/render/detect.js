@@ -28,6 +28,14 @@ export function isMobile() {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (/Macintosh/.test(ua) && (nav.maxTouchPoints || 0) > 1);
 }
 
+/**
+ * perf-fix-1: a tile-based (deferred) GPU — phones, tablets, Apple silicon (Safari reports every Mac as "Apple GPU"),
+ * Mali / PowerVR / Adreno — removes hidden fragments in hardware, so a depth pre-pass only adds draws and vertices there.
+ */
+export function tiledGpu(renderer) {
+  return isMobile() || /apple|mali|immortalis|powervr|img |adreno|xclipse/i.test(gpuString(renderer));
+}
+
 /** Tier from the GPU string alone, or null when unknown. */
 export function classifyGpu(gpu, mobile) {
   const g = gpu.toLowerCase();
@@ -202,6 +210,12 @@ export function detectDevice(renderer, { bench = true } = {}) {
     reason = stringTier ? `gpu=${stringTier}` : benchTier ? `bench=${benchTier}` : 'unknown GPU';
   }
   if (mobile && ORDER.indexOf(tier) > 1) { tier = 'medium'; reason += ', mobile cap'; }
+  // perf-fix-1: a first visit compiles every shader on the CPU (ANGLE translates and FXC compiles on the browser's worker
+  // threads; a strong GPU does not speed it up): ≈ 28 s for medium and ≈ 42 s for high on a 4-thread CPU (HD 4600 box),
+  // ultra more. Few threads → a lower default (Settings still offers every tier; later visits hit the GPU program cache)
+  const threads = globalThis.navigator?.hardwareConcurrency || 0;
+  const cpuMax = !threads ? 3 : threads <= 4 ? 1 : threads < 8 ? 2 : 3;
+  if (ORDER.indexOf(tier) > cpuMax) { tier = ORDER[cpuMax]; reason += `, cpu cap (${threads} threads)`; }
   return { tier, gpu, mobile, stringTier, benchTier, score: Math.round(score * 10) / 10, reason };
 }
 

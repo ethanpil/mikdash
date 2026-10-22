@@ -352,7 +352,8 @@ export async function init(ctx) {
     engine.setTier(key);
     if (engine.running) { warmed = false; warm(false); }
   });
-  ctx.bus.on('ready', () => setTimeout(() => warm(true), 4000));
+  // perf-1: after the first view (the synthesis workers would take CPU from the shader compiler threads before it)
+  ctx.bus.on('firstFrame', () => setTimeout(() => warm(true), 4000));
 
   ctx.engine.onUpdate((dt) => {
     engine.update(dt);

@@ -5,7 +5,7 @@
 // the skinning, so the CPU cost per figure is a few dozen floats.
 import {
   Group, Object3D, InstancedMesh, InstancedBufferAttribute, BufferGeometry, DynamicDrawUsage, Frustum, Matrix4,
-  Vector3, Sphere, Mesh, BufferAttribute, MeshStandardMaterial, ShaderMaterial,
+  Vector3, Sphere, Mesh, BufferAttribute, Float32BufferAttribute, MeshStandardMaterial, ShaderMaterial,
 } from 'three';
 import { AnimAtlas } from './anim.js';
 import { LocalPose, blendPose } from './pose.js';
@@ -15,6 +15,7 @@ import { buildAnimalGeometry, halterPoint } from './animals.js';
 import { gripOffset } from './clips.js';
 import { PROPS, HELD_VESSELS, buildPropGeometry, propAttach, propTip } from './props.js';
 import { createPeopleMaterial, createPeopleDepthMaterials } from './material.js';
+import { compileScene, rendersOffscreen } from '../render/warmup.js';
 import { CLIP_ALIASES } from './clips.js';
 import { m2w, headingToYaw, AMAH } from '../core/units.js';
 import { rng, hashStr, clamp, lerp, smooth } from './util.js';
@@ -88,6 +89,31 @@ const _e2 = new Float32Array(16);
 
 // distinct prop batches (draw calls) per frame by tier (low … ultra); see the draw loop
 const PROP_BATCH_CAP = [14, 22, 34, 56];
+
+// Material options of a figure batch at `lod` on a tier of `detail` (pattern group FIG | KG | BEAST). perf-1: options
+// that compile to the same program are made equal, so batches share programs (each costs 1.5–5 s to compile on
+// ANGLE/D3D11):
+//  * without pattern detail (LOD 2/3 everywhere, LOD 1 on low) every group is compiled in — outside P_DETAIL a group's
+//    code is per-pattern-id branches that never meet another class's ids (the ephod's strands only on the High
+//    Priest, the animal eye only on animals) — and lerp and morph are on: LOD 2/3 instances push 0 for the frame
+//    fraction and morph weights (Batch.flat), and animals have no morph attribute and zero weights;
+//  * with detail on medium+ LOD 0 dithers like LOD 1 (a hero is drawn only at alpha > 0.999, so it never discards);
+//  * with detail every man's figure compiles the High Priest's group too (measured free: 7.5 → 7.6 s on medium, where
+//    his own program cost another 7.5 s); the animals keep theirs (merged it would add 4 s to the longest program).
+function figureMatOpts(detailTier, lod, group) {
+  const detail = lod === 0 || (lod === 1 && detailTier >= 1);
+  if (!detail) return { lerp: true, detail: false, physical: false, dither: true, morph: true, groups: ['FIG', 'KG', 'BEAST'] };
+  return {
+    lerp: true, detail: true, physical: detailTier >= 2, dither: lod >= 1 || detailTier >= 1, morph: group !== 'BEAST',
+    groups: group === 'BEAST' ? ['BEAST'] : ['FIG', 'KG'],
+  };
+}
+/** prop material options ('PROP' vessels / instruments / wood / cloth, 'FLESH' carcass and limbs); without detail both
+ *  groups share one program (as figureMatOpts) */
+function propMatOpts(detailTier, lod, group) {
+  const detail = lod ? detailTier >= 1 : true;
+  return { prop: true, lerp: true, detail, physical: !lod && detailTier >= 2, groups: detail ? [group] : ['PROP', 'FLESH'] };
+}
 
 // --------------------------------------------------------------------------------------------- batches
 class Batch {
@@ -190,16 +216,14 @@ class Arch {
     if (!this.geos[lod]) {
       this.geos[lod] = this.isAnimal ? buildAnimalGeometry(this.def, this.rig, lod) : buildHumanGeometry(this.def.recipe, this.rig, lod);
     }
-    const mat = createPeopleMaterial({
-      atlas: sys.atlas, palette: this.def.palette, lerp: lod < 2, detail: lod === 0 || (lod === 1 && sys.detail >= 1),
-      physical: sys.detail >= 2 && lod < 2, dither: lod >= 1, morph: !this.isAnimal && lod <= 1,
-      groups: this.isAnimal ? ['BEAST'] : this.key === 'kg_gold' ? ['FIG', 'KG'] : ['FIG'],
-    });
+    const mat = createPeopleMaterial({ atlas: sys.atlas, palette: this.def.palette, ...figureMatOpts(sys.detail, lod, this.isAnimal ? 'BEAST' : this.key === 'kg_gold' ? 'KG' : 'FIG') });
     // heroes (LOD0) cast their shadows through the LOD1 proxy below: the same silhouette at an eighth of the
     // triangles, which matters because every shadow pass (two sun cascades, six faces per torch shadow) draws it
     const b = new Batch(sys, `${this.key}:${lod}`, this.geos[lod], mat, sys.depthFig, {
       castShadow: !!sys.quality.shadows && (lod === 1 || (lod === 0 && this.isAnimal)), cap: lod >= 2 ? 64 : 16,
     });
+    // perf-1: LOD 2/3 share the non-detail program, which lerps and morphs: their instances push 0 for both
+    b.flat = lod >= 2;
     this.batches[lod] = b;
     sys.batches.push(b);
     return b;
@@ -764,11 +788,47 @@ export class PeopleSystem {
   /** prop material by pattern group ('PROP' vessels/instruments/wood/cloth, 'FLESH' carcass and limbs) and LOD */
   propMat(group, lod) {
     const key = `${group}:${lod ? 1 : 0}`;
-    if (!this.propMats.has(key)) {
-      this.propMats.set(key, createPeopleMaterial({ atlas: this.atlas, prop: true, lerp: true, groups: [group],
-        detail: lod ? this.detail >= 1 : true, physical: !lod && this.detail >= 2 }));
-    }
+    if (!this.propMats.has(key)) this.propMats.set(key, createPeopleMaterial({ atlas: this.atlas, ...propMatOpts(this.detail, lod, group) }));
     return this.propMats.get(key);
+  }
+
+  /**
+   * perf-1: a Group of one-instance dummy batches whose programs the first view most likely needs (all = every variant
+   * this tier can draw), for renderer.compile() ahead of the batches that need them — a batch made later finds its
+   * program linked. Keyed exactly like the real batches (same options, same attribute layout as far as three's program
+   * key reads it); the dummies' materials stay referenced, so their programs are never released.
+   */
+  warmupObjects(all = false) {
+    const d = this.detail;
+    const opts = [
+      figureMatOpts(d, 0, 'FIG'), figureMatOpts(d, 1, 'FIG'), figureMatOpts(d, 2, 'FIG'),
+      propMatOpts(d, 0, 'PROP'), propMatOpts(d, 1, 'PROP'),
+    ];
+    // where LOD 1 has pattern detail (medium+) the High Priest's, the animals' and the carcasses' programs are drawn
+    // from a distance too (the courts at dawn): likely in a first view there; on low only up close
+    if (all || d >= 1) opts.push(figureMatOpts(d, 1, 'BEAST'), propMatOpts(d, 1, 'FLESH'));
+    if (all) opts.push(figureMatOpts(d, 0, 'BEAST'), propMatOpts(d, 0, 'FLESH'));
+    if (!this._warmGeo) {
+      const g = new BufferGeometry();
+      g.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+      g.setAttribute('normal', new Float32BufferAttribute([0, 1, 0, 0, 1, 0, 0, 1, 0], 3));
+      g.setAttribute('uv', new Float32BufferAttribute([0, 0, 0, 0, 0, 0], 2));
+      g.setAttribute('color', new Float32BufferAttribute([1, 1, 1, 1, 1, 1, 1, 1, 1], 3));
+      this._warmGeo = g;
+      this._warm = new Map();
+    }
+    const grp = new Group();
+    for (const o of opts) {
+      const key = JSON.stringify(o);
+      if (!this._warm.has(key)) {
+        const mesh = new InstancedMesh(this._warmGeo, createPeopleMaterial({ atlas: this.atlas, ...o }), 1);
+        mesh.frustumCulled = false;
+        mesh.receiveShadow = true;
+        this._warm.set(key, mesh);
+      }
+      grp.add(this._warm.get(key));
+    }
+    return grp;
   }
 
   // ---------------------------------------------------------------- floors
@@ -947,6 +1007,35 @@ export class PeopleSystem {
     this._makeShared();
   }
 
+  /**
+   * perf-1: a batch whose program is still being compiled (KHR_parallel_shader_compile: the GPU process links it on a
+   * worker thread) is not drawn yet — its instances go to the next coarser LOD that is ready, so a figure that comes
+   * near (a variant no one has drawn yet) never stalls the frame for its program, 1.5–7 s on ANGLE/D3D11. Only batches
+   * that exist already serve as the fallback. Without the extension three reports every program ready and the first
+   * draw compiles it, as before.
+   */
+  _drawable(b) {
+    if (b.drawable) return true;
+    const R = this.ctx.renderer;
+    if (!R?.properties) return true;
+    const prog = R.properties.get(b.material).currentProgram;
+    if (!prog) {
+      if (!b.issued) { b.issued = true; compileScene(R, b.mesh, this.ctx.camera, this.ctx.scene, rendersOffscreen(this.ctx)); }
+      return false;
+    }
+    let ok = true;
+    try { ok = prog.isReady(); } catch { ok = true; }
+    if (ok) b.drawable = true;
+    return ok;
+  }
+  _batchFor(arch, lod) {
+    const b = arch.batch(lod);
+    if (this._drawable(b)) return b;
+    // only batches that already exist (building one is geometry work, and its program would compile too)
+    for (let l = lod + 1; l <= 3; l++) { const c = arch.batches[l]; if (c && c !== b && this._drawable(c)) return c; }
+    return b; // nothing coarser ready: draw it (and compile it) as before
+  }
+
   _cands(n) {
     const c = this._cand;
     if (c.d.length < n) {
@@ -1047,7 +1136,9 @@ export class PeopleSystem {
     let propBatches = 0;
     const propCap = PROP_BATCH_CAP[Math.max(0, Math.min(3, this.detail | 0))];
     const propBatch = (v, lod) => {
-      const b = v.batch(lod);
+      let b = v.batch(lod);
+      // still compiling: the LOD 1 prop (small geometry, the shared non-detail material, linked at boot) meanwhile
+      if (lod === 0 && !this._drawable(b)) { const b1 = v.batch(1); if (this._drawable(b1)) b = b1; }
       if (b.n === 0) { if (propBatches >= propCap && v.name !== 'torch') return null; propBatches++; }   // a burning torch always shows
       return b;
     };
@@ -1102,9 +1193,10 @@ export class PeopleSystem {
       if (fade === -1) { _fa[0] = _fa[1] = owner.scratch; _fa[2] = 0; } // blended pose in a scratch frame
       else this.atlas.sample(clip, phase, _fa);
       fade = 0;
-      const b = arch.batch(lod);
-      b.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, mA, mB, mask, tint[0], tint[1], tint[2], tint[3]);
-      if (lod === 0) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
+      const b = this._batchFor(arch, lod);
+      if (b.flat) b.push(e16, _fa[0], _fa[1], 0, alpha, 0, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
+      else b.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, mA, mB, mask, tint[0], tint[1], tint[2], tint[3]);
+      if (lod === 0 && b === arch.batches[0]) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
       // props (none on LOD3 silhouettes except the big ones); a second prop (setProps) in the left hand
       const prop2 = owner instanceof Crowd ? null : owner.prop2;
       // ritual vessels in an actor's hands stay drawn at LOD 2 (crowds keep only the big props there)

@@ -173,36 +173,80 @@ export class AtmosphereLUTs {
   buildTable(alts = TABLE_ALTS, sunTOA = ATMO.sunIlluminanceTOA) {
     const n = alts.length;
     const rt = makeRT(8, n, { type: this.floatStats ? FloatType : HalfFloatType, filter: NearestFilter });
-    const u = this.skyMat.uniforms;
-    const keep = ['uSunDir', 'uSunE', 'uMoonDir', 'uMoonE', 'uGroundIrr'].map((k) => [k, u[k].value.clone()]);
-    const refAz = this.statsMat.uniforms.uRefAz.value;
     const buf = this.floatStats ? new Float32Array(n * 32) : new Uint16Array(n * 32);
     try {
-      this.withState(() => {
-        u.uMoonE.value.set(0, 0, 0);
-        u.uGroundIrr.value.set(0, 0, 0);
-        this.statsMat.uniforms.uRefAz.value = 0;
-        rt.scissorTest = true;
-        for (let k = 0; k < n; k++) {
-          const a = alts[k] * DEG;
-          const e = (sunTOA * tableBoost(alts[k])) / LUT_SCALE;
-          u.uSunDir.value.set(0, Math.sin(a), -Math.cos(a)); // azimuth 0 (north) = the reference
-          u.uSunE.value.set(e, e, e);
-          this.pass(this.skyMat, this.skyRT);
-          rt.viewport.set(0, k, 8, 1);
-          rt.scissor.set(0, k, 8, 1);
-          this.pass(this.statsMat, rt);
-        }
-      });
+      this._tablePasses(rt, this.skyRT, alts, 0, n, sunTOA);
       this.renderer.readRenderTargetPixels(rt, 0, 0, 8, n, buf);
     } catch (e) {
       console.warn('[env] sky statistics table unavailable', e);
       return false;
     } finally {
-      for (const [k, v] of keep) u[k].value.copy(v);
-      this.statsMat.uniforms.uRefAz.value = refAz;
       rt.dispose();
     }
+    return this._tableFinish(buf, alts, sunTOA);
+  }
+
+  /**
+   * perf-1: the same table built after the first view instead of in the boot (≈ 1 s of GPU work and a synchronous
+   * read on the HD 4600): `perFrame` altitudes a frame into private targets (the live sky-view LUT is untouched), one
+   * asynchronous read at the end. Until it lands env reads the statistics back as it does without a table.
+   */
+  async buildTableAsync(alts = TABLE_ALTS, sunTOA = ATMO.sunIlluminanceTOA, perFrame = 4) {
+    const n = alts.length;
+    const rt = makeRT(8, n, { type: this.floatStats ? FloatType : HalfFloatType, filter: NearestFilter });
+    const sky = makeRT(this.skyW, this.skyH, { wrapS: RepeatWrapping });
+    const buf = this.floatStats ? new Float32Array(n * 32) : new Uint16Array(n * 32);
+    const frame = () => new Promise((r) => (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(() => r()) : setTimeout(r, 16)));
+    try {
+      for (let k0 = 0; k0 < n; k0 += perFrame) {
+        await frame();
+        if (this.skyW !== sky.width || this.skyH !== sky.height) return false; // a tier change rebuilt it meanwhile
+        this._tablePasses(rt, sky, alts, k0, Math.min(n, k0 + perFrame), sunTOA);
+      }
+      await this.renderer.readRenderTargetPixelsAsync(rt, 0, 0, 8, n, buf);
+    } catch (e) {
+      console.warn('[env] sky statistics table unavailable', e);
+      return false;
+    } finally {
+      rt.dispose();
+      sky.dispose();
+    }
+    return this._tableFinish(buf, alts, sunTOA);
+  }
+
+  /** rows k0..k1 of the table: the sky-view LUT for a unit source at each altitude (into `sky`), then its statistics */
+  _tablePasses(rt, sky, alts, k0, k1, sunTOA) {
+    const u = this.skyMat.uniforms;
+    const keep = ['uSunDir', 'uSunE', 'uMoonDir', 'uMoonE', 'uGroundIrr'].map((k) => [k, u[k].value.clone()]);
+    const su = this.statsMat.uniforms;
+    const refAz = su.uRefAz.value, skyTex = su.uSky.value;
+    try {
+      this.withState(() => {
+        u.uMoonE.value.set(0, 0, 0);
+        u.uGroundIrr.value.set(0, 0, 0);
+        su.uRefAz.value = 0;
+        su.uSky.value = sky.texture;
+        rt.scissorTest = true;
+        for (let k = k0; k < k1; k++) {
+          const a = alts[k] * DEG;
+          const e = (sunTOA * tableBoost(alts[k])) / LUT_SCALE;
+          u.uSunDir.value.set(0, Math.sin(a), -Math.cos(a)); // azimuth 0 (north) = the reference
+          u.uSunE.value.set(e, e, e);
+          this.pass(this.skyMat, sky);
+          rt.viewport.set(0, k, 8, 1);
+          rt.scissor.set(0, k, 8, 1);
+          this.pass(this.statsMat, rt);
+        }
+      });
+    } finally {
+      for (const [k, v] of keep) u[k].value.copy(v);
+      su.uRefAz.value = refAz;
+      su.uSky.value = skyTex;
+    }
+  }
+
+  _tableFinish(buf, alts, sunTOA) {
+    const n = alts.length;
     // per lux of source at the top of the atmosphere, log for interpolation
     const T = new Float64Array(n * 32);
     let ok = true;

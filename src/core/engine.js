@@ -26,6 +26,10 @@ export class Engine {
     this.renderer.toneMapping = ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.type = PCFShadowMap; // PCFSoftShadowMap was removed in r186
+    // perf-fix-2: no shader-error checks in the production bundle (`?shadercheck=1` turns them back on): three's check
+    // reads the program and both shader info logs at each program's first use, three synchronous queries to the GPU
+    // process (a failed generator bake still falls back: world/materials/gen/baker.js checks the link status itself)
+    this.renderer.debug.checkShaderErrors = !import.meta.env?.PROD || !!params.raw?.has?.('shadercheck');
 
     this.scene = new Scene();
     this.camera = new PerspectiveCamera(params.fov || 62, 1, 0.08, 9000);
@@ -36,6 +40,8 @@ export class Engine {
     this.updaters = [];
     this.renderFn = () => this.renderer.render(this.scene, this.camera);
     this.frame = 0;
+    // false while the boot warms shaders up: updaters run, nothing is drawn (perf-1, render/warmup.js)
+    this.drawing = true;
     this.fps = 60;
     this.running = false;
     this.pixelRatio = 1;
@@ -97,7 +103,7 @@ export class Engine {
         u.failed = true;
       }
     }
-    this.renderFn(dt);
+    if (this.drawing) this.renderFn(dt);
     this.frame++;
   }
 }

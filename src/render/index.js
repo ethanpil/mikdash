@@ -9,6 +9,8 @@ import { SunShadows, installCascadeBiasChunk } from './shadows.js';
 import { AdaptiveResolution } from './adaptive.js';
 import { detectDevice, isMobile } from './detect.js';
 import { installShaderLogFilter } from './log-filter.js';
+import { setFrameLights } from './warmup.js';
+import { KeyShadowCache } from './shadow-cache.js';
 
 export async function init(ctx) {
   const { engine, renderer } = ctx;
@@ -23,6 +25,7 @@ export async function init(ctx) {
   ctx.fx = fx;
   const pipeline = new Pipeline(ctx, fx);
   let shadows = null;
+  let shadowCache = null; // perf-fix-1: medium's key-light shadow, static casters cached (render/shadow-cache.js)
   const stats = { fps: 60, ms: 16.7, scale: 1, calls: 0, triangles: 0, tier: ctx.quality.key, mode: 'direct' };
 
   const size = () => ({
@@ -42,9 +45,13 @@ export async function init(ctx) {
   async function configure(q) {
     shadows?.dispose();
     shadows = null;
+    shadowCache?.dispose();
+    shadowCache = null;
     renderer.shadowMap.enabled = !!q.shadows;
     if (q.shadows && (q.cascades || 1) > 1) {
       try { shadows = new SunShadows(ctx, q.key); } catch (e) { console.error('[render] cascaded shadows unavailable', e); }
+    } else if (q.shadows) {
+      try { shadowCache = new KeyShadowCache(ctx); } catch (e) { console.error('[render] key shadow cache unavailable', e); }
     }
     fx.setMode({ tier: q.key, soft: !!q.post });
     try {
@@ -59,6 +66,8 @@ export async function init(ctx) {
     applyScale(adaptive.scale);
   }
   installShaderLogFilter();
+  // perf-fix-1: shader warm-ups (render/warmup.js) compile with the frame's light state (the cascades' borrow)
+  setFrameLights((fn) => (shadows ? shadows.withFrameLights(fn) : fn()));
   await configure(ctx.quality);
 
   engine.onResize((w, h, pr) => {
@@ -114,6 +123,8 @@ export async function init(ctx) {
     stats,
     get composer() { return pipeline.composer; },
     get shadows() { return shadows; },
+    /** perf-fix-1: medium's key-light shadow cache ({ enabled, stats }) or null */
+    get shadowCache() { return shadowCache; },
     get toneMapper() { return pipeline.toneMapper; },
     /** final tone-mapping exposure (env.exposure × operator parity gain) */
     get exposureTotal() { return pipeline.exposureTotal; },

@@ -11,7 +11,7 @@
 //   --w W --h H      viewport size (default 1280x720)
 //   --timeout S      seconds to wait for window.__mikdashReady (default 120)
 //   --keep-ui        do not add shot=1 (renders the UI too; clock keeps running)
-//   --eval "JS"      evaluate JS in the page after ready (result printed), e.g. "__mikdash.renderer.info.render"
+//   --eval "JS"      evaluate JS in the page after ready (result printed; a Promise is awaited), e.g. "__mikdash.renderer.info.render"
 //   --prod           measure the PRODUCTION bundle: vite build into a temp dir, served by vite preview
 //                    (slower to start, but timings match what visitors get)
 //
@@ -111,8 +111,8 @@ try {
     }).catch((e) => ({ error: String(e) }));
     const evals = [];
     for (const js of opt.evals) {
-      evals.push(await page.evaluate((code) => {
-        try { return JSON.stringify((0, eval)(code)); } catch (e) { return `ERR ${e.message}`; }
+      evals.push(await page.evaluate(async (code) => {
+        try { return JSON.stringify(await (0, eval)(code)); } catch (e) { return `ERR ${e.message}`; }
       }, js).catch((e) => `ERR ${e.message}`));
     }
     const file = resolve(root, opt.out, `${name || opt.name || slug(query)}.png`);

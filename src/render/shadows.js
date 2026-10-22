@@ -275,6 +275,13 @@ export class SunShadows {
     this.borrowed = null;
   }
 
+  /** perf-fix-1: run fn (a warm-up compile) with this frame's light state; inside a frame as it is */
+  withFrameLights(fn) {
+    if (this.borrowed) return fn();
+    this.beforeRender();
+    try { return fn(); } finally { this.afterRender(); }
+  }
+
   dispose() {
     this.afterRender();
     for (const [l, cast] of this.restore) l.castShadow = cast;

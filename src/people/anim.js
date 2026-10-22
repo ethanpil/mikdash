@@ -9,6 +9,7 @@ import { PoseBuilder, LocalPose, poseToSkin, blendPose } from './pose.js';
 import { HUMAN_CLIPS, SERVICE_CLIPS, SERVICE_RIGS, SERVICE_ANY } from './clips.js';
 import { QUAD_CLIPS, BIRD_CLIPS } from './animal-clips.js';
 import { clothCage, clothSkin } from './cloth.js';
+import { takePrebaked } from './prebake.js';
 
 export const BLOCK_ROWS = 1024;
 export const BLOCK_W = MAX_BONES * 3;
@@ -18,6 +19,50 @@ export const SCRATCH = 64;            // dynamic frames for cross-fades (blended
 
 export function clipSetFor(rig) {
   return rig.kind === 'human' ? HUMAN_CLIPS : rig.kind === 'quad' ? QUAD_CLIPS : BIRD_CLIPS;
+}
+
+let _bakeWarned = false;
+/**
+ * Bake a rig's clip set: { frames, clips: [{ name, start (from 0), frames, loop, rate, stride, grip, hand, halter, cord,
+ * pairGrip }], master: Float32Array (skinning rows per frame), locals: Float32Array (local pose per frame) }. A pure
+ * function of the rig and the clip code — runs on the main thread or in people/bake.worker.js (perf-1).
+ */
+export function bakeRig(rigKey) {
+  const rig = getRig(rigKey);
+  const set = clipSetFor(rig);
+  // the temple-service clips (people-3) only for the men's rigs that serve; women, boys and children skip them
+  // (≈ 0.5k frames each) — a missing pose falls back to 'stand' with a warning, as any unknown pose does
+  const skip = (n) => rig.kind === 'human' && !SERVICE_RIGS.has(rigKey) && SERVICE_CLIPS[n] && !SERVICE_ANY.has(n);
+  const names = Object.keys(set).filter((n) => !skip(n));
+  const total = names.reduce((s, n) => s + set[n].frames, 0);
+  const master = new Float32Array(total * FLOATS_PER_FRAME);
+  const locals = new Float32Array(total * LOCAL_STRIDE);
+  const P = new PoseBuilder(rig);
+  const clips = [];
+  let f = 0;
+  for (const name of names) {
+    const c = set[name];
+    clips.push({
+      name, start: f, frames: c.frames, loop: !!c.loop, rate: c.rate ?? 0.2,
+      stride: typeof c.stride === 'string' ? rig.dims[c.stride] : (c.stride || 0),
+      grip: c.grip || 'fist', hand: c.hand || null, halter: !!c.halter, cord: !!c.cord, pairGrip: c.pairGrip || null,
+    });
+    for (let i = 0; i < c.frames; i++) {
+      const ph = c.loop ? i / c.frames : i / (c.frames - 1);
+      P.reset();
+      try { c.fn(P, rig, ph); if (rig.kind === 'human') clothCage(P, rig); } catch (e) {
+        if (!_bakeWarned) { console.error(`[people] clip ${name} failed on ${rigKey}`, e); _bakeWarned = true; }
+        P.reset();
+      }
+      poseToSkin(rig, P.lp, master, f * FLOATS_PER_FRAME);
+      if (rig.kind === 'human') clothSkin(rig, master, f * FLOATS_PER_FRAME);
+      const lo = f * LOCAL_STRIDE;
+      locals.set(P.lp.q, lo);
+      locals.set(P.lp.t, lo + MAX_BONES * 4);
+      f++;
+    }
+  }
+  return { key: rigKey, frames: f, clips, master, locals };
 }
 
 export class AnimAtlas {
@@ -39,45 +84,20 @@ export class AnimAtlas {
   ensure(rigKey) {
     if (this.entries.has(rigKey)) return this.entries.get(rigKey);
     const rig = getRig(rigKey);
-    const set = clipSetFor(rig);
-    // the temple-service clips (people-3) only for the men's rigs that serve; women, boys and children skip them
-    // (≈ 0.5k frames each) — a missing pose falls back to 'stand' with a warning, as any unknown pose does
-    const skip = (n) => rig.kind === 'human' && !SERVICE_RIGS.has(rigKey) && SERVICE_CLIPS[n] && !SERVICE_ANY.has(n);
-    const names = Object.keys(set).filter((n) => !skip(n));
-    const total = names.reduce((s, n) => s + set[n].frames, 0);
+    // perf-1: baked ahead in a Worker at boot (people/prebake.js) when it got there first; the same bakeRig() either way
+    const baked = takePrebaked(rigKey) || bakeRig(rigKey);
     const start0 = this.frames;
-    const grown = new Float32Array((this.frames + total + SCRATCH) * FLOATS_PER_FRAME);
-    grown.set(this.master.subarray(0, this.frames * FLOATS_PER_FRAME));
-    const locals = new Float32Array((this.frames + total) * LOCAL_STRIDE);
-    locals.set(this.locals.subarray(0, this.frames * LOCAL_STRIDE));
-    const P = new PoseBuilder(rig);
+    const grown = new Float32Array((start0 + baked.frames + SCRATCH) * FLOATS_PER_FRAME);
+    grown.set(this.master.subarray(0, start0 * FLOATS_PER_FRAME));
+    grown.set(baked.master, start0 * FLOATS_PER_FRAME);
+    const locals = new Float32Array((start0 + baked.frames) * LOCAL_STRIDE);
+    locals.set(this.locals.subarray(0, start0 * LOCAL_STRIDE));
+    locals.set(baked.locals, start0 * LOCAL_STRIDE);
     const clips = {};
-    let f = start0;
-    for (const name of names) {
-      const c = set[name];
-      clips[name] = {
-        name, start: f, frames: c.frames, loop: !!c.loop, rate: c.rate ?? 0.2,
-        stride: typeof c.stride === 'string' ? rig.dims[c.stride] : (c.stride || 0),
-        grip: c.grip || 'fist', hand: c.hand || null, halter: !!c.halter, cord: !!c.cord, pairGrip: c.pairGrip || null,
-      };
-      for (let i = 0; i < c.frames; i++) {
-        const ph = c.loop ? i / c.frames : i / (c.frames - 1);
-        P.reset();
-        try { c.fn(P, rig, ph); if (rig.kind === 'human') clothCage(P, rig); } catch (e) {
-          if (!this._warned) { console.error(`[people] clip ${name} failed on ${rigKey}`, e); this._warned = true; }
-          P.reset();
-        }
-        poseToSkin(rig, P.lp, grown, f * FLOATS_PER_FRAME);
-        if (rig.kind === 'human') clothSkin(rig, grown, f * FLOATS_PER_FRAME);
-        const lo = f * LOCAL_STRIDE;
-        locals.set(P.lp.q, lo);
-        locals.set(P.lp.t, lo + MAX_BONES * 4);
-        f++;
-      }
-    }
+    for (const c of baked.clips) clips[c.name] = { ...c, start: c.start + start0 };
     this.master = grown;
     this.locals = locals;
-    this.frames = f;
+    this.frames = start0 + baked.frames;
     const entry = { key: rigKey, rig, clips };
     this.entries.set(rigKey, entry);
     // scratch frames sit after the last baked frame: re-issue them (holders notice the new epoch)

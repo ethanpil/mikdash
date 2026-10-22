@@ -44,6 +44,12 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   from `frequency.alone` with one seeded day quantile, never perDay plus sets.
 - People shaders: no dFdx/fwidth inside pattern branches (ANGLE/D3D11 flattens them; 10–18 s compiles); robes use
   a bake-time skirt cage + `clothSkin` flatten pass (MAX_BONES 36); people splice their own `lights_fragment_begin`.
+- Performance (perf pass, HD 4600 cold production): first view low ~14 s, medium ~27 s, high ~40 s, ultra ~48 s
+  (was 56/115/190/235). Lessons: a synchronous WebGL query (getProgramParameter, getUniformBlockIndex,
+  getProgramInfoLog, readPixels) waits for all queued GPU work — removing one only moves the wait; anything issued
+  during the shader warm-up competes with the first view, so start non-view work at 'firstFrame', one program per
+  idle slice; CSS animations of box-shadow/filter repaint every frame (the tag pulse cost 11 fps) — animate
+  transform/opacity only; fps here is quantized by vsync, so A/B in-page, interleaved, in normal play.
 - Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
   give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.

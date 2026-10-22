@@ -515,6 +515,8 @@ export function createMaterialLibrary(ctx) {
     get basisMs() { return Math.round(B().basisMs || 0); },
     get bakeMs() { return Math.round(B().bakeMs || 0); },
     get sets() { return B().sets || 0; },
+    /** perf-fix-2: set bakes so far; rises whenever a material's textures were (re-)drawn in place */
+    get bakes() { return B().bakes || 0; },
     get kinds() { return B().kinds || 0; },
     get restMs() { return Math.round(B().restMs || 0); },
     /** GPU memory of the baked sets + basis maps */
@@ -792,7 +794,11 @@ export function createMaterialLibrary(ctx) {
         console.warn('[mats] texture generation unavailable — flat materials', e);
       }
       stats.readyMs = performance.now() - t0;
-      ctx.bus?.on?.('ready', () => { this.loaded(); });
+      // perf-fix-2: in normal play the later groups start with the first view, not at 'ready': their ≈ 25 generator
+      // programs linked alongside the first view's (main.js warm-up), and their bakes, queued in the warm-up's idle time,
+      // ran on the GPU inside the first drawn frame (0.3–0.8 s later first view on the HD 4600). The intro covers the
+      // view while they bake; a screenshot still bakes everything at 'ready'
+      ctx.bus?.on?.(shotMode ? 'ready' : 'firstFrame', () => { this.loaded(); });
       ctx.bus?.on?.('quality:change', () => this.rebuild(ctx.quality));
     },
     /**
@@ -814,7 +820,7 @@ export function createMaterialLibrary(ctx) {
             } else {
               for (let i = 0; i < baker.groups.length; i++) {
                 await idle(1000);
-                await baker.compileGroup(i);
+                await baker.compileGroup(i, () => idle(1000)); // (one kind's program per idle slice: perf-fix-2)
                 while (baker.flush(6) > 0) await idle(250);
               }
             }
@@ -822,7 +828,9 @@ export function createMaterialLibrary(ctx) {
             console.warn('[mats] texture generation failed', e);
           }
           stats.waitMs = performance.now() - tw;
-          baker.sync();
+          // (perf-fix-2: a screenshot waits for the GPU here; in play the read-back stalled a frame by up to 0.45 s, and
+          // the scratch targets released below are freed by GL once the queued bakes are done with them)
+          if (shotMode) baker.sync();
           baker.releaseScratch();
           stats.loadedMs = performance.now() - t0Lib;
           // any kind still not compiled compiles in the background, for keys used later (the preview, adopted keys)
