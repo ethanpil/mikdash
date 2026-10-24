@@ -28,7 +28,7 @@
 // from inside the precinct (Beit HaMoked, the door of Pinchas' chamber: "the holy garments are not worn out into the
 // city", Yechezkel 44:19). Fires and the wheel are pure functions of t; the module is `always` so that they are
 // right after any jump (the nazirites' hearth burns only while a nazir's pot is on).
-import { smooth, rand, within, since } from '../lib/core.js';
+import { smooth, rand, within, since, wrap } from '../lib/core.js';
 import { crossed } from '../lib/cue.js';
 import { Itin, Troupe, Follower, daySeed, dayQuantile, tierCount, win, hm, observerNear, norm } from './g4/lib.js';
 import { visit, arrive, leave, fitAt, mpOf, release, bestEntry, SPURS } from './g4/mount.js';
@@ -121,6 +121,7 @@ const SEALS = { door: [217.0, 405.2, 16], achiyah: { at: [213.7, 403.2, 16], fac
 
 export default {
   id: 'chambers-daily',
+  planRank: 4,        // the boot's plan job (g4/book.js ORDER: last)
   always: true,
   lead: 12,
   lag: 12,
@@ -156,15 +157,28 @@ export default {
     };
     state.cast = new SetCast(ctx, { kohen: state.setK, lamb: state.setLamb, ewe: state.setEwe, ram: state.setRam, nazir: state.nazir, companion: state.comp });
     // the nazir's offerings as watchable rows ("Happening now", the map), under the nazirites' event
-    try { state.offSource = ctx.schedule?.addSource?.(setsSource(ctx, 'g4-nazir', () => plan(ctx, state, sim).sets)); } catch (e) { console.warn('[sim:g4] source failed', e); }
+    try { state.offSource = ctx.schedule?.addSource?.(setsSource(ctx, 'g4-nazir', () => plan(ctx, state, sim)?.sets)); } catch (e) { console.warn('[sim:g4] source failed', e); }
+    // the nazirites' listed window is the staged one: from the first party into the chamber to the last out of it; none
+    // today — an empty window (qa-r2 SIM-R2-6: the chamber stood empty for hours of the data's window). Until this
+    // date's plan is built (a new date is selected before it), the data's window ⚙
+    try {
+      sim.schedule?.retime?.('nazirites', (t0, t1, o) => {
+        const P = state.plan;
+        if (o?.nextDay || !P || state.planDate !== ctx.time?.dateString || !P.nazSpan) return [t0, t1];
+        return P.nazSpan.none ? [t0, t0] : P.nazSpan.w;
+      });
+    } catch (e) { console.warn('[sim:g4] nazirites retime failed', e); }
     return state;
   },
 
   /** the day's plan (g4/book.js: after courts-daily and sanhedrin, before nikanor-stations) */
   plan(ctx, state, sim) { return plan(ctx, state, sim); },
+  /** the same, as an iterator (the boot's plan job slices it) */
+  planSteps(ctx, state, sim) { return planSteps(ctx, state, sim); },
 
   update(ctx, state, t, dt, sim) {
     const P = plan(ctx, state, sim);
+    if (!P) return;
     P.tNow = t;
     for (const tr of state.troupes) tr.update(ctx, sim, t, tr.cb);
     state.cast.update(sim, t, dt);
@@ -215,14 +229,23 @@ export default {
 };
 
 // ================================================================================================ the plan
+const fresh = (ctx, state, sim) => state.plan && state.planGen === sim.generation && state.planDate === ctx.time?.dateString;
 function plan(ctx, state, sim) {
-  if (state.plan && state.planGen === sim.generation && state.planDate === ctx.time?.dateString) return state.plan;
+  if (fresh(ctx, state, sim)) return state.plan;
+  // not before the boot's plan job has built it (no figures meanwhile — runtime.js planRank, qa-r2 SIM-R2-12)
+  if (sim.planNow && !sim.planNow()) return null;
+  for (const _ of planSteps(ctx, state, sim));     // eslint-disable-line no-unused-vars
+  return state.plan;
+}
+/** the plan as an iterator: a yield between its parts and between the nazirites' sets (the plan job slices it) */
+function* planSteps(ctx, state, sim) {
+  if (fresh(ctx, state, sim)) return;
   planBefore(ctx, sim, WHO);
   const book = g4Book(ctx, sim);
   book.dropOwner(WHO);
   const seed = daySeed(ctx, SEED);
   const W = {
-    chav: win(sim, 'chavitin-bakers'), wood: win(sim, 'wood-chamber'), naz: win(sim, 'nazirites'), golah: win(sim, 'golah-wheel'),
+    chav: win(sim, 'chavitin-bakers'), wood: win(sim, 'wood-chamber'), naz: winPlan(sim, 'nazirites'), golah: win(sim, 'golah-wheel'),
     parvah: win(sim, 'parvah'), garmu: win(sim, 'beit-garmu'), seals: win(sim, 'seals'),
   };
   const P = { W, seed, naz: [], cues: [], chelPass: [], nazFire: null, wheelAngle: () => 0, sets: [], free: [], shaven: [], lamps: [], ctx };
@@ -230,7 +253,9 @@ function plan(ctx, state, sim) {
   state.cast.reset();
   if (W.chav) chavitin(state, P, seed, sim);
   if (W.wood) wood(state, P, seed, sim, book);
-  if (W.naz) nazirites(state, P, seed, sim, ctx, book);
+  yield;
+  if (W.naz) yield* nazirites(state, P, seed, sim, ctx, book);
+  yield;
   if (W.golah) golah(state, P, seed, sim, book);
   if (W.parvah) parvah(state, P, seed, sim, ctx);
   if (W.garmu) garmu(state, P, seed, sim);
@@ -239,7 +264,19 @@ function plan(ctx, state, sim) {
   state.plan = P;
   state.planGen = sim.generation;
   state.planDate = ctx.time?.dateString;
-  return P;
+  // the nazirites' staged window (the retime in init), published now that this date's sets are placed
+  if (W.naz) {
+    P.nazSpan = P.naz.length ? { w: [wrap(Math.min(...P.naz.map((n) => n.span[0]))), wrap(Math.max(...P.naz.map((n) => n.span[1])))] } : { none: true };
+    const ev = sim.event('nazirites');
+    if (ev) ctx.schedule?.resolveEvent?.(ev);
+  }
+}
+
+/** an event's window as the data gives it (its tPlan when a choreo retimes it — the nazirites' here) */
+function winPlan(sim, id) {
+  const e = sim.events.find((x) => x.id === id) || null;
+  if (!e || !Number.isFinite(e.t0) || !Number.isFinite(e.t1)) return null;
+  return e.tPlan ? [e.tPlan[0], e.tPlan[1]] : [e.t0, e.t1];
 }
 
 /** a visit from the city booked on the Mount, timed so that its it.mark falls on `target` */
@@ -384,7 +421,7 @@ function wood(state, P, seed, sim, book) {
  * court (g4/sets.js scriptNazir, at rings and hooks G5 does not use, kept clear of its bookings), the shaving and the
  * cooking in the chamber, the waving in the court (scriptWaving), home by the circuit.
  */
-function nazirites(state, P, seed, sim, ctx, book) {
+function* nazirites(state, P, seed, sim, ctx, book) {
   const [w0, w1] = P.W.naz;
   const G = geoOf(ctx);
   const P5 = g5PlanOf(ctx, sim);
@@ -398,6 +435,7 @@ function nazirites(state, P, seed, sim, ctx, book) {
   const span = Math.max(0, w1 - w0 - 175);
   const back = entryBack();
   for (let i = 0; i < Math.min(3, n); i++) {
+    if (i > 0) yield;
     const target = w0 + 8 + span * ((i + 0.1 + 0.8 * rand(seed, 'nz', i)) / Math.min(3, n));
     // the court: the earliest placement (of a few ways to lay it out) from the target on
     const pl = placeSet(NAZIR_COMBOS.map((combo) => (F) => scriptNazir(G, i, seed, combo, back, F)), target, book, P5, G, { maxShift: 150, step: 3 });
@@ -407,14 +445,12 @@ function nazirites(state, P, seed, sim, ctx, book) {
     bookSet(B, book, P5, pl.hot, WHO, pl.H, pl.own);
     // ---- the party up from the city to the foot of the Korban gate's flight, the animals on their ropes behind
     const gate = bestEntry('korban');
-    const arrive3 = (target2, pose, prop, prev) => booked(book, target2, (it) => { arrive(it, { gate, spur: 'korban', cls: 0, pose, prop, prev }); it.mark = it.T; });
-    const eO = arrive3(tA, 'lead_walk', null, null);
-    const eC1 = arrive3(tA + sy.dtC1, 'lead_walk', null, eO.it.cols);
+    // the animals walk where their leaders walked: their lines in the lanes are checked and booked with the leader's
+    // (g4/mount.js lags — a booked shadow alone could run into a walker booked before)
+    const arrive3 = (target2, pose, prop, prev, lags) => booked(book, target2, (it) => { arrive(it, { gate, spur: 'korban', cls: 0, pose, prop, prev, lags }); it.mark = it.T; });
+    const eO = arrive3(tA, 'lead_walk', null, null, [sy.lagR]);
+    const eC1 = arrive3(tA + sy.dtC1, 'lead_walk', null, eO.it.cols, sy.lagL);
     const eC2 = arrive3(tA + sy.dtC2, 'carry_shoulder_walk', 'sal_matzot', eC1.it.cols);
-    // the animals walk where their leaders walked: keep the lane free behind them too
-    for (const [e, lags] of [[eO, [sy.lagR]], [eC1, sy.lagL]]) {
-      for (const h of [...(e.it.mp?.taken || [])]) if (h.lane) for (const g of lags) e.it.mp.taken.push(h.lane.shadow(h, g, WHO));
-    }
     const k3 = i % 3, k2 = i % 2, kR = i % 2;
     ep.nazir[k3].push(eO);
     ep.comp[2 * k3].push(eC1);
@@ -439,7 +475,7 @@ function nazirites(state, P, seed, sim, ctx, book) {
     const ch = chamber(state, P, seed, sim, ctx, book, G, P5, B, i, k3, ep);
     if (!ch) continue;
     fires.push([...ch.fire, k3]);
-    P.naz.push({ t0: tA, set: B, wave: ch.wave });
+    P.naz.push({ t0: tA, set: B, wave: ch.wave, span: ch.span });
     P.sets.push(B);
     if (ch.wave) P.sets.push(ch.wave);
   }
@@ -573,7 +609,10 @@ function chamber(state, P, seed, sim, ctx, book, G, P5, B, i, k3, ep) {
   ep.comp[2 * k3 + 1].push({ t0: tA + sy.tC2Foot, T: c2.T, it: c2 });
   // the basket on the bench while he is shaved (a free prop)
   P.free.push({ name: 'sal_matzot', t0: tBasket + 0.15, t1: tHome - 0.2, at: basketAt, h: 0 });
-  return { fire: [tPot - 0.6, tHome + 0.5], wave };
+  // the chamber in use: from the first of the party across Ezrat Nashim to it until all three have left it (the
+  // nazirites' listed window — qa-r2 SIM-R2-6)
+  const span = [tA + Math.min(sy.tMeatFoot, sy.tNazirFoot, sy.tC2Foot), tHome + 0.8];
+  return { fire: [tPot - 0.6, tHome + 0.5], wave, span };
 }
 
 /** free props of the day's plan (P.free: { name, t0, t1, at, h }): the basket on the bench, the dough on the table —

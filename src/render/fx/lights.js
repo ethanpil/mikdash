@@ -10,9 +10,52 @@
 // Each cluster has a weight per pool that eases toward 1 when it is among that pool's top-N by score
 // (intensity / distance²) and toward 0 otherwise; a slot is only handed over once its previous owner has
 // faded out => no popping. A cluster moving between pools cross-fades (both weights ease at the same rate).
-import { PointLight, Vector3, Color } from 'three';
+import { PointLight, Vector3, Color, ShaderChunk } from 'three';
 
 const MERGE = 1.6;
+// qa-r1-fix-env-render: a fire is not a point. Close to the flames a point light's 1 / d² singularity burned a hot disc
+// into the floor round the Moked's hearth and turned the logs cream. Each fire light carries its flames' radius in its
+// decay (decay = 2 + r, metres; the patched getDistanceAttenuation below reads it): the irradiance of a source that
+// size, 1 / (d² + r²) (a Lambertian disc on its axis), the same as the point's beyond a few radii.
+export const FLAME_R = 0.35; // × the cluster's flame size
+// qa-r2-fix-env-render (ENV-R2-4c): a cluster of several fires (the Menorah's seven lamps, spread along ≈ 1.5 m) is as
+// wide as its fires' spread, not as one flame: its source radius is √((FLAME_R × size)² + the fires' RMS distance from
+// the light), capped. 1 / (d² + r²) then gives the row's peak irradiance (0.6 / m² for the Menorah 1.2 m in front of the
+// gold wall: the exact sum over the seven lamps is 0.60, a point 0.69), and the specular lobe below its width.
+const CLUSTER_R_MAX = 1.2; // m
+const ATT_STOCK = 'float distanceFalloff = 1.0 / max( pow( lightDistance, decayExponent ), 0.01 );';
+const ATT_FIRE = `float mkRs = max( decayExponent - 2.0, 0.0 );
+	float distanceFalloff = decayExponent > 2.0 ? 1.0 / max( lightDistance * lightDistance + mkRs * mkRs, 0.01 ) : 1.0 / max( pow( lightDistance, decayExponent ), 0.01 );`;
+// qa-r2-fix-env-render (ENV-R2-4c): …and its highlight on a polished surface is as wide as the source seen from there
+// (Karis 2013, sphere lights: α' = α + r / 2d, the lobe renormalised by (α / α')²). One point light for the seven lamps
+// printed a single round hot spot on the Kodesh's gold relief where seven small reflections spread along a row are; a
+// 2 m pyre's light on the bronze and gold near it widens the same way. The source radius comes from the light's decay
+// (above); the sun, the moon and spot lights reset it.
+const POINT_INFO = 'float lightDistance = length( lVector );';
+const RESET_AT = ['light.direction = directionalLight.direction;', 'light.direction = sunLight.direction;', 'float angleCos = dot( light.direction, spotLight.direction );'];
+const GGX_FN = 'vec3 BRDF_GGX( const in vec3 lightDir';
+const GGX_ALPHA = 'float alpha = pow2( roughness );'; // (three's build strips the chunks' comments)
+const GGX_RETURN = 'return F * ( V * D );';
+/** install the source-radius falloff and highlight width into three's light chunks (once, before any lit program compiles) */
+export function installFireFalloffChunk() {
+  const c = ShaderChunk.lights_pars_begin;
+  if (c.includes('mkRs')) return true;
+  if (!c.includes(ATT_STOCK)) { console.warn('[fx] three attenuation chunk changed — fire lights stay point lights'); return false; }
+  let lp = c.replace(ATT_STOCK, ATT_FIRE);
+  const g = ShaderChunk.lights_physical_pars_fragment;
+  const gi = g.indexOf(GGX_FN);
+  const ga = gi >= 0 ? g.indexOf(GGX_ALPHA, gi) : -1, gr = ga >= 0 ? g.indexOf(GGX_RETURN, ga) : -1;
+  if (lp.includes(POINT_INFO) && RESET_AT.every((d) => lp.includes(d)) && gr > 0) {
+    lp = `float mkSrcA = 0.0; // the current light's source width term, α' = α + mkSrcA (render/fx/lights.js)\n${lp}`
+      .replace(POINT_INFO, `${POINT_INFO} mkSrcA = pointLight.decay > 2.0 ? 0.5 * ( pointLight.decay - 2.0 ) / max( lightDistance, 0.05 ) : 0.0;`);
+    for (const d of RESET_AT) lp = lp.replace(d, `mkSrcA = 0.0; ${d}`);
+    ShaderChunk.lights_physical_pars_fragment = g.slice(0, ga)
+      + `${GGX_ALPHA}\n\tfloat mkA0 = alpha; alpha = min( alpha + mkSrcA, 1.0 );`
+      + g.slice(ga + GGX_ALPHA.length, gr) + 'return F * ( V * D ) * pow2( mkA0 / alpha );' + g.slice(gr + GGX_RETURN.length);
+  } else console.warn('[fx] three light chunks changed — fire highlights stay point-sized');
+  ShaderChunk.lights_pars_begin = lp;
+  return true;
+}
 const FADE_RATE = 2.5;   // weight units per second
 const KEEP_BONUS = 1.35; // hysteresis for the currently-lit clusters
 const SHADOW_KINDS = new Set(['pyre', 'hearth', 'brazier']);
@@ -185,6 +228,11 @@ export class FireLights {
       }
       c.I = I;
       c.pos = (c.pos || new Vector3()).copy(pos).multiplyScalar(1 / wsum);
+      if (c.fires.length > 1) {
+        let s2 = 0;
+        for (const f of c.fires) s2 += Math.max(f.lightCandela * f.cur, 1e-6) * f.lightPos.distanceToSquared(c.pos);
+        c.srcR = Math.min(Math.sqrt((FLAME_R * c.size) ** 2 + s2 / wsum), CLUSTER_R_MAX);
+      } else c.srcR = FLAME_R * c.size;
       c.color = (c.color || new Color()).setRGB(col.r / wsum, col.g / wsum, col.b / wsum);
       c.distance = c.fires[0].lightDistance * Math.sqrt(Math.max(1, c.fires.length) / 1);
       const d2 = Math.max(c.pos.distanceToSquared(camPos), 4);
@@ -243,11 +291,16 @@ export class FireLights {
       const V = c.ins && this.visibility ? c.ins.V : 1;
       l.intensity = c.I * sw * flick * gain * V;
       l.userData.mkV = V;
-      // the court walls / altar top occluding a plain slot's fire (a shadow slot's cube map does it there)
-      l.userData.mkRec = p.shadow ? -1 : this.record(c);
+      // the court walls / altar top occluding the fire (fire occluder records). qa-r2-fix-env-render (ENV-R2-4a): a shadow
+      // slot's too — its cube map is drawn by the casters' back faces, and where the altar's body meets its yesod the body's
+      // north face lies on the yesod's top: the 128² map's taps leaked the great pile's light along that seam as a dotted
+      // row of orange points; the altar's top occludes it analytically (the pavement and ledges below it), as for the plain
+      // slots
+      l.userData.mkRec = this.record(c);
       l.userData.mkRecPos = c.pos; // unjittered (the occluder test needs no flicker)
       l.userData.mkRecR = c.recR;
       l.color.copy(c.color);
+      l.decay = 2 + (c.srcR ?? FLAME_R * c.size);
       if (p.shadow) {
         // shadow slots stay put (no positional jitter): the cube map is rendered only now and then
         if (l.userData.shadowOwner !== c.key || l.position.distanceToSquared(c.pos) > 1e-4 || l.distance !== c.distance) {
@@ -288,7 +341,7 @@ export class FireLights {
    * Returns a function that restores the frame's assignment.
    */
   assignFor(pos, gain = this.gain) {
-    const saved = this.lights.map((l) => ({ l, i: l.intensity, p: l.position.clone(), c: l.color.clone(), d: l.distance }));
+    const saved = this.lights.map((l) => ({ l, i: l.intensity, p: l.position.clone(), c: l.color.clone(), d: l.distance, k: l.decay }));
     const ins = this.visibility ? this.visibility(pos, { V: 1, vol: null, s: 0 }) : null;
     const owners = new Set();
     // `gain` without the viewer's local adaptation to firelight (fx/index.js lightsFor): the capture is normalised
@@ -316,8 +369,9 @@ export class FireLights {
       l.color.copy(e.c.color);
       l.position.copy(e.c.pos);
       l.distance = e.c.distance;
+      l.decay = 2 + (e.c.srcR ?? FLAME_R * e.c.size);
     });
-    return () => { saved.forEach((s, k) => { s.l.intensity = s.i; s.l.position.copy(s.p); s.l.color.copy(s.c); s.l.distance = s.d; [s.l.userData.mkV, s.l.userData.mkRec, s.l.userData.mkRecPos, s.l.userData.mkRecR] = saved2[k]; }); };
+    return () => { saved.forEach((s, k) => { s.l.intensity = s.i; s.l.position.copy(s.p); s.l.color.copy(s.c); s.l.distance = s.d; s.l.decay = s.k; [s.l.userData.mkV, s.l.userData.mkRec, s.l.userData.mkRecPos, s.l.userData.mkRecR] = saved2[k]; }); };
   }
 
   /** slow, staggered refresh of the shadow cube maps (people and other moving casters) */

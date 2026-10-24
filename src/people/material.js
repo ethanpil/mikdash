@@ -8,12 +8,47 @@
 // Depth/distance materials get the same vertex code so shadows follow the animation.
 import {
   MeshStandardMaterial, MeshPhysicalMaterial, MeshDepthMaterial, MeshDistanceMaterial, Color, CanvasTexture,
-  LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace, ShaderChunk,
+  LinearFilter, LinearMipmapLinearFilter, SRGBColorSpace, ShaderChunk, Vector3,
 } from 'three';
 import { BLOCK_W, BLOCK_ROWS } from './anim.js';
 import { AVNET_AVG } from './human.js';
+import { MANTLE_ARMS } from './builder.js';
+import { getRig } from './rig.js';
 
 const lin = (hex) => { const c = new Color(hex); return `vec3(${c.r.toFixed(4)}, ${c.g.toFixed(4)}, ${c.b.toFixed(4)})`; };
+// qa-r2: figures write their shadow-map depth this far behind their surface (m, away from the light). people cast by
+// their back faces (three's FrontSide → BackSide), and a cloth sheet's inner face is one: the mantle's lining (≈ 3 mm
+// under the outer face), the hems' facings and the hair and beard shells over the skin put a back face just behind a lit
+// surface, which then shadowed itself in the shadow map's texel grid (acne, dithered by the PCF kernel into a regular
+// dot screen over the garments and faces at 2–4 m — worst on heroes, whose shadow comes from the coarser LOD1 proxy).
+// Bodies are thicker than this, so a figure still shadows itself (an arm the torso, the mantle the tunic beyond it).
+const SHADOW_BIAS = 0.02;
+
+// qa-r2 (PPL-R2-1): a mantle is kept outside its wearer's arms. The cloth is skinned to the torso below the elbow (the
+// arm share there lifted the mantle off the belt in semichah, qa-r1), so a forearm hanging forward or a sleeve swinging
+// went through it. Each flagged vertex (pattern id + MANTLE_ARMS, human.js mantle; LOD0/1) is draped over
+// two segments posed by the arm's own bones, every frame (cross-fades included): the upper arm (from 30 % below the
+// shoulder joint to the elbow) and the forearm with the hand hanging from it (elbow → fingertips, tapering), each the
+// sleeve's girth + 1.5 cm (pExit). The rest joints come from this table, one row of four per human rig (pAnimB.x =
+// HUMAN_RIG_ID; the right arm mirrors the left).
+export const HUMAN_RIG_ID = { man: 0, elder: 1, woman: 2, boy: 3, child: 4 };
+const ARM_TABLE = (() => {
+  const f = (v) => new Vector3(...v);
+  const rows = [];
+  let bones = null;
+  for (const key of Object.keys(HUMAN_RIG_ID)) {
+    const r = getRig(key), k = r.dims.H / 1.67, I = r.index;
+    bones ||= [I.uarm_l, I.farm_l, I.uarm_r, I.farm_r];
+    const sh = r.rest[I.uarm_l], el = r.rest[I.farm_l], kn = r.rest[I.fing_l], f2 = r.rest[I.fing2_l];
+    const tip = f2.clone().add(f2.clone().sub(kn).multiplyScalar(0.5));      // the fingertips, the hand hanging open
+    // radii: a long sleeve over the upper arm ≈ 5.7 cm, at the elbow 5.4 (human.js armBody) + 1.5 cm; the forearm and the
+    // hand (posed with the forearm: a relaxed wrist) one segment to the fingertips, tapering to the hand's half-width + 1 cm
+    rows.push(f(sh.clone().lerp(el, 0.3).toArray()), f(el.toArray()), f(tip.toArray()), f([0.072 * k, 0.069 * k, 0.045 * k]));
+  }
+  // a uniform array, not a GLSL const array: dynamically indexed, a const array cost the figure programs ≈ 0.1 s each to
+  // compile on ANGLE/D3D11 (an indexable temp)
+  return { glsl: `uniform vec3 uPArm[${rows.length}];`, uniform: { value: rows }, bones };
+})();
 
 const VERT_PARS = /* glsl */`
 uniform highp sampler2D uPBones;
@@ -76,6 +111,55 @@ mat4 pSkin() {
     return m;
   #endif
 }
+#if defined(P_G_FIG) && !defined(P_PROP) && !defined(P_DEPTH)
+${ARM_TABLE.glsl}
+// Keep p clear of an arm segment a → b (radius r.x at a … r.y at b) that hangs within ~20° of plumb (|axis.y| from 0.82,
+// fully from 0.94: a man standing or walking, his arms under the mantle). A raised arm (semichah, carrying, a hand held
+// out) is out in front of the cloth, which falls behind it as it did before (pushed, the panels were lifted into a box).
+// The cloth DRAPES over the arm as over a cylinder — in the plane across the arm, with s the depth along the cloth's
+// outward direction (perpendicular to the axis) and d the offset sideways, the cloth must lie at s ≥ h(d), a half-ellipse
+// over the arm (R + 1 cm high) that spreads T = 6 cm past its sides; it is lifted to it, and cloth more than ~5 cm behind
+// the arm (the far side of the body) is left alone. Pushed radially instead, the vertices either side of an arm lying in
+// the cloth parted round it and the arm showed through the gap; jumped across it one by one, the lifted columns stood out
+// beside it as a board. Beyond the segment's ends the lift fades over T. rad += the lifted surface's normal × the lift.
+vec3 pExit(vec3 p, vec3 o, vec3 a, vec3 b, vec2 r, inout vec3 rad) {
+  vec3 ab = b - a;
+  float L = max(length(ab), 1e-4);
+  vec3 u = ab / L;
+  float hang = smoothstep(0.82, 0.94, abs(u.y));
+  float t0 = dot(p - a, u), t = clamp(t0, 0.0, L);
+  float R = mix(r.x, r.y, t / L);
+  vec3 q = p - a - u * t;
+  q -= dot(q, u) * u;
+  vec3 on = o - dot(o, u) * u;
+  on *= inversesqrt(max(dot(on, on), 1e-6));
+  vec3 e = cross(u, on);
+  float s = dot(q, on), x = dot(q, e) / (R + 0.06);
+  float h = (R + 0.01) * sqrt(max(1.0 - x * x, 0.0));
+  float lift = max(h - s, 0.0) * hang * smoothstep(-(R + 0.07), -(R + 0.03), s) * (1.0 - smoothstep(0.0, 0.06, abs(t0 - t)));
+  // h'(d), for the lifted surface's normal
+  rad += normalize(on + (R + 0.01) * x / ((R + 0.06) * sqrt(max(1.0 - x * x, 0.04))) * e) * lift;
+  return on * lift;
+}
+// the offset that keeps a mantle vertex outside his arm: p its skinned position, o the cloth's outward direction, rest x < 0
+// = his left side; bends the normal n with it
+vec3 pArmPush(vec3 p, vec3 o, bool left, inout vec3 n) {
+  int base = int(pAnimB.x + 0.5) * 4;
+  vec3 m = vec3(left ? 1.0 : -1.0, 1.0, 1.0);
+  mat4 mu = pBoneM(left ? ${ARM_TABLE.bones[0]} : ${ARM_TABLE.bones[2]});
+  mat4 mf = pBoneM(left ? ${ARM_TABLE.bones[1]} : ${ARM_TABLE.bones[3]});
+  vec3 s0 = (mu * vec4(uPArm[base] * m, 1.0)).xyz;
+  vec3 el = (mf * vec4(uPArm[base + 1] * m, 1.0)).xyz;
+  vec3 tp = (mf * vec4(uPArm[base + 2] * m, 1.0)).xyz;
+  vec3 rr = uPArm[base + 3];
+  vec3 rad = vec3(0.0);
+  vec3 off = pExit(p, o, s0, el, rr.xx, rad);
+  off += pExit(p + off, o, el, tp, rr.yz, rad);       // the forearm and the hand hanging from it, one tapering segment
+  float k = clamp(length(rad) / 0.03, 0.0, 1.0) * 0.75;
+  if (k > 0.0) { vec3 dn = normalize(rad); if (dot(n, dn) < 0.0) dn = -dn; n = normalize(mix(n, dn, k)); }
+  return off;
+}
+#endif
 #ifndef P_DEPTH
 vec3 pPalette(int cls) {
   #ifndef P_PROP
@@ -91,11 +175,26 @@ vec3 pPalette(int cls) {
 #endif
 `;
 
+const VERT_POS = /* glsl */`
+vec3 pPos = position;
+#ifdef P_MORPH
+pPos += pMorph.xyz * pAnimB.y + normal * (pMorph.w * pAnimB.z);
+#endif
+`;
+
 const VERT_BEGINNORMAL = /* glsl */`
 mat4 pSkinM = pSkin();
 #define P_SKINNED
+${VERT_POS}
 // a plumb fringe (pMat.y ≤ −1, see VERT_BEGIN) keeps its rest normal: it hangs in the figure's frame
 vec3 objectNormal = pMat.y < -0.995 ? vec3(normal) : mat3(pSkinM) * vec3(normal);
+#if defined(P_G_FIG) && !defined(P_PROP)
+// a mantle kept outside the arms (qa-r2, ARM_TABLE): the offset, and its normal bent with it (figure programs only —
+// the animals' and the props' never draw a mantle)
+#define P_ARMS
+vec3 pArmOff = vec3(0.0);
+if (pMat.z > ${MANTLE_ARMS - 0.5}) pArmOff = pArmPush((pSkinM * vec4(pPos, 1.0)).xyz, normalize(mat3(pSkinM) * vec3(pPos.x, 0.0, pPos.z - 0.01) + vec3(0.0, 1e-5, 0.0)), pPos.x < 0.0, objectNormal);
+#endif
 #ifdef USE_TANGENT
 vec3 objectTangent = vec3( tangent.xyz );
 #endif
@@ -104,13 +203,15 @@ vec3 objectTangent = vec3( tangent.xyz );
 const VERT_BEGIN = /* glsl */`
 #ifndef P_SKINNED
 mat4 pSkinM = pSkin();
-#endif
-vec3 pPos = position;
-#ifdef P_MORPH
-pPos += pMorph.xyz * pAnimB.y + normal * (pMorph.w * pAnimB.z);
+${VERT_POS}
 #endif
 vec3 transformed = (pSkinM * vec4(pPos, 1.0)).xyz;
 #ifndef P_PROP
+// (the mantle's drape over the arms, VERT_BEGINNORMAL: colour passes only — the shadow passes cast by back faces 2 cm
+// deep and skip it: their programs compile at the first frame, and every line there delays it)
+#ifdef P_ARMS
+transformed += pArmOff;
+#endif
 // a plumb fringe (the tzitzit): pMat.y = −1 − q − h, h = the vertex's height below its knot at rest (q: pSkin). The
 // knot is skinned with the cloth; the strand hangs straight down from it in the figure's frame whatever the cloth does
 // (the skirt cage turned it out horizontally over a seated man's knees), and what reaches the floor lies on it,
@@ -138,7 +239,8 @@ const VERT_COLOR = /* glsl */`
 #if defined( USE_COLOR )
 vColor = vec4(color * pPalette(int(pMat.w + 0.5) & 7), 1.0);
 #endif
-vPMat = vec4(pMat.x, max(pMat.y, 0.0), pMat.zw);   // (a plumb fringe's hang height is not a metalness)
+// (a plumb fringe's hang height is not a metalness; the mantle's arm flag is not part of its pattern id)
+vPMat = vec4(pMat.x, max(pMat.y, 0.0), pMat.z > ${MANTLE_ARMS - 0.5} ? pMat.z - ${MANTLE_ARMS.toFixed(1)} : pMat.z, pMat.w);
 vPUv = uv;
 vPFade = pAnimA.w;
 #ifndef P_PROP
@@ -171,12 +273,8 @@ const vec3 P_AVNET_AVG = vec3(${AVNET_AVG.map((x) => x.toFixed(4)).join(', ')});
 float pWrap;     // wrapped diffuse (skin subsurface, fleece)
 vec3 pSSS;       // tint of the light bled past the terminator
 float pTrans;    // thin-cloth translucency (light through the weave from behind)
-float pBayer(vec2 p) { // 4x4 ordered dither threshold
-  ivec2 q = ivec2(mod(p, 4.0));
-  int i = q.x + q.y * 4;
-  const float M[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
-  return (M[i] + 0.5) / 16.0;
-}
+// interleaved gradient noise (Jimenez 2014): a cheap blue-noise-like threshold for the dither fades — no visible 4×4 grid
+float pIGN(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
 float pHash(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
 float pNoise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
@@ -229,6 +327,17 @@ function lightsBegin() {
   return _lightsBegin;
 }
 
+// qa-r2: three's PCF (r186) rotates its 5-tap Vogel disk per pixel by interleaved gradient noise. On a figure much of the
+// surface lies in a soft self-shadow penumbra (folds, the far side of a curve, a mantle's edge over the tunic), and there
+// the rotation printed a regular dot screen over the garments and faces at 2–4 m (QA PPL-R2-6: the twill was blamed; the
+// dots went with shadow radius 0, not with the twill). The people's programs take the taps unrotated: each is a hardware
+// bilinear PCF, so the penumbra is a smooth ramp. The chunk is read at compile time (render/shadows.js patches it first).
+const IGN_PHI = 'float phi = interleavedGradientNoise( gl_FragCoord.xy ) * PI2;';
+function shadowPars() {
+  const c = ShaderChunk.shadowmap_pars_fragment || '';
+  return c.includes(IGN_PHI) ? c.split(IGN_PHI).join('float phi = 0.0; // people: unrotated taps (material.js shadowPars)') : '#include <shadowmap_pars_fragment>';
+}
+
 // pattern evaluation: modifies pCol, pH (height, metres), pRough, pMetal, pSheen and the lighting response
 // (pWrap, pSSS, pTrans). pPx = metres per pixel.
 // Every periodic detail of period P fades to its AVERAGE before it can alias: P_NY(P) = 1 while P spans >= 4 px,
@@ -236,7 +345,7 @@ function lightsBegin() {
 // Shell patterns (hair and beard) discard by a lock pattern and fade out entirely once the locks are sub-pixel.
 const FRAG_PATTERN = /* glsl */`
 #ifdef P_DITHER
-if (vPFade < 0.999 && vPFade <= pBayer(gl_FragCoord.xy)) discard;
+if (vPFade < 0.999 && vPFade <= pIGN(gl_FragCoord.xy)) discard;
 #endif
 vec3 pCol = diffuseColor.rgb;
 float pH = 0.0;
@@ -259,7 +368,8 @@ if (pat == 7) pSpec = mix(vec3(0.04), P_GOLD, 0.5);
 // flatten every branch — compile times of many seconds per program on ANGLE)
 
 if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
-  pWrap = 0.45; pSSS = vec3(1.0, 0.42, 0.27);
+  // skin: light scattered under it carries past the terminator, red-shifted (blood) — qa-r1 a little wider and redder
+  pWrap = 0.52; pSSS = vec3(1.0, 0.36, 0.22);
   pCol *= mix(vec3(1.035, 0.985, 0.95), vec3(0.975, 1.0, 1.0), vPSeed); // per-figure undertone: ruddy … olive
 }
 #ifdef P_DETAIL
@@ -302,12 +412,18 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
     float n = mix(0.5, pNoise(uv * 170.0), fade);
     pCol *= 0.93 + 0.12 * n + 0.06 * (pNoise(uv * 23.0) - 0.5);
     if (pat == 6) pCol *= 1.0 - 0.07 * mix(0.5, step(0.5, fract((uv.x + uv.y) / 0.0035)), P_NY(0.0025));
-    pH += 0.0045 * fold + 0.0003 * (n - 0.5) * fade;
+    // qa-r1: the hand-spun weave — a fine diagonal twill rib within reach, and a roughness that varies with the slub of
+    // the yarn and the nap rubbed down on the folds' ridges (a constant roughness read as paper)
+    float tw = mix(0.5, 0.5 + 0.5 * sin((uv.x + uv.y) * 2513.0), P_NY(0.0025));
+    pH += 0.0058 * fold + 0.0003 * (n - 0.5) * fade + 0.00012 * tw;
+    pRough = clamp(vPMat.x * (0.9 + 0.14 * n) + 0.06 * (pNoise(uv * 41.0 + 3.7) - 0.5) - 0.07 * fold, 0.55, 1.0);
     if (pat == 15) {
-      float d = abs(abs(uv.x) - 0.082);
-      float w = 0.0085;
+      // clavi: two narrow stripes woven in, about 1.1 cm wide, either side of the neck opening, running over the shoulders
+      // from the hem in front to the hem behind (Judean tunics of the period, reconstruction)
+      float d = abs(abs(uv.x) - 0.098);
+      float w = 0.0055;
       float s = 1.0 - smoothstep(w - pPx, w + pPx, d);
-      pCol = mix(pCol, vPStripe * (0.9 + 0.1 * n), s);
+      pCol = mix(pCol, vPStripe * (0.9 + 0.1 * n), s * 0.92);
     }
     pSheen = 0.45;
     pTrans = pat == 6 ? 0.06 : 0.12;
@@ -374,24 +490,33 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
     float fade = P_NY(0.0024);
     float n = mix(0.5, pNoise(vec2(uv.x * 420.0, uv.y * 30.0)), fade);
     float clump = pNoise(vec2(uv.x * 90.0, uv.y * 8.0));
-    pCol *= (0.7 + 0.5 * n * (0.7 + 0.3 * clump));
-    // strands: fine ridges along the hair (v) stretch the specular lobe across them — an anisotropic sheen
+    // qa-r1: the locks keep their light and dark at any distance (the clump scale, not the strands, carries it) and the
+    // hair is a dull sheen, not a gloss: at 3–15 m it read as a lacquered helmet
+    pCol *= mix(0.74, 1.14, clump) * (0.86 + 0.28 * n);
+    // strands: fine ridges along the hair (v) stretch the specular lobe across them — an anisotropic sheen; lock-scale
+    // ridges (about 2 cm) carry it where the strands are below a pixel
     float ridge = mix(0.5, 0.5 + 0.5 * sin(uv.x * 2600.0 + clump * 6.0), P_NY(0.0012));
-    pRough = 0.38 + 0.2 * n;
-    pH += 0.0004 * n * fade + 0.0014 * clump + 0.00012 * ridge;
+    float lockR = mix(0.5, 0.5 + 0.5 * sin(uv.x * 330.0 + clump * 5.0), P_NY(0.006));
+    pRough = 0.52 + 0.16 * n + 0.1 * (1.0 - clump);
+    pH += 0.0004 * n * fade + 0.0016 * clump + 0.00012 * ridge + 0.0005 * lockR;
     pWrap = 0.25; pSSS = vec3(1.0, 0.8, 0.65);
   }
 #endif
 #if defined(P_G_BEAST) || defined(P_G_FIG)
   if (pat == 23 || pat == 35) { // hair shells / long coat: locks thinning toward the outer layer
     float t = vPMat.y; pMetal = 0.0;
-    float lk = pNoise(vec2(uv.x * 260.0, uv.y * 24.0)) * 0.65 + pNoise(vec2(uv.x * 700.0, uv.y * 50.0)) * 0.35;
+    // qa-r2: two scales of lock — strands within reach, and clumps (≈ 1.5 cm across, ≈ 9 cm along the hair) from
+    // ~1 m out, so a shell keeps a broken outline at 2–6 m. With the strands alone (3.5 mm) the shells were discarded
+    // beyond ~1.2 m and from 2 m on the hair and beard were their solid caps: a helmet with a hard edge and a mask.
+    float fine = pNoise(vec2(uv.x * 260.0, uv.y * 24.0)) * 0.65 + pNoise(vec2(uv.x * 700.0, uv.y * 50.0)) * 0.35;
+    float coarse = pNoise(vec2(uv.x * 70.0, uv.y * 9.0)) * 0.7 + pNoise(vec2(uv.x * 150.0, uv.y * 15.0)) * 0.3;
+    float lk = mix(fine, coarse, smoothstep(0.0008, 0.0018, pPx));
     if (pat == 23 || t > 0.0) {                                // shells (not the solid long coat): alpha-tested
-      float far = smoothstep(0.0011, 0.0022, pPx);            // locks unresolvable: the shell fades away
-      if (lk < mix(0.42, 0.7, t) || far > pBayer(gl_FragCoord.xy)) discard;
+      float far = smoothstep(0.0055, 0.0095, pPx);            // the clumps unresolvable: the shell fades away
+      if (lk < mix(0.42, 0.72, t) || far > pIGN(gl_FragCoord.xy)) discard;
     }
     pCol *= 0.8 + 0.4 * lk;
-    pRough = pat == 35 ? 0.66 : 0.45;   // a long animal coat is duller than combed human hair
+    pRough = pat == 35 ? 0.66 : 0.56;   // a long animal coat is duller than combed human hair (qa-r1: hair a dull sheen)
     pH += 0.0002 * lk;
     pWrap = 0.3; pSSS = vec3(1.0, 0.8, 0.65);
   }
@@ -520,12 +645,15 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
 #if defined(P_G_FIG)
   if (pat == 26) { // wound linen (migba'at, mitznefet): a strip wound over itself - every winding laps the
     // last with a crisp edge and a little shadow under it; fine linen thread and soft creases inside each strip
-    float P = 0.022;
+    float P = 0.03;   // human.js WOUND_PITCH (qa-r2: the bands are modelled; 2.2 cm → 3 cm)
     float ph = fract((uv.x + uv.y) / P);
     float fe = P_NY(P);
-    float lip = smoothstep(0.0, 0.1, ph);
-    pH += (0.0009 * sqrt(ph) + 0.0003 * sin(ph * 3.14159)) * fe;
-    pCol *= 1.0 - (0.2 * (1.0 - lip) + 0.04 * (1.0 - ph)) * fe - 0.035 * (1.0 - fe);
+    // ph runs up each band: its lower edge (ph ≈ 0) is the lip lying over the band below, rounded and proud; up the band
+    // the cloth falls away under the next winding, whose lip shades the band's top (qa-r2: as the geometry, human.js wound)
+    float lipR = smoothstep(0.0, 0.12, ph);
+    pH += 0.0012 * lipR * (1.0 - ph) * fe;
+    float shd = smoothstep(0.72, 1.0, ph);
+    pCol *= 1.0 - (0.2 * shd + 0.06 * (1.0 - lipR)) * fe - 0.035 * (1.0 - fe);
     float th = pNoise(vec2(uv.x * 700.0, uv.y * 700.0));
     pCol *= 0.975 + 0.04 * mix(0.5, th, P_NY(0.0016)) + 0.04 * (pNoise(vec2((uv.x + uv.y) * 40.0, (uv.x - uv.y) * 140.0)) - 0.5);
     pSheen = 0.5;
@@ -636,11 +764,17 @@ if (pat == 22) { // eyeball: sclera, iris with radial fibres and a dark limbal r
   float fib = 0.82 + 0.36 * pNoise(vec2(ang * 7.0, r * 16.0));
   vec3 irisC = mix(vec3(0.045, 0.024, 0.012), vec3(0.17, 0.09, 0.035) * (0.7 + 0.6 * vPSeed), smoothstep(pr, ir * 0.9, r)) * fib;
   irisC *= 1.0 - 0.65 * smoothstep(ir - 0.09, ir, r);
-  vec3 sclera = vec3(0.6, 0.56, 0.52) * (1.0 - 0.3 * smoothstep(0.55, 1.0, r)) * mix(vec3(1.0), vec3(1.0, 0.84, 0.8), smoothstep(0.5, 1.0, abs(uv.x)));
+  // (qa-r1: a duller sclera, more shaded by the lid — a bright white all round read as a doll's stare)
+  vec3 sclera = vec3(0.5, 0.46, 0.42) * (1.0 - 0.35 * smoothstep(0.5, 1.0, r)) * mix(vec3(1.0), vec3(1.0, 0.82, 0.78), smoothstep(0.45, 1.0, abs(uv.x)));
   pCol = mix(sclera, irisC, iris);
   pCol = mix(pCol, vec3(0.006), pupil);
   // the upper lid and lashes shade the top of the eye (a lit sclera all round reads as a stare)
-  pCol *= 1.0 - 0.5 * smoothstep(-0.05, 0.22, uv.y);
+  pCol *= 1.0 - 0.62 * smoothstep(-0.12, 0.2, uv.y);
+  // qa-r2: the catchlight — the bright sky mirrored in the wet cornea, up and to one side over the iris (both eyes alike).
+  // Never thinner than a pixel; widened, it dims to keep its energy, so far off it is a faint spark, not a white blot.
+  float gr = max(0.1, pPx * 0.8);
+  float glint = (1.0 - smoothstep(gr * 0.55, gr, length(uv - vec2(0.19, 0.11)))) * (0.1 * 0.1) / (gr * gr);
+  pCol = mix(pCol, vec3(0.92, 0.94, 0.96), clamp(glint, 0.0, 1.0) * 0.9);
   pRough = 0.07; pMetal = 0.0; pSheen = 0.0; pWrap = 0.0;
 }
 #endif
@@ -664,31 +798,62 @@ if (pat == 34) { // nails
 #ifdef P_G_FIG
 if (pat == 19 || pat == 25) { // face skin: brows, nostrils, lips, the flush of cheeks and nose; painted eyes at LOD1
   vec2 uv = vPUv;
+  // a bearded man's face carries −20 in v on the front (human.js head): the beard's line is painted below
+  float bearded = step(uv.y, -10.0);
+  uv.y += 20.0 * bearded;
   float n = pNoise(uv * 140.0);
   pCol *= 0.96 + 0.06 * mix(0.5, n, P_NY(0.007));
   pRough = 0.46 + 0.12 * n;
   pSheen = 0.12;
   if (uv.y < 5.0) {
+    // qa-r1: the skin's roughness varies — the forehead and nose (the T-zone) a little oilier and glossier, the cheeks
+    // drier — and the colour: the nose tip and ears warmer, under the eyes a touch darker and cooler
+    float tz = 0.6 * exp(-pow(uv.x / 0.018, 2.0)) * smoothstep(-0.048, -0.025, uv.y) * smoothstep(0.012, -0.004, uv.y) + 0.7 * exp(-pow(uv.x / 0.045, 2.0)) * smoothstep(0.022, 0.04, uv.y);
+    pRough += -0.09 * clamp(tz, 0.0, 1.0) + 0.06 * exp(-pow((abs(uv.x) - 0.046) / 0.016, 2.0) - pow((uv.y + 0.026) / 0.016, 2.0));
+    float under = exp(-pow((abs(uv.x) - 0.031) / 0.012, 2.0) - pow((uv.y + 0.0045) / 0.005, 2.0));
+    pCol *= mix(vec3(1.0), vec3(0.9, 0.88, 0.92), under * 0.6);
+    // qa-r2: the three zones of a face's colour (one flat tone read as a mannequin) — the forehead a little yellower; the
+    // nose, cheeks and ears warmer (blood close under the skin: the flush below and the ears' own colour, human.js); the
+    // jaw, chin and the upper lip cooler and greyer (a man's beard shadow, bluish; a woman's or a boy's barely)
+    float zF = smoothstep(0.012, 0.042, uv.y);
+    float zL = smoothstep(-0.032, -0.064, uv.y) * mix(0.35, 1.0, bearded)
+      + exp(-pow(uv.x / 0.02, 2.0) - pow((uv.y + 0.049) / 0.0075, 2.0)) * mix(0.3, 0.8, bearded);
+    pCol *= mix(vec3(1.0), vec3(1.025, 1.0, 0.935), zF * 0.75);
+    pCol *= mix(vec3(1.0), vec3(0.92, 0.945, 1.0), clamp(zL, 0.0, 1.0) * 0.6);
+    // the beard's shadow above its line (human.js beardTop / BEARD_PHI; the head's half-width ≈ 0.065 hs at the cheeks): hair the
+    // eye cannot resolve, so the cheek line is soft at any distance and the sideburn runs into the temple's hair
+    if (bearded > 0.5 && vPHair.x >= 0.0) {
+      float aa = asin(clamp(abs(uv.x) / 0.065, 0.0, 1.0)) / 1.45;
+      float yTop = aa < 0.28 ? mix(-0.07, -0.061, smoothstep(0.08, 0.28, aa))
+        : mix(mix(-0.061, -0.008, pow(smoothstep(0.28, 0.86, aa), 0.85)), 0.038, smoothstep(0.8, 1.0, aa));
+      float bs = smoothstep(yTop + 0.017, yTop - 0.002, uv.y);
+      // (qa-r2: the dark of hair under the skin is bluish grey, part the hair's own colour)
+      pCol = mix(pCol, mix(vPHair * 1.05, pCol * vec3(0.78, 0.81, 0.9), 0.45), 0.42 * bs);
+      pRough = mix(pRough, 0.62, bs);
+    }
     float ff = 1.0 - smoothstep(0.0018, 0.0036, pPx);
     float aa = max(pPx * 0.7, 0.0003);
     // blood under the skin: cheeks and nose a little warmer
     float flush = exp(-pow((abs(uv.x) - 0.04) / 0.018, 2.0) - pow((uv.y + 0.022) / 0.016, 2.0)) + 0.8 * exp(-pow(uv.x / 0.012, 2.0) - pow((uv.y + 0.036) / 0.01, 2.0));
-    pCol *= mix(vec3(1.0), vec3(1.06, 0.93, 0.9), clamp(flush, 0.0, 1.0));
+    pCol *= mix(vec3(1.0), vec3(1.075, 0.925, 0.89), clamp(flush, 0.0, 1.0));
     float ex = abs(uv.x) - 0.031;
     float ey = uv.y - 0.008;
     if (pat == 25) { // LOD1: eyes drawn on the face (no modelled eyeballs)
       float sock = exp(-(ex * ex) / (0.0125 * 0.0125) - (ey - 0.002) * (ey - 0.002) / (0.0095 * 0.0095));
       pCol *= 1.0 - (0.2 + 0.12 * (1.0 - ff)) * sock;
-      float ew = 0.0118;
+      // (qa-r1: a narrower, calmer opening, the sclera barely lighter than the skin and shaded by the lid)
+      float ew = 0.0115;
       float tx = clamp(ex / ew, -1.0, 1.0);
-      float hh = 0.0041 * (1.0 - tx * tx);
+      float hh = 0.0035 * (1.0 - tx * tx);
       float ec = ey + 0.0006 * tx;
       float inEye = (1.0 - smoothstep(hh - aa, hh + aa, abs(ec))) * step(abs(ex), ew) * ff;
-      vec3 sclera = pCol * vec3(1.18, 1.12, 1.05) + vec3(0.05, 0.045, 0.04);
+      vec3 sclera = pCol * vec3(1.08, 1.04, 1.0) + vec3(0.025, 0.022, 0.02);
       float ir = length(vec2(ex + 0.0006, ey + 0.0003));
-      float iris = 1.0 - smoothstep(0.0043 - aa, 0.0043 + aa, ir);
+      float iris = 1.0 - smoothstep(0.0045 - aa, 0.0045 + aa, ir);
       vec3 eyeCol = mix(sclera, vec3(0.04, 0.026, 0.02), iris);
-      eyeCol *= 1.0 - 0.45 * smoothstep(-0.001, hh, ec);
+      eyeCol *= 1.0 - 0.55 * smoothstep(-0.0015, hh, ec);
+      // (qa-r2) the catchlight over the iris, while it spans a pixel
+      eyeCol = mix(eyeCol, vec3(0.75), (1.0 - smoothstep(0.0007, 0.0007 + aa, length(vec2(ex - 0.0016, ey - 0.0012)))) * ff * 0.8);
       pCol = mix(pCol, eyeCol, inEye);
       float lash = (1.0 - smoothstep(0.0004, 0.0004 + aa, abs(ec - hh))) * step(abs(ex), ew * 1.02) * ff;
       pCol = mix(pCol, vec3(0.03, 0.02, 0.015), lash * 0.8);
@@ -743,10 +908,14 @@ function glyphTexture() {
   return _glyph;
 }
 
-function patchVertex(src, { depth }) {
+function patchVertex(src, { depth, prop = false }) {
   let s = src.replace('#include <common>', `#include <common>\n${depth ? '#define P_DEPTH\n' : ''}${VERT_PARS}`);
   if (s.includes('#include <beginnormal_vertex>')) s = s.replace('#include <beginnormal_vertex>', VERT_BEGINNORMAL);
   s = s.replace('#include <begin_vertex>', VERT_BEGIN);
+  // qa-r2 (SHADOW_BIAS): a figure's depth in an orthographic shadow map moved away from the light (ortho: z_clip grows by
+  // 2·b / (far − near) = −P[2][2]·b); in the fires' cube maps MeshDistanceMaterial's distance (createPeopleDepthMaterials)
+  if (depth && !prop) s = s.replace('#include <project_vertex>', `#include <project_vertex>
+if (projectionMatrix[3][3] > 0.5) gl_Position.z -= projectionMatrix[2][2] * ${SHADOW_BIAS.toFixed(4)};`);
   if (!depth) s = s.replace('#include <color_vertex>', `#include <color_vertex>\n${VERT_COLOR}`);
   return s;
 }
@@ -774,8 +943,10 @@ export function createPeopleMaterial(opts) {
     shader.uniforms.uPBones = atlas.uniform;
     shader.uniforms.uPPal = palette;
     shader.uniforms.uPGlyph = glyph;
+    if (!prop) shader.uniforms.uPArm = ARM_TABLE.uniform;
     shader.vertexShader = patchVertex(shader.vertexShader, { depth: false });
     let f = shader.fragmentShader.replace('#include <common>', `#include <common>\n${FRAG_PARS}`);
+    f = f.replace('#include <shadowmap_pars_fragment>', shadowPars());
     const lb = lightsBegin();
     if (lb) {
       f = f.replace('#include <lights_physical_pars_fragment>', `#include <lights_physical_pars_fragment>\n${FRAG_LIGHT}`);
@@ -799,7 +970,7 @@ material.sheenRoughness = 0.6;
     }
     shader.fragmentShader = f;
   };
-  const key = `people:${defines.join(',')}:${physical ? 'phys' : 'std'}:v7`;
+  const key = `people:${defines.join(',')}:${physical ? 'phys' : 'std'}:v9`;
   mat.customProgramCacheKey = () => key;
   return mat;
 }
@@ -810,9 +981,10 @@ export function createPeopleDepthMaterials(atlas, prop = false) {
     m.defines = prop ? { P_PROP: '', P_LERP: '' } : { P_LERP: '' };
     m.onBeforeCompile = (shader) => {
       shader.uniforms.uPBones = atlas.uniform;
-      shader.vertexShader = patchVertex(shader.vertexShader, { depth: true });
+      shader.vertexShader = patchVertex(shader.vertexShader, { depth: true, prop });
+      if (!prop) shader.fragmentShader = shader.fragmentShader.replace('float dist = length( vWorldPosition - referencePosition );', `float dist = length( vWorldPosition - referencePosition ) + ${SHADOW_BIAS.toFixed(4)};`);
     };
-    const key = `people-depth:${prop ? 'prop' : 'fig'}:v5`;
+    const key = `people-depth:${prop ? 'prop' : 'fig'}:v6`;
     m.customProgramCacheKey = () => key;
     return m;
   };

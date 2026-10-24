@@ -97,7 +97,7 @@ function quad(B, rig, lod, kind, def = {}) {
   const W_body = (p) => envelope(rig, p, { pelvis: 1, spine: 1, chest: 1, neck: 0.4, fl_up: 0.2, fr_up: 0.2, hl_up: 0.25, hr_up: 0.25, tail: 0.15 }, 3);
   const fleece = sheep ? (lod === 0 ? 0.05 : 0.042) * H / 0.66 : 0;
   // ---- body barrel (rear → front)
-  const N = sgL(lod, sheep || bull ? 26 : 20, 8);
+  const N = sgL(lod, sheep || bull ? 26 : 20, 14);   // (qa-r2: LOD1 14 rings × 20, was 8 × 12 — a box on sticks at 3–14 m)
   const zA = d.zr + 0.1 * L, zB = d.zf - 0.08 * L;
   const rings = [];
   for (let j = 0; j <= N; j++) {
@@ -118,7 +118,7 @@ function quad(B, rig, lod, kind, def = {}) {
     const hdB = R(rig, 'head');
     const end = hdB.clone().add(V(0, -0.02, 0.06));
     const mid = V(0, lerp(last.c.y, end.y, 0.45), lerp(last.c.z, end.z, 0.5));
-    const n = sgL(lod, 8, 4);
+    const n = sgL(lod, 8, 6);
     for (let i = 1; i <= n; i++) {
       const u = i / n;
       // quadratic path: barrel front → over the shoulders → down to the poll; deep and narrow, narrowing to the head
@@ -148,7 +148,7 @@ function quad(B, rig, lod, kind, def = {}) {
     return 1;
   };
   const W_neckB = (p) => envelope(rig, p, { chest: 1, neck: 1, neck2: 1, head: 0.5 }, 4);
-  const body = () => B.tube(rings, { seg: sgL(lod, sheep || bull ? 40 : 32, 12), weights: (p, j) => { const u = rings[j]?.neck || 0; if (u <= 0) return W_body(p); if (u >= 0.5) return W_neckB(p); const k = u / 0.5; return normW([...W_body(p).map(([b, w]) => [b, w * (1 - k)]), ...W_neckB(p).map(([b, w]) => [b, w * k])]); }, capA: 'dome', capB: 'dome', domeH: 0.5, radial: lod === 0 && !sheep ? relief : null });
+  const body = () => B.tube(rings, { seg: sgL(lod, sheep || bull ? 40 : 32, 20), weights: (p, j) => { const u = rings[j]?.neck || 0; if (u <= 0) return W_body(p); if (u >= 0.5) return W_neckB(p); const k = u / 0.5; return normW([...W_body(p).map(([b, w]) => [b, w * (1 - k)]), ...W_neckB(p).map(([b, w]) => [b, w * k])]); }, capA: 'dome', capB: 'dome', domeH: 0.5, radial: lod === 0 && !sheep ? relief : null });
   const bodyCentre = (p) => {
     let best = rings[0].c, bd = Infinity;
     for (const r of rings) { const dd = Math.abs(r.c.z - p.z); if (dd < bd) { bd = dd; best = r.c; } }
@@ -157,10 +157,14 @@ function quad(B, rig, lod, kind, def = {}) {
   B.set(bodySet);
   // fleece: an opaque, clumped volume (locks displaced in rest space; the shader adds crimp and crevices). The
   // earlier alpha-tested strand shells read as a screen-door stipple at mid range and are gone.
+  const fleece0 = B.count;
   if (sheep) withLocks(B, lod === 0 ? 0.06 : 0.035, 1, bodyCentre, body, 0.014);
   else if (goat) withLocks(B, lod === 0 ? 0.03 : 0.016, 2.2, bodyCentre, body, 0.03, null, 0.25);
   else body();
   if (goat) goatSkirt(B, rig, lod, rings, coatSet, W_body);
+  // qa-r2: a sheep's fleece is soiled underneath — the belly, the lower flanks and the breech yellowed with lanolin and
+  // grey-brown with dust and dung (a clean white all round read as a toy); the back stays the cleanest
+  if (sheep) soilFleece(B, fleece0, B.count, H, d.zr);
   // ---- neck
   const ch = R(rig, 'chest'), nk = R(rig, 'neck'), n2 = R(rig, 'neck2'), hd = R(rig, 'head');
   const nr = bull ? 0.22 : sheep ? 0.075 * H / 0.66 + fleece : 0.062 * H / 0.7;
@@ -170,7 +174,7 @@ function quad(B, rig, lod, kind, def = {}) {
   const W_neck = (p) => envelope(rig, p, { chest: 1, neck: 1, neck2: 1, head: 0.6 }, 4);
   B.set(bodySet);
   // the bull's neck flares into the shoulders from a root ring deep inside the barrel (no collar where they meet)
-  const neck = () => tubeAlong(B, neckPts, neckR, sgL(lod, bull ? 28 : 20, 8), { weights: W_neck, capB: 'dome', domeH: 0.4, radial: bull && lod === 0 ? (th) => 1 + 0.06 * Math.max(0, Math.sin(th)) ** 2 : null });
+  const neck = () => tubeAlong(B, neckPts, neckR, sgL(lod, bull ? 28 : 20, 14), { weights: W_neck, capB: 'dome', domeH: 0.4, radial: bull && lod === 0 ? (th) => 1 + 0.06 * Math.max(0, Math.sin(th)) ** 2 : null });
   const neckC = (p) => { let best = neckPts[0], bd = Infinity; for (const q of neckPts) { const dd = q.distanceTo(p); if (dd < bd) { bd = dd; best = q; } } return best; };
   // the wool stops at the poll: the face is short-haired
   const hdC = R(rig, 'head');
@@ -220,9 +224,11 @@ function quad(B, rig, lod, kind, def = {}) {
   if (sheep) { // the fat tail (alyah, Vayikra 3:9; Tamid 4:3): a heavy pad of fat hanging from the rump toward the
     // hocks — narrow where it hangs from the tail root, broad and thick below where the fat sags, two lobes parted
     // by a groove; wool over its back, its underside bare and pinkish, the thin tail tip turned up from the groove
+    // qa-r2: set further back and lower, out of the rump's wool, so the pad shows from behind and the side as the
+    // breed's (its root and upper back were inside the fleece: from behind the lamb was a plain white box)
     const k = H / 0.66 * (ram ? 1.25 : 1);
-    const c = V(0, tl.y - 0.15 * k, tl.z + 0.05 * k);
-    const r = [0.115 * k, 0.17 * k, 0.085 * k];
+    const c = V(0, tl.y - 0.185 * k, tl.z + 0.088 * k);
+    const r = [0.112 * k, 0.175 * k, 0.08 * k];
     const tw = (p) => normW([[tb, 1], [t2b, smooth(tl.y, t2.y, p.y)], [rig.index.pelvis, 0.3]]);
     const lobe = (l) => {
       const u = l.y / r[1];                                  // +1 top (root) … −1 bottom
@@ -234,9 +240,16 @@ function quad(B, rig, lod, kind, def = {}) {
       return l;
     };
     B.set(fleeceSet);
-    const fat = () => B.ellipsoid(c, r, { nu: sgL(lod, 22, 12), nv: sgL(lod, 16, 8), deform: lobe, weights: tw,
-      col: (l) => (l.z < -r[2] * 0.25 && l.y < r[1] * 0.3 ? [0.86, 0.7, 0.62] : null) });   // the bare underside (toward the legs)
-    withLocks(B, lod === 0 ? 0.022 : 0.014, 1.2, () => c, fat, 0.003, (p) => (p.z < c.z - r[2] * 0.25 ? 0.25 : 1));
+    // the bare underside (toward the legs) pinkish; the wool over the pad shorter than the body's, a little soiled toward
+    // its lower edge, and darker in the crease where its root meets the buttocks (qa-r2: it merged into the rump)
+    const fat = () => B.ellipsoid(c, r, { nu: sgL(lod, 22, 14), nv: sgL(lod, 16, 10), deform: lobe, weights: tw,
+      col: (l) => {
+        if (l.z < -r[2] * 0.25 && l.y < r[1] * 0.3) return [0.86, 0.7, 0.62];
+        const u = l.y / r[1];
+        const soil = smooth(-0.2, -0.95, u), crease = smooth(0.55, 0.95, u);
+        return [1 - 0.14 * soil - 0.28 * crease, 1 - 0.2 * soil - 0.3 * crease, 1 - 0.32 * soil - 0.34 * crease];
+      } });
+    withLocks(B, lod === 0 ? 0.016 : 0.01, 1.4, () => c, fat, 0.002, (p) => (p.z < c.z - r[2] * 0.25 ? 0.25 : 1));
     B.set(fleeceSet);
     const tip = c.clone().add(V(0, -r[1] * 0.62, r[2] * 0.55));
     tubeAlong(B, [tip, tip.clone().add(V(0, -r[1] * 0.2, r[2] * 0.22)), tip.clone().add(V(0, -r[1] * 0.12, r[2] * 0.42))], [0.022 * k, 0.017 * k, 0.008 * k], 7, { bone: t2b, capB: 'dome' });
@@ -248,6 +261,17 @@ function quad(B, rig, lod, kind, def = {}) {
     tubeAlong(B, [tl.clone(), t2.clone(), t2.clone().add(V(0, -0.45, 0.02))], [0.032, 0.022, 0.015], 7, { weights: (p) => normW([[tb, 1], [t2b, smooth(tl.y, t2.y - 0.2, p.y) * 2]]) });
     B.set({ ...faceSet, pat: PAT.COAT_LONG, color: [0.5, 0.5, 0.5] });
     B.ellipsoid(t2.clone().add(V(0, -0.53, 0.02)), [0.04, 0.1, 0.04], { nu: 8, nv: 5, bone: t2b, deform: (l) => { l.x *= 1 + 0.3 * smooth(0, -0.1, l.y); return l; } });
+  }
+}
+
+/** darken and yellow the fleece's vertices [a, b) toward the belly, the lower flanks and the breech (rest space) */
+function soilFleece(B, a, b, H, zr) {
+  for (let i = a; i < b; i++) {
+    const y = B.pos[i * 3 + 1], z = B.pos[i * 3 + 2];
+    const low = smooth(H * 0.72, H * 0.4, y);                    // from the mid-flank down to the belly
+    const breech = smooth(zr - 0.12 * H, zr + 0.1 * H, z) * smooth(H * 0.8, H * 0.45, y);
+    const s = Math.min(1, 0.75 * low + 0.6 * breech);
+    B.col[i * 3] *= 1 - 0.16 * s; B.col[i * 3 + 1] *= 1 - 0.22 * s; B.col[i * 3 + 2] *= 1 - 0.36 * s;
   }
 }
 
@@ -324,7 +348,8 @@ function head(B, rig, lod, kind, faceSet, bodySet, def = {}) {
   const { pitch, fwd, up, hw, P0, len } = headFrame(rig, kind);
   const hb = rig.index.head, jb = rig.index.jaw;
   const prof = HEADS[kind] || HEADS.sheep;
-  const rows = lod === 0 ? prof : [prof[0], prof[2], prof[4], prof[6]];
+  // (qa-r2: LOD1 five rows, was four — the face's brow, eyes and muzzle read at 3–14 m)
+  const rows = lod === 0 ? prof : [prof[0], prof[1], prof[2], prof[4], prof[6]];
   const eyeT = 0.3;
   const rings = rows.map(([t, w, h, drop]) => ({
     c: P0.clone().addScaledVector(fwd, t * len).addScaledVector(up, -drop * hw), rx: w * hw, rz: h * hw, ax: V(1, 0, 0), az: up.clone(), t,
@@ -337,8 +362,8 @@ function head(B, rig, lod, kind, faceSet, bodySet, def = {}) {
     return jw > 0.02 ? normW([[hb, 1 - jw], [jb, jw]]) : [[hb, 1]];
   };
   B.tube(rings, {
-    seg: sgL(lod, 24, 10), weights: W, capA: 'dome', capB: 'dome', domeH: bull ? 0.45 : 0.6,
-    radial: lod === 0 ? (th, j, Rg) => {
+    seg: sgL(lod, 24, 14), weights: W, capA: 'dome', capB: 'dome', domeH: bull ? 0.45 : 0.6,
+    radial: lod <= 1 ? (th, j, Rg) => {
       const t = Rg.t, s = Math.sin(th), c = Math.cos(th);
       const sock = -0.07 * g2(Math.abs(c) - 0.82, s - 0.32, 0.22, 0.25) * g2(t - eyeT, 0, 0.09, 1);
       const brow = 0.06 * g2(Math.abs(c) - 0.7, s - 0.62, 0.3, 0.2) * g2(t - eyeT + 0.05, 0, 0.08, 1);
@@ -420,7 +445,7 @@ function head(B, rig, lod, kind, faceSet, bodySet, def = {}) {
   // lid lies over the top of the eyeball (a placid look), dark lid rims all round
   if (lod < 2) {
     const er = hw * (bull ? 0.16 : 0.19);
-    const r0 = rings[lod === 0 ? 2 : 1];
+    const r0 = rings[2];
     for (const sg of [-1, 1]) {
       const c = r0.c.clone().addScaledVector(fwd, (eyeT - r0.t) * len).add(V(sg * r0.rx * 0.8, 0, 0)).addScaledVector(up, r0.rz * 0.3);
       const rot = new Matrix4().makeRotationY(sg * 1.05).multiply(new Matrix4().makeRotationX(-pitch * 0.4));
@@ -446,7 +471,7 @@ function head(B, rig, lod, kind, faceSet, bodySet, def = {}) {
     nrm.applyAxisAngle(a, sg * (bull ? 0.5 : 0.75)).normalize();          // the outer face turned back: the hollow faces forward
     const b = new Vector3().crossVectors(nrm, a).normalize();
     const root = e.clone().add(V(sg * 0.008, -0.004, 0.008));
-    const nu2 = sgL(lod, 10, 5), nv2 = sgL(lod, 8, 4);
+    const nu2 = sgL(lod, 10, 7), nv2 = sgL(lod, 8, 5);
     const ear = (inner) => {
       B.set({ ...faceSet, pat: PAT.COAT, color: inner ? [1.3, 1.02, 0.96] : [1, 1, 1] });
       B.grid(nu2, nv2, (i, j) => {
@@ -471,7 +496,7 @@ function head(B, rig, lod, kind, faceSet, bodySet, def = {}) {
     B.set({ cls: CLS.FIX, pat: PAT.HORN, rough: 0.5, metal: 0, color: goat ? '#2c2624' : bull ? '#cdbb9a' : '#c2ab86', grp: 0 });
     for (const sg of [-1, 1]) {
       const pts = [], rad = [];
-      const n = sgL(lod, 20, 8);
+      const n = sgL(lod, 20, 12);
       const base = cran.clone().addScaledVector(up, hw * 0.72).add(V(sg * hw * (goat ? 0.32 : 0.5), 0, 0));
       for (let i = 0; i <= n; i++) {
         const t = i / n;
@@ -497,7 +522,7 @@ function head(B, rig, lod, kind, faceSet, bodySet, def = {}) {
       }
       // goat horns are flattened side to side (a keel in front); sheep horns ridged across
       const hr = goat ? rad.map((r) => [r * 0.62, r * 1.15]) : rad;
-      tubeAlong(B, pts, hr, sgL(lod, 10, 5), { bone: hb, capB: 'dome', domeH: 0.8,
+      tubeAlong(B, pts, hr, sgL(lod, 10, 6), { bone: hb, capB: 'dome', domeH: 0.8,
         radial: lod === 0 && !bull ? (th, j) => 1 + (goat ? 0.05 * Math.max(0, Math.sin(j * 3.1)) : 0.07 * Math.max(0, Math.sin(j * 2.6))) : null });
     }
   }
@@ -582,7 +607,8 @@ function legMesh(B, rig, lod, leg, kind, bodySet, faceSet, fleece) {
     [k * 0.44, k * 0.46],
     [k * 0.47, k * 0.5],
   ];
-  const sel = lod === 0 ? [0, 1, 2, 3, 4, 5, 6, 7, 8] : [0, 1, 3, 4, 6, 8];
+  // (qa-r2: LOD1 keeps every ring — the knee or hock, the cannon, the fetlock and the pastern: stick legs before)
+  const sel = [0, 1, 2, 3, 4, 5, 6, 7, 8];
   if (sheep) {
     // fleece down to just past the knee/hock (a woolly cuff), short brown hair below
     // the fleece runs down the upper leg and thins out above the knee / hock into the short brown hair below:
@@ -592,21 +618,23 @@ function legMesh(B, rig, lod, leg, kind, bodySet, faceSet, fleece) {
     const legC = (p) => { let best = pts[0], bd = Infinity; for (const q of pts) { const dd = q.distanceTo(p); if (dd < bd) { bd = dd; best = q; } } return best; };
     const fade = (p) => smooth(pts[2].y, pts[1].y + 0.02 * H, p.y);
     const fr = (i) => [rad[i][0] * (i === 2 ? 1.08 : 1) + fleece * [0.62, 0.42, 0.06][i], rad[i][1] * (i === 2 ? 1.08 : 1) + fleece * [0.62, 0.42, 0.06][i]];
-    withLocks(B, lod === 0 ? 0.03 : 0.02, 1.3, legC, () => tubeAlong(B, top.map((i) => pts[i]), top.map(fr), sgL(lod, 16, 6), { weights: W, capA: 'dome' }), 0.008, fade);
+    const w0 = B.count;
+    withLocks(B, lod === 0 ? 0.03 : 0.02, 1.3, legC, () => tubeAlong(B, top.map((i) => pts[i]), top.map(fr), sgL(lod, 16, 8), { weights: W, capA: 'dome' }), 0.008, fade);
+    soilFleece(B, w0, B.count, H, d.zr);
     B.set(faceSet);
     const lower = [3, 4, 5, 6, 7, 8].filter((i) => sel.includes(i));
     // the short-haired leg starts inside the end of the wool (no gap) and runs down through the knee / hock
     const lp = [pts[2].clone().lerp(pts[1], 0.3), ...lower.map((i) => pts[i])];
     const lr = [[rad[2][0] * 1.02, rad[2][1] * 1.02], ...lower.map((i) => [rad[i][0] * 0.98, rad[i][1] * 0.98])];
-    tubeAlong(B, lp, lr, sgL(lod, 12, 6), { weights: W, capA: 'dome' });
+    tubeAlong(B, lp, lr, sgL(lod, 12, 8), { weights: W, capA: 'dome' });
   } else {
     B.set(bodySet);
     const upper = [0, 1, 2, 3].filter((i) => sel.includes(i));
-    tubeAlong(B, upper.map((i) => pts[i]), upper.map((i) => rad[i]), sgL(lod, 12, 6), { weights: W, capA: 'dome' });
+    tubeAlong(B, upper.map((i) => pts[i]), upper.map((i) => rad[i]), sgL(lod, 12, 8), { weights: W, capA: 'dome' });
     B.set(kind === 'goat' ? bodySet : { ...faceSet, cls: CLS.GA });
     const lower = [3, 4, 5, 6, 7, 8].filter((i) => sel.includes(i));
     const lp = lower.map((i) => pts[i]); lp[0] = pts[3].clone().lerp(pts[2], 0.35);
-    tubeAlong(B, lp, lower.map((i) => rad[i]), sgL(lod, 10, 6), { weights: W, capA: 'dome' });
+    tubeAlong(B, lp, lower.map((i) => rad[i]), sgL(lod, 10, 7), { weights: W, capA: 'dome' });
   }
   // cloven hoof: two claws, flat soles, toes forward
   B.set({ cls: CLS.FIX, pat: PAT.HORN, rough: 0.45, metal: 0, color: '#2b2622', grp: 0 });

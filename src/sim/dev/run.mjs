@@ -68,12 +68,14 @@ try {
     console.log(`[shot] ${file}`);
     return file;
   });
-  // cdp(method, params): Chrome DevTools Protocol passthrough. HeapProfiler.getSamplingProfile comes back aggregated:
-  // { total, top: [['fn @ src/…:line', bytes], …] } (self sizes by allocating function)
+  // cdp(method, params): Chrome DevTools Protocol passthrough. HeapProfiler.getSamplingProfile and .stopSampling (both
+  // return the whole profile) come back aggregated: { total, samples, top: [['fn @ src/…:line', bytes], …] } (self
+  // sizes by allocating function), so a profile never crosses back into the page. The browser → Node pipe still carries
+  // the raw profile (Playwright caps one message at 100 MB): sample at a coarse interval over short windows (gc.js).
   const client = await page.context().newCDPSession(page);
   await page.exposeFunction('__simCdp', async (method, params) => {
     const r = await client.send(method, params || {});
-    if (method !== 'HeapProfiler.getSamplingProfile') return r;
+    if (method !== 'HeapProfiler.getSamplingProfile' && method !== 'HeapProfiler.stopSampling') return r;
     const agg = new Map();
     let total = 0;
     const walk = (n) => {
@@ -86,7 +88,7 @@ try {
       for (const c of n.children || []) walk(c);
     };
     walk(r.profile.head);
-    return { total, top: [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 80) };
+    return { total, samples: r.profile.samples?.length ?? 0, top: [...agg.entries()].sort((a, b) => b[1] - a[1]).slice(0, 300) };
   });
   const qs = new URLSearchParams(query);
   if (!opt.keepUi && !qs.has('shot')) qs.set('shot', '1');

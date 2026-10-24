@@ -8,7 +8,8 @@
 //                                         ctx.addFire's default size 1 is ignored for lamps and torches.
 //   ctx.fx.setFire(id, intensity 0..1)    eases toward the new intensity (fuelling, dying down)
 //   ctx.fx.attachTorch(object3D, opts)    -> handle; opts { offset:[x,y,z] local m, size, intensity, kind }
-//   ctx.fx.smokeColumn({ pos, height, width, density, kind:'wood'|'incense', rise }) -> handle
+//   ctx.fx.smokeColumn({ pos, height, width, density, kind:'wood'|'incense', rise, base }) -> handle
+//                                         base: height (m) above pos where the visible smoke begins (default 0)
 //   ctx.fx.remove(handle | id)
 //   ctx.fx.emissionScale                  scene units per cd/m² of fire emission as fx's own flames, embers and beds use
 //                                         it (env.preExposure × fireScale × local fire adaptation × flame-core gain):
@@ -40,10 +41,10 @@ const ADAPT_ALBEDO = 0.3;
 const ADAPT_SLOPE = 0.85; // ≈ d log(P)/d log(La) of env's exposure key, moonlit → firelit
 const ADAPT_TAU = 0.8;    // s
 // Looking INTO the fire the eye adapts to the flames themselves: emission is scaled so that a reference flame
-// core (1.25 × 2e4 cd/m²) lands at FIRE_CORE_HEADROOM × the display cap (then soft-capped). Below that
-// (daylight) the gain is 1. Without it every part of a night fire sits far above the cap and the soft cap
-// flattens core, body and tips into one cream mass.
-const FIRE_REF_CORE = 1.25 * 2.0e4;
+// core (1.6 × 2e4 cd/m²: a card's body peak plus its added hot core, qa-r1-fix-env-render) lands at
+// FIRE_CORE_HEADROOM × the display cap (then soft-capped). Below that (daylight) the gain is 1. Without it every part
+// of a night fire sits far above the cap and the soft cap flattens core, body and tips into one cream mass.
+const FIRE_REF_CORE = 1.6 * 2.0e4;
 const FIRE_CORE_HEADROOM = 1.8;
 // render-env-2: local adaptation also to the firelit surfaces in view (rays in screen-fraction units of the half fov)
 // [x, y, weight]: the centre (what one looks at) counts most
@@ -51,8 +52,15 @@ const VIEW_RAYS = [[0, 0, 0.4], [0.4, 0.1, 0.15], [-0.4, 0.1, 0.15], [0, 0.45, 0
 const VIEW_PERIOD = 0.2; // s between samplings
 const VIEW_FAR = 600;    // m
 const VIEW_WEIGHT = 0.6; // share of the view the sampled surfaces stand for (as the camera term's 0.6)
+const SAME_ROOM_VIEW = 0.5; // how much of the excess of the own room's firelit view over env's room meter adapts the eye
 
 const TIER_INDEX = { low: 0, medium: 1, high: 2, ultra: 3 };
+// the open fires: heat shimmer over them (post tiers; render/post-effects.js HeatHazeEffect, the plumes in view, by screen
+// size) and the local adaptation to their light in the viewer's own room
+const OPEN_FIRES = new Set(['pyre', 'hearth', 'brazier']);
+const HAZE_MAX = 4;
+const HAZE_RAD = 3e-3;   // rad of deflection at the reference pile size (2 m); ∝ √size (a deeper plume)
+const HAZE_PX = 4;       // cap, pixels
 // low: more, smaller puffs (less stretching along the column => no torn strips), each a little thinner
 const SMOKE_PUFFS = [24, 30, 40, 52];
 const SMOKE_DENSITY = [0.8, 1, 1, 1];
@@ -85,18 +93,19 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   let ti = TIER_INDEX[tier] ?? 1;
   let low = ti === 0;
   const mats = createFxMaterials({ soft, low, noise });
-  const flames = new InstanceBatch('flames', { iPos: 3, iSize: 2, iParams: 4, iLean: 4 }, 1024);
+  const flames = new InstanceBatch('flames', { iPos: 3, iSize: 2, iParams: 4, iLean: 4, iCore: 1 }, 1024);
   const halos = new InstanceBatch('halos', { iPos: 3, iParams: 4, iColor: 3 }, 512, { x0: -1, x1: 1, y0: -1, y1: 1 });
   const embers = new InstanceBatch('embers', { iPos: 3, iParams: 4, iParams2: 2 }, 4096);
-  const beds = new InstanceBatch('beds', { iPos: 3, iParams: 4 }, 512, { x0: -1, x1: 1, y0: -1, y1: 1 });
+  const beds = new InstanceBatch('beds', { iPos: 3, iParams: 4, iChar: 2 }, 512, 'box');
   const smoke = new InstanceBatch('smoke', { iPos: 3, iCol: 4, iPuff: 4, iGlow: 3, iMisc: 2 }, 4096, { x0: -1, x1: 1, y0: -1, y1: 1 });
-  // draw order: smoke (alpha) first, then additive glow, flames, embers on top
-  scene.add(smoke.makeMesh(mats.smoke));
+  // draw order: the coal-bed decal (it chars and lights the scene's own surfaces), smoke (alpha), additive glow, flames,
+  // embers on top
   scene.add(beds.makeMesh(mats.bed));
+  scene.add(smoke.makeMesh(mats.smoke));
   scene.add(halos.makeMesh(mats.halo));
   scene.add(flames.makeMesh(mats.flame));
   scene.add(embers.makeMesh(mats.ember));
-  smoke.mesh.renderOrder = 1; beds.mesh.renderOrder = 2; halos.mesh.renderOrder = 2; flames.mesh.renderOrder = 3; embers.mesh.renderOrder = 4;
+  beds.mesh.renderOrder = 0; smoke.mesh.renderOrder = 1; halos.mesh.renderOrder = 2; flames.mesh.renderOrder = 3; embers.mesh.renderOrder = 4;
   // render-env-2-fix: the nivreshet's sun glint (fx/glint.js)
   const glint = createGlint(ctx, mats.glint);
   scene.add(glint.mesh);
@@ -112,7 +121,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   let haloScale = low ? 0.3 : 0.15;
   let adaptOn = true;
   let logAdapt = 0;
-  let viewClock = 1e9, viewLaf = 0;
+  let viewClock = 1e9, viewLaf = 0, viewLafSame = 0;
+  const _vl = { same: 0 };
   let snap = true;             // first frame / time jump: no easing
 
   // ------------------------------------------------------------------ fires
@@ -132,16 +142,17 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const P = f.preset;
     const rnd = mulberry(f.seedInt);
     const size = f.size;
-    const nT = P.tongues[ti];
+    // qa-r1-fix-env-render: a few wide soft cards (procedural flipbooks) instead of a dozen narrow tongue sprites — the
+    // card over the fuel's centre is the widest and tallest, the rest stand on a small ring round it at their own phase
+    const nC = P.cards[ti];
     f.tongues = [];
-    for (let i = 0; i < nT; i++) {
-      // central tongues tallest; outer ones lower and wider apart
-      const ring = nT === 1 ? 0 : Math.sqrt((i + 0.5) / nT);
-      const a = i * 2.39996 + rnd() * 0.6;
-      const r = ring * P.spread * size;
-      const tall = 1 - 0.55 * ring;
-      const h = size * (P.tongueH[0] + (P.tongueH[1] - P.tongueH[0]) * (0.35 * rnd() + 0.65 * tall));
-      const w = size * (P.tongueW[0] + (P.tongueW[1] - P.tongueW[0]) * rnd());
+    for (let i = 0; i < nC; i++) {
+      const outer = i > 0;
+      const a = i * 2.39996 + rnd() * 0.8;
+      const r = outer ? P.ringR * size * (0.75 + 0.5 * rnd()) : 0;
+      const k = outer ? 0 : 1;
+      const h = size * (P.cardH[0] + (P.cardH[1] - P.cardH[0]) * k) * (0.9 + 0.2 * rnd());
+      const w = size * (P.cardW[0] + (P.cardW[1] - P.cardW[0]) * k) * (0.9 + 0.2 * rnd());
       const slot = flames.alloc();
       f.tongues.push({ ox: Math.cos(a) * r, oz: Math.sin(a) * r, w, h, seed: rnd() * 10, slot, speed: P.speed * (0.85 + 0.3 * rnd()), turb: P.turb * (0.85 + 0.3 * rnd()) });
     }
@@ -166,6 +177,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
         pos: f.pos, height: sp.height * (f.kind === 'pyre' ? Math.sqrt(k) : 1),
         width: Math.max(sp.width * size, 0.05), density: sp.density * Math.min(1.5, Math.max(0.3, k ** 0.8)), rise: sp.rise, spread: sp.spread,
         kind: sp.kind, fire: f, seed: f.seedInt,
+        // the visible smoke begins where the flames end (a thin base there, thickening as it rises)
+        base: 0.75 * size * P.cardH[1],
       });
     }
     writeFire(f);
@@ -173,14 +186,15 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
 
   function writeFire(f) {
     const inten = f.cur;
-    // overlap-aware emission so a 12-tongue pyre doesn't saturate to white at its base
-    const bright = f.tongues.length > 2 ? Math.pow(3 / f.tongues.length, 0.35) : 1;
+    // overlap-aware emission: the cards overlap over the fuel, so their sum must not saturate there
+    const bright = f.tongues.length > 1 ? Math.pow(1 / f.tongues.length, 0.22) : 1;
     const L = f.lean;
     for (const t of f.tongues) {
       flames.set(t.slot, 'iPos', f.pos.x + t.ox, f.pos.y, f.pos.z + t.oz);
       flames.set(t.slot, 'iSize', t.w, t.h);
       flames.set(t.slot, 'iParams', t.seed, inten, t.turb, t.speed);
       flames.set(t.slot, 'iLean', L.x, L.y, bright, f.L);
+      flames.set(t.slot, 'iCore', f.preset.core ?? 1.4);
     }
     const hp = f.preset.halo;
     halos.set(f.halo, 'iPos', f.pos.x, f.pos.y + f.size * 0.45, f.pos.z);
@@ -189,7 +203,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const P = f.preset;
     if (f.bed) {
       beds.set(f.bed, 'iPos', f.pos.x, f.pos.y, f.pos.z);
-      beds.set(f.bed, 'iParams', Math.max(0.05, P.spread * f.size * P.bed), (P.Lbed || 0) * f.cur, (f.seedInt % 89) / 13, 0);
+      beds.set(f.bed, 'iParams', Math.max(0.05, P.spread * f.size * P.bed), (P.Lbed || 0) * f.cur, (f.seedInt % 89) / 13, (P.bedH ?? 0.42) * f.size);
+      beds.set(f.bed, 'iChar', P.charR ?? 1, P.ash ?? 0);
     }
     for (const e of f.emberSlots) {
       embers.set(e.slot, 'iPos', f.pos.x, f.pos.y + f.size * 0.15, f.pos.z);
@@ -289,7 +304,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const kindNum = o.kind === 'incense' || o.kind === 1 ? 1 : 0;
     const col = {
       pos: toWorld(o.pos), height: o.height ?? 30, width: o.width ?? 1, density: o.density ?? 0.5,
-      rise: o.rise ?? (kindNum ? 0.8 : 2.2), spread: o.spread ?? (kindNum ? 1.3 : 3.0),
+      rise: o.rise ?? (kindNum ? 0.8 : 2.2), spread: o.spread ?? (kindNum ? 1.3 : 3.0), base: Math.max(0, o.base ?? 0),
       kind: kindNum, fire: o.fire || null, seed: ((o.seed ?? hashStr(String(Math.random()))) % 1000) / 1000,
       slots: [], glow: new Color(0, 0, 0), intensity: 1,
     };
@@ -316,7 +331,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       smoke.set(s, 'iCol', col.height, col.width, col.density * SMOKE_DENSITY[ti] * Math.min(1, k), col.seed * 7 + i * 0.13);
       smoke.set(s, 'iPuff', (i + col.seed) / n, col.kind, col.rise, col.spread);
       smoke.set(s, 'iGlow', col.glow.r, col.glow.g, col.glow.b);
-      smoke.set(s, 'iMisc', n, 0);
+      smoke.set(s, 'iMisc', n, col.base);
     }
   }
 
@@ -400,8 +415,12 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       // render-env-2: …and to the firelit surfaces in view — the Heichal's facade lit by the altar seen over the courts'
       // walls from the dark Mount, where the camera itself (behind the walls) receives no firelight at all
       viewClock += dt;
-      if (snap || env.adaptSnap || viewClock > VIEW_PERIOD) { viewClock = 0; viewLaf = viewFireLuminance(); }
+      if (snap || env.adaptSnap || viewClock > VIEW_PERIOD) { viewClock = 0; viewLaf = viewFireLuminance(_vl); viewLafSame = _vl.same; }
       Laf = Math.max(Laf, VIEW_WEIGHT * viewLaf);
+      // qa-r1-fix-env-render: …and, centre-weighted, to half of what the viewer's own room's fires light in view beyond
+      // env's whole-room meter (La): looking at the Moked's hearth from beside it, the floor round it was 4 stops over
+      // the hall's mean and burned white (half: the eye adapts to a bright patch only in part)
+      Laf = Math.max(Laf, SAME_ROOM_VIEW * (VIEW_WEIGHT * viewLafSame - La));
       target = ADAPT_SLOPE * Math.log(La / (La + Laf));
     }
     // real time (τ ADAPT_TAU) plus sim time (τ 0.5 sim-min, as env's meter): keeps up in a 600× time-lapse
@@ -435,7 +454,51 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     if (size.y >= 16 && Number.isFinite(env.preExposure)) glint.update(dt, env.preExposure, low, size);
     else glint.mesh.visible = false;
     flames.flush(); halos.flush(); embers.flush(); smoke.flush(); beds.flush();
+    updateHaze();
     snap = false;
+  }
+
+  /** the plumes for the heat shimmer: up to HAZE_MAX static big fires in front of the camera, largest on screen first */
+  const haze = { n: 0, a: new Float32Array(HAZE_MAX * 4), b: new Float32Array(HAZE_MAX * 4) };
+  const _hz = new Vector3(), _hv = new Vector3();
+  const _hs = new Float32Array(HAZE_MAX); // the kept plumes' screen areas (largest first), no per-frame allocation
+  function updateHaze() {
+    haze.n = 0;
+    if (low) return;
+    const cam = ctx.camera;
+    cam.updateMatrixWorld();
+    const P = cam.projectionMatrix.elements;
+    const H = Math.max(1, mats.shared.uResolution.value.y);
+    const tanHalf = 1 / Math.max(P[5], 1e-6);
+    for (const f of fires.values()) {
+      if (f.cur < 0.05 || f.follow || !OPEN_FIRES.has(f.kind)) continue;
+      const hF = f.size * f.preset.cardH[1];
+      // the plume's box: from the flames' middle to about two flame heights above them (the shimmer starts at the tips:
+      // post-effects.js HeatHazeEffect)
+      _hz.set(f.pos.x, f.pos.y + hF * 1.4, f.pos.z);
+      _hv.copy(_hz).applyMatrix4(cam.matrixWorldInverse);
+      const z = _hv.z;
+      if (z > -0.5) continue;
+      const sy = (0.5 * P[5]) / -z, sx = (0.5 * P[0]) / -z; // uv per metre
+      const hy = 1.25 * hF * sy, hx = 0.6 * f.size * f.preset.cardW[1] * sx;
+      if (hy < 0.015) continue;
+      _hz.project(cam);
+      if (Math.abs(_hz.x) > 1 + 2 * hx || Math.abs(_hz.y) > 1 + 2 * hy) continue;
+      const sc = hx * hy * Math.min(1, f.cur);
+      // insertion into the largest-first list of HAZE_MAX
+      let i = haze.n;
+      while (i > 0 && _hs[i - 1] < sc) i--;
+      if (i >= HAZE_MAX) continue;
+      for (let j = Math.min(haze.n, HAZE_MAX - 1); j > i; j--) {
+        _hs[j] = _hs[j - 1];
+        for (let k = 0; k < 4; k++) { haze.a[j * 4 + k] = haze.a[(j - 1) * 4 + k]; haze.b[j * 4 + k] = haze.b[(j - 1) * 4 + k]; }
+      }
+      const amp = Math.min((HAZE_RAD * Math.sqrt(f.size / 2)) / (2 * tanHalf), HAZE_PX / H) * Math.min(1, f.cur);
+      _hs[i] = sc;
+      haze.a[i * 4] = _hz.x * 0.5 + 0.5; haze.a[i * 4 + 1] = _hz.y * 0.5 + 0.5; haze.a[i * 4 + 2] = hx; haze.a[i * 4 + 3] = hy;
+      haze.b[i * 4] = z; haze.b[i * 4 + 1] = amp; haze.b[i * 4 + 2] = (f.seedInt % 97) / 31; haze.b[i * 4 + 3] = 0;
+      haze.n = Math.min(HAZE_MAX, haze.n + 1);
+    }
   }
 
   /**
@@ -443,12 +506,16 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
    * (centre-weighted, ctx.physics BVH): ADAPT_ALBEDO × E / π at each hit, misses count 0. Fires in the hit point's own
    * room are left out (env meters a room's own fires).
    */
-  const _vd = new Vector3(), _vp = new Vector3();
-  function viewFireLuminance() {
+  const _vd = new Vector3(), _vp = new Vector3(), _vi = { V: 1, vol: null, s: 0 };
+  function viewFireLuminance(out = null) {
     const ph = ctx.physics, cam = ctx.camera;
+    if (out) out.same = 0;
     if (typeof ph?.raycast !== 'function' || !fires.size) return 0;
     const th = Math.tan(((cam.fov || 60) * Math.PI) / 360);
-    let sum = 0;
+    // out.same: the same mean for the fires of the viewer's own room, where the ray ends in that room (qa-r1-fix-env-render)
+    const at = ctx.env?.interiors?.at;
+    const camVol = out && at ? at(cam.position, _vi).vol : null;
+    let sum = 0, same = 0;
     for (const [x, y, w] of VIEW_RAYS) {
       _vd.set(x * th * (cam.aspect || 1), y * th, -1).normalize().applyQuaternion(cam.quaternion);
       let hit = null;
@@ -457,7 +524,10 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       _vp.copy(hit.point).addScaledVector(_vd, -0.08);
       const E = illuminanceAt(_vp, { split: true });
       sum += w * Math.max(0, E.all - E.same);
+      // open fires only (pyre, hearth, brazier): a room lit by its lamps (the Kodesh by the Menorah) stays as env meters it
+      if (camVol && at(_vp, _vi).vol === camVol) same += w * illuminanceAt(_vp, { split: true, kinds: OPEN_FIRES }).same;
     }
+    if (out) out.same = (ADAPT_ALBEDO * same) / Math.PI;
     return (ADAPT_ALBEDO * sum) / Math.PI;
   }
 
@@ -467,7 +537,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
    * own room (0 outdoors); opts.split: returns { all, same, sameS } (sameS = same × how far the point is inside).
    * opts.rendered: each fire weighted by the luminance of its light colour, i.e. what its point light renders
    * (three scales intensity × colour: a lamp's (1, 0.46, 0.16) renders 55 % of its candela). opts.color: a Color
-   * that receives the counted fires' light colour, weighted by their contribution (lighting-polish-fix).
+   * that receives the counted fires' light colour, weighted by their contribution (lighting-polish-fix). opts.kinds: a Set
+   * of fire kinds to count (all when omitted).
    */
   const _ins = { V: 1, vol: null, s: 0 };
   function illuminanceAt(pos, opts = {}) {
@@ -477,7 +548,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const ins = at ? at(pos, _ins) : null;
     let E = 0, Es = 0, cr = 0, cg = 0, cb = 0;
     for (const f of fires.values()) {
-      if (!f.lightCandela || f.cur <= 0) continue;
+      if (!f.lightCandela || f.cur <= 0 || (opts.kinds && !opts.kinds.has(f.kind))) continue;
       const d2 = Math.max(f.lightPos.distanceToSquared(pos), 1);
       let k = 1, same = !ins || !ins.vol;
       if (ins) {
@@ -584,6 +655,10 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
      * fireScale × the local adaptation to firelight × the flame-core gain (materials' glowing embers; materials-2 request)
      */
     get emissionScale() { return mats.shared.uP.value * mats.shared.uFireGain.value; },
+    /** the heat-shimmer plumes this frame (post tiers): { n, a: [u, v, half w, half h] × n, b: [view z, amplitude (uv), seed, 0] × n } */
+    get haze() { return haze; },
+    /** fx's animation clock (s) */
+    get time() { return time; },
     /** internal (dev scripts): the light pool */
     get _lights() { return lights; },
     get stats() {
@@ -591,7 +666,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
         fires: fires.size, columns: columns.size, lights: lights.active ?? 0, maxLights: lights.max,
         shadowLights: lights.pools[0]?.lights.length ?? 0,
         flames: flames.count, embers: embers.count, puffs: smoke.count, P: +mats.shared.uP.value.toPrecision(3),
-        adaptation: +Math.exp(logAdapt).toPrecision(3), viewLaf: +viewLaf.toPrecision(3),
+        adaptation: +Math.exp(logAdapt).toPrecision(3), viewLaf: +viewLaf.toPrecision(3), viewLafSame: +viewLafSame.toPrecision(3),
         glint: glint.mesh.visible ? { I: +glint.stats.I.toPrecision(3), sparks: glint.stats.n, vis: +glint.stats.vis.toFixed(2), L0: +glint.stats.L0.toPrecision(3) } : null,
       };
     },

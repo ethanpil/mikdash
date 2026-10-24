@@ -36,17 +36,23 @@ export function courseStarts(heights) {
  * @returns {{ rows:number, rowH:number, dMax:number, q:number, lut:Float32Array, lutW:number, list:number[][],
  *            heights:number[]|null, courseLut:Float32Array|null, courseN:number }}
  */
-export function masonryLayout({ W, H, rowH, q, minL, maxL, gap, seed = 1, rowType = () => [0, 0], heights = null }) {
+export function masonryLayout({ W, H, rowH, q, minL, maxL, gap, seed = 1, rowType = () => [0, 0], heights = null, rowLens = null }) {
   const rows = heights ? heights.length : Math.round(H / rowH);
   const Wq = Math.round(W / q);
-  const lo = Math.round(minL / q);
-  const hi = Math.round(maxL / q);
+  // rowLens (qa-r2, paving): [[minL, maxL], …] — each row draws its own length window, so rows of short slabs alternate
+  // irregularly with rows of long ones instead of every row having the same mix (a regular checkerboard from afar)
+  const ranges = rowLens || [[minL, maxL]];
+  const dMax = Math.max(...ranges.map((r) => r[1]));
   if (rows > 16) throw new Error(`layout: ${rows} rows > 16`);
   if (Math.abs(Wq * q - W) > 1e-6) throw new Error(`layout: tile width ${W} is not a multiple of q ${q}`);
   if (heights && Math.abs(heights.reduce((a, b) => a + b, 0) - H) > 1e-6) throw new Error('layout: course heights do not sum to the tile height');
   const rng = mulberry32(seed * 7919 + 17);
+  const rngL = mulberry32(seed * 104729 + 3);
   const list = [];
   for (let r = 0; r < rows; r++) {
+    const [rMin, rMax] = ranges[Math.floor(rngL() * ranges.length) % ranges.length];
+    const lo = Math.round(rMin / q);
+    const hi = Math.round(rMax / q);
     let pick = null;
     for (let attempt = 0; attempt < 600 && !pick; attempt++) {
       const lens = [];
@@ -115,5 +121,5 @@ export function masonryLayout({ W, H, rowH, q, minL, maxL, gap, seed = 1, rowTyp
       courseLut.set([r, y0[r], heights[r], type * 2 + flag], i * 4);
     }
   }
-  return { rows, rowH: H / rows, dMax: maxL, q, lut, lutW, list, heights: heights ? [...heights] : null, courseLut, courseN };
+  return { rows, rowH: H / rows, dMax, q, lut, lutW, list, heights: heights ? [...heights] : null, courseLut, courseN };
 }

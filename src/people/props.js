@@ -23,7 +23,7 @@ import { PoseBuilder, poseToSkin } from './pose.js';
 import { clothCage, clothSkin } from './cloth.js';
 import { RECIPES } from './human.js';
 import { MAX_BONES } from './rig.js';
-import { DEG, smooth, lerp } from './util.js';
+import { DEG, smooth, lerp, clamp } from './util.js';
 import { STAFF, handQ, RIMS_HAND, SLAIN_HANDS } from './clips.js';
 import { AMAH } from '../core/units.js';
 import { buildAnimalGeometry, quadHeadFrame } from './animals.js';
@@ -834,19 +834,46 @@ function cover(B, lod, lay, o = {}) {
     }
     if (lod === 0) y += 0.004 * Math.sin(t * 17 + x * 5) * smooth(floor + 0.03, floor + 0.12, y);   // shallow folds on top
     if (!back && j === 0) y -= 0.008 * smooth(floor + 0.02, floor + 0.06, y);                        // the edge rolls down
+    // qa-r1: where the wool falls from the body to the floor it hangs in folds — rounded ridges and sharp creases running
+    // down the fall (displaced along the cloth's normal, strongest mid-fall) — and the body's forms read through: the
+    // occlusion term darkens the hollows between shoulder, hip and knees and the foot of each fall (see shade below)
+    let ao = 1;
+    if (!(narrow && (i < nf || i > nu - nf))) {
+      const e = 0.03;
+      const gx = (sampleH(fd, D, x + e, t) - sampleH(fd, D, x - e, t)) / (2 * e);
+      const gt = (sampleH(fd, D, x, t + e) - sampleH(fd, D, x, t - e)) / (2 * e);
+      const g = Math.hypot(gx, gt);
+      const up = y - floor;
+      const fall = smooth(0.35, 1.4, g) * smooth(0.005, 0.03, up) * smooth(0.45, 0.12, up);
+      if (fall > 0.01 && g > 1e-3) {
+        const px = -gt / g, pt_ = gx / g;                            // along the contour: the folds alternate this way
+        const ph = (x * px + t * pt_) * (Math.PI * 2 / 0.15) + 1.3 * Math.sin(x * 7.1 - t * 5.3);
+        const prof = (Math.abs(Math.sin(ph)) - 0.64) * fall * (lod === 0 ? 0.011 : 0.008);
+        const nl = Math.hypot(gx, 1, gt);
+        x += (-gx / nl) * prof; y += (1 / nl) * prof; t += (-gt / nl) * prof;
+        ao *= 1 - 0.22 * fall * Math.max(0, 0.64 - Math.abs(Math.sin(ph))) / 0.64;   // the creases in shadow
+      }
+      // occlusion: below the local mean height (a hollow, the cloth's foot by the body) darker; on a crest lighter
+      let m = 0;
+      for (const [a, b] of [[0.09, 0], [-0.09, 0], [0, 0.09], [0, -0.09], [0.064, 0.064], [-0.064, 0.064], [0.064, -0.064], [-0.064, -0.064]]) m += sampleH(fd, D, x + a, t + b);
+      ao *= clamp(1 + 3.2 * (y - m / 8), 0.62, 1.1) * (1 - 0.2 * smooth(0.035, 0.0, up) * smooth(0.2, 0.6, g));
+    }
     const yy = y - (inner ? 0.006 : 0);
     // pillow_back: the body runs toward −z; pillow_side: toward −x (across is z)
+    _coverAO = ao;
     return back ? V(x, yy, -t) : V(-t, yy, x - 0.1);
   };
   for (const inner of [false, true]) {
-    S(B, 'mat', { color: '#988670', rough: 0.95 });
+    // his own mantle (undyed wool, lighter than the kesset under him, so the body's forms read against it)
+    S(B, 'mat', { color: '#b09e7e', rough: 0.95 });
     B.grid(nu, nv, (i, j) => {
       const p = pt(i, j, inner);
       const h = p.y, edge = Math.min(i, nu - i) / nu;
-      return { p, u: (i / nu) * 0.9, v: (j / nv) * 1.6, w: 0, shade: inner ? 0.5 : 1 - 0.18 * smooth(0.12, 0, h) * smooth(0.25, 0.05, edge) };
+      return { p, u: (i / nu) * 0.9, v: (j / nv) * 1.6, w: 0, shade: inner ? 0.5 : (1 - 0.18 * smooth(0.12, 0, h) * smooth(0.25, 0.05, edge)) * _coverAO };
     }, { inside: back ? V(0, -1, -0.9) : V(-0.8, -1, -0.1), invert: inner });
   }
 }
+let _coverAO = 1;
 
 /** the four white garments folded into a bundle (+ his own mat, the kesset, under the body when used as a pillow) */
 function foldedGarments(B, lod, cls, o = {}) {
@@ -1176,9 +1203,12 @@ function carcassFlaying(B, lod, kind = 'lamb') {
   const top = -0.42 * sl, bot = -0.86 * sl;
   const n = sg(lod, 22, 10), m = sg(lod, 6, 3);
   const coat = () => (goat ? S(B, 'coatProp', { color: '#1c1917', rough: 0.72 }) : S(B, 'fleeceProp'));
+  // qa-r2: a draped hide, not a sack — deeper, uneven folds, and the hem drawn down into the two empty skins of the hind
+  // legs (peeled off them first) hanging as tapering flaps at the sides
+  const flap = (a) => Math.exp(-((Math.atan2(Math.sin(a - 0.35), Math.cos(a - 0.35)) / 0.32) ** 2)) + Math.exp(-((Math.atan2(Math.sin(a - Math.PI + 0.35), Math.cos(a - Math.PI + 0.35)) / 0.32) ** 2));
   const at = (i, s, k) => {
-    const a = (i / n) * Math.PI * 2, r = (0.13 + 0.06 * s) * sw * k * (1 + 0.08 * Math.sin(a * 5 + s * 2));
-    return V(Math.cos(a) * r, lerp(top, bot, s) - 0.03 * Math.sin(a * 3) * s, -Math.sin(a) * r * 0.9);
+    const a = (i / n) * Math.PI * 2, r = (0.13 + 0.06 * s) * sw * k * (1 + 0.11 * Math.sin(a * 5 + s * 2) + 0.05 * Math.sin(a * 9 + 1.3 + s * 3)) * (1 - 0.35 * flap(a) * s * s);
+    return V(Math.cos(a) * r, lerp(top, bot, s) - 0.03 * Math.sin(a * 3) * s - 0.11 * sl * flap(a) * s * s, -Math.sin(a) * r * 0.9);
   };
   for (const inner of [false, true]) {
     if (inner) coat(); else S(B, 'hide');
@@ -1196,6 +1226,31 @@ function carcassFlaying(B, lod, kind = 'lamb') {
   curve(B, roll, roll.map((_, i) => rho * (1 + 0.15 * Math.sin(i * 2.3))), sg(lod, 6, 4));
   // the head, still on, hanging below the hide: baked from the live animal (its horns, ears and face)
   hangingHead(B, lod, kind, V(0, bot - 0.02 * sl, -0.01));
+  // qa-r2: and the fore legs, not yet taken off (Tamid 4:2: flayed down to the breast, then the head, then the legs),
+  // hanging below the hide's hem either side of the head — the silhouette was a pink sack with one dark end
+  hangingForelegs(B, lod, kind, V(0, bot + 0.035 * sl, 0.045 * sw), sw);
+}
+
+/** the live animal's lower fore legs (from the knee: short hair and hooves), baked hanging straight down with the knees
+ *  at `at` (carcass frame), drawn together under the breast */
+function hangingForelegs(B, lod, kind, at, sw = 1) {
+  const rig = getRig(ANIMALS[kind].rig), I = rig.index;
+  const bones = new Set([I.fl_lo, I.fl_ft, I.fr_lo, I.fr_ft]);
+  const base = B.count;
+  const res = bakeAnimal(B, kind, lod, (P) => { P.rot('fl_lo', 4, 0, 6); P.rot('fr_lo', 9, 0, -5); P.rot('fl_ft', 14, 0, 0); P.rot('fr_ft', 8, 0, 0); }, {
+    tint: [0.3, 0.3, 0.4, 0.4],
+    only: (si, sw2, i) => { let w = 0; for (let q = 0; q < 4; q++) if (bones.has(si[i * 4 + q])) w += sw2[i * 4 + q] / 255; return w > 0.6; },
+  });
+  if (!res) return;
+  const kl = res.P.worldPos('fl_lo'), kr = res.P.worldPos('fr_lo');
+  const kx = (Math.abs(kl.x) + Math.abs(kr.x)) / 2, ky = (kl.y + kr.y) / 2, kz = (kl.z + kr.z) / 2;
+  const gap = 0.05 * sw;
+  for (let i = base; i < B.count; i++) {
+    const x = B.pos[i * 3];
+    B.pos[i * 3] = x - Math.sign(x) * (kx - gap);
+    B.pos[i * 3 + 1] += at.y - ky;
+    B.pos[i * 3 + 2] += at.z - kz;
+  }
 }
 
 /** the hide after flaying: the fleece spread, folded once, the pale inner face showing at the fold */

@@ -50,6 +50,11 @@ const dblTap = async (pg, x, y, reset) => {
   }
   return null;
 };
+/** the HUD's "Walking to …" pill shows only while the player is walking a route (qa-r2 UI-R2-5: it was read stale) */
+const pillHonest = async (pg, label) => {
+  const r = await pg.evaluate(() => { const s = document.querySelector('.mk-status'); return { mode: __mikdash.player.mode, shown: !!s && !s.hidden, text: s?.textContent || '' }; });
+  check(`${label}: the HUD walking pill is hidden unless walking`, r.mode === 'auto' || !r.shown, JSON.stringify(r));
+};
 const overlaps = (rs) => { for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) { const a = rs[i], b = rs[j]; if (a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b) return `${a.id} × ${b.id}`; } return null; };
 
 async function boot(opts) {
@@ -287,6 +292,7 @@ try {
   await page.click('.mk-mapv__travel button');
   await page.waitForTimeout(600);
   check('Stop cancels the walk and hides the pill', await ev(() => __mikdash.player.mode !== 'auto' && document.querySelector('.mk-mapv__travel').hidden));
+  await pillHonest(page, 'desktop, after Stop');
   // the info button opens the place panel pinned to the selection
   await ev(() => __mikdash.ui.map.select('gazit'));
   await page.waitForTimeout(600);
@@ -369,6 +375,7 @@ try {
   await dblTap(ph, dx, dy, selKiyor);
   await ph.waitForTimeout(800);
   check('phone: double tap goes there', await pe(() => __mikdash.ui.panel === null && __mikdash.player.mode === 'auto'));
+  await pillHonest(ph, 'phone, walking');
   // reopened during the walk: the pill sits clear of the presets
   await pe(() => __mikdash.ui.open('map'));
   await ph.waitForTimeout(800);
@@ -376,6 +383,7 @@ try {
   await ph.screenshot({ path: resolve(root, out, 'test-phone-walking.png') });
   await pe(() => __mikdash.player.cancel());
   await ph.waitForTimeout(300);
+  await pillHonest(ph, 'phone, after cancel');
   // double tap with no card open, low on the screen, where the card's sheet comes up under the second tap
   const fresh = async () => { await pe(() => { __mikdash.player.cancel?.(); if (!__mikdash.ui.panel) __mikdash.ui.open('map'); __mikdash.ui.map.deselect(); __mikdash.ui.map.fit('courts'); }); await ph.waitForTimeout(600); };
   for (const id of ['har-habayit', 'ezrat-nashim', 'chel']) {
@@ -390,8 +398,34 @@ try {
     if (!pt) { check(`phone: double tap low on the map (${id})`, false, 'no point found'); continue; }
     const gap = await dblTap(ph, box.x + pt[0], box.y + pt[1], fresh);
     await ph.waitForTimeout(800);
-    const r = await pe(() => ({ panel: __mikdash.ui.panel, mode: __mikdash.player.mode, status: document.querySelector('.mk-status')?.textContent }));
+    const r = await pe(() => { const s = document.querySelector('.mk-status'); return { panel: __mikdash.ui.panel, mode: __mikdash.player.mode, status: s && !s.hidden ? s.textContent : '(hidden)' }; });
     check(`phone: double tap low on the map, no card open, goes (${id} at y ${Math.round(pt[1])} of ${Math.round(box.height)})`, r.panel === null && r.mode === 'auto', `${JSON.stringify(r)} · taps ${gap === null ? '—' : Math.round(gap)} ms apart`);
+    await pillHonest(ph, `phone, double tap on ${id}`);
+  }
+  // the same double tap delivered late (a busy page or machine): the second tap is stamped 250 ms after the first but
+  // handled ~600 ms after it, when the card's tap guard has lapsed, the card is under the finger and the reveal has
+  // begun to pan the map. It must still go, to the place the first tap named, and the card must not take its click.
+  {
+    await fresh();
+    const box = await ph.locator('.mk-mapv__stage').boundingBox();
+    const pt = await pe(([h]) => { const m = __mikdash.ui.map; for (let y = h * 0.9; y > h * 0.55; y -= 12) for (let x = 40; x < 300; x += 12) { const r = m.hit(x, y); if (r.kind === 'zone' && r.id === 'ezrat-nashim') return [x, y]; } return null; }, [box.height]);
+    const x = box.x + pt[0], y = box.y + pt[1];
+    const site = await pe(([a, b]) => __mikdash.ui.map.screenToSite(a, b), pt);
+    const speed0 = await pe(() => __mikdash.settings.get('travelSpeed'));
+    await pe(() => { const P = __mikdash.player, g = P.goTo; globalThis.__lastGo = null; P.goTo = (t, s) => { globalThis.__lastGo = t; P.goTo = g; return g.call(P, t, s); }; });
+    const cdp = await ph.context().newCDPSession(ph);
+    const touch = (type, ts) => cdp.send('Input.dispatchTouchEvent', { type, timestamp: ts, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }] });
+    const T0 = Date.now() / 1000;
+    await touch('touchStart', T0); await touch('touchEnd', T0 + 0.03);
+    await ph.waitForTimeout(600);
+    await touch('touchStart', T0 + 0.25); await touch('touchEnd', T0 + 0.28);
+    await ph.waitForTimeout(800);
+    const r = await pe(() => ({ panel: __mikdash.ui.panel, mode: __mikdash.player.mode, to: __lastGo?.at, speed: __mikdash.settings.get('travelSpeed') }));
+    const near = !!r.to && Math.hypot(r.to[0] - site[0], r.to[1] - site[1]) < 0.5;
+    check('phone: a double tap whose second tap is handled late still goes, to the place of the first tap', r.panel === null && r.mode === 'auto' && near && r.speed === speed0,
+      `${JSON.stringify(r)} · first tap at ${site.map((v) => v.toFixed(1))}`);
+    await pillHonest(ph, 'phone, late double tap');
+    await cdp.detach();
   }
   await pe(() => __mikdash.player.cancel());
   await ph.close();
@@ -416,6 +450,15 @@ try {
     return { speed: hs('.mk-mapcard__speed button'), presets: hs('.mk-mapv__presets button'), places: hs('.mk-placesbtn'), close: hs('[data-panel=map] .mk-panel__head .mk-close') };
   });
   check('landscape: map controls are at least 40 px tall', Object.values(ltt).every((a) => a.length && a.every((v) => v >= 40)), JSON.stringify(ltt));
+  // qa-r2 UI-R2-3: ~320 px of card; the first "Happening here now" row is in view above the one-row speed / Go footer
+  await ls.evaluate(() => __mikdash.ui.map.select('slaughter-zone'));
+  await ls.waitForTimeout(600);
+  const lrow = await ls.evaluate(() => {
+    const c = document.querySelector('.mk-mapcard'), f = c.querySelector('.mk-mapcard__foot').getBoundingClientRect();
+    const row = c.querySelector('.mk-mapcard__sec .mk-mapcard__evs > *')?.getBoundingClientRect();
+    return { rowBottom: row ? Math.round(row.bottom) : null, footTop: Math.round(f.top), foot: Math.round(f.height), n: c.querySelector('.mk-mapcard__sec .mk-h')?.textContent };
+  });
+  check('landscape: the first activity here is in view above the Go row', lrow.rowBottom !== null && lrow.rowBottom <= lrow.footTop + 1 && lrow.foot < 80, JSON.stringify(lrow));
   await ls.screenshot({ path: resolve(root, out, 'test-landscape-select.png') });
   await ls.close();
 } catch (e) {

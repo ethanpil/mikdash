@@ -6,7 +6,7 @@ self.onmessage = (e) => {
   for (const key of e.data?.rigs || []) {
     try {
       const res = bakeRig(key);
-      self.postMessage({ type: 'rig', res }, [res.master.buffer, res.locals.buffer]);
+      self.postMessage({ type: 'rig', res }, [res.master.buffer, res.locals.buffer, res.half.buffer]);
     } catch (err) {
       self.postMessage({ type: 'error', key, message: String(err?.stack || err) });
     }

@@ -2,7 +2,7 @@
 // facings and a single-stone lintel (shekufah) on both faces of the Mount-level gates — except Tadi, whose head is
 // two leaning stones (walls.js) —, and the Shushan HaBirah chamber over the Eastern Gate (mount.gate.shushan.chamber)
 // with the image of Shushan the capital on its east face (Middot 1:3) and the two standard amot of Kelim 17:9 inside.
-import { Group, Mesh, BoxGeometry, Vector3 } from 'three';
+import { Group, Mesh, BoxGeometry, CylinderGeometry, Vector3 } from 'three';
 import { AMAH, m2w } from '../../core/units.js';
 import { mergeGeometries, applyWorldUV } from '../geom.js';
 import { siteDir, worldQuad } from './kit.js';
@@ -103,6 +103,36 @@ function leafGeometry(w, h, hs, t, detail) {
   const parts = [];
   const V = (x, y, z) => new Vector3(x, y, z);
   const q = (a, b, c, d, n) => parts.push(worldQuad(a, b, c, d, n));
+  // qa-r2-fix-world: smooth-shaded mouldings. A flat bevel or edge of beaten gold turned to the sun lit up as one even
+  // white strip (a "light leak" down the leaf): each bevel now sweeps its normal from near the frame's face at its top
+  // (an ovolo) to its own slope at the panel, and the leaf's edges are shaded as rounded arrises, so the sun gives a
+  // highlight line with a falloff instead of a slab of light ⚙ (the moulding profile is reconstruction)
+  const qn = (pts, ns, hint) => {
+    const g = worldQuad(pts[0], pts[1], pts[2], pts[3], hint);
+    // UVs from the flat face (a per-vertex projection on the turned normals would smear the plate across the bevel)
+    applyWorldUV(g);
+    g.userData.mkUV = true;
+    // worldQuad may have flipped the winding (a, d, c, b): map the normals to its vertex order
+    const p = g.attributes.position, nr = g.attributes.normal;
+    for (let i = 0; i < p.count; i++) {
+      let k = 0, best = Infinity;
+      for (let j = 0; j < 4; j++) { const dd = (p.getX(i) - pts[j].x) ** 2 + (p.getY(i) - pts[j].y) ** 2 + (p.getZ(i) - pts[j].z) ** 2; if (dd < best) { best = dd; k = j; } }
+      nr.setXYZ(i, ns[k].x, ns[k].y, ns[k].z);
+    }
+    parts.push(g);
+  };
+  const flatN = (a, b, c, hint) => { const n = new Vector3().subVectors(b, a).cross(new Vector3().subVectors(c, a)).normalize(); return n.dot(hint) < 0 ? n.negate() : n; };
+  /** a bevel from the frame's face (a, b at zf) down to the panel (c, d at zp) */
+  const bevel = (a, b, c, d, hint, zs) => {
+    const nb = flatN(a, b, c, hint), nf = V(0, 0, zs);
+    const top = nf.clone().multiplyScalar(0.8).add(nb).normalize(), foot = nb.clone().add(nf.clone().multiplyScalar(0.1)).normalize();
+    qn([a, b, c, d], [top, top, foot, foot], hint);
+  };
+  /** an edge face whose normal turns toward each face it meets (a rounded arris): along the thickness (z) of the leaf */
+  const edge = (a, b, c, d, n) => {
+    const ns = [a, b, c, d].map((p) => n.clone().add(V(0, 0, Math.sign(p.z) * 0.85)).normalize());
+    qn([a, b, c, d], ns, n);
+  };
   const top = (x) => hs + (h - hs) * (x / w);
   const sw = 0.36, rT = 0.36, rB = 0.62, rM = 0.3, bev = 0.06, rec = 0.09;
   const c = Math.max(0.04, t - 2 * rec);
@@ -123,22 +153,25 @@ function leafGeometry(w, h, hs, t, detail) {
     for (const [x0, y0, x1, y1] of ops) {
       const X0 = x0 + bev, X1 = x1 - bev, Y0 = y0 + bev, Y1 = y1 - bev;
       q(V(X0, Y0, zp), V(X1, Y0, zp), V(X1, Y1, zp), V(X0, Y1, zp), n);
-      q(V(x0, y0, zf), V(x1, y0, zf), V(X1, Y0, zp), V(X0, Y0, zp), V(0, 1, zs));
-      q(V(x0, y1, zf), V(x1, y1, zf), V(X1, Y1, zp), V(X0, Y1, zp), V(0, -1, zs));
-      q(V(x0, y0, zf), V(x0, y1, zf), V(X0, Y1, zp), V(X0, Y0, zp), V(1, 0, zs));
-      q(V(x1, y0, zf), V(x1, y1, zf), V(X1, Y1, zp), V(X1, Y0, zp), V(-1, 0, zs));
+      bevel(V(x0, y0, zf), V(x1, y0, zf), V(X1, Y0, zp), V(X0, Y0, zp), V(0, 1, zs), zs);
+      bevel(V(x0, y1, zf), V(x1, y1, zf), V(X1, Y1, zp), V(X0, Y1, zp), V(0, -1, zs), zs);
+      bevel(V(x0, y0, zf), V(x0, y1, zf), V(X0, Y1, zp), V(X0, Y0, zp), V(1, 0, zs), zs);
+      bevel(V(x1, y0, zf), V(x1, y1, zf), V(X1, Y1, zp), V(X1, Y0, zp), V(-1, 0, zs), zs);
     }
   }
-  // the leaf's edges
+  // the leaf's edges (rounded arrises)
   const T2 = t / 2;
-  q(V(0, 0, -T2), V(0, 0, T2), V(0, top(0), T2), V(0, top(0), -T2), V(-1, 0, 0));
-  q(V(w, 0, -T2), V(w, 0, T2), V(w, top(w), T2), V(w, top(w), -T2), V(1, 0, 0));
-  q(V(0, 0, -T2), V(w, 0, -T2), V(w, 0, T2), V(0, 0, T2), V(0, -1, 0));
-  q(V(0, top(0), -T2), V(w, top(w), -T2), V(w, top(w), T2), V(0, top(0), T2), V(0, 1, 0));
+  edge(V(0, 0, -T2), V(0, 0, T2), V(0, top(0), T2), V(0, top(0), -T2), V(-1, 0, 0));
+  edge(V(w, 0, -T2), V(w, 0, T2), V(w, top(w), T2), V(w, top(w), -T2), V(1, 0, 0));
+  edge(V(0, 0, -T2), V(w, 0, -T2), V(w, 0, T2), V(0, 0, T2), V(0, -1, 0));
+  edge(V(0, top(0), -T2), V(w, top(w), -T2), V(w, top(w), T2), V(0, top(0), T2), V(0, 1, 0));
   const boxAt = (x0, x1, y0, y1, z0, z1) => {
     const g = new BoxGeometry(x1 - x0, y1 - y0, z1 - z0).translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
     parts.push(g.toNonIndexed());
   };
+  // the hinge stile turned round, a pivot post (qa-r2-fix-world, as the courts' leaves) ⚙: its back half lies in the jamb
+  const post = new CylinderGeometry(T2, T2, top(0), detail >= 2 ? 16 : 10, 1, true, Math.PI, Math.PI).translate(0, top(0) / 2, 0);
+  parts.push(post.toNonIndexed());
   // meeting astragal (+z face): covers the joint and laps 0.07 amah over the other leaf
   const A = AMAH, ov = 0.12 * A;
   boxAt(w - 0.06, w + ov, 0.03, top(w) - 0.03, T2, T2 + 0.045);
@@ -152,8 +185,13 @@ function leafGeometry(w, h, hs, t, detail) {
       for (const y of rails) for (let x = sw + step / 2; x < w - sw; x += step) boxAt(x - b, x + b, y - b, y + b, z0, z1);
     }
   }
-  const g = mergeGeometries(parts.map((p) => { const q2 = p.index ? p.toNonIndexed() : p; if (q2.attributes.uv) q2.deleteAttribute('uv'); return q2; }), false);
-  return applyWorldUV(g);
+  // world UVs per part from its own (flat) normals; the smooth-shaded parts already carry theirs
+  return mergeGeometries(parts.map((p) => {
+    if (p.userData.mkUV) return p;
+    const q2 = p.index ? p.toNonIndexed() : p;
+    if (q2.attributes.uv) q2.deleteAttribute('uv');
+    return applyWorldUV(q2);
+  }), false);
 }
 
 /** The Shushan HaBirah chamber over the Eastern Gate, its relief and the two amot (reached from the raised gate bay). */

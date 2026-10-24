@@ -59,14 +59,17 @@ export function landPlan(ctx) {
   const burning = { floor, top: pb.min[2], tankIn, tank, tankWall, cut: [floor, tank] };
 
   // graded level areas: { rect [x0,y0,x1,y1] amot, z (amot, the walking surface), margin (m), drop (m) = how far the
-  // graded ground lies under z: 0.32 under the plazas paved here, LIFT where only a street's paving is draped on it
-  // (its top then meets the bridge / causeway deck), 0 where the ground itself is the surface (the Tadi apron)
+  // graded ground lies under z: 0.32 under the plazas paved here, LIFT where a street's paving is draped on it (its top
+  // then meets the bridge deck) and at the causeway's end (the path's ground a kerb's step below the deck, clear of it
+  // where the landing runs under the deck's end), 0 where the ground itself is the surface (the Tadi apron)
   const flats = [
     { id: 'ophel-plaza', rect: [plaza.x0, plaza.y0, plaza.x1, plaza.y1], z: chW.min[2], margin: 26, drop: 0.32 },
     { id: 'kiponus-landing', rect: [kipEndX - m(18), kipY - 9, kipEndX + 4, kipY + 9], z: 0, margin: 14, drop: LIFT },
     { id: 'causeway-landing', rect: [cw.max[0] - 4, axisY - 9, cw.max[0] + m(16), axisY + 9], z: 0, margin: 14, drop: LIFT },
-    // the stone floor stands LIFT proud of this ground: the Parah path's paving (draped at ground + LIFT) meets its top
-    { id: 'burning-place', rect: [pyre.box.min[0] - 14, axisY - 16, pyre.box.max[0] + 16, axisY + 16], z: pyre.box.min[2], margin: 22, drop: LIFT },
+    // the stone floor stands LIFT proud of this ground, a low kerb; the Parah path (the graded ground itself since
+    // qa-r1-fix-world) runs up to it
+    // qa-r1-fix-world: margin 22 → 10 m — the graded level round the floor read as a flat plain from the viewpoint
+    { id: 'burning-place', rect: [pyre.box.min[0] - 14, axisY - 16, pyre.box.max[0] + 16, axisY + 16], z: pyre.box.min[2], margin: 10, drop: LIFT },
     { id: 'tadi-apron', rect: [tadi.min[0] - 4, fp.y1, tadi.max[0] + 4, fp.y1 + 10], z: ctx.el('mount.wall.north').params.outerFootZ, margin: 6, drop: 0 },
   ];
 
@@ -81,7 +84,7 @@ export function landPlan(ctx) {
     // north of the Mount (sparser)
     { id: 'north', rect: [fp.x0 + m(10), N(70), fp.x1 - m(30), N(420)], density: 0.42, block: [m(46), m(38)], rot: 0.0 },
   ];
-  // viewpoints (anchors in mount/posts.js) whose view cone is kept clear of trees and rocks: [X, Y], heading. The
+  // viewpoints (anchors in mount/posts.js) whose view cone is kept under the sight line (sightTop): [X, Y], heading. The
   // ground viewpoint is site.js groundEye (a viewer on the crest, no pyre built); kohenEye stands on the pyre (Parah 3:9)
   const eye = pyre.params.groundEye;
   const slopeLookout = [eye[0] - 260, axisY - 40];
@@ -98,21 +101,46 @@ export function landPlan(ctx) {
     [kipEndX - m(25), kipY - m(14), fp.x0, kipY + m(14)],                                   // the Kiponus bridge
     [fp.x1, axisY - m(16), cw.max[0] + m(30), axisY + m(16)],                               // the Parah causeway
   ];
-  /** inside a viewpoint's cone (±40°, up to 60 m) — nothing tall may stand there */
-  const inViewCone = (X, Y) => {
+  // terraced slopes (dry-stone walls along the contours, olives on the benches) and the Kidron garden plots ⚙
+  const terraces = { u0: 215, u1: 790, uw0: 70, uw1: 175, yPad: 420 };   // m east of the E wall face; Y padding (m)
+  // qa-r1-fix-world: the near field of the Har HaMishchah viewpoints (the crest, the slope lookout, the Parah path between
+  // them). The tensor grid gets extra lines across this rectangle (terrain/index.js) so the ground there can carry its
+  // micro-relief (terrain/height.js `micro`): x from 125 m west of the slope lookout to just east of the burning place,
+  // y over the path and the lookout. `fine`: spacing (m) per tier where the eye stands; `coarse` on the lower slope.
+  const detail = {
+    x0: slopeLookout[0] - m(125), xFine: slopeLookout[0] - m(30), x1: floor[2] + m(22),
+    y0: axisY - m(55), y1: axisY + m(30),
+    fine: [6, 4, 3, 2.5], coarse: [9, 6, 5, 4],
+  };
+  /** 0..1: how far (X, Y) lies inside the detail rectangle (1 inside a 12 m margin) */
+  const inDetail = (X, Y) => {
+    const e = m(12);
+    const f = (v, a, b) => Math.max(0, Math.min(1, (v - a) / e, (b - v) / e));
+    return f(X, detail.x0, detail.x1) * f(Y, detail.y0, detail.y1);
+  };
+  /**
+   * The highest top (site Z) a thing may have at (X, Y) without crossing any viewpoint's sight line to the Heichal's
+   * entrance (its sill, +22), less half an amah — Infinity outside every view cone. Low things (terrace walls, rocks,
+   * ground cover) may stand in the cones as long as they stay under the line; tall ones are held out where they would
+   * cross it. `groundZ(X, Y)` gives a viewpoint's ground (site Z).
+   */
+  const ulamSill = ctx.el('heichal.ulam.opening').box;
+  const target = [ulamSill.max[0], axisY, ulamSill.min[2]];
+  const sightTop = (X, Y, groundZ) => {
+    let top = Infinity;
     for (const v of viewpoints) {
       const dx = (X - v.p[0]) * A, dy = (Y - v.p[1]) * A, d = Math.hypot(dx, dy);
-      if (d < 12) return true;
       if (d > 60) continue;
       const h = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
       let dh = Math.abs(h - v.heading) % 360; if (dh > 180) dh = 360 - dh;
-      if (dh < 40) return true;
+      if (d >= 12 && dh >= 40) continue;
+      v.z ??= groundZ(v.p[0], v.p[1]) + 1.6 / A;
+      const D = Math.hypot((target[0] - v.p[0]) * A, (target[1] - v.p[1]) * A) || 1;
+      top = Math.min(top, v.z + (target[2] - v.z) * Math.min(1, d / D) - 0.5);
     }
-    return false;
+    return top;
   };
-  // terraced slopes (dry-stone walls along the contours, olives on the benches) and the Kidron garden plots ⚙
-  const terraces = { u0: 215, u1: 790, uw0: 70, uw1: 175, yPad: 420 };   // m east of the E wall face; Y padding (m)
-  const plan = { fp, axisY, kipY, kipEndX, kipEndM, plaza, streets, parahPath, burning, flats, districts, keepOut, slopeLookout, viewpoints, inViewCone, terraces, m };
+  const plan = { fp, axisY, kipY, kipEndX, kipEndM, plaza, streets, parahPath, burning, flats, districts, keepOut, slopeLookout, viewpoints, sightTop, terraces, detail, inDetail, m };
   memo.set(ctx, plan);
   return plan;
 }

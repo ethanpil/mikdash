@@ -3,10 +3,10 @@
 // of the hours come after the lists.
 import { h, he, icon, setText, clear, append } from './dom.js';
 import { createPanel, section } from './panel.js';
-import { eventRow } from './events.js';
+import { eventRow, SPEEDS as TRAVEL_SPEEDS } from './events.js';
 import {
   seasonal, seasonalLabelHe, fromDial, clock, ordinal, quarters, hebrewAt, civilDate, civilShort, addDays,
-  DAY_TYPE_LABEL, PSALM_OF_DAY, WEEKDAYS,
+  dayBadge, PSALM_OF_DAY, WEEKDAYS,
 } from './format.js';
 import { ZMAN_ANGLES } from '../time/zmanim.js';
 
@@ -57,10 +57,27 @@ export function packLanes(items, nLanes = LANES.length, gap = 0.06) {
   return items;
 }
 
+/** the stage each group of offerings is at, by its parent event (the stream's stages in src/sim/choreo/g5/plan.js) */
+const STAGES = {
+  'private-offerings': 'Offerings now at the leaning and the slaughter', 'altar-blood': 'Offerings now at the blood on the altar',
+  'private-flaying': 'Offerings now at the flaying tables', tenufah: 'Offerings now at the waving',
+  'altar-limbs': 'Offerings now going up the ramp to the altar', 'bird-offerings': 'Bird offerings now at the corners of the altar',
+  'meal-offerings': 'Meal-offerings now in progress', 'kayitz-hamizbeach': 'Kayitz hamizbeach offerings now',
+  'notar-burning': 'Leftovers being burned now', 'kodashim-meal': 'Offerings now eaten by the kohanim', 'bikkurim-late': 'First fruits now',
+  nazirites: 'Nazirites\' offerings now', metzora: 'A metzora\'s offerings now',
+  'entry-circuit': 'On the circuit of the Mount now', // not offerings: prostrations at the breaches, a mourner (g4/watch.js)
+};
+/** the group's header: "Offerings now at the blood on the altar"; an unknown stage by its event's title */
+export function stageTitle(pid, parentTitle) {
+  if (STAGES[pid]) return STAGES[pid];
+  return parentTitle ? `Now: ${parentTitle.replace(/^([A-Z])(?=[a-z])/, (c) => c.toLowerCase())}` : "Individuals' offerings in progress";
+}
+
 /**
  * A parent event's dynamic sub-events (each individual's offering in progress at that stage of the stream) as one
  * expandable entry: a header with the count, and a row per offering — what it is, its current step, where, and a
- * Go / Watch button at the chosen speed. opts: { title, he, open, onToggle(open), verb, speed() }.
+ * Go / Watch button at the chosen speed. opts: { title, he, open, onToggle(open), verb, speed() }: with speed() the rows
+ * use the caller's speed control (the map card's); without it the group has its own, shared by its rows.
  * Returns { el, update(t), ev: null }.
  */
 export function dynGroup(app, items, opts = {}) {
@@ -70,9 +87,18 @@ export function dynGroup(app, items, opts = {}) {
   const hit = h('button.mk-mev__hit', { type: 'button', 'aria-expanded': opts.open ? 'true' : 'false', 'aria-controls': moreId },
     h('span.mk-mev__title', { style: { fontSize: '15px' } }, opts.title || 'Offerings in progress'),
     opts.he ? he(opts.he, 'mk-mev__he') : null,
-    h('span.mk-mev__time', count, ' ', h('span.mk-muted', opts.hint || "individuals' offerings at this stage — expand to watch one")));
+    h('span.mk-mev__time', count, ' ', h('span.mk-muted', opts.hint || 'expand to watch one')));
   const list = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } });
-  const more = h('div.mk-mev__more', { id: moreId }, list);
+  // the group's own speed, as on every event row (the choice also becomes the default, as there)
+  let speedSel = null;
+  if (!opts.speed) {
+    speedSel = h('select.mk-select', { 'aria-label': 'Travel speed' }, TRAVEL_SPEEDS.map(([v, l]) => h('option', { value: v }, l)));
+    speedSel.value = app.settings?.get('travelSpeed') || 'walk';
+    speedSel.addEventListener('change', () => app.settings?.set('travelSpeed', speedSel.value));
+  }
+  const speed = () => (speedSel ? speedSel.value : opts.speed());
+  const bar = speedSel ? h('div.mk-dyn__bar', h('span.mk-muted', 'Watch one, travelling at'), speedSel) : null;
+  const more = h('div.mk-mev__more', { id: moreId }, bar, list);
   const el = h('article.mk-mev.is-now.mk-dyn', { 'data-dyn': opts.key || '', style: { marginLeft: opts.indent === false ? '0' : '14px' } }, hit, more);
   el.classList.toggle('is-open', !!opts.open);
   hit.addEventListener('click', () => {
@@ -85,8 +111,8 @@ export function dynGroup(app, items, opts = {}) {
     const title = h('span', { style: { font: '600 14.5px/1.25 var(--mk-display)', color: 'var(--mk-ink)' } });
     const step = h('span', { style: { fontSize: '13.5px', lineHeight: '1.35', color: 'var(--mk-ink-2)' } });
     const place = h('span.mk-muted', { style: { fontSize: '12.5px' } });
-    const go = h('button.mk-btn.mk-btn--sm', { type: 'button', title: 'Go to a good spot to watch this offering at its current step',
-      on: { click: () => app.goToEvent(ev, opts.speed?.() || app.settings?.get('travelSpeed') || 'walk') } }, icon('walk'), opts.verb || 'Go');
+    const go = h('button.mk-btn.mk-btn--sm', { type: 'button', title: 'Go to a good spot to watch it, at its current step',
+      on: { click: () => app.goToEvent(ev, speed()) } }, icon('walk'), opts.verb || 'Go');
     const row = h('div.mk-dyn__row', { 'data-ev': ev.id, style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderTop: '1px solid var(--mk-line-2)' } },
       h('div', { style: { flex: '1', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '2px' } }, title, step, place), go);
     list.append(row);
@@ -456,7 +482,7 @@ export function createTimePanel(app) {
     const mk = (ev) => eventRow(app, ev, { expanded: expanded.has(ev.id), onToggle: (e, open) => (open ? expanded.add(e.id) : expanded.delete(e.id)) });
     const grp = (pid, list, parent) => dynGroup(app, list, {
       key: pid, open: openGroups.has(pid), onToggle: (on) => (on ? openGroups.add(pid) : openGroups.delete(pid)),
-      title: parent ? `Offerings at this stage` : (list[0]?.parentTitle?.en || "Individuals' offerings in progress"), indent: !!parent,
+      title: stageTitle(pid, parent?.title?.en || list[0]?.parentTitle?.en), indent: !!parent,
     });
     rows = [];
     clear(nowList);
@@ -510,7 +536,8 @@ export function createTimePanel(app) {
     }
     if (time.speed !== last.speed) for (const b of speedSeg.children) b.setAttribute('aria-pressed', +b.dataset.speed === time.speed ? 'true' : 'false');
     const evening = t >= time.zmanim.sunset;
-    const dateKey = `${time.dateString}|${evening}`;
+    const badge = dayBadge(time, t);
+    const dateKey = `${time.dateString}|${evening}|${badge}`;
     if (dateKey !== last.date) {
       const hd = hebrewAt(time, t);
       setText(dateEn, civilShort(time));
@@ -520,7 +547,7 @@ export function createTimePanel(app) {
       dateMain.title = `${full}${hd?.he ? ` · ${hd.he}` : ''} — choose another date`;
       dateInput.value = time.dateString;
       append(clear(dateMeta), [
-        h('span.mk-badge.mk-badge--gold', DAY_TYPE_LABEL[time.dayType] || time.dayType),
+        h('span.mk-badge.mk-badge--gold', badge),
         h('span.mk-badge', { title: `The Levites' psalm for ${WEEKDAYS[time.weekday]} (Tamid 7:4)` }, `Psalm ${PSALM_OF_DAY[time.weekday]}`),
         evening ? h('span.mk-badge', { title: 'The Hebrew day begins at sunset' }, 'Evening: the Hebrew date has turned') : null,
       ]);

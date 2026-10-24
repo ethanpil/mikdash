@@ -11,8 +11,8 @@
 // Fog: env replaces three's fog chunks with aerial perspective applied inside tonemapping_fragment; FX use
 // fog:false and apply their own: transmittance only for additive emitters, full blend for smoke.
 import {
-  ShaderMaterial, CustomBlending, OneFactor, OneMinusSrcAlphaFactor, OneMinusSrcColorFactor, AddEquation,
-  Vector2, Vector3, Vector4, Color,
+  ShaderMaterial, CustomBlending, OneFactor, ZeroFactor, OneMinusSrcAlphaFactor, OneMinusSrcColorFactor, AddEquation,
+  Vector2, Vector3, Vector4, Color, FrontSide, BackSide,
 } from 'three';
 
 const COMMON = /* glsl */`
@@ -68,8 +68,6 @@ function defines(soft, low) {
   const d = {};
   if (soft) d.SOFT_DEPTH = 1;
   if (low) d.LOW_Q = 1;
-  // flame alpha edge: wider on low (rendered at 0.8 scale and upscaled => softer, unjagged tips)
-  d.FLAME_EDGE = low ? '0.45' : '0.3';
   return d;
 }
 
@@ -82,47 +80,75 @@ function setBlend(m, kind, low) {
   m.blending = CustomBlending;
   m.blendEquation = AddEquation;
   m.blendSrc = OneFactor;
-  if (kind === 'flame' || kind === 'smoke') m.blendDst = OneMinusSrcAlphaFactor;
+  if (kind === 'flame' || kind === 'smoke' || (kind === 'bed' && !low)) m.blendDst = OneMinusSrcAlphaFactor;
   else m.blendDst = low ? OneMinusSrcColorFactor : OneFactor;
+  // qa-r2-fix-env-render: the buffer's alpha becomes an EMITTER MASK on the post tiers (FXPass sets it to 1 first):
+  // flames, embers, glows and glints multiply it by (1 − their coverage), the shader's alpha (the flame's emissivity, a
+  // glow's shape); smoke and the coal-bed decal leave it. The grade pass reads it: no heat shimmer on a flame's own pixels,
+  // and at night the bloom keeps its glare for the emitters, not for the surfaces they light (post-effects.js)
+  m.blendEquationAlpha = AddEquation;
+  m.blendSrcAlpha = ZeroFactor;
+  m.blendDstAlpha = kind === 'smoke' || kind === 'bed' ? OneFactor : OneMinusSrcAlphaFactor;
+  // the bed is a box: a decal drawn by its far faces on the post tiers (the camera may stand inside it), flattened into
+  // a disc seen from above on low
+  if (kind === 'bed') m.side = low ? FrontSide : BackSide;
 }
 
 // ---------------------------------------------------------------- flames
+// qa-r1-fix-env-render: soft-edged procedural flipbook cards. Each card is a plume envelope eroded by noise that rises
+// faster with height (the licks tear off and burn out at the top), drawn as two layers in one premultiplied output:
+//   body  emission × visible density, alpha = its emissivity (Kirchhoff: a sooty flame hides what is behind it as much
+//         as it emits), thinning to nothing at the edges — the path through a round flame there is short — so no dark
+//         paper-cut rim can form where the emission fades before the alpha;
+//   core  the hot core added on top (alpha 0): brighter than daylit stone, pale yellow.
+// The base fades in over the fuel and, on the post tiers, against the scene depth (the logs), never a hard cut.
 const FLAME_VS = /* glsl */`
 attribute vec3 iPos;      // flame base, world
 attribute vec2 iSize;     // width, height (m)
 attribute vec4 iParams;   // seed, fuel intensity 0..1, turbulence, speed
 attribute vec4 iLean;     // tip lean (x, z) per metre of height; overlap emission scale; luminance cd/m²
+attribute float iCore;    // the hot core's added emission at its peak (× luminance)
 varying vec2 vUv;
 varying vec4 vParams;
 varying float vEmit;
 varying float vViewZ;
 varying float vSoot;
+varying vec2 vSize;
+varying float vCore;
+varying float vGraze;
 ${VCOMMON}
 void main() {
   vUv = uv;
   vParams = iParams;
   vEmit = iLean.z * iLean.w;
+  vCore = iCore;
   float seed = iParams.x;
   float inten = clamp(iParams.y, 0.0, 1.5);
   float t = uTime * iParams.w;
-  // licking: the tongue stretches and shrinks; less fuel => smaller flames
-  float lick = 1.0 + 0.13 * sin(t * 5.3 + seed * 31.0) + 0.07 * sin(t * 9.1 + seed * 17.0);
+  // licking: the whole card stretches and shrinks a little; less fuel => smaller flames
+  float lick = 1.0 + 0.09 * sin(t * 4.1 + seed * 31.0) + 0.05 * sin(t * 7.3 + seed * 17.0);
   float h = iSize.y * mix(1.0, lick, clamp(iParams.z, 0.0, 1.0)) * (0.3 + 0.7 * min(inten, 1.0));
   float w = iSize.x * (0.55 + 0.45 * min(inten, 1.0));
-  // soot emissivity of a flame this thick (Beer–Lambert, κ ≈ 1.3 m⁻¹ for luminous wood flames):
-  // a 1 m pyre tongue ≈ 0.7, a torch ≈ 0.2, an oil-lamp flame ≈ 0.04
-  vSoot = 1.0 - exp(-1.3 * w);
+  vSize = vec2(w, h);
+  // soot emissivity of a flame this thick (Beer–Lambert, κ ≈ 1.1 m⁻¹ for luminous wood flames): a 1 m pyre card ≈ 0.6,
+  // a torch ≈ 0.2, an oil-lamp flame ≈ 0.04
+  vSoot = 1.0 - exp(-1.1 * w);
   vec3 toCamH = cameraPosition - iPos; toCamH.y = 0.0;
   float lh = length(toCamH);
   vec3 dirC = lh > 1e-4 ? toCamH / lh : vec3(0.0, 0.0, 1.0);
   vec3 right = vec3(dirC.z, 0.0, -dirC.x);
   vec3 toCam = normalize(cameraPosition - iPos);
   vec3 sphUp = normalize(cross(toCam, right));
-  // cylindrical billboard (stays vertical), leaning toward the camera when seen from above
-  vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), sphUp, 0.6 * smoothstep(0.3, 0.95, toCam.y)));
+  // cylindrical billboard (stays vertical), leaning toward the camera when seen from well above or below
+  // (qa-r2-fix-env-render: from below too — the altar's fire from its foot)
+  vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), sphUp, 0.6 * smoothstep(0.3, 0.95, abs(toCam.y))));
+  // a card seen within ≈ 25° of its own plane is a smear, not a flame: faded out (it cannot happen with the lean above
+  // short of looking straight up or down the axis, but the cards' feet sit close to the viewer on the altar's top)
+  vGraze = smoothstep(0.2, 0.42, abs(dot(normalize(cross(right, up)), toCam)));
   vec2 p = position.xy;
   vec3 lean = vec3(iLean.x, 0.0, iLean.y) * (p.y * p.y) * h;
-  vec3 wp = iPos + right * (p.x * w) + up * (p.y * h) + lean;
+  // the card's foot sits a little into the fuel: its fade-in hides the cut
+  vec3 wp = iPos + right * (p.x * w) + up * (p.y * h - 0.06 * h) + lean;
   vec4 mv = viewMatrix * vec4(wp, 1.0);
   vViewZ = mv.z;
   vFxFog = -mv.z;
@@ -137,12 +163,15 @@ varying vec4 vParams;
 varying float vEmit;
 varying float vViewZ;
 varying float vSoot;
+varying vec2 vSize;
+varying float vCore;
+varying float vGraze;
 ${COMMON}
-// dark red -> orange -> yellow-orange body -> pale yellow core (wood fire, ~1100–1900 K soot emission)
-vec3 fireRamp(float h) {
-  vec3 c = mix(vec3(0.20, 0.012, 0.0), vec3(0.95, 0.20, 0.015), smoothstep(0.0, 0.28, h));
-  c = mix(c, vec3(1.0, 0.47, 0.07), smoothstep(0.22, 0.55, h));
-  c = mix(c, vec3(1.0, 0.72, 0.32), smoothstep(0.55, 1.0, h));
+// deep red -> orange -> yellow-orange body -> pale yellow (wood-fire soot, ≈ 1100–1650 K, partly white-balanced)
+vec3 fireRamp(float T) {
+  vec3 c = mix(vec3(0.7, 0.1, 0.008), vec3(1.0, 0.3, 0.03), smoothstep(0.0, 0.35, T));
+  c = mix(c, vec3(1.0, 0.52, 0.1), smoothstep(0.3, 0.7, T));
+  c = mix(c, vec3(1.0, 0.74, 0.38), smoothstep(0.72, 1.0, T));
   return c;
 }
 void main() {
@@ -150,36 +179,74 @@ void main() {
   float inten = vParams.y;
   float turb = vParams.z;
   float t = uTime * vParams.w;
-  vec2 uv = vUv;
-  float y = uv.y;
-  float n1 = texture2D(uNoise, vec2(uv.x * 0.32 + seed, y * 0.42 - t * 0.50)).r;
-  float n2 = texture2D(uNoise, vec2(uv.x * 0.65 + seed * 1.37, y * 0.85 - t * 1.05)).g;
-  float dx = ((n1 - 0.5) * 0.60 + (n2 - 0.5) * 0.28) * y * turb;
-  float x = (uv.x - 0.5 + dx) * 2.0;
-  float base = smoothstep(0.0, 0.18, y);
-  float width = mix(0.22, 1.0, base) * pow(max(1.0 - y, 0.0), 0.6);
-  float shape = 1.0 - abs(x) / max(width, 1e-3);
-  float n3 = texture2D(uNoise, vec2(uv.x * 1.1 + seed * 2.1, y * 1.3 - t * 1.8)).b;
+  float y = vUv.y;
+  // the card's height in pixels (before any branch: ANGLE/D3D11): the finest erosion fades out where its cells fall
+  // under a few pixels — at 25 m the great pile's flames are ≈ 60 px tall and that detail only shredded them
+  float hPx = 1.0 / max(fwidth(y), 1e-4);
+  // card coordinates in flame heights (isotropic noise whatever the card's aspect)
+  float sc = 1.0 / max(vSize.y, 0.02);
+  float mx = (vUv.x - 0.5) * vSize.x * sc;
+  // big slow licks (domain warp), growing with height
+  float w1 = texture2D(uNoise, vec2(mx * 0.42 + seed, y * 0.36 - t * 0.55)).r;
+  float w2 = texture2D(uNoise, vec2(mx * 0.85 - seed * 1.3, y * 0.72 - t * 0.95)).g;
+  float warp = ((w1 - 0.5) * 0.9 + (w2 - 0.5) * 0.4) * turb * (0.1 + 0.8 * y);
+  float x = (vUv.x - 0.5) * 2.0 + warp;
+  // the plume's envelope: full width over the fuel, tapering to rounded tips (no threads)
+  float halfW = mix(1.0, 0.3, pow(y, 0.9)) * (0.8 + 0.2 * smoothstep(0.0, 0.2, y));
+  float body = 1.0 - abs(x) / halfW;
+  // erosion rising faster than the gas below it: tongues tear off and burn out
+  float ex = x * 0.5 * vSize.x * sc;
+  // qa-r2-fix-env-render: the tongues ≈ 6 noise cells per flame height (a wide pile breaks into a few tongues, not into
+  // a dozen fragments: at 17 cells per height the great pile read as a shredded orange sheet), the 17-cell layer only
+  // frays their edges, faded by its cells' pixel size
+  float e1 = texture2D(uNoise, vec2(ex * 0.72 + seed * 2.1, y * 0.78 - t * 1.05)).g;
 #ifdef LOW_Q
-  float er = n3;
+  float er = e1;
 #else
-  float n4 = texture2D(uNoise, vec2(uv.x * 1.6 - seed, y * 1.9 - t * 2.6)).a;
-  float er = n3 * 0.74 + n4 * 0.26;
+  float e2 = texture2D(uNoise, vec2(ex * 1.05 - seed, y * 1.15 - t * 1.55)).b;
+  float er = mix(e1, e2, 0.34 * smoothstep(2.0, 6.0, hPx / 17.0));
 #endif
-  float d = shape * 1.3 - er * (0.18 + 1.0 * y) * turb;
-  d *= smoothstep(0.0, 0.06, y);
+  float d = body * 1.15 - (er - 0.32) * (0.3 + 1.1 * y) * turb - 0.4 * y * y;
+  d *= smoothstep(0.0, 0.1, y);
   if (d <= 0.0) discard;
-  float a = smoothstep(0.0, FLAME_EDGE, d);
-  float heat = clamp(d * (1.3 - 0.9 * y), 0.0, 1.0);
-  // x luminance: body (heat 0.3–0.6) 0.45–0.7 L, core ≈ 1.25 L — a luminous wood flame outshines the day sky
-  vec3 col = fireRamp(heat) * (0.35 + 0.9 * heat * heat) * a;
+  // visible density: a wide soft edge band (no cut-out rim)
+  float dens = smoothstep(0.0, 0.5, d);
+  // the path through a round flame is short at its edge: emission and emissivity thin out together there
+  float thick = sqrt(clamp(body, 0.0, 1.0));
+  // temperature: hottest low on the axis, cooling outward and upward — and, in the intermittent upper flame, still
+  // yellow inside each tongue (its soot glows; only the tongue's skin is orange-red): the old ramp left the whole upper
+  // half orange, so from below the altar's edge, where only that half shows, the fire had no hot centre at all
+  float T = clamp(d * (1.15 - 0.65 * y) + 0.3 * y * smoothstep(0.35, 0.9, d) * thick, 0.0, 1.0);
+  float vis = dens * mix(0.4, 1.0, thick);
+  vec3 col = fireRamp(T) * (0.35 + 0.8 * T) * vis;
+  // the hot core: an additive layer that does not hide anything (brighter than sunlit stone at noon), pale yellow-white
+  col += vec3(1.0, 0.88, 0.64) * (smoothstep(0.6, 1.0, T) * dens * vCore);
   col = capEmission(col * inten * vEmit * uP * uFireGain);
-  float fade = softFade(vViewZ, 0.25) * (1.0 - fogAmount());
+  float softness = clamp(0.18 * vSize.x, 0.06, 0.45);
+  float fade = softFade(vViewZ, softness) * (1.0 - fogAmount()) * vGraze;
   col *= fade;
-  // premultiplied: the sooty flame also hides part of what is behind it (its emissivity), so the sky cannot
-  // tint it pink and overlapping tongues converge to the flame colour instead of summing to white
-  gl_FragColor = vec4(col, vSoot * a * fade * min(inten, 1.0));
+  // premultiplied: the sooty body also hides part of what is behind it (its emissivity), so overlapping cards converge
+  // to the flame colour instead of summing to white, and the sky cannot tint the flame pink
+  // the cool, thin margins (T → 0) hold little soot: they barely hide the background (no dark rim on a sunlit wall)
+  float occ = vSoot * vis * mix(0.5, 1.0, thick) * (0.3 + 0.7 * smoothstep(0.0, 0.35, T));
+  float aOut = occ * fade * min(inten, 1.0);
+#ifndef LOW_Q
+  // qa-r2-fix-env-render: the alpha is also the emitter mask (setBlend). A lamp's or a torch's thin flame holds almost no
+  // soot (emissivity ≈ 0.04) and would not mark it: its hot core counts at 0.4 at least — behind a core this bright the
+  // extra occlusion cannot be seen
+  aOut = max(aOut, 0.4 * smoothstep(0.5, 0.85, T) * dens * fade * min(inten, 1.0));
+#endif
+#ifdef LOW_Q
+  // low draws into the tone-mapped 8-bit canvas: tone-map the flame's own colour per unit of its coverage, then apply
+  // the coverage again — tone-mapping the premultiplied colour darkened the thin margins into an inked outline
+  float cov = max(aOut, 0.15);
+  gl_FragColor = vec4(col / cov, 1.0);
   ${OUTPUT}
+  gl_FragColor = vec4(gl_FragColor.rgb * cov, aOut);
+#else
+  gl_FragColor = vec4(col, aOut);
+  ${OUTPUT}
+#endif
 }
 `;
 
@@ -228,9 +295,9 @@ void main() {
   // pure exponential glare, reaching exactly zero at the sprite edge (no rim, no disc)
   float g = (exp(-r2 * 6.0) - 0.0024788) / 0.9975212;
   g = 0.4 * g + 0.6 * exp(-r2 * 30.0) * (1.0 - r2);
-  vec3 col = capEmission(vColor * vInten * uP * uFireGain) * g;
-  col *= softFade(vViewZ, 2.0) * (1.0 - fogAmount());
-  gl_FragColor = vec4(col, 1.0);
+  float hv = softFade(vViewZ, 2.0) * (1.0 - fogAmount());
+  vec3 col = capEmission(vColor * vInten * uP * uFireGain) * g * hv;
+  gl_FragColor = vec4(col, clamp(2.0 * g * hv, 0.0, 1.0)); // alpha: emitter coverage (setBlend)
   ${OUTPUT}
 }
 `;
@@ -274,8 +341,9 @@ void main() {
   // 0.1–1.5°; the bloom's kernel is far wider than these few pixels. Its ≈ 17 % of the flux is taken from the core.
   float th = max(r * uGlint2.y, 0.1);
   float glare = (10.0 / (th * th * th) + 5.0 / (th * th)) * uGlint2.x * (1.0 - smoothstep(1.0, 1.5, th));
-  vec3 col = vCol * (0.83 * exp(-0.5 * r2) + glare) * softFade(vViewZ, 0.05) * (1.0 - fogAmount());
-  gl_FragColor = vec4(col, 1.0);
+  float gv = softFade(vViewZ, 0.05) * (1.0 - fogAmount());
+  vec3 col = vCol * (0.83 * exp(-0.5 * r2) + glare) * gv;
+  gl_FragColor = vec4(col, exp(-0.5 * r2) * gv); // alpha: emitter coverage (setBlend)
   ${OUTPUT}
 }
 `;
@@ -341,25 +409,47 @@ void main() {
   if (vBright <= 1e-3) discard;
   float g = 1.0 - smoothstep(0.2, 1.0, abs(vUv.x * 2.0 - 1.0));
   vec3 c = mix(vec3(1.0, 0.55, 0.16), vec3(0.85, 0.11, 0.01), smoothstep(0.0, 0.7, vLife));
-  vec3 col = capEmission(c * vBright * uP * uFireGain) * g;
-  col *= softFade(vViewZ, 0.1) * (1.0 - fogAmount());
-  gl_FragColor = vec4(col, 1.0);
+  float ev = softFade(vViewZ, 0.1) * (1.0 - fogAmount());
+  vec3 col = capEmission(c * vBright * uP * uFireGain) * g * ev;
+  gl_FragColor = vec4(col, g * ev); // alpha: emitter coverage (setBlend)
   ${OUTPUT}
 }
 `;
 
 // ---------------------------------------------------------------- coal beds (glowing embers under the flames)
+// qa-r1-fix-env-render: on the post tiers a deferred decal — a box round the fuel bed; each pixel reconstructs the scene
+// surface from the depth texture and, inside the bed's cylinder, chars it and lets it glow in cracked seams: the coal
+// bed, the logs' tops and inner ends, the ash round them, whatever geometry the builders put there. Up-facing surfaces
+// under the flames glow most (from the depth's derivatives). On low (no depth texture) the box flattens into the old
+// disc at the top of the fuel bed.
 const BED_VS = /* glsl */`
-attribute vec3 iPos;     // bed centre (fire base)
-attribute vec4 iParams;  // radius, luminance (cd/m²), seed, -
-varying vec2 vQ;
+attribute vec3 iPos;     // bed centre (fire base: the top of the fuel bed)
+attribute vec4 iParams;  // radius (m), luminance (cd/m²), seed, height of the bed's volume (m)
+attribute vec2 iChar;    // the char's reach ÷ radius (≤ 1: none beyond the bed), the floor's ash darkening there
 varying vec4 vParams;
 varying float vViewZ;
+#ifdef SOFT_DEPTH
+varying vec3 vWorld;
+varying vec3 vBase;
+varying vec2 vChar;
+#else
+varying vec2 vQ;
+#endif
 ${VCOMMON}
 void main() {
-  vQ = position.xy;
   vParams = iParams;
-  vec3 wp = iPos + vec3(position.x * iParams.x, 0.04, -position.y * iParams.x);
+#ifdef SOFT_DEPTH
+  vBase = iPos;
+  vChar = iChar;
+  float H = max(iParams.w, 0.05);
+  float Rb = iParams.x * max(iChar.x, 1.0);
+  // from below the fuel's top (the coals and the ash under the pile) up through the logs, as far out as the char reaches
+  vec3 wp = iPos + vec3(position.x * Rb, mix(-0.55 * H, H, position.y * 0.5 + 0.5), position.z * Rb);
+  vWorld = wp;
+#else
+  vQ = position.xz;
+  vec3 wp = iPos + vec3(position.x * iParams.x, 0.04, position.z * iParams.x);
+#endif
   vec4 mv = viewMatrix * vec4(wp, 1.0);
   vViewZ = mv.z;
   vFxFog = -mv.z;
@@ -369,14 +459,62 @@ void main() {
 
 const BED_FS = /* glsl */`
 uniform sampler2D uNoise;
-varying vec2 vQ;
 varying vec4 vParams;
 varying float vViewZ;
+#ifdef SOFT_DEPTH
+varying vec3 vWorld;
+varying vec3 vBase;
+varying vec2 vChar;
+#else
+varying vec2 vQ;
+#endif
 ${COMMON}
+vec3 emberRamp(float heat) {
+  vec3 c = mix(vec3(0.35, 0.03, 0.0), vec3(1.0, 0.30, 0.03), smoothstep(0.15, 0.7, heat));
+  return mix(c, vec3(1.0, 0.62, 0.22), smoothstep(0.75, 1.0, heat));
+}
 void main() {
+  float seed = vParams.z;
+#ifdef SOFT_DEPTH
+  // the scene surface on this pixel's ray (the box itself only selects the pixels)
+  float dz = texture2D(uDepth, gl_FragCoord.xy / uResolution).x;
+  float sceneZ = perspectiveDepthToViewZ(dz, uNearFar.x, uNearFar.y);
+  vec3 P = cameraPosition + (vWorld - cameraPosition) * (sceneZ / min(vViewZ, -1e-4));
+  // its facing, from the depth's screen derivatives (taken before any branch: ANGLE/D3D11)
+  vec3 N = normalize(cross(dFdx(P), dFdy(P)) + vec3(0.0, 1e-6, 0.0));
+  vec3 L = P - vBase;
+  float R = max(vParams.x, 0.02), H = max(vParams.w, 0.05);
+  float r = length(L.xz) / R;
+  float h = L.y / H;
+  float m = (1.0 - smoothstep(0.55, 1.0, r)) * smoothstep(-0.55, -0.2, h) * (1.0 - smoothstep(0.45, 1.0, h));
+  // qa-r2-fix-env-render (ENV-R2-5): beyond the bed (a hearth's iChar.x > 1): the logs' charred outer lengths and the
+  // ash and soot strewn round the kerb on the floor
+  float rc = length(L.xz) / (R * max(vChar.x, 1.0));
+  float mc = step(1.001, vChar.x) * (1.0 - smoothstep(0.7, 1.0, rc)) * smoothstep(-0.55, -0.4, h) * (1.0 - smoothstep(0.6, 1.0, h));
+  if (max(m, mc) <= 1e-3 || vParams.y <= 1e-3) discard;
+  float n1 = texture2D(uNoise, P.xz * 0.8 + seed).a;
+  float n2 = texture2D(uNoise, vec2(P.x + P.z, P.y) * 0.75 + seed * 1.7).b;
+  float n3 = texture2D(uNoise, P.xz * 0.3 + vec2(0.0, uTime * 0.03) + seed).g;
+  // cracked char: glowing seams between the scales, slowly breathing
+  float seam = 1.0 - smoothstep(0.0, 0.17, abs(mix(n1, n2, 0.4) - 0.5));
+  float breathe = 0.6 + 0.4 * sin(uTime * (0.8 + n3) + n3 * 11.0);
+  float top = smoothstep(-0.25, 0.65, N.y);                                     // log tops, the bed under the flames
+  float hot = (1.0 - smoothstep(0.0, 0.85, r)) * (1.0 - smoothstep(0.35, 1.0, h)); // under and among the flames' foot
+  float heat = clamp(seam * (0.5 + 0.5 * top) * (0.6 + 0.4 * hot) + hot * (0.3 + 0.55 * n3) - 0.18, 0.0, 1.0) * breathe * m;
+  // above the floor (the logs, the kerb's top) vs the floor itself (1.0 − h ≈ the fire base's height over the floor)
+  float logs = smoothstep(-0.38, -0.28, h);
+  // the logs smoulder in their cracks toward the fire (dull red, fading out along them)
+  heat = max(heat, seam * logs * top * (1.0 - smoothstep(0.2, 0.7, rc)) * 0.3 * breathe * mc);
+  vec3 col = capEmission(emberRamp(heat) * heat * vParams.y * uP * uFireGain) * (1.0 - fogAmount());
+  // char: what does not glow round the flames' foot is blackened (premultiplied: alpha darkens the surface)
+  float charA = m * 0.85 * (1.0 - smoothstep(0.05, 0.55, heat)) * (1.0 - smoothstep(0.2, 0.95, r));
+  // …and beyond it the logs are charred black, the floor round the kerb greyed by ash (vChar.y), both mottled
+  // (sides — the kerb's outer face, the logs' flanks — take less soot than the tops)
+  charA = max(charA, mc * mix(vChar.y * (0.75 + 0.5 * n2), (0.82 + 0.1 * n1) * mix(0.55, 1.0, top), logs) * (1.0 - smoothstep(0.05, 0.4, heat)));
+  gl_FragColor = vec4(col, charA);
+#else
   float d2 = dot(vQ, vQ);
   if (d2 >= 1.0 || vParams.y <= 1e-3) discard;
-  float seed = vParams.z;
   vec2 p = vQ * vParams.x; // metres
   float n1 = texture2D(uNoise, p * 0.55 + seed).a;
   float n2 = texture2D(uNoise, p * 0.23 + seed * 1.7).b;
@@ -386,22 +524,26 @@ void main() {
   float breathe = 0.65 + 0.35 * sin(uTime * (0.9 + n2) + n3 * 12.0);
   float heat = clamp(seam * 0.8 + n2 * 0.5 - 0.25, 0.0, 1.0) * breathe;
   heat *= pow(1.0 - d2, 1.2);
-  vec3 c = mix(vec3(0.35, 0.03, 0.0), vec3(1.0, 0.30, 0.03), smoothstep(0.15, 0.7, heat));
-  c = mix(c, vec3(1.0, 0.62, 0.22), smoothstep(0.75, 1.0, heat));
-  vec3 col = capEmission(c * heat * vParams.y * uP * uFireGain);
-  col *= softFade(vViewZ, 0.04) * (1.0 - fogAmount());
+  vec3 col = capEmission(emberRamp(heat) * heat * vParams.y * uP * uFireGain);
+  col *= (1.0 - fogAmount());
   gl_FragColor = vec4(col, 1.0);
+#endif
   ${OUTPUT}
 }
 `;
 
 // ---------------------------------------------------------------- smoke (columns rising straight up)
+// qa-r1-fix-env-render: the column starts thin and faint at the flame tips (a smoke base: hot gas, little soot yet) and
+// widens and thickens as it rises and cools; inside, the puffs' surfaces roll (domain-warped noise with its own
+// motion) and are lit as billows. The fire lights it from below only near the fire: its light reaches a height h through
+// the column's own smoke beneath (exp(−τ), τ ∝ density × h / width) and falls off as the inverse square. The column
+// axis never bends (Avot 5:5; Yoma 38a).
 const SMOKE_VS = /* glsl */`
 attribute vec3 iPos;    // column base
 attribute vec4 iCol;    // height, base width, density, seed
 attribute vec4 iPuff;   // phase offset, kind (0 wood, 1 incense), rise speed (m/s), spread factor
 attribute vec3 iGlow;   // fire beneath: colour × luminous intensity (cd, physical)
-attribute vec2 iMisc;   // puffs in this column, -
+attribute vec2 iMisc;   // puffs in this column, height of the column's base above iPos (m: the flame tips)
 varying vec2 vUv;
 varying vec2 vShape;
 varying float vAlpha;
@@ -415,19 +557,22 @@ varying float vSeed;
 varying float vKind;
 varying vec3 vGlow;
 varying vec3 vWorld;
+varying vec2 vCol2;     // the column's base height above the fire (m), its density
 ${VCOMMON}
 void main() {
   float H = max(iCol.x, 0.1);
   float W = iCol.y;
   float seed = iCol.w;
   float N = max(iMisc.x, 1.0);
+  float h0 = iMisc.y;
   float phase = fract(iPuff.x + uTime * iPuff.z / H);
   const float E = 0.9; // mild deceleration of the buoyant plume
   float h = H * pow(phase, E);
   float gap = H * E * pow(max(phase, 0.03), E - 1.0) / N; // distance to the next puff at this height
-  float r = W * 0.5 * (1.0 + iPuff.w * pow(phase, 0.85));
+  // a narrow base (a third of the width) entraining air: the plume widens with height
+  float r = W * 0.5 * (0.35 + 0.65 * smoothstep(0.0, 0.14, phase) + iPuff.w * pow(phase, 0.85));
   float rv = min(max(r, gap * 0.9), r * 2.2); // stretch along the column so neighbours overlap into one column
-  vec3 c = iPos + vec3(0.0, h + rv * 0.5, 0.0);
+  vec3 c = iPos + vec3(0.0, h0 + h + rv * 0.5, 0.0);
   // internal churn only: the column axis itself never bends (Avot 5:5; Yoma 38a "rises like a stick")
   float ps = seed * 12.9 + iPuff.x * 40.0;
   c.x += sin(uTime * 0.55 + ps + phase * 8.0) * r * 0.08;
@@ -445,14 +590,16 @@ void main() {
   vUv = vec2(ca * q.x - sa * q.y, sa * q.x + ca * q.y) * vec2(1.0, rv / r);
   vRight = axR; vUp = axU; vFwd = toCam;
   float a = iCol.z;
-  a *= smoothstep(0.0, 0.025, phase) * (1.0 - smoothstep(0.45, 1.0, phase));
-  a *= pow(clamp(W * 0.5 / r, 0.0, 1.0), 0.7);
+  // faint at the base, thickening as it cools over the first fifth of the column, thinning out at the top
+  a *= smoothstep(0.0, 0.2, phase) * (1.0 - smoothstep(0.45, 1.0, phase));
+  a *= pow(clamp(W * 0.5 / r, 0.0, 1.0), 0.45);
   a *= mix(1.0, 0.6, clamp((rv / r - 1.0) * 0.5, 0.0, 1.0)); // stretched puffs overlap more
   float dist = length(cameraPosition - c);
   a *= smoothstep(r * 0.6, r * 2.2, dist); // avoid full-screen overdraw when the viewer stands in the column
   vAlpha = a;
-  vH = h + rv * 0.5;
+  vH = h0 + h + rv * 0.5;
   vW = W;
+  vCol2 = vec2(h0, iCol.z);
   vSeed = seed + iPuff.x;
   vKind = iPuff.y;
   vGlow = iGlow;
@@ -484,13 +631,17 @@ varying float vSeed;
 varying float vKind;
 varying vec3 vGlow;
 varying vec3 vWorld;
+varying vec2 vCol2;
 ${COMMON}
 float hg(float c, float g) { float g2 = g * g; return (1.0 - g2) / (12.566 * pow(1.0 + g2 - 2.0 * g * c, 1.5)); }
 void main() {
   vec2 p = vShape;
   float r2 = dot(p, p);
   if (r2 >= 1.0 || vAlpha <= 0.002) discard;
-  vec2 nuv = vUv * 0.28 + vec2(vSeed * 0.37, vSeed * 0.71 - uTime * 0.015);
+  // billows: the puff's surface rolls (a domain warp with its own slow motion), then one or two octaves of detail
+  vec2 nuv = vUv * 0.28 + vec2(vSeed * 0.37, vSeed * 0.71);
+  vec2 wv = texture2D(uNoise, nuv * 0.55 + vec2(uTime * 0.011, -uTime * 0.019)).rg - 0.5;
+  nuv += wv * 0.4 - vec2(0.0, uTime * 0.015);
   float n = texture2D(uNoise, nuv).g;
 #ifdef LOW_Q
   const float NAMP = 0.7; // one octave only: a gentler erosion keeps puffs round instead of torn strips
@@ -502,16 +653,19 @@ void main() {
   float dens = smoothstep(0.08, 0.8, body * 0.9 + (n - 0.5) * NAMP);
   float a = vAlpha * dens;
   if (a <= 0.002) discard;
-  vec3 nrm = normalize(vRight * p.x + vUp * p.y + vFwd * sqrt(max(1.0 - r2, 0.0)));
+  // the billow's own relief tilts the normal: lit tops, shaded undersides
+  vec3 nrm = normalize(vRight * (p.x + wv.x * 0.9) + vUp * (p.y + wv.y * 0.9) + vFwd * sqrt(max(1.0 - r2, 0.0)));
   vec3 albedo = mix(vec3(0.50, 0.48, 0.46), vec3(0.80, 0.82, 0.86), vKind);
   vec3 V = normalize(vWorld - cameraPosition);
   // key light (sun or moon): wrapped diffuse (multiple scattering) + forward scattering when backlit
   float ws = clamp(dot(nrm, uSunDir) * 0.6 + 0.4, 0.0, 1.0);
   vec3 direct = uSunColor * (ws * 0.318 + hg(dot(V, uSunDir), 0.55) * 1.6 * (1.0 - dens * 0.6));
   vec3 amb = mix(uGround, uSky, nrm.y * 0.5 + 0.5);
-  // the fire below lights the column from underneath: inverse square from the flames (physical cd × uP)
+  // the fire below lights the column from underneath: inverse square from the flames (physical cd × uP), through the
+  // column's own smoke beneath this height — so only its foot glows
   float hb = vH + vW;
-  vec3 glowE = vGlow * uP / (hb * hb);
+  float tau = 0.6 * vCol2.y * max(vH - vCol2.x, 0.0) / max(vW, 0.1);
+  vec3 glowE = vGlow * uP * exp(-tau) / (hb * hb);
   vec3 glow = glowE * 0.318 * (0.35 + 0.65 * clamp(0.3 - nrm.y, 0.0, 1.0));
   vec3 col = albedo * (direct + amb + glow);
   float f = fogAmount();

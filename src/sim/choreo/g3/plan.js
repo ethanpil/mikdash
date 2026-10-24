@@ -11,6 +11,12 @@
 import { wrap, since } from '../../lib/core.js';
 
 export const CUE_LEAD = 0.5;
+/**
+ * Minutes from the blessing's start to the hands coming down (morning.js stages the raise at its start + CUE_LEAD). The
+ * module publishes [start, start + BLESS_DOWN] as the event's window (ctx.schedule.retime), so the listed window is
+ * the raised hands (qa-r1 SIM-3) ⚙ the minutes: the blessing is fifteen words said slowly with the Name, as one.
+ */
+export const BLESS_DOWN = 2.0;
 /** trumpet-set buffer: 0.03 + teki'ah 3.1 + 0.55 + teru'ah (9 × 0.27 + 0.12) + 0.55 + teki'ah 3.1, + 0.5 tail (s) */
 export const D_SET = 0.03 + 3.1 + 0.55 + (9 * 0.27 + 0.12) + 0.55 + 3.1 + 0.5;
 /**
@@ -42,7 +48,8 @@ export function windows(ctx, sim) {
   const z = ctx.time?.zmanim || {};
   const sr = Number.isFinite(z.sunrise) ? z.sunrise : 356, sh = Number.isFinite(z.shaahDay) ? z.shaahDay : 53.6;
   const dh = (h) => sr + h * sh;
-  const ev = (...ids) => { for (const id of ids) { const e = sim.event(id); if (e && Number.isFinite(e.t0)) return [e.t0, e.t1]; } return null; };
+  // an event the module retimes (ctx.schedule.retime) keeps the data's window as tPlan: the staging reads that
+  const ev = (...ids) => { for (const id of ids) { const e = sim.event(id); if (e && Number.isFinite(e.t0)) return e.tPlan ? [e.tPlan[0], e.tPlan[1]] : [e.t0, e.t1]; } return null; };
   const U = (w, fb) => unwrapW(w || fb.map(wrap), sr);
   const dayType = ctx.time?.dayType || 'weekday';
   return {

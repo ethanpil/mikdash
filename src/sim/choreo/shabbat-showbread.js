@@ -38,6 +38,10 @@ const TEXT = {
 // (a bowls(bool) on the movable is requested from world)
 const SHULCHAN = 'heichal.shulchan.bread', INCOMING = 'heichal.shulchan.bread.incoming';
 
+// minutes from the swap's start until the old bread is on the gold table (the plan's T.oldOnGoldEnd − T, measured:
+// the retime's value before a Shabbat's plan exists) ⚙
+const SWAP_SPAN = 4.4;
+
 export default {
   id: 'shabbat-showbread',
   // the kanim are out of the bread from Friday's pulling until after Shabbat (Menachot 11:6), so the module states the
@@ -59,6 +63,10 @@ export default {
       sh: { main: sim.door(SHULCHAN), inc: sim.door(INCOMING), c: {} },
     };
     try { plan(ctx, sim, state); } catch (e) { console.warn(`[sim] ${sim.id} plan at init failed`, e); }
+    // the swap's listed window is the change itself: from its start until the old bread is laid on the gold table in the
+    // Ulam (Menachot 11:7); bread-warm carries the Ulam's part on (qa-r2 SIM-R2-6: the data's ten minutes left the Shulchan
+    // bare for the last five). As minutes after the data's start; SWAP_SPAN until a Shabbat's plan is built ⚙
+    try { sim.schedule?.retime?.('showbread-swap', (t0) => [t0, t0 + (state.swapSpan ?? SWAP_SPAN)]); } catch (e) { console.warn('[sim] showbread-swap retime failed', e); }
     return state;
   },
 
@@ -91,6 +99,12 @@ function plan(ctx, sim, state) {
   state.props.setPlan(B ? B.items.swap : []);
   if (B) {
     const T = B.t;
+    const span = T.oldOnGoldEnd - B.T;
+    if (Number.isFinite(span) && Math.abs(span - (state.swapSpan ?? -1)) > 1e-6) {
+      state.swapSpan = span;
+      const ev = sim.event('showbread-swap');
+      if (ev) ctx.schedule?.resolveEvent?.(ev);
+    }
     state.cue = {
       bring: wrap(T.bringLeave + 2.2), in: wrap(B.T + 0.55), slide: wrap(T.slide[0] + 0.1), gold: wrap(T.oldOnGold + 0.05),
       warm: wrap(Math.max(T.touch, B.warm[0] + 0.5)), baz: wrap(Math.max(T.takeBaz[0] + 0.1, B.baz[0] + 0.5)), burn: wrap(T.pour[0]),

@@ -9,9 +9,10 @@ import { createTimePanel } from './timepanel.js';
 import { createInfoPanel } from './infopanel.js';
 import { createMapPanel } from './mappanel.js';
 import { createSettingsPanel } from './settingspanel.js';
+import { createAboutPanel } from './aboutpanel.js';
 import { clock } from './format.js';
 
-const FACTORIES = { time: createTimePanel, info: createInfoPanel, map: createMapPanel, settings: createSettingsPanel };
+const FACTORIES = { time: createTimePanel, info: createInfoPanel, map: createMapPanel, settings: createSettingsPanel, about: createAboutPanel };
 const KEYS = { KeyT: 'time', KeyI: 'info', KeyM: 'map', KeyG: 'settings' };
 
 export function mountUi(ctx) {
@@ -121,6 +122,7 @@ export function mountUi(ctx) {
   /** label: a place name, or { event: title } when going to watch an event */
   app.goTo = (target, label = 'that spot', { speed, keepMap = false } = {}) => {
     speed = speed || ctx.settings.get('travelSpeed') || 'walk';
+    hud.dismissAccess(); // the notice was about where you stood
     if (!(keepMap && current?.name === 'map' && !isPhone())) app.close();
     if (typeof ctx.player?.goTo !== 'function') { ctx.bus.emit('ui:goto', { target, speed }); return; }
     const token = ++goToken;
@@ -128,7 +130,8 @@ export function mountUi(ctx) {
     const at = Array.isArray(target?.at) ? target.at : null;
     app.trip = at ? { key: token, at, label: ev ? `watch: ${ev}` : midSentence(label), speed, verb: VERB[speed] || 'Walking' } : null;
     if (speed !== 'instant') hud.travel(ev ? `${VERB[speed] || 'Walking'} to watch: ${ev}` : `${VERB[speed] || 'Walking'} to ${midSentence(label)}`);
-    Promise.resolve(ctx.player.goTo(target, speed)).then((ok) => {
+    // a synchronous throw becomes a rejection too, so the pill never outlives the walk
+    new Promise((res) => res(ctx.player.goTo(target, speed))).then((ok) => {
       if (token !== goToken) return;
       app.trip = null;
       hud.travel(null);
@@ -199,6 +202,8 @@ export function mountUi(ctx) {
       return;
     }
     if (typing(e.target) || e.repeat) return;
+    // '?' (by character, whatever the layout): About, at the controls
+    if (e.key === '?') { e.preventDefault(); if (current?.name === 'about') app.close(); else app.open('about', { section: 'controls' }); return; }
     const name = KEYS[e.code];
     if (name) { e.preventDefault(); app.toggle(name); }
   }, true);

@@ -3,6 +3,9 @@
 // bone). Frames are stacked in blocks of 1024 rows side by side, so the texture never exceeds 1024 rows
 // (WebGL2 guarantees only 2048) and the vertex shader addresses a frame with two integer ops.
 // A Float32 master copy is kept for CPU reads (hand anchors for torches, etc.).
+// qa-r2: the half floats are kept and only a new rig's frames are encoded (by the bake, in the worker when prebaked);
+// a wider texture re-lays the rows already encoded by copying them. Before, every ensure() re-encoded every frame baked
+// so far and allocated a new buffer (quadratic in rigs: ≈ 1.25 s of the low boot at 8 rigs / 8.6k frames).
 import { DataTexture, RGBAFormat, HalfFloatType, NearestFilter, DataUtils, Matrix4, Vector3 } from 'three';
 import { MAX_BONES, getRig } from './rig.js';
 import { PoseBuilder, LocalPose, poseToSkin, blendPose } from './pose.js';
@@ -43,7 +46,7 @@ export function bakeRig(rigKey) {
   for (const name of names) {
     const c = set[name];
     clips.push({
-      name, start: f, frames: c.frames, loop: !!c.loop, rate: c.rate ?? 0.2,
+      name, base: name.split('~')[0], start: f, frames: c.frames, loop: !!c.loop, rate: c.rate ?? 0.2,
       stride: typeof c.stride === 'string' ? rig.dims[c.stride] : (c.stride || 0),
       grip: c.grip || 'fist', hand: c.hand || null, halter: !!c.halter, cord: !!c.cord, pairGrip: c.pairGrip || null,
     });
@@ -62,79 +65,111 @@ export function bakeRig(rigKey) {
       f++;
     }
   }
-  return { key: rigKey, frames: f, clips, master, locals };
+  // the GPU copy's half floats, frame after frame (the atlas copies each frame's row segment into its block)
+  const half = new Uint16Array(master.length);
+  const toH = DataUtils.toHalfFloat;
+  for (let i = 0; i < master.length; i++) half[i] = toH(master[i]);
+  return { key: rigKey, frames: f, clips, master, locals, half };
 }
 
 export class AnimAtlas {
   constructor() {
     this.frames = 0;
-    this.master = new Float32Array(0);
+    this.master = new Float32Array(0);   // (capacity grows geometrically: ≥ (frames + SCRATCH) frames)
     this.entries = new Map(); // rigKey -> { rig, clips: { name: { start, frames, loop, rate, stride, grip, hand } } }
     this.uniform = { value: null };
     this.texture = null;
     this.locals = new Float32Array(0);
-    this.data = null;
+    this.data = null;                    // the texture's half floats: width × BLOCK_ROWS texels, row-major
     this.width = 0;
+    this.blocks = 0;
     this.scratchFree = [];
     this.epoch = 0;
     this._lpA = null; this._lpB = null;
+    this._full = false;                  // a whole-texture upload is pending (no partial ranges until it is done)
+    this.stats = { ensureMs: 0, uploads: 0, rigs: [] };
   }
 
   /** bake a rig's clip set (once) and return its entry */
   ensure(rigKey) {
     if (this.entries.has(rigKey)) return this.entries.get(rigKey);
+    const t0 = typeof performance !== 'undefined' ? performance.now() : 0;
     const rig = getRig(rigKey);
     // perf-1: baked ahead in a Worker at boot (people/prebake.js) when it got there first; the same bakeRig() either way
     const baked = takePrebaked(rigKey) || bakeRig(rigKey);
-    const start0 = this.frames;
-    const grown = new Float32Array((start0 + baked.frames + SCRATCH) * FLOATS_PER_FRAME);
-    grown.set(this.master.subarray(0, start0 * FLOATS_PER_FRAME));
-    grown.set(baked.master, start0 * FLOATS_PER_FRAME);
-    const locals = new Float32Array((start0 + baked.frames) * LOCAL_STRIDE);
-    locals.set(this.locals.subarray(0, start0 * LOCAL_STRIDE));
-    locals.set(baked.locals, start0 * LOCAL_STRIDE);
+    const start0 = this.frames, end = start0 + baked.frames;
+    this._reserve(end + SCRATCH);
+    this.master.set(baked.master, start0 * FLOATS_PER_FRAME);
+    this.master.fill(0, end * FLOATS_PER_FRAME, (end + SCRATCH) * FLOATS_PER_FRAME);
+    this.locals.set(baked.locals, start0 * LOCAL_STRIDE);
     const clips = {};
     for (const c of baked.clips) clips[c.name] = { ...c, start: c.start + start0 };
-    this.master = grown;
-    this.locals = locals;
-    this.frames = start0 + baked.frames;
+    this.frames = end;
     const entry = { key: rigKey, rig, clips };
     this.entries.set(rigKey, entry);
     // scratch frames sit after the last baked frame: re-issue them (holders notice the new epoch)
     this.scratchFree = Array.from({ length: SCRATCH }, (_, i) => this.frames + i);
     this.epoch++;
-    this._upload();
+    this._encode(start0, baked.half);
+    const ms = typeof performance !== 'undefined' ? performance.now() - t0 : 0;
+    this.stats.ensureMs += ms;
+    this.stats.rigs.push([rigKey, baked.frames, Math.round(ms)]);
     return entry;
   }
 
-  _upload() {
-    const rows = this.frames + SCRATCH;
-    const blocks = Math.max(1, Math.ceil(rows / BLOCK_ROWS));
-    const width = blocks * BLOCK_W;
-    const height = Math.min(BLOCK_ROWS, Math.max(16, Math.ceil(rows / 16) * 16));
-    const data = new Uint16Array(width * height * 4);
-    const toH = DataUtils.toHalfFloat;
-    for (let F = 0; F < this.frames; F++) {
-      const bx = F >> 10, y = F & (BLOCK_ROWS - 1);
-      const src = F * FLOATS_PER_FRAME;
-      let dst = (y * width + bx * BLOCK_W) * 4;
-      for (let i = 0; i < FLOATS_PER_FRAME; i++) data[dst++] = toH(this.master[src + i]);
+  /** grow the CPU buffers to hold `frames` frames (keeping their contents) */
+  _reserve(frames) {
+    if (this.master.length >= frames * FLOATS_PER_FRAME) return;
+    const cap = Math.max(frames, Math.ceil(this.master.length / FLOATS_PER_FRAME * 1.5));
+    const m = new Float32Array(cap * FLOATS_PER_FRAME);
+    m.set(this.master);
+    const l = new Float32Array(cap * LOCAL_STRIDE);
+    l.set(this.locals);
+    this.master = m;
+    this.locals = l;
+  }
+
+  /**
+   * Copy the new frames' half floats (from frame f0) into their blocks and schedule the upload. A texture with more
+   * blocks re-lays the rows already there (a row copy, nothing re-encoded) and is created anew; otherwise the whole
+   * texture is re-uploaded once at the next render, whatever number of rigs arrived before it (the boot ensures every
+   * pooled rig before its first frame). Creating a DataTexture is CPU-only: three allocates and uploads at first use.
+   */
+  _encode(f0, half) {
+    const blocks = Math.max(1, Math.ceil((this.frames + SCRATCH) / BLOCK_ROWS));
+    const grow = blocks > this.blocks;
+    if (grow) {
+      const width = blocks * BLOCK_W;
+      const data = new Uint16Array(width * BLOCK_ROWS * 4);
+      if (this.data) {
+        const ow = this.width * 4;
+        for (let y = 0; y < BLOCK_ROWS; y++) data.set(this.data.subarray(y * ow, (y + 1) * ow), y * width * 4);
+      }
+      this.data = data;
+      this.width = width;
+      this.blocks = blocks;
     }
-    const tex = new DataTexture(data, width, height, RGBAFormat, HalfFloatType);
-    tex.minFilter = tex.magFilter = NearestFilter;
-    tex.generateMipmaps = false;
-    tex.flipY = false;
-    tex.needsUpdate = true;
-    tex.name = 'people-anim';
-    // until the first full upload, partial updateRanges would upload ONLY those rows (three uses
-    // texStorage + texSubImage per range) — so ranges are added only after onUpdate fired once
-    this._fresh = true;
-    tex.onUpdate = () => { this._fresh = false; };
-    this.texture?.dispose();
-    this.texture = tex;
-    this.data = data;
-    this.width = width;
-    this.uniform.value = tex;
+    const n = half.length / FLOATS_PER_FRAME;
+    for (let i = 0; i < n; i++) {
+      const F = f0 + i, bx = F >> 10, y = F & (BLOCK_ROWS - 1);
+      this.data.set(half.subarray(i * FLOATS_PER_FRAME, (i + 1) * FLOATS_PER_FRAME), (y * this.width + bx * BLOCK_W) * 4);
+    }
+    if (grow || !this.texture) {
+      const tex = new DataTexture(this.data, this.width, BLOCK_ROWS, RGBAFormat, HalfFloatType);
+      tex.minFilter = tex.magFilter = NearestFilter;
+      tex.generateMipmaps = false;
+      tex.flipY = false;
+      tex.name = 'people-anim';
+      tex.onUpdate = () => { this._full = false; this.stats.uploads++; };
+      this.texture?.dispose();
+      this.texture = tex;
+      this.uniform.value = tex;
+    }
+    // until a whole upload is done, partial updateRanges would upload ONLY those rows (three uses texStorage +
+    // texSubImage per range, height 1) — so writeScratch adds ranges only once onUpdate fired
+    this.texture.clearUpdateRanges();
+    this.texture.needsUpdate = true;
+    this._full = true;
   }
 
   // ---- cross-fade scratch frames
@@ -169,7 +204,7 @@ export class AnimAtlas {
     const start = (y * this.width + bx * BLOCK_W) * 4;
     const toH = DataUtils.toHalfFloat;
     for (let i = 0; i < FLOATS_PER_FRAME; i++) this.data[start + i] = toH(this.master[off + i]);
-    if (!this._fresh) this.texture.addUpdateRange(start, FLOATS_PER_FRAME);
+    if (!this._full) this.texture.addUpdateRange(start, FLOATS_PER_FRAME);
     this.texture.needsUpdate = true;
   }
 

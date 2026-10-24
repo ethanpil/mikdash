@@ -41,12 +41,14 @@ export default {
 
   init(ctx, events, sim) {
     sim.setBounds([85, 270, 0], [252, 400, 30]);
+    // dividing and eating the bread is not avodah: the hedyot's sha'atnez avnet is off (Rambam Klei HaMikdash 8:11;
+    // docs/decisions/people.md — qa-r2 SIM-R2-1). The Kohen Gadol's golden avnet is under the me'il (no flag).
     const state = {
-      O: sim.pool({ name: 'outgoing', role: 'kohen', count: N_SIDE, seed: SEED_OUT, importance: 2 }),
-      I: sim.pool({ name: 'incoming', role: 'kohen', count: N_SIDE, seed: SEED_IN, importance: 2 }),
+      O: sim.pool({ name: 'outgoing', role: 'kohen', count: N_SIDE, seed: SEED_OUT, importance: 2, avnet: false }),
+      I: sim.pool({ name: 'incoming', role: 'kohen', count: N_SIDE, seed: SEED_IN, importance: 2, avnet: false }),
       // the Kohen Gadol (G2 / G3's seed: the same man as at the tamid) and the kohanim who eat his loaves with him
       KG: sim.pool({ name: 'kohen-gadol', role: 'kohen_gadol', count: 1, seed: SEED_KG, importance: 2 }),
-      K: sim.pool({ name: 'kg-kohanim', role: 'kohen', count: N_KGK, seed: SEED_KGK, importance: 1 }),
+      K: sim.pool({ name: 'kg-kohanim', role: 'kohen', count: N_KGK, seed: SEED_KGK, importance: 1, avnet: false }),
       props: new FreeProps(ctx),
       plan: null, planGen: -1, out: {}, fnsO: [], fnsI: [], fnsG: [], fnsK: [], kgList: [],
       fmt: (m) => ctx.time?.format?.(m) ?? '--',

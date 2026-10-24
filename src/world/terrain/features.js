@@ -69,16 +69,21 @@ function buildTerraces(ctx, T, kit, detail, blocked, rand) {
           const [xa, ha] = order[i], [xb, hb] = order[i + 1];
           if (ha < hc && hb >= hc) { X = xa + (xb - xa) * (hc - ha) / (hb - ha); break; }
         }
-        const patch = T.noise.fbm(Y * A / 170 + hc * 0.07, hc * 0.13, 2) > -0.25;   // terraces come in patches
-        if (X == null || !patch || blocked(X, Y, 4) || plan.inViewCone(X, Y)) { flush(); return; }
+        // terraces come in patches (qa-r1-fix-world: fewer and shorter runs — long unbroken lines read as drawn strokes)
+        const patch = T.noise.fbm(Y * A / 120 + hc * 0.07, hc * 0.13, 2) > -0.02;
+        // qa-r1-fix-world: in a view cone only where the wall stays under the sight line (was: never in the cones)
+        if (X == null || !patch || blocked(X, Y, 4) || plan.sightTop(X, Y, T.heightZ) < T.heightZ(X, Y) + m(1.3)) { flush(); return; }
         if (line.length && Math.abs(X - line[line.length - 1][0]) > 3 * dy) flush();
         line.push([X, Y]);
       });
       flush();
     }
   }
-  // the walls: a battered face downhill, a top, a back into the bench ⚙ heights 0.8–1.1 m
+  // the walls: a battered face downhill, a top, a back into the bench ⚙ heights 0.6–1.2 m, the top ragged (each 4.5 m
+  // piece its own height, slumped here and there); dry-stone field rubble (qa-r1-fix-world: the pale limestone key read
+  // as white lines across the slope)
   const wallH = m(0.95), thick = m(0.6), bury = m(0.5);
+  const KEY = ctx.mats?.has?.('house_rubble') ? 'house_rubble' : 'terrain_rock';
   for (const row of rows) {
     const P = row.pts;
     for (let i = 0; i + 1 < P.length; i++) {
@@ -89,13 +94,14 @@ function buildTerraces(ctx, T, kit, detail, blocked, rand) {
       const za = T.heightZ(ax, ay), zb = T.heightZ(bx, by);
       const probe = T.heightZ((ax + bx) / 2 + nx * m(2), (ay + by) / 2 + ny * m(2));
       if (probe > (za + zb) / 2) { nx = -nx; ny = -ny; }
-      const h = wallH * (0.85 + 0.3 * rand());
+      if (rand() < 0.1) continue;                                  // a slumped gap
+      const h = wallH * (0.7 + 0.5 * rand()) * (rand() < 0.15 ? 0.5 : 1);
       const ux = -nx * thick, uy = -ny * thick;                     // uphill offset of the wall's back
       const zab = T.heightZ(ax + ux, ay + uy), zbb = T.heightZ(bx + ux, by + uy);
       const topA = za + h, topB = zb + h;
-      kit.quad([[ax, ay, za - bury], [bx, by, zb - bury], [bx, by, topB], [ax, ay, topA]], [nx, ny, 0], 'terrain_rock', { collide: false });
-      kit.quad([[ax, ay, topA], [bx, by, topB], [bx + ux, by + uy, Math.max(topB, zbb + m(0.15))], [ax + ux, ay + uy, Math.max(topA, zab + m(0.15))]], [0, 0, 1], 'terrain_rock', { collide: false, castShadow: false });
-      kit.quad([[ax + ux, ay + uy, Math.max(topA, zab + m(0.15))], [bx + ux, by + uy, Math.max(topB, zbb + m(0.15))], [bx + ux, by + uy, zbb - bury], [ax + ux, ay + uy, zab - bury]], [-nx, -ny, 0], 'terrain_rock', { collide: false, castShadow: false });
+      kit.quad([[ax, ay, za - bury], [bx, by, zb - bury], [bx, by, topB], [ax, ay, topA]], [nx, ny, 0], KEY, { collide: false });
+      kit.quad([[ax, ay, topA], [bx, by, topB], [bx + ux, by + uy, Math.max(topB, zbb + m(0.15))], [ax + ux, ay + uy, Math.max(topA, zab + m(0.15))]], [0, 0, 1], KEY, { collide: false, castShadow: false });
+      kit.quad([[ax + ux, ay + uy, Math.max(topA, zab + m(0.15))], [bx + ux, by + uy, Math.max(topB, zbb + m(0.15))], [bx + ux, by + uy, zbb - bury], [ax + ux, ay + uy, zab - bury]], [-nx, -ny, 0], KEY, { collide: false, castShadow: false });
       segs++;
     }
   }
@@ -126,6 +132,7 @@ function buildPlots(ctx, T, kit, detail, blocked, rand) {
   }
   // low field walls (0.6 m), draped in 4 m pieces, a gap for the gate on the side toward the bed ⚙
   const H = m(0.6), t = m(0.45), step = m(4);
+  const KEY = ctx.mats?.has?.('house_rubble') ? 'house_rubble' : 'terrain_rock';
   for (const [x0, y0, x1, y1] of plots) {
     const xt = T.thalwegX((y0 + y1) / 2);
     const gateSide = Math.abs(x0 - xt) < Math.abs(x1 - xt) ? 3 : 1;   // edge index nearer the bed (3 = west, 1 = east)
@@ -139,9 +146,9 @@ function buildPlots(ctx, T, kit, detail, blocked, rand) {
         const p = [ax + (bx - ax) * f0, ay + (by - ay) * f0], q = [ax + (bx - ax) * f1, ay + (by - ay) * f1];
         const zp = T.heightZ(...p), zq = T.heightZ(...q);
         const pi = [p[0] - ox * t, p[1] - oy * t], qi = [q[0] - ox * t, q[1] - oy * t];
-        kit.quad([[...p, zp - m(0.3)], [...q, zq - m(0.3)], [...q, zq + H], [...p, zp + H]], [ox, oy, 0], 'terrain_rock', { collide: false, castShadow: false });
-        kit.quad([[...pi, zp - m(0.3)], [...qi, zq - m(0.3)], [...qi, zq + H], [...pi, zp + H]], [-ox, -oy, 0], 'terrain_rock', { collide: false, castShadow: false });
-        kit.quad([[...p, zp + H], [...q, zq + H], [...qi, zq + H], [...pi, zp + H]], [0, 0, 1], 'terrain_rock', { collide: false, castShadow: false });
+        kit.quad([[...p, zp - m(0.3)], [...q, zq - m(0.3)], [...q, zq + H], [...p, zp + H]], [ox, oy, 0], KEY, { collide: false, castShadow: false });
+        kit.quad([[...pi, zp - m(0.3)], [...qi, zq - m(0.3)], [...qi, zq + H], [...pi, zp + H]], [-ox, -oy, 0], KEY, { collide: false, castShadow: false });
+        kit.quad([[...p, zp + H], [...q, zq + H], [...qi, zq + H], [...pi, zp + H]], [0, 0, 1], KEY, { collide: false, castShadow: false });
       }
     });
   }

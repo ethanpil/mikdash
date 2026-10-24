@@ -4,12 +4,13 @@
 import { PCFShadowMap } from 'three';
 import { PRIORITY } from '../core/engine.js';
 import { createFx } from './fx/index.js';
+import { installFireFalloffChunk } from './fx/lights.js';
 import { Pipeline, TONE_MAPPERS } from './pipeline.js';
 import { SunShadows, installCascadeBiasChunk } from './shadows.js';
 import { AdaptiveResolution } from './adaptive.js';
 import { detectDevice, isMobile } from './detect.js';
 import { installShaderLogFilter } from './log-filter.js';
-import { setFrameLights } from './warmup.js';
+import { setFrameLights, warmHidden } from './warmup.js';
 import { KeyShadowCache } from './shadow-cache.js';
 
 export async function init(ctx) {
@@ -18,6 +19,8 @@ export async function init(ctx) {
   renderer.shadowMap.type = PCFShadowMap;
   // sun / moon shadow casters' front faces + slope-scaled normal offset (medium's env key light, high / ultra cascades)
   installCascadeBiasChunk();
+  // fire lights soften within their flames' radius (render/fx/lights.js, qa-r1-fix-env-render)
+  installFireFalloffChunk();
   // count the whole frame (composer passes + FX), not just the last render() call
   renderer.info.autoReset = false;
 
@@ -75,6 +78,10 @@ export async function init(ctx) {
     pipeline.setSize(w, h);
   });
   engine.onUpdate((dt) => fx.update(dt), PRIORITY.fx);
+  // qa-r1-fix-env-render (ENV-5): after the first view, warm what the boot could not see (hidden meshes, the plain
+  // program of lazily made ones) in idle slices — render/warmup.js warmHidden
+  let hiddenWarm = null;
+  ctx.bus.on('firstFrame', () => { if (!hiddenWarm && ctx.params?.raw?.get?.('warmhidden') !== '0') hiddenWarm = warmHidden(ctx); });
   ctx.bus.on('time:jump', () => fx.snap());
   ctx.bus.on('quality:change', () => {
     if (engine.quality !== ctx.quality) engine.configure(ctx.quality);
@@ -145,6 +152,8 @@ export async function init(ctx) {
       adaptive.set(s);
     },
     adaptive,
+    /** the post-boot warm-up of hidden objects ({ queued, issued, programs }; null before the first frame) */
+    get hiddenWarm() { return hiddenWarm; },
     /** GPU string + micro-benchmark tier suggestion (cached per GPU) */
     detect: () => detectDevice(renderer),
     rebuild: () => (building = building.then(() => configure(ctx.quality))),

@@ -64,7 +64,11 @@ export async function build(ctx) {
   H.bandBase = H.zF;
   H.rovadRecess = 1 / 3;             // ⚙ the plain courses sit a third of an amah behind the rovadin: each rovad's head a ledge
   H.lintelProud = 1 / 6;             // ⚙ the milah lintels stand a sixth proud, the stone courses between set back a sixth
-  H.kiyurUlamScale = 0.5 / 0.36;     // ⚙ the +62 kiyur round the Ulam block projects ½ amah (0.36 elsewhere)
+  H.kiyurUlamScale = 0.75 / 0.36;    // ⚙ the +62 kiyur round the Ulam block projects ¾ amah (qa-r1-fix-world: was ½)
+  H.kiyurLowScale = 0.6 / 0.36;      // ⚙ …round the aliyah block 0.6 (was 0.36)
+  H.kiyurRoofScale = 1 / 0.36;       // ⚙ the +107 kiyur, the house's crowning cornice under the ma'akeh, 1 amah all round (was 0.36):
+                                     //   a classical cornice projects about its own height, and only that reads from the Mount
+  H.copingOut = 0.55;                // ⚙ the ma'akeh's coping projects 0.55 amah (was 0.34)
   H.bandTopK = Math.round((el('heichal.maakeh').box.max[2] - 5 - H.zF) / 4);
   // F1 windows (site box spans the band; 5 per side, 1 wide inside, 2 outside)
   const f1e = el('heichal.windows.f1');

@@ -8,7 +8,8 @@
 Self-check: `runChecks()` → **PASS** (1552 checks, 0 failures; also under the Feinstein and Chazon Ish amot). 190 elements, 68 zones, 24 dimension chains.
 
 ```sh
-node --input-type=module -e "import('file:///C:/Code/temple-walk/mikdash/src/data/site.js').then(m=>console.log(m.runChecks()))"
+# from the repository root
+node --input-type=module -e "import('./src/data/site.js').then(m=>console.log(m.runChecks()))"
 ```
 
 ## 1. Frame, sources, method

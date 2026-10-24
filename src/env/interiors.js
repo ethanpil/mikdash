@@ -65,7 +65,26 @@ function toWorldAperture(ap, AMAH) {
   const wHalf = [0, 0, 0];
   for (let s = 0; s < 3; s++) wHalf[W_AXIS[s]] = half[s];
   const wo = [0, 1, 2].filter((k) => k !== wax);
-  return { centre: m2w(c[0], c[1], c[2]), axis: wax, sign: sgn * W_SIGN[sax], hx: wHalf[wo[0]], hy: wHalf[wo[1]], open: ap.open, beyond: ap.beyond, value: 0, openness: 0 };
+  // a row of splayed windows across the aperture (env/volumes.js F1): metres; the row runs along the aperture's first
+  // in-plane world axis (wo[0]: x for a north / south face)
+  const slot = ap.slot ? { n: ap.slot.n, period: ap.slot.period * AMAH, wIn: ap.slot.wIn * AMAH, wOut: ap.slot.wOut * AMAH, depth: ap.slot.depth * AMAH } : null;
+  return { centre: m2w(c[0], c[1], c[2]), axis: wax, sign: sgn * W_SIGN[sax], hx: wHalf[wo[0]], hy: wHalf[wo[1]], open: ap.open, beyond: ap.beyond, value: 0, openness: 0, slot };
+}
+
+/** site faces ('+X', '-Y', ...) joining another room -> world face bits (-x, +x, -y, +y, -z, +z): site X -> x, Y -> -z, Z -> y */
+const SITE_FACE_BIT = { '-X': 0, '+X': 1, '-Z': 2, '+Z': 3, '+Y': 4, '-Y': 5 };
+function joinBits(list) {
+  let m = 0;
+  for (const f of list || []) if (SITE_FACE_BIT[f] !== undefined) m |= 1 << SITE_FACE_BIT[f];
+  return m;
+}
+
+/** a window row as the high bits of an aperture's axis word: bit 3 flag, 4–7 count, 8–15 period, 16–21 inner width,
+ *  22–27 outer width (4 cm units), 28–31 depth (20 cm units) — see interiors-glsl.js mkSlot */
+function slotBits(sl) {
+  if (!sl) return 0;
+  const q = (v, unit, max) => Math.max(0, Math.min(max, Math.round(v / unit)));
+  return (8 | (q(sl.n, 1, 15) << 4) | (q(sl.period, 0.04, 255) << 8) | (q(sl.wIn, 0.04, 63) << 16) | (q(sl.wOut, 0.04, 63) << 22) | (q(sl.depth, 0.2, 15) << 28)) >>> 0;
 }
 
 /** exact solid angle of [0,x]×[0,y] at height h over its corner (signed in x, y) */
@@ -115,7 +134,7 @@ export function createInteriors(ctx, opts = {}) {
   const AMAH = ctx.units.AMAH;
   const volumes = defineVolumes(ctx).map((v) => {
     const wb = toWorldBox(v.min, v.max);
-    return { id: v.id, min: wb.min, max: wb.max, base: v.base, margin: v.margin, shell: v.shell, probe: v.probe, gold: v.gold, site: v, apertures: v.apertures.map((a) => toWorldAperture(a, AMAH)), apStart: 0, slot: -1 };
+    return { id: v.id, min: wb.min, max: wb.max, base: v.base, margin: v.margin, shell: Math.min(v.shell, 3.9), joins: joinBits(v.joins), probe: v.probe, gold: v.gold, site: v, apertures: v.apertures.map((a) => toWorldAperture(a, AMAH)), apStart: 0, slot: -1 };
   });
   // the 16-bit centimetre coordinates count from here: the site from X −300, Y +900, Z −100 amot (655 m covers it)
   const origin = m2w(-300, 900, -100);
@@ -220,7 +239,7 @@ export function createInteriors(ctx, opts = {}) {
     buf.apU[i * 4] = (cm(c.x - ox) | (cm(c.y - oy) << 16)) >>> 0;
     buf.apU[i * 4 + 1] = (cm(c.z - oz) | (u8(a.openness) << 16) | (u8(a.beyond) << 24)) >>> 0;
     buf.apU[i * 4 + 2] = (cm(a.hx) | (cm(a.hy) << 16)) >>> 0;
-    buf.apU[i * 4 + 3] = a.axis + (a.sign > 0 ? 0 : 3);
+    buf.apU[i * 4 + 3] = ((a.axis + (a.sign > 0 ? 0 : 3)) | slotBits(a.slot)) >>> 0;
   }
   /**
    * a gilded room's gain as 3 × 10 bits (/256); 0 = none. Not where the room's own probe exists (medium+: the Kodesh):
@@ -238,7 +257,7 @@ export function createInteriors(ctx, opts = {}) {
       v.slot = i;
       // grown by the margin: the shader's coarse rejection needs no third load
       buf.volA.set([v.min.x - v.margin, v.min.y - v.margin, v.min.z - v.margin, v.base], i * 4);
-      buf.volB.set([v.max.x + v.margin, v.max.y + v.margin, v.max.z + v.margin, v.shell], i * 4);
+      buf.volB.set([v.max.x + v.margin, v.max.y + v.margin, v.max.z + v.margin, v.shell + 4 * v.joins], i * 4);
       const lo = [v.min.x - v.margin, v.min.y - v.margin, v.min.z - v.margin].map(halfDown);
       const hi = [v.max.x + v.margin, v.max.y + v.margin, v.max.z + v.margin].map(halfUp);
       buf.volH.set([(lo[0] | (lo[1] << 16)) >>> 0, (lo[2] | (hi[0] << 16)) >>> 0, (hi[1] | (hi[2] << 16)) >>> 0, gainBits(v)], i * 4);

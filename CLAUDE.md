@@ -14,7 +14,8 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - Start: slightly before dawn at the outer (Chel) steps leading into the Temple.
 
 ## Ground truth
-- The research lives one level up (`../report/parts/*.md`, `../sources/`). It is the authority.
+- The research lives one level up (`../report/parts/*.md`, `../sources/`), outside this repository: it is not
+  published with it. It is the authority.
 - `../engine/temple_manifest.json`, `../diagrams/`, `../video/` are SAMPLES (the user said so): use them only as
   cross-checks, never as the source of coordinates, timings or visual design.
 - Geometry at runtime comes only from `src/data/site.js` (research-derived, self-checked dimension chains).
@@ -55,5 +56,9 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.
 
 ## Tools
+- README.md is the public page on GitHub: its controls, URL parameters and credits mirror `src/ui/controls.js`,
+  `src/core/params.js` and the About panel (`src/ui/aboutpanel.js`). Update it when those change. Its three
+  absolute links (live site, example, licence texts) hard-code the Pages address: change them if the repo is renamed
+  or moves to a domain (the share cards follow the deploy on their own).
 - `npm run dev` / `npm run build`
 - `node tools/shot.mjs "at=X,Y&look=heading,pitch&t=sunrise+10"` → `shots/*.png` + console/draw-call report.

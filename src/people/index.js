@@ -51,8 +51,11 @@
 //   { scale }) — the poses that meet a partner or a fixture are made at scale 1: the tenufah pair at ONE scale s
 //   (kohen.setScale(owner.scale)) WAVE_UNDER.partner·s apart; the operators of crank / windlass(_raise) / knead at 1. Prop
 //   dough (on the KNEAD surface). Roles mourner / menudeh draw the atifah (archetype 'mourner').
+//   qa-r1 (docs/decisions/qa-r1-people.md): Actor/Crowd.setGarb(name?, { avnet: false }) — a kohen outside the avodah
+//   without the sha'atnez avnet (Rambam KhM 8:11; the sim passes it); pose variants (stand~k, raise_hands~k) chosen per
+//   figure; contact shadows on low/medium (contact.js); temporal fades (0.25 s real time, snapped on jump/pause/stills).
 // Rendering: GPU-instanced; every figure is skinned in the vertex shader from a baked animation atlas. Beyond
-// quality.maxFigures the next figures (up to 3× more) are drawn as LOD3 silhouettes that dither out at the cap.
+// quality.maxFigures the next figures (up to 3× more) are drawn as LOD3 silhouettes that fade out at the cap.
 import { PRIORITY } from '../core/engine.js';
 import { PeopleSystem } from './system.js';
 import { ROLE_NAMES, ANIMAL_NAMES, ROLES } from './roles.js';
@@ -137,7 +140,7 @@ export async function init(ctx) {
     roles: ROLE_NAMES,
     animals: ANIMAL_NAMES,
     props: PROP_NAMES,
-    poses: Object.keys(HUMAN_CLIPS),
+    poses: Object.keys(HUMAN_CLIPS).filter((n) => !n.includes('~')),   // (variants 'pose~k' are chosen per figure)
     // Tamid 4:3: "the first with the head and the right leg — the head in his right hand … the leg in his left";
     // 6th the entrails in a bazach with the lower legs on top, 7th the fine flour, 8th the chavitin, 9th the wine
     tamid: {

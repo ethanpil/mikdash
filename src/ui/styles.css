@@ -41,6 +41,9 @@
   text-rendering: optimizeLegibility;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
+  /* no page pinch- or double-tap zoom from anything in the UI (it stuck at 5× after a pinch on a panel); scrolling stays.
+     The map stage (touch-action: none) does its own pinch zoom; the 3D view is #scene (index.html, none) */
+  touch-action: pan-x pan-y;
 }
 #ui-root * { box-sizing: border-box; }
 #ui-root .mk-live { pointer-events: auto; }
@@ -199,14 +202,35 @@
 
 /* floating event labels */
 .mk-labels { position: absolute; inset: 0; overflow: hidden; z-index: -1; }
+/* placed by hud.js (placeTags: decluttered, a leader of --lh px down to the anchor, --lx px off the tag's centre) */
 .mk-tag {
   position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 7px; padding: 4px 11px 4px 8px;
-  border-radius: 999px; font-size: 13.5px; white-space: nowrap; cursor: pointer; color: var(--mk-ink);
+  max-width: min(360px, calc(100vw - 32px)); border-radius: 999px; font-size: 13.5px; white-space: nowrap; cursor: pointer; color: var(--mk-ink);
   background: rgba(12, 9, 6, 0.72); border: 1px solid rgba(212, 166, 64, 0.45); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  will-change: transform, opacity; transition: border-color 160ms;
+  will-change: transform, opacity; transition: border-color 160ms; touch-action: none;
 }
+.mk-tag__t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .mk-tag:hover { border-color: var(--mk-gold-hi); }
-.mk-tag::after { content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 18px; background: linear-gradient(rgba(212, 166, 64, 0.7), transparent); }
+.mk-tag::after { content: ''; position: absolute; left: calc(50% + var(--lx, 0px)); top: 100%; width: 1px; height: var(--lh, 18px); background: linear-gradient(rgba(212, 166, 64, 0.7), rgba(212, 166, 64, 0.12)); }
+/* touch: a drag that starts on a tag is a look-drag on the canvas; taps are hit-tested by hud.js */
+@media (pointer: coarse) { #ui-root .mk-tag { pointer-events: none; } }
+
+/* touch: ghost controls for the first seconds (hud.js showHints) */
+.mk-touchhint { position: absolute; inset: 0; pointer-events: none; transition: opacity 900ms; }
+.mk-touchhint[hidden] { display: none; }
+.mk-touchhint.out { opacity: 0; }
+/* not through a panel's glass: they come back on close if their 9 s are not over */
+#ui-root.mk-panel-open .mk-touchhint { opacity: 0; transition-duration: 120ms; }
+.mk-touchhint__joy, .mk-touchhint__look { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 14px; color: var(--mk-ink); text-shadow: 0 1px 3px #000; }
+.mk-touchhint__joy { left: max(6%, calc(var(--mk-safe-l) + 8px)); bottom: max(15%, 96px); }
+.mk-touchhint__joy i { position: relative; width: 108px; height: 108px; border-radius: 50%; border: 1.5px dashed rgba(232, 220, 192, 0.6); background: rgba(13, 11, 8, 0.24); }
+.mk-touchhint__joy i::after { content: ''; position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; border-radius: 50%; background: rgba(232, 220, 192, 0.55); animation: mk-joy 2.4s var(--mk-ease) infinite; }
+@keyframes mk-joy { 0%, 15% { transform: none; } 45%, 60% { transform: translateY(-26px); } 90%, 100% { transform: none; } }
+.mk-touchhint__look { right: max(6%, calc(var(--mk-safe-r) + 8px)); bottom: max(22%, 140px); }
+.mk-touchhint__look b { display: flex; align-items: center; gap: 22px; padding: 12px 18px; border-radius: 999px; border: 1.5px dashed rgba(232, 220, 192, 0.6); background: rgba(13, 11, 8, 0.24); color: var(--mk-ink); animation: mk-look 2.4s var(--mk-ease) infinite; }
+.mk-touchhint__look .ico { width: 22px; height: 22px; }
+@keyframes mk-look { 0%, 15% { transform: none; } 40%, 55% { transform: translateX(-16px); } 80%, 100% { transform: none; } }
+.mk-touchhint__pill { position: absolute; left: 50%; bottom: var(--mk-safe-b); transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); padding: 7px 14px; border-radius: 999px; font-size: 13.5px; text-align: center; color: var(--mk-ink-2); background: rgba(8, 6, 4, 0.55); }
 /* perf-fix-2: the pulse is a ring drawn once and animated by transform and opacity on the compositor; the box-shadow
    keyframes it replaces (the same ring: spread 0 → 8 px, alpha 0.55 → 0, ease, 2.2 s) repainted every tag on every
    frame: 42 → 53 fps at the low spawn on the HD 4600. The ring is the dot's own gold, so over the dot it changes nothing */
@@ -249,7 +273,7 @@
 .mk-panel__head { display: flex; align-items: center; gap: 10px; padding: 14px 12px 8px 20px; flex: none; }
 .mk-panel__title { margin: 0; flex: 1; font: 600 22px/1.15 var(--mk-display); letter-spacing: 0.02em; color: var(--mk-ink); outline: none; }
 .mk-panel__title .he { font-size: 0.86em; color: var(--mk-gold-hi); margin-left: 10px; font-weight: 400; }
-.mk-panel__body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 4px 20px 20px; user-select: text; scrollbar-width: thin; scrollbar-color: rgba(212, 166, 64, 0.4) transparent; }
+.mk-panel__body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; padding: 4px 20px 20px; user-select: text; scrollbar-width: thin; scrollbar-color: rgba(212, 166, 64, 0.4) transparent; }
 .mk-panel__body::-webkit-scrollbar { width: 8px; }
 .mk-panel__body::-webkit-scrollbar-thumb { background: rgba(212, 166, 64, 0.35); border-radius: 4px; }
 
@@ -502,6 +526,7 @@ span.mk-src { color: var(--mk-ink-2); border-color: var(--mk-line-2); background
 .mk-mapcard__he { display: block; font-size: 27px; line-height: 1.12; color: var(--mk-gold-hi); text-align: left; }
 .mk-mapcard__en { margin: 3px 0 0; font: 600 19.5px/1.2 var(--mk-display); letter-spacing: 0.01em; color: var(--mk-ink); outline: none; }
 .mk-mapcard__tr { margin-top: 1px; font-size: 14.5px; font-style: italic; color: var(--mk-ink-2); }
+.mk-mapcard__names > .mk-mapcard__lvl { display: inline-block; margin-top: 6px; }
 .mk-mapcard__meta { flex: none; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 6px 18px 12px; border-bottom: 1px solid var(--mk-line-2); }
 .mk-mapcard__lvl[hidden], .mk-mapcard__sanct[hidden], .mk-mapcard__levels[hidden], .mk-mapcard__access[hidden], .mk-mapcard__tr[hidden] { display: none; }
 .mk-mapcard__sanct { display: flex; align-items: center; gap: 8px; font-size: 13.5px; letter-spacing: 0.04em; color: var(--mk-ink-2); }
@@ -528,6 +553,7 @@ span.mk-src { color: var(--mk-ink-2); border-color: var(--mk-line-2); background
 .mk-mev.is-open .mk-mev__more { display: block; }
 .mk-mev__sum { margin: 0 0 9px; font-size: 14.5px; line-height: 1.45; color: var(--mk-ink); }
 .mk-mev__acts { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
+.mk-dyn__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 2px 0 8px; font-size: 13.5px; }
 .mk-mapcard .mk-empty { padding: 9px 12px; font-size: 14px; }
 .mk-mapcard__foot { flex: none; display: flex; flex-direction: column; gap: 9px; padding: 11px 14px 14px; border-top: 1px solid var(--mk-line-2); background: rgba(0, 0, 0, 0.2); }
 .mk-mapcard__speed { display: flex; width: 100%; flex-wrap: nowrap; }
@@ -535,6 +561,7 @@ span.mk-src { color: var(--mk-ink-2); border-color: var(--mk-line-2); background
 .mk-mapcard__speed button[aria-checked='true'] { background: rgba(212, 166, 64, 0.22); color: var(--mk-gold-hi); box-shadow: inset 0 0 0 1px rgba(212, 166, 64, 0.5); }
 .mk-mapcard__acts { display: flex; flex-wrap: wrap; gap: 8px; }
 .mk-mapcard__go { flex: 1 1 auto; min-height: 40px; font-size: 16px; }
+.mk-mapcard__goshort { display: none; }
 .mk-mapcard__acts .mk-btn[hidden] { display: none; }
 .mk-mapcard__nostand { margin: 0; font-size: 13px; font-style: italic; color: var(--mk-ink-3); }
 .mk-mapcard__nostand[hidden] { display: none; }
@@ -592,6 +619,35 @@ span.mk-src { color: var(--mk-ink-2); border-color: var(--mk-line-2); background
 .mk-intro__help div > span:first-child { flex: none; min-width: 74px; display: inline-flex; gap: 3px; justify-content: flex-end; }
 .mk-intro__go { margin-top: 26px; min-height: 48px; padding: 8px 34px; font-size: 18px; letter-spacing: 0.06em; }
 .mk-intro__fine { margin-top: 14px; font-size: 13px; color: var(--mk-ink-3); }
+.mk-intro__links { margin-top: 6px; }
+.mk-intro__about { padding: 6px 4px; border: 0; background: transparent; cursor: pointer; font-size: 14px; color: var(--mk-gold-hi); text-decoration: underline; text-decoration-color: rgba(242, 211, 138, 0.4); text-underline-offset: 3px; }
+.mk-intro__about:hover { text-decoration-color: var(--mk-gold-hi); }
+
+/* ============================================================================
+   About
+   ============================================================================ */
+.mk-panel--about { width: min(680px, calc(100vw - 24px)); }
+.mk-about__lead { font-size: 17px; font-style: italic; color: var(--mk-ink-2); }
+.mk-toc { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 2px; }
+.mk-toc .mk-chip2 { border-style: solid; border-color: var(--mk-line); font-size: 13.5px; }
+.mk-defs { margin: 0 0 12px; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 12px; align-items: baseline; }
+.mk-defs dt { margin: 0; }
+.mk-defs dd { margin: 0; font-size: 15px; line-height: 1.45; color: var(--mk-ink); }
+.mk-defs dd .mk-srcs { margin-top: 5px; }
+.mk-choices { display: flex; flex-direction: column; gap: 10px; }
+.mk-choice { padding: 10px 14px 12px; border-radius: 12px; border: 1px solid var(--mk-line-2); background: rgba(241, 232, 212, 0.025); }
+.mk-choice__t { margin: 0 0 5px; font: 600 17px/1.2 var(--mk-display); color: var(--mk-gold-hi); }
+.mk-choice__p { margin: 6px 0 5px; font-size: 15px; line-height: 1.45; }
+.mk-choice__alt { color: var(--mk-ink-2); }
+.mk-choice__k { display: inline-block; min-width: 3.4em; margin-right: 6px; font: 600 10.5px/1 var(--mk-serif); letter-spacing: 0.14em; text-transform: uppercase; color: var(--mk-gold); }
+.mk-choice .mk-srcs { gap: 4px; }
+.mk-choice .mk-src { font-size: 12.5px; padding: 1px 8px; }
+.mk-keys { display: flex; flex-direction: column; gap: 14px; }
+.mk-keys__h { margin: 0 0 6px; font: 600 15px/1.2 var(--mk-display); color: var(--mk-gold-hi); }
+.mk-keys__row { display: grid; grid-template-columns: minmax(118px, max-content) minmax(0, 1fr); gap: 4px 14px; align-items: center; padding: 3px 0; font-size: 15px; }
+.mk-keys__caps { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.mk-keys__or { margin: 0 3px; font-size: 12.5px; font-style: italic; color: var(--mk-ink-3); }
+.mk-keys__txt { color: var(--mk-ink); }
 
 /* ============================================================================
    Responsive
@@ -684,15 +740,34 @@ span.mk-src { color: var(--mk-ink-2); border-color: var(--mk-line-2); background
   .mk-panel--map .mk-panel__title { font-size: 18px; }
   .mk-here__lbl { display: none; }
   .mk-mapv__legend { display: none; }
-  .mk-mapcard { top: 8px; left: auto; right: 8px; bottom: auto; max-height: calc(100% - 16px); width: min(350px, 48%); border-radius: 14px; border-bottom: 1px solid var(--mk-line); animation-name: mk-cardin; }
+  .mk-mapcard { top: 8px; left: auto; right: 8px; bottom: auto; max-height: calc(100% - 16px); width: min(350px, max(48%, 340px)); border-radius: 14px; border-bottom: 1px solid var(--mk-line); animation-name: mk-cardin; }
   .mk-mapcard__grab { display: none; }
-  .mk-mapcard__he { font-size: 21px; }
-  .mk-mapcard__head { padding-top: 10px; }
+  .mk-mapcard__he { font-size: 20px; }
+  .mk-mapcard__en { font-size: 18px; }
+  .mk-mapcard__head { padding-top: 8px; }
   .mk-mapcard__meta { padding-bottom: 8px; }
   .mk-mapcard__access { -webkit-line-clamp: 2; }
   .mk-mapcard { overflow-y: auto; overscroll-behavior: contain; }
   .mk-mapcard__scroll { flex: none; overflow: visible; min-height: auto; }
   .mk-mapcard__foot { position: sticky; bottom: 0; background: #120e09; }
+  /* ~320 px of card: what is happening here comes straight under the name, then rung, access and what is next; the
+     speeds and Go share one row (Go, and About / This spot as icons) so the first activity is in view (qa-r2 UI-R2-3) */
+  .mk-mapcard__scroll { display: contents; }
+  .mk-mapcard__sec { order: 1; padding: 0 16px; }
+  .mk-mapcard__sec:first-child { margin-top: 6px; }
+  .mk-mapcard__sec .mk-h { margin-bottom: 5px; }
+  .mk-mapcard__meta { order: 2; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--mk-line-2); border-bottom: 0; }
+  .mk-mapcard__sec + .mk-mapcard__sec { order: 3; margin-bottom: 12px; }
+  .mk-mapcard__foot { order: 4; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px 10px; }
+  .mk-mapcard__speed { flex: 1 0 186px; width: auto; }
+  .mk-mapcard__speed button { flex: 1 1 auto; padding: 2px 3px; font-size: 13.5px; }
+  .mk-mapcard__acts { flex: 0 0 auto; flex-wrap: nowrap; gap: 6px; }
+  .mk-mapcard__go { padding: 0 14px; }
+  #ui-root .mk-mapcard__go .ico { display: none; }
+  .mk-mapcard__golong, .mk-mapcard__acts .mk-mapcard__lbl { display: none; }
+  .mk-mapcard__goshort { display: inline; }
+  .mk-mapcard__acts .mk-btn:not(.mk-mapcard__go) { min-width: 40px; min-height: 40px; padding: 0 9px; }
+  .mk-mapcard__nostand { flex-basis: 100%; }
   .mk-mapv__north { display: none; }
   .mk-intro { padding: 10px 16px; }
   .mk-intro__title { font-size: 46px; }
@@ -700,6 +775,7 @@ span.mk-src { color: var(--mk-ink-2); border-color: var(--mk-line-2); background
   .mk-orn { margin: 10px auto; }
   .mk-intro__text { font-size: 15.5px; line-height: 1.5; max-width: 640px; }
   .mk-intro__card > .mk-intro__fine { display: none; }
+  .mk-intro__card > .mk-intro__links { display: block; margin-top: 4px; }
   .mk-intro__help { grid-template-columns: repeat(4, auto); justify-content: center; gap: 4px 18px; max-width: none; margin-top: 10px; font-size: 13px; }
   .mk-intro__help div > span:first-child { min-width: 0; }
   .mk-intro__go { margin-top: 12px; min-height: 42px; }

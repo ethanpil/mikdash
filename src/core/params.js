@@ -17,7 +17,7 @@
 //   audio=0                        disable audio
 //   debug=boxes,zones,nav,anchors,stats   comma list of debug overlays
 //   seed=N                         deterministic seed for procedural variation
-//   fov=N                          camera vertical field of view in degrees
+//   fov=N                          camera vertical field of view in degrees, clamped to the settings range 40–95
 
 function num(v, d) {
   const n = parseFloat(v);
@@ -49,7 +49,7 @@ export function readParams(search = globalThis.location?.search || '') {
     audio: u.get('audio') !== '0' && !flag('shot'),
     debug: new Set((u.get('debug') || '').split(',').filter(Boolean)),
     seed: num(u.get('seed'), 5786),
-    fov: num(u.get('fov'), 62),
+    fov: Math.min(95, Math.max(40, num(u.get('fov'), 62))), // the range of the settings slider (ui/settings.js)
     raw: u,
   };
 }

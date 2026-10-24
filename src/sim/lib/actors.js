@@ -27,6 +27,8 @@ export class Slot {
     // people-3/4 looks (change-cached like the rest): the priestly headgear on (people's default), hair grown, the
     // role's garb, the seeded size (null)
     this._hg = true; this._shave = pool.spec?.shaven ?? false; this._garb = pool.spec?.garb ?? null; this._scale = pool.spec?.scale ?? null;
+    // the hedyot's sha'atnez avnet: on (people's default) unless the pool is not in the avodah (qa-r2 SIM-R2-1)
+    this._avnet = pool.spec?.avnet !== false;
   }
   get ctx() { return this.pool.sim.ctx; }
 
@@ -107,6 +109,17 @@ export class Slot {
     this.ensure().setGarb?.(v);
     return this;
   }
+  /**
+   * The kohen's avnet (Actor.setGarb({ avnet })): worn only in the avodah, because it is sha'atnez (Rambam Klei
+   * HaMikdash 8:11; docs/decisions/people.md). on = true | false | undefined (= the pool's own: spec.avnet).
+   */
+  avnet(on) {
+    const v = on === undefined ? this.pool.spec?.avnet !== false : !!on;
+    if (v === this._avnet) return this;
+    this._avnet = v;
+    this.ensure().setGarb?.({ avnet: v });
+    return this;
+  }
   /** the figure's size: a number (0.8–1.2) | null = its seeded size (Actor.setScale — operators at a fixture at 1) */
   scale(s = null) {
     const v = Number.isFinite(s) ? s : null;
@@ -135,7 +148,8 @@ export class Slot {
 export class ActorPool {
   /**
    * spec: { role (person role) | animal (kind), count, seed, importance (1..3), name, prop, hand, pose,
-   *         scale? (a fixed size, e.g. 1 for an operator at a fixture), shaven? ('head' | 'all'), garb? ('black' | 'white') }
+   *         scale? (a fixed size, e.g. 1 for an operator at a fixture), shaven? ('head' | 'all'), garb? ('black' | 'white'),
+   *         avnet? (false: kohanim not in the avodah — eating, dividing the showbread, waiting; Rambam KhM 8:11) }
    * Figures are spawned eagerly by warm() (choreo init) so the first visible frame does not hitch.
    */
   constructor(sim, spec) {
@@ -157,8 +171,11 @@ export class ActorPool {
         : people.spawn({ role: s.role || 'israelite', seed, ...(Number.isFinite(s.scale) ? { scale: s.scale } : {}), ...(s.shaven ? { shaven: s.shaven } : {}), ...(s.garb ? { garb: s.garb } : {}) });
       if (a && s.prop !== undefined) a.setProp(s.prop, s.hand || 'right');
       if (a && s.pose) a.setPose(s.pose);
+      // a pool not in the avodah (the meal, the showbread's division): the sha'atnez avnet off (qa-r2 SIM-R2-1)
+      if (a && s.avnet === false) a.setGarb?.({ avnet: false });
     }
     if (!a) a = nullActor();
+    this.slots[i]._avnet = s.avnet !== false;
     if (s.prop !== undefined) { this.slots[i]._prop = s.prop || null; this.slots[i]._hand = s.hand || 'right'; }
     return a;
   }

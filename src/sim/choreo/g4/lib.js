@@ -137,7 +137,7 @@ export class Itin {
     const rev = d1 < d0, side = opts.side || 0;
     const q0 = route.sample(d0, _q0, side, rev);
     const leg = { kind: WALK, t0: this.T, t1: this.T + dur, route, d0, d1, m0: this.m, side, rev,
-      ox: 0, oy: 0, oz: 0, hPrev: NaN, hStart: route.sample(d0 + (rev ? -1 : 1) * Math.min(0.5, len), _q1, side, rev).heading,
+      ox: 0, oy: 0, oz: 0, hPrev: NaN, hStart: NaN,   // (the heading it sets off on: done(), only after a stand)
       pose: opts.pose || 'walk', prop: opts.prop ?? null, hand: opts.hand || 'right', props2: opts.left ?? null };
     if (this.end) {
       leg.ox = this.end.X - q0.X; leg.oy = this.end.Y - q0.Y; leg.oz = this.end.Z - q0.Z;
@@ -191,7 +191,10 @@ export class Itin {
       if (g.kind !== STAND || !g.turn) continue;
       const p = L[i - 1], n = L[i + 1];
       if (p) g.hIn = p.kind === STAND ? p.h : p.hEnd;
-      if (n && n.kind === WALK) { g.hOut = n.hStart; n.hPrev = n.hStart; }   // turned already: the walk sets off straight
+      if (n && n.kind === WALK) {
+        if (!Number.isFinite(n.hStart)) n.hStart = n.route.sample(n.d0 + (n.rev ? -1 : 1) * Math.min(0.5, Math.abs(n.d1 - n.d0)), _q1, n.side, n.rev).heading;
+        g.hOut = n.hStart; n.hPrev = n.hStart;   // turned already: the walk sets off straight
+      }
     }
     return this;
   }
@@ -262,6 +265,12 @@ export class Follower {
     if (!g) { out.X = s.X; out.Y = s.Y; out.Z = s.Z; out.heading = s.heading; out.pose = this.standPose; out.phase = null; out.walking = false; out.still = false; out.m = m; out.prop = null; out.left = null; out.leg = this; out.lead = true; return out; }
     const len = Math.abs(g.d1 - g.d0);
     this.lead._walkAt(g, Math.min(len, Math.max(0, m - g.m0)), out);
+    // before the leader has gone a rope's length it stands that much behind his start, on the way he sets off (where
+    // they come in together), not under him
+    if (s.m < this.lag) {
+      const h = (out.heading * Math.PI) / 180, b = (this.lag - s.m) / AMAH;
+      out.X -= Math.sin(h) * b; out.Y -= Math.cos(h) * b;
+    }
     out.m = m;
     out.walking = s.walking && s.m > this.lag;
     out.pose = out.walking ? this.walkPose : this.standPose;

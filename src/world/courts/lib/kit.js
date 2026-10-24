@@ -7,7 +7,7 @@
 //   'curtain:<gate id>'    the gate's parochet; userData.open(f): 0 = drawn across the opening, 1 = gathered at the jambs
 //   'wheel:<element id>'   userData.spin(angleRad) turns the wheel about its axle
 import {
-  Group, Object3D, InstancedMesh, Mesh, Matrix4, Quaternion, Vector3, BoxGeometry, BufferGeometry,
+  Group, Object3D, InstancedMesh, Mesh, Matrix4, Quaternion, Vector3, BoxGeometry, BufferGeometry, CylinderGeometry,
   Float32BufferAttribute, DynamicDrawUsage,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
@@ -186,32 +186,67 @@ const boxAt = (x0, y0, z0, x1, y1, z1) => {
   g.translate((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2);
   return g;
 };
+/** merge LOCAL parts with world-scaled UVs, each part projected by its own normals (a part flagged userData.mkUV keeps
+ *  the UVs it carries — the smooth-shaded mouldings, whose UVs come from their flat faces) */
 const finishLocal = (parts) => {
   const g = mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p)).map((p) => {
     for (const k of Object.keys(p.attributes)) if (!['position', 'normal', 'uv'].includes(k)) p.deleteAttribute(k);
+    if (!p.userData.mkUV) applyWorldUV(p);
     return p;
   }), false);
-  applyWorldUV(g);
   g.computeBoundingSphere();
   return g;
 };
 
-/** Local quads (amot in, meters out) with flat normals; each [a, b, c, d, hint] is turned to face its hint. */
+/**
+ * Local quads (amot in, meters out) with flat normals; each [a, b, c, d, hint] is turned to face its hint.
+ * A sixth element zs (±1) makes the quad a bevel from a face to a sunk panel (a, b on the face, c, d on the panel):
+ * its normal sweeps from near the face's (±z) at a, b to its own slope at c, d — an ovolo, shaded smooth (qa-r2-fix-world:
+ * a flat bevel of polished metal turned to the sun lit up as one even strip of light) ⚙. UVs from the flat faces.
+ */
 export function quadsLocal(list) {
-  const A = AMAH, p = [], n = [];
+  const A = AMAH, p = [], n = [], uvp = [];
   const sub3 = (u, v) => [u[0] - v[0], u[1] - v[1], u[2] - v[2]];
   const cross3 = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
-  for (const [a, b, c, d, hint] of list) {
-    let q = [a, b, c, d];
+  const unit = (v) => { const l = Math.hypot(...v) || 1; return v.map((x) => x / l); };
+  for (const [a, b, c, d, hint, zs] of list) {
+    let q = [a, b, c, d], ord = [0, 1, 2, 3];
     let N = cross3(sub3(b, a), sub3(c, a));
-    if (N[0] * hint[0] + N[1] * hint[1] + N[2] * hint[2] < 0) { q = [a, d, c, b]; N = N.map((v) => -v); }
-    const l = Math.hypot(...N) || 1;
-    for (const i of [0, 1, 2, 0, 2, 3]) { p.push(q[i][0] * A, q[i][1] * A, q[i][2] * A); n.push(N[0] / l, N[1] / l, N[2] / l); }
+    if (N[0] * hint[0] + N[1] * hint[1] + N[2] * hint[2] < 0) { q = [a, d, c, b]; ord = [0, 3, 2, 1]; N = N.map((v) => -v); }
+    N = unit(N);
+    const vn = zs ? [0, 1, 2, 3].map((k) => (ord[k] < 2 ? unit([N[0], N[1], N[2] + 0.8 * zs]) : unit([N[0], N[1], N[2] + 0.1 * zs]))) : null;
+    for (const i of [0, 1, 2, 0, 2, 3]) {
+      p.push(q[i][0] * A, q[i][1] * A, q[i][2] * A);
+      const m = vn ? vn[i] : N;
+      n.push(m[0], m[1], m[2]);
+      uvp.push(N[0], N[1], N[2]);
+    }
   }
   const g = new BufferGeometry();
   g.setAttribute('position', new Float32BufferAttribute(p, 3));
+  // UVs projected from the flat normals, then the shading normals put in
+  g.setAttribute('normal', new Float32BufferAttribute(uvp, 3));
+  applyWorldUV(g);
   g.setAttribute('normal', new Float32BufferAttribute(n, 3));
-  g.setAttribute('uv', new Float32BufferAttribute(new Float32Array((p.length / 3) * 2), 2));
+  g.userData.mkUV = true;
+  return g;
+}
+
+/** the leaf's two vertical edges (local x = 0 and x = w, metres) shaded as rounded arrises across its thickness: the
+ *  edge faces' normals turn toward the face they meet (up to ±0.9 at the frames' outer faces) ⚙ (qa-r2-fix-world: a
+ *  sunlit flat edge of gold or bronze read as a slit of light beside the jamb) */
+function roundEdges(g, w, zMax) {
+  const p = g.attributes.position, nr = g.attributes.normal, e = 1e-4;
+  for (let i = 0; i < p.count; i++) {
+    const nx = nr.getX(i);
+    if (Math.abs(nx) < 0.99) continue;
+    const x = p.getX(i);
+    if (Math.abs(x) > e && Math.abs(x - w) > e) continue;
+    const k = 0.9 * Math.max(-1, Math.min(1, p.getZ(i) / zMax));
+    const l = Math.hypot(nx, k);
+    nr.setXYZ(i, nx / l, 0, k / l);
+  }
+  nr.needsUpdate = true;
   return g;
 }
 
@@ -311,10 +346,10 @@ export function leafGeometry(w, h, t, style, detail, holes = [], o = {}) {
         // the chamfered ring round the sunk panel (mitred at the corners)
         const c = cham;
         quads.push(
-          [[x0, y0, zt], [x1, y0, zt], [x1 - c, y0 + c, zf], [x0 + c, y0 + c, zf], [0, 1, s]],
-          [[x0, y1, zt], [x1, y1, zt], [x1 - c, y1 - c, zf], [x0 + c, y1 - c, zf], [0, -1, s]],
-          [[x0, y0, zt], [x0, y1, zt], [x0 + c, y1 - c, zf], [x0 + c, y0 + c, zf], [1, 0, s]],
-          [[x1, y0, zt], [x1, y1, zt], [x1 - c, y1 - c, zf], [x1 - c, y0 + c, zf], [-1, 0, s]],
+          [[x0, y0, zt], [x1, y0, zt], [x1 - c, y0 + c, zf], [x0 + c, y0 + c, zf], [0, 1, s], s],
+          [[x0, y1, zt], [x1, y1, zt], [x1 - c, y1 - c, zf], [x0 + c, y1 - c, zf], [0, -1, s], s],
+          [[x0, y0, zt], [x0, y1, zt], [x0 + c, y1 - c, zf], [x0 + c, y0 + c, zf], [1, 0, s], s],
+          [[x1, y0, zt], [x1, y1, zt], [x1 - c, y1 - c, zf], [x1 - c, y0 + c, zf], [-1, 0, s], s],
         );
         if (style === 'bronze') {
           // a cast domed boss with a fillet at its foot ⚙
@@ -343,9 +378,15 @@ export function leafGeometry(w, h, t, style, detail, holes = [], o = {}) {
       }
     }
     if (quads.length) parts.push(quadsLocal(quads));
+    // the hinge stile turned round, a pivot post (a heavy leaf turns on pivots in sockets in the threshold and lintel)
+    // ⚙ (qa-r2-fix-world): the leaf's flat hinge end, turned to the sun 0.2 amah out of the reveal when the leaf
+    // stood open, read as a slit of light; the half-round post's back half lies in the reveal, and as the post turns
+    // in place it shows a rounded, graded highlight instead
+    const R = t / 2 + 0.14;
+    parts.push(new CylinderGeometry(R * A, R * A, h * A, detail >= 2 ? 16 : 10, 1, true, Math.PI, Math.PI).translate(0, (h / 2) * A, 0));
   }
   astragal();
-  return finishLocal(parts);
+  return roundEdges(finishLocal(parts), w * A, (t / 2 + (detail >= 1 ? 0.14 : 0)) * A);
 }
 
 // ------------------------------------------------------------------------------------------------ curtains

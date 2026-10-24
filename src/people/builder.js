@@ -16,6 +16,8 @@ export const PAT = {
   FAT: 20, COAT: 21, EYE: 22, HAIR_SHELL: 23, FLEECE_SHELL: 24, FACE1: 25, WOUND: 26, AEYE: 27, ROPE: 28, SALT: 29,
   BREAD: 30, FLOUR: 31, LIQUID: 32, FEATHER: 33, NAIL: 34, COAT_LONG: 35, MUZZLE: 36, HIDE: 38, CHAR: 39, BARK: 40,
 };
+// qa-r2: added to a vertex's pattern id: the cloth is kept outside the arms in the vertex shader (mantles; material.js)
+export const MANTLE_ARMS = 64;
 
 const _c = new Color();
 export function lin(hex) { _c.set(hex); return [_c.r, _c.g, _c.b]; } // three converts sRGB hex → linear

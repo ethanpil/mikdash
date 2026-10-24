@@ -34,6 +34,7 @@ const CANDIDATE = [48.6, 381.0, 16];
 
 export default {
   id: 'sanhedrin',
+  planRank: 2,        // the boot's plan job (g4/book.js ORDER)
   lead: 40,
   lag: 20,
   importance: 2,
@@ -61,6 +62,7 @@ export default {
 
   update(ctx, state, t, dt, sim) {
     const P = plan(ctx, state, sim);
+    if (!P) return;
     for (const tr of state.troupes) tr.update(ctx, sim, t);
     if (sim.crossing.ok) for (const c of P.cues) if (crossed(state, c.at)) sim.cueAt(c.key, c.at, () => { if (observerNear(ctx, c.pos, CAPTION_RANGE)) sim.caption(c.text, { id: 'sanhedrin', duration: 7 }); });
   },
@@ -80,6 +82,10 @@ const attendance = (sim) => Math.min(N, Math.max(Math.ceil(N / 2), Math.round(N 
 
 const WHO = 'sanhedrin';
 function plan(ctx, state, sim) {
+  if (state.plan && state.planGen === sim.generation && state.planDate === ctx.time?.dateString) return state.plan;
+  // not in the boot's undrawn frames (the plan job builds it — runtime.js planRank, qa-r2 SIM-R2-12); a drawn frame
+  // first finishes that job
+  if (sim.planNow && !sim.planNow()) return null;
   if (state.plan && state.planGen === sim.generation && state.planDate === ctx.time?.dateString) return state.plan;
   planBefore(ctx, sim, WHO);
   const book = g4Book(ctx, sim);

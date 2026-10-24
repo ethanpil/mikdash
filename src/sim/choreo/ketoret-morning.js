@@ -16,7 +16,7 @@
 import { places } from './g3/places.js';
 import { runScripts, FreeProps } from './g3/script.js';
 import { POOLS, newDay } from './g3/day.js';
-import { windows, prostPhase, PROSTRATE_S, CUE_LEAD } from './g3/plan.js';
+import { windows, prostPhase, PROSTRATE_S, CUE_LEAD, BLESS_DOWN } from './g3/plan.js';
 import { buildMorning } from './g3/morning.js';
 import { buildAfternoon } from './g3/afternoon.js';
 import { buildSongs } from './g3/song.js';
@@ -45,6 +45,9 @@ export default {
   init(ctx, events, sim) {
     const P = places(ctx);
     sim.setBounds([115, 262, 0], [292, 400, 40]);
+    // the blessing's listed window is its raised hands: from its start (the kohanim on the steps) to the hands coming
+    // down (morning.js); the staging keeps the data's window (qa-r1 SIM-3)
+    sim.schedule?.retime?.('birkat-kohanim', (t0, t1) => [t0, since(t1, t0) > BLESS_DOWN ? wrap(t0 + BLESS_DOWN) : t1]);
     const pools = {};
     for (const [k, s] of Object.entries(POOLS)) pools[k] = sim.pool({ name: k, role: s.role, count: s.count, seed: s.seed, importance: s.importance });
     const M = P.maamad, third = (M.y1 - M.y0) / 3;

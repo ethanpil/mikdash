@@ -1119,6 +1119,15 @@ function altarPlan(P, T, M, A, altarAtNight) {
       out.stack.push({ name: c.pile.name, at: A.limbStack[c.j % A.limbStack.length], h: 30 + 50 * (c.j % 3), from: E0 - 2, until: null });
     });
     out.carries = carries; out.woods = woods; out.E = [E0, E1];
+    // the stations round the pile are booked: a tender stands only at a station no one else holds then (qa-r2 SIM-R2-9:
+    // on Friday and Shabbat evenings two or three chose the same one). The crew is planned man by man, each keeping
+    // clear of those planned before him: he cuts a wait short where another is due at his station, and moves on to a
+    // free one ⚙
+    const occ = st.map(() => []);
+    const freeFor = (s, a, b) => occ[s].every(([x, y]) => b <= x || a >= y);
+    const nextBusy = (s, a) => { let m = Infinity; for (const [x, y] of occ[s]) if (y > a && x < m) m = x; return m; };
+    const pick = (order, a, b) => order.find((s) => freeFor(s, a, b)) ?? null;
+    const near = (s) => [0, 1, 2, 3, 4, 5].filter((q) => q !== s).sort((p, q) => Math.hypot(st[p].at[0] - st[s].at[0], st[p].at[1] - st[s].at[1]) - Math.hypot(st[q].at[0] - st[s].at[0], st[q].at[1] - st[s].at[1]));
     P.crew.forEach((key, i) => {
       const x = A.xE + (i % 2 ? 1.2 : -1.2);
       // out of Beit HaMoked by its gate (open by day), round the altar's east to the vessels by the ramp's west foot for
@@ -1129,8 +1138,21 @@ function altarPlan(P, T, M, A, altarAtNight) {
       tr.hold(0.12, { h: 270, pose: 'bow', phase: (l, d) => 0.5 * clamp(l / d) });
       tr.hold(0.1, { h: 270, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), prop: 'fork' });
       tr.walk([[x, A.yFoot - 1.8 - 0.5 * i, Z16], [x, A.yFoot + 0.6, A.rampZ(A.yFoot + 0.6)], [x, A.yHead + 0.8, A.Zt]], { speed: WALK, prop: 'fork' });
-      let sIdx = [0, 2, 1, 3][i] ?? 0;
+      const home = [0, 2, 1, 3][i] ?? 0;
+      let sIdx = pick([home, ...near(home)], tr.now(), tr.now() + 2.5) ?? home;
       tr.walk([st[sIdx].at], { speed: WALK, prop: 'fork' });
+      let arr = tr.now();
+      const leave = () => { occ[sIdx].push([arr, tr.now()]); };
+      /** to another station (free when he gets there), booking the one he leaves */
+      const moveTo = (order, speed) => {
+        const s2 = pick(order, tr.now(), tr.now() + 2.5);
+        if (s2 == null || s2 === sIdx) return false;
+        leave();
+        sIdx = s2;
+        tr.walk([st[sIdx].at], { speed, prop: 'fork' });
+        arr = tr.now();
+        return true;
+      };
       const jobs = [];
       if (key === 'y2') for (const c of carries) jobs.push({ t: c.t, kind: 'limb', j: c.j, pile: c.pile });
       if (key === 'y3') for (const tw of woods) jobs.push({ t: tw, kind: 'wood' });
@@ -1139,9 +1161,13 @@ function altarPlan(P, T, M, A, altarAtNight) {
       const stays = key === 'y0' && T.late;
       const end = stays ? T.late[0] : E1;
       let b = 0;
-      while (tr.now() < end - 0.6) {
+      while (tr.now() < end - 0.6 && b < 4000) {
         const jb = jobs.find((x) => !x.done && x.t >= tr.now() - 0.01);
-        const blockEnd = Math.min(end - 0.6, jb ? jb.t : end, tr.now() + 3 + 4 * R(i, b, 'L'));
+        let blockEnd = Math.min(end - 0.6, jb ? jb.t : end, tr.now() + 3 + 4 * R(i, b, 'L'));
+        // another is due at this station: the wait ends before he comes, and this one moves on
+        const nb = nextBusy(sIdx, tr.now());
+        const forced = nb < blockEnd + 0.3;
+        if (forced) blockEnd = Math.max(tr.now(), nb - 0.3);
         // tending: the fork in the fire for a while, then a rest with it (Tamid 2:1 — the forks; TuM 1:6 — turning)
         const sNow = st[sIdx];
         const stoke = Math.min(blockEnd - tr.now(), 0.8 + 1.6 * R(i, b, 'S'));
@@ -1150,20 +1176,33 @@ function altarPlan(P, T, M, A, altarAtNight) {
         b++;
         if (jb && Math.abs(tr.now() - jb.t) < 0.02) {
           jb.done = true;
+          leave();
           if (jb.kind === 'limb') limbTrip(tr, A, jb, out);
           else if (jb.kind === 'wood') woodTrip(tr, A, out);
           else springTrip(tr, A, out);
-          sIdx = (sIdx + 2) % 4;
+          const back = (sIdx + 2) % 4;
+          sIdx = pick([back, ...near(back)], tr.now(), tr.now() + 2.5) ?? back;
           tr.walk([st[sIdx].at], { speed: WALK, prop: 'fork' });
+          arr = tr.now();
+        } else if (forced) {
+          // to the nearest free station; none free (it cannot be: six stations, four men) — a short wait aside
+          if (!moveTo(near(sIdx), SLOW)) tr.hold(0.15, { h: sNow.h, pose: 'stand', prop: 'fork' });
         } else if (R(i, b, 'M') < 0.4 && end - tr.now() > 2) {
           // round the pile, mostly on its south and east; now and then to its north side ⚙
-          sIdx = R(i, b, 'N') < 0.15 ? 4 + (i % 2) : (sIdx + (R(i, b, 'D') < 0.5 ? 1 : 3)) % 4;
-          tr.walk([st[sIdx].at], { speed: SLOW, prop: 'fork' });
+          const want = R(i, b, 'N') < 0.15 ? 4 + (i % 2) : (sIdx + (R(i, b, 'D') < 0.5 ? 1 : 3)) % 4;
+          moveTo([want], SLOW);
         }
+      }
+      // the last wait (to midnight, or until the crew goes down) at a station free for all of it
+      const last = stays ? T.late[0] : E1 + 0.15 * i;
+      if (!freeFor(sIdx, tr.now(), last)) {
+        const s2 = pick(near(sIdx), tr.now(), last);
+        if (s2 != null) { leave(); sIdx = s2; tr.walk([st[sIdx].at], { speed: SLOW, prop: 'fork' }); arr = tr.now(); }
       }
       if (stays) {
         // after midnight (late-turning): he alone turns what lies on the fire now and then (visits below)
         tr.until(T.late[0], { pose: 'stand', prop: 'fork' });
+        leave();
         visits(tr, A, DAY);
         out.episodes[key] = [tr.episode()];
         return;
@@ -1171,6 +1210,7 @@ function altarPlan(P, T, M, A, altarAtNight) {
       // down the west half, the fork laid by, and in to sleep in the Moked (Friday: by its gate, still open; else the
       // wicket) ⚙
       tr.until(E1 + 0.15 * i, { pose: 'stand', prop: 'fork' });
+      leave();
       forkDown(tr, i);
       tr.walk(friday ? toMokedGate : toWicket, { speed: WALK });
       if (!friday) out.wicket.push([tr.now() - 0.42, tr.now() + 0.1]);
@@ -1317,7 +1357,9 @@ function limbTrip(tr, A, jb, out) {
   tr.hold(0.14, { face: s, pose: 'bow', phase: (l, d) => 0.5 * clamp(l / d) });
   const tPick = tr.now();
   tr.hold(0.1, { face: s, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), prop: name });
-  tr.walk([[A.xE - 1, s[1] + 0.6, A.rampZ(s[1] + 0.6)], A.upTop, [A.g.max[0] + 1.6, A.gy + 0.4 - 1.2 * (jb.j % 3), A.Zt]], { speed: WALK * 0.9, pose: 'carry_limbs_walk', prop: name });
+  // (the toss from the east face between its two stations, clear of whoever tends at them — qa-r2 SIM-R2-9: every third
+  // limb was thrown from station 2's own spot) ⚙
+  tr.walk([[A.xE - 1, s[1] + 0.6, A.rampZ(s[1] + 0.6)], A.upTop, [A.g.max[0] + 1.6, A.gy - 0.55, A.Zt]], { speed: WALK * 0.9, pose: 'carry_limbs_walk', prop: name });
   tr.hold(0.04, { h: 270, pose: 'carry_limbs', prop: name });
   const tToss = tr.now() + 0.07;
   tr.hold(0.14, { h: 270, pose: 'toss', phase: (l, d) => clamp(l / d), props: [name, null] });
@@ -1334,7 +1376,7 @@ function woodTrip(tr, A, out) {
   tr.walk([A.downTop, A.downFoot, [A.xW + 1, A.yFoot - 1.8, 16], from], { speed: WALK });
   tr.hold(0.12, { h: 180, pose: 'bow', phase: (l, d) => 0.5 * clamp(l / d) });
   tr.hold(0.1, { h: 180, pose: 'bow', phase: (l, d) => 0.5 + 0.5 * clamp(l / d), prop: 'log' });
-  tr.walk([[A.xE, A.yFoot - 0.6, 16], A.upFoot, A.upTop, [A.g.max[0] + 1.6, A.gy - 0.8, A.Zt]], { speed: WALK * 0.85, pose: 'carry_shoulder_walk', prop: 'log' });
+  tr.walk([[A.xE, A.yFoot - 0.6, 16], A.upFoot, A.upTop, [A.g.max[0] + 1.6, A.gy + 0.65, A.Zt]], { speed: WALK * 0.85, pose: 'carry_shoulder_walk', prop: 'log' });
   out.tosses.push(tr.now() + 0.08);
   tr.hold(0.16, { h: 270, pose: 'toss', phase: (l, d) => clamp(l / d), props: ['log', null] });
 }

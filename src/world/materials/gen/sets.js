@@ -6,19 +6,26 @@
 // Research: report Part VII §21 (materials matrix), §23 (fabrics), §24 (metals), §26 (palette), Part V §13.11.
 // Dimensions marked "recon." are reconstruction — see docs/decisions/materials*.md.
 
-// Herodian coursing: 12 courses per tile in an irregular sequence of shayish (0), kochla (1) and marmara (2) — kochla
-// every 3rd, 4th, 5th course, never a strict period (materials-2-fix: a strict white/kochla/marmara cycle read as
-// pinstripes from 50 m) — one course set out and one drawn in (even rows set out, as the builders model them).
+// Herodian coursing: 12 courses per tile, one course set out and one drawn in (even rows set out, as the builders model
+// them — "apik shefa v'a'eil shefa", Bava Batra 4a; Rashi Sukkah 51b: "a row of stones set in and a row set out"). The
+// row code still carries a nominal marble per course (the old irregular sequence) for ctx.mats.courseAt(); the
+// generator no longer colours by it: qa-r1 — the marble is chosen PER STONE (Rashi Sukkah 51b on "like the waves of the
+// sea": "the stones differ in appearance one from another, and the eyes looking at them wander"); a course of one
+// marble read as a blue-grey stripe across the whole wall.
 const HERODIAN_SEQ = [0, 2, 1, 0, 2, 1, 0, 0, 2, 1, 0, 2];
 const herodianRows = (r) => [HERODIAN_SEQ[r % 12], r % 2 === 0 ? 1 : 0];
 // the course-table variant (herodian_wall_courses): course heights 1.00–1.20 m in whole cm, summing to 13.2 m (recon.)
 export const HERODIAN_COURSES = [1.12, 1.04, 1.18, 1.08, 1.0, 1.15, 1.2, 1.06, 1.1, 1.02, 1.16, 1.09];
 
-// Kochla (blue-green banded marble): ONE palette for the wall courses and the monolithic marble_kochla — base, band
-// (slightly deeper layers) and the sparse pale streaks. A pale grey with a hint of grey-green: its value ~0.3 stop
-// under the white, its chroma half that of materials-2 and its residual cast green rather than blue (skylight before
-// dawn amplified the blue into stripes).
-const KOCHLA = { base: '#cbd0ca', band: '#bfc6c0', streak: '#dadcd7' };
+// Kochla (blue-green banded marble): ONE palette for the wall stones and the monolithic marble_kochla — base, band
+// (slightly deeper layers) and the sparse pale streaks. A pale grey with a hint of grey-green: its value ~0.2 stop
+// under the white (qa-r1: was 0.3 — scattered stone by stone, the deeper kochla read as a patchwork in shade under
+// blue skylight), its chroma half that of materials-2 and its residual cast green rather than blue.
+// qa-r2: whole kochla blocks still read as blue-green tiles among the cream stones (a block-wide cast 12 levels bluer
+// than the shayish, b − r): the stone's ground now carries the shayish's warmth, a little deeper in value, and the
+// grey-green lives in its bedding layers (band), so the colour varies WITHIN each stone, as in the banded green
+// marbles (cipollino) — the "waves of the sea" (Bava Batra 4a) — and no block reads as a different colour.
+const KOCHLA = { base: '#d7d2c6', band: '#c3c7be', streak: '#e3e0d6' };
 
 const marbleWall = {
   // shayish (white) · kochla (blue-green) · marmara (veined) — Bava Batra 4a; Part VII §21 #1, §26
@@ -26,11 +33,15 @@ const marbleWall = {
   uC3: '#cbc6bd', uC4: KOCHLA.streak, uC5: '#a39e96', uC6: KOCHLA.band,
 };
 const herodianU = {
-  // uP0 margin 11 cm (8.3–13.8 per side), boss raise 15 mm (11–19), joint 1 mm, set-out 4 cm;
-  // uP1 boss pit depth 2.2 mm; uP3 bevel 4 cm (3.2–5), tone ±4.5 %, hue cast 0.6, vein slant ±0.45 rad
-  uP0: [0.11, 0.015, 0.001, 0.04], uP1: [1, 0.0022, 0.6, 1], uP2: [0.004, 0.004, 0.05, 0.35], uP3: [0.04, 0.045, 0.6, 0.9], ...marbleWall,
+  // uP0 margin 10 cm (8–12 per side), boss raise 15 mm (11–19), joint 1 mm, set-out 4 cm;
+  // uP1 boss pit depth 2.2 mm; uP3 bevel 4 cm (3.2–5), tone ±3.5 % per stone, hue cast 0.5 (qa-r2: warm cream .. neutral,
+  // b/r −3 % .. +1 %; was ±2.5–3 % into cool grey, which drew a blue-grey / beige patchwork), vein slant ±0.45 rad
+  uP0: [0.10, 0.015, 0.001, 0.04], uP1: [1, 0.0022, 0.6, 1], uP2: [0.004, 0.004, 0.05, 0.35], uP3: [0.04, 0.035, 0.5, 0.9], ...marbleWall,
 };
-const herodianInnerU = { ...herodianU, uP0: [0.11, 0.0, 0.001, 0.04], uP1: [0, 0, 0.4, 1], uP2: [0.005, 0.003, 0.05, 0.3] };
+// the dressed inner / court faces (qa-r1): the same drafted margins (8–12 cm, combed) round a lower, finer boss (12 mm
+// raise, shallower pits) — the court walls are Herodian ashlar as much as the outer faces; the margins fade out where
+// the texture cannot resolve them (on low), which keeps a plain face there
+const herodianInnerU = { ...herodianU, uP0: [0.10, 0.012, 0.001, 0.04], uP1: [1, 0.0018, 0.4, 1], uP2: [0.005, 0.003, 0.05, 0.3] };
 
 // firewood pile (Tamid 2:3): fig (smooth warm grey), walnut (dark grey-brown, furrowed), oil-tree read as
 // Aleppo pine (grey-brown plate faces over red-brown fissures); split wood (pale)
@@ -49,8 +60,9 @@ export const SETS = {
     layout: { rowH: 1.1, q: 0.5, minL: 2.0, maxL: 5.0, gap: 0.75, rowType: herodianRows },
     u: herodianU,
   },
+  // (qa-r1: 896 → 1280 px, 10 mm/texel on high, so the inner faces' margins, bevels and pecked bosses resolve; +9 MB on high)
   herodian_inner: {
-    kind: 'herodian', tile: [13, 13.2], px: [896, 910], seed: 11,
+    kind: 'herodian', tile: [13, 13.2], px: [1280, 1300], seed: 11,
     layout: { rowH: 1.1, q: 0.5, minL: 2.0, maxL: 5.0, gap: 0.75, rowType: herodianRows },
     u: herodianInnerU,
   },
@@ -62,7 +74,7 @@ export const SETS = {
     u: herodianU,
   },
   herodian_inner_c: {
-    kind: 'herodian', tile: [13, 13.2], px: [896, 910], seed: 13,
+    kind: 'herodian', tile: [13, 13.2], px: [1280, 1300], seed: 13,
     layout: { rowH: 1.1, q: 0.5, minL: 2.0, maxL: 5.0, gap: 0.75, rowType: herodianRows, heights: HERODIAN_COURSES },
     u: herodianInnerU,
   },
@@ -83,12 +95,16 @@ export const SETS = {
       uC0: '#dccfb6', uC1: '#d3c5a9', uC2: '#cbbd9f', uC3: '#a69c8a', uC4: '#f0ede5',
     },
   },
+  // qa-r2: from a distance the slabs read as a pixelated checkerboard (three palette colours ±7 % and a ±9 % value
+  // spread per slab, plus the patch's ±6 %): now a close palette and ±2.5 % per slab (about ±3 % in all), and rows that
+  // each draw their own slab lengths (short 0.75–1.5 m to long 2–3 m) on a 25 cm start quantum. The large-scale life
+  // comes from the macro dust (MAC.mount, 20–60 m) and the worn routes (index.js PAVE_ROUTES), not from slab tints.
   paving_mount: {
     kind: 'paving', tile: [10, 10], px: [832, 832], seed: 31,
-    layout: { rowH: 1.25, q: 0.5, minL: 1.0, maxL: 2.5, gap: 0.5 },
+    layout: { rowH: 1.25, q: 0.25, minL: 1.0, maxL: 2.5, gap: 0.5, rowLens: [[0.75, 1.5], [1.0, 2.0], [1.25, 2.5], [1.75, 3.0]] },
     u: {
-      uP0: [0.002, 0.008, 0.016, 0.6], uP1: [1, 0.72, 0.004, 0.004], uP2: [0.3, 0.1, 0.14, 0.3],
-      uC0: '#d4cab5', uC1: '#c2b7a0', uC2: '#d8d3c6', uC3: '#aaa395', uC4: '#a39d92',
+      uP0: [0.002, 0.008, 0.016, 0.6], uP1: [1, 0.72, 0.004, 0.004], uP2: [0.3, 0.1, 0.08, 0.3], uP3: [0.025, 0.4, 0, 0],
+      uC0: '#d4cab5', uC1: '#cec4af', uC2: '#d6cfc0', uC3: '#aaa395', uC4: '#a39d92',
     },
   },
   paving_azarah: {
@@ -125,15 +141,17 @@ export const SETS = {
     u: { uP0: [0.0006, 0.0002, 0.6, 0.5], uP1: [0.55, 0.9, 0, 0], uC0: '#d2c9b6', uC1: '#aaa292', uC2: '#9d968a' },
   },
   // closely packed rounded stones ~25 / ~11 cm with warped outlines (4 cm), low pillows (9 / 4 mm) buried in broad
-  // lime fillets, so they read as soft bulges under thick renewed lime; faint horizontal cloth-wipe strokes
+  // lime fillets, so they read as soft bulges under thick renewed lime; faint horizontal cloth-wipe strokes.
+  // qa-r1: the limed mass swells ±1.3 cm over ~0.4–1.5 m (uP3.w), fine crazing of the lime skin (uP3.y), and an
+  // off-white lime (#ece7dc; a lime wash months old, not paint-white)
   whitewash: {
     kind: 'whitewash', tile: [4, 4], px: [704, 704], seed: 67,
-    u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [0, 0.9, 0.04, 0.6], uC0: '#f3f1ea', uC1: '#c6c1b6', uC2: '#8e2b1c' },
+    u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [0, 0.9, 0.04, 0.9], uP3: [0, 0.5, 0, 0.016], uC0: '#ece7dc', uC1: '#c2bcaf', uC2: '#8e2b1c' },
   },
-  // same skin (same seed/tile) so the painted girdle continues the whitewashed stones exactly
+  // same skin (same seed/tile/undulation) so the painted girdle continues the whitewashed stones exactly
   sikra: {
     kind: 'whitewash', tile: [4, 4], px: [512, 512], seed: 67,
-    u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [1, 0.86, 0.04, 0.6], uC0: '#f3f1ea', uC1: '#c6c1b6', uC2: '#8f2a1b' },
+    u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [1, 0.86, 0.04, 0.9], uP3: [0, 0.5, 0, 0.016], uC0: '#ece7dc', uC1: '#c2bcaf', uC2: '#8f2a1b' },
   },
   // the Even Shetiyah (world-4): pale Jerusalem limestone beside the Kodesh HaKodashim's gold, so lighter stone, fewer
   // and shallower crevices, little patina or soil (it stands indoors) and a weaker baked cavity AO (0.55 -> 0.3)
@@ -158,14 +176,17 @@ export const SETS = {
   goldplate: {
     kind: 'goldplate', tile: [5.76, 2.88], px: [896, 448], seed: 89, metal: true, hRange: 0.005,
     // sheets 1 amah high, 1.5–3 amot long (recon.); hammer dishes 1 mm deep on ~2.5 cm cells, the sheet
-    // undulating ±1–2 mm over 20–40 cm; sheets matched closely (rough ±0.005, tone ±0.008)
+    // undulating ±1–2 mm over 20–40 cm; sheets matched closely (rough ±0.005, tone ±0.008); qa-r2: roughness 0.25–0.4
+    // varied blow by blow (±0.03) and a little rougher on the ridges between dishes (+0.05), mean ≈ 0.33
     layout: { rowH: 0.48, q: 0.24, minL: 0.72, maxL: 1.44, gap: 0.24 },
-    u: { uP0: [0.0008, 0.0004, 0.001, 0.025], uP1: [0.3, 0.005, 0.002, 1], uP2: [0.008, 0, 0, 0] },
+    u: { uP0: [0.0008, 0.0004, 0.001, 0.025], uP1: [0.3, 0.005, 0.002, 0.7], uP2: [0.008, 0.03, 0.05, 0] },
   },
   // the Kodesh relief (materials-2-fix: relief heights in metres inside the kind, up to ~2.3 cm at the head)
   relief: {
     kind: 'relief', tile: [3.84, 2.88], px: [1088, 816], seed: 97, metal: true,
-    u: { uP0: [0, 0.48, 1.92, 0.0012], uP1: [0.2, 0.34, 0.00008, 0] },
+    // qa-r2: raised work 0.27, the hammered ground 0.36, ± 0.025 blow to blow (0.25–0.4; ± 0.045 read as a sponge
+    // mottle under the night lamps)
+    u: { uP0: [0, 0.48, 1.92, 0.0012], uP1: [0.27, 0.36, 0.00008, 0.025] },
   },
   vessel: {
     kind: 'metal', tile: [0.5, 0.5], px: [384, 384], seed: 101, metal: true,
@@ -260,17 +281,17 @@ export const SETS = {
   whitewash_worn: {
     kind: 'whitewash', tile: [4, 4], px: [512, 512], seed: 67,
     u: {
-      uP0: [0.0035, 0.0018, 0.003, 0.0004], uP1: [0, 0.72, 0.04, 0.6], uP2: [1, 0, 0, 0], uP3: [4, 1, 1, 0],
-      uC0: '#efece4', uC1: '#b5ad9e', uC2: '#8e2b1c',
+      uP0: [0.0035, 0.0018, 0.003, 0.0004], uP1: [0, 0.72, 0.04, 0.6], uP2: [1, 0, 0, 0], uP3: [4, 1, 1, 0.006],
+      uC0: '#e8e3d8', uC1: '#b5ad9e', uC2: '#8e2b1c',
     },
   },
   whitewash_soot: {
     kind: 'whitewash', tile: [4, 4], px: [512, 512], seed: 67,
-    u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [0, 0.9, 0.04, 0.6], uP2: [0, 1, 0, 0], uC0: '#f3f1ea', uC1: '#c6c1b6', uC2: '#8e2b1c', uC3: '#4d4844' },
+    u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [0, 0.9, 0.04, 0.9], uP2: [0, 1, 0, 0], uP3: [0, 0.5, 0, 0.016], uC0: '#ece7dc', uC1: '#c2bcaf', uC2: '#8e2b1c', uC3: '#4d4844' },
   },
   whitewash_stained: {
     kind: 'whitewash', tile: [4, 4], px: [512, 512], seed: 67,
-    u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [0, 0.9, 0.04, 0.6], uP2: [0, 0, 1, 0.5], uC0: '#f3f1ea', uC1: '#c6c1b6', uC2: '#8e2b1c', uC4: '#70372b' },
+    u: { uP0: [0.009, 0.004, 0.002, 0.0003], uP1: [0, 0.9, 0.04, 0.9], uP2: [0, 0, 1, 0.25], uP3: [0, 0.5, 0, 0.016], uC0: '#ece7dc', uC1: '#c2bcaf', uC2: '#8e2b1c', uC4: '#5a2820' },
   },
   // terrain_blend layers (pack 'blend': albedo+height, normal+roughness+AO), early November: r grey limestone
   // (6 m tile: 7.8 mm/texel on high; the 8 m tile at 10 mm read smeared close up)
@@ -360,16 +381,21 @@ export const SETS = {
     kind: 'weave', tile: [0.064, 0.064], px: [256, 256], seed: 157, minPx: 192, hRange: 0.0006,
     u: { uP0: [0.001, 0.92, 0.18, 0], uP1: [0.004, 0.8, 0.85, 0.45], uP2: [6, 0, 0, 0], uC0: '#e8e1d0' },
   },
-  // a tefach-thick cloth of 24-thread cords (Shekalim 8:5): every cord twists techelet, argaman, tola'at shani and
-  // shesh. Techelet is wool dyed SKY-blue (Part VII §23); argaman red-purple, tola'at shani worm-crimson; the finer
-  // linen ply takes ~6 % of the surface; ~5 % mean reflectance (deep-dyed, deep-piled wool). 1 m tile, 8 mm cords in plain weave, 12.3 mm twist (incommensurate with the
-  // 16 mm float spacing); minPx 640 so every tier
-  // keeps >= 5 texels a cord (medium and low drew a flat heather). Tones and shares: reconstruction.
+  // a tefach-thick cloth (Shekalim 8:5) woven ma'aseh choshev (Yoma 72b) on 72 cords of 24 threads — 4 materials × 6
+  // (report Part V §13.7: every cord carries all four). qa-r2: EVERY CORD TWISTED OF FOUR PLIES — techelet (wool dyed
+  // sky-blue, Part VII §23), argaman red-purple, tola'at shani worm-crimson, shesh natural linen (the finer thread, ~12 %
+  // of the face, jittered cord to cord) — in a 2/2 twill (floats two cords long), so the colours mix evenly and the
+  // cloth shows no stripes: a deep heathered red-violet at a distance, the four colours in the twist up close. (qa-r1's
+  // compound weave in broad bands parted by linen lines read as horizontal stripes against Shekalim 8:5's cords.)
+  // 8 mm cords, 12.3 mm twist (incommensurate with the float: no plaid), a 1 m tile at 640 px on every tier (5 texels a
+  // cord on high/ultra; medium and low fade the structure into the same heather). Tones: reconstruction — deep-dyed wools
+  // (techelet #1f3a66 a deep sky-blue, argaman #4f1530, tola'at shani #8a1a24): with qa-r1's brighter blue the even mix
+  // read lilac; the far mix in the Kodesh is aimed at materials.md's deep heathered red-violet ≈ sRGB (109, 74, 79).
   parochet: {
     kind: 'weave', tile: [1, 1], px: [640, 640], seed: 163, minPx: 640, hRange: 0.005, ao: [0.004, 0.0015, 0.55],
     u: {
-      uP0: [0.008, 0.9, 0.03, 1], uP1: [0.0123, 1.0, 0.86, 0.75], uP2: [4, 0, 0.06, 0.25], uP3: [0.3, 0, 0, 0],
-      uC1: '#2a4f80', uC2: '#4a0f2a', uC3: '#7a1020', uC4: '#8c8370',
+      uP0: [0.008, 0.9, 0.03, 1], uP1: [0.0123, 1.0, 0.86, 0.75], uP2: [4, 1, 0.12, 0.3], uP3: [0.3, 0, 0, 0],
+      uC1: '#1f3a66', uC2: '#4f1530', uC3: '#8a1a24', uC4: '#bdb39b',
     },
   },
 

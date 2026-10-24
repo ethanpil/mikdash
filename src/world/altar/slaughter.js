@@ -105,20 +105,44 @@ export function buildSlaughter(A) {
       const b = new BoxGeometry(0.03 * s, 0.12 * s, 0.03 * s).translate(0.2 * s, 0.06 * s, 0);
       return mergeGeometries([a.toNonIndexed(), b.toNonIndexed()], false);
     }
+    // qa-r2-fix-world: a forged hook heavy enough to carry a bull (≈ 1.5 cm bar, was 0.9 — it read as a crack in the
+    // wood), its root under a square iron plate nailed to the block ⚙
     const c = new CatmullRomCurve3([new Vector3(-0.02 * s, 0, 0), new Vector3(0.12 * s, 0, 0), new Vector3(HOOK_CROOK[0] * s, HOOK_CROOK[1] * s, 0),
-      new Vector3(0.23 * s, 0.08 * s, 0), new Vector3(0.22 * s, 0.15 * s, 0)]);
-    return new TubeGeometry(c, d >= 2 ? 10 : 7, 0.018 * s, d >= 2 ? 6 : 4, false).toNonIndexed();
+      new Vector3(0.24 * s, 0.09 * s, 0), new Vector3(0.225 * s, 0.17 * s, 0)]);
+    const bar = new TubeGeometry(c, d >= 2 ? 12 : 8, 0.032 * s, d >= 2 ? 6 : 4, false).toNonIndexed();
+    const plate = new BoxGeometry(0.025 * s, 0.13 * s, 0.13 * s).translate(0.0125 * s, 0, 0).toNonIndexed();
+    for (const k of Object.keys(plate.attributes)) if (!bar.attributes[k]) plate.deleteAttribute(k);
+    return mergeGeometries([bar, plate], false);
   })();
   const mtx = new Matrix4(), rot = new Matrix4();
+  const ENDK = A.mat('cedar_end', 'cedar_v');
+  /** the cedar block: an (optionally chamfered) square prism, half-width h, from z0 to z1; E/W faces end grain */
+  const cedarBlock = (X, Y, z0, z1, h, ch) => {
+    const side = B.m(CEDAR), end = B.m(ENDK);
+    const x0 = X - h, x1 = X + h, y0 = Y - h, y1 = Y + h;
+    // the plan outline counter-clockwise seen from above, its corners chamfered
+    const P = ch > 0
+      ? [[x0 + ch, y0], [x1 - ch, y0], [x1, y0 + ch], [x1, y1 - ch], [x1 - ch, y1], [x0 + ch, y1], [x0, y1 - ch], [x0, y0 + ch]]
+      : [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+    for (let i = 0; i < P.length; i++) {
+      const a = P[i], b = P[(i + 1) % P.length];
+      const nx = b[1] - a[1], ny = -(b[0] - a[0]);                  // outward normal of a counter-clockwise edge
+      const isEnd = Math.abs(nx) > 0.99 * Math.hypot(nx, ny);       // an east or west face: the end grain
+      (isEnd ? end : side).quadH([a[0], a[1], z0], [b[0], b[1], z0], [b[0], b[1], z1], [a[0], a[1], z1], [nx, ny, 0]);
+    }
+    side.poly(P.map(([x, y]) => [x, y, z1]), [0, 0, 1]);
+    side.poly(P.map(([x, y]) => [x, y, z0]), [0, 0, -1]);
+  };
   for (const [X, Y, Z] of nn.pillars) {
     // plinth
     sweepRing(mm, roundedRectFn(X - 0.65, Y - 0.65, X + 0.65, Y + 0.65, (o) => 0.04 + o, fs ? 1 : 0),
       [[0, Z], [0, Z + plinthH - 0.04], [-0.04, Z + plinthH]], { mat: MAR, cap: true });
     shafts.push(lathe(shaftProf, [X, Y, Z], segs).toNonIndexed());
-    // the squared cedar block (revi'in shel erez), closed underneath by its own ring (no slit of sky along its foot)
-    const z0 = Z + shaftH, z1 = nn.topZ;
-    const CP = [[0, z0], [0, z1 - 0.05], [-0.05, z1]];
-    sweepRing(mm, roundedRectFn(X - capW / 2, Y - capW / 2, X + capW / 2, Y + capW / 2, (o) => 0.05 + o, fs ? 1 : 0), CP, { mat: CEDAR, cap: true, capBottom: true });
+    // the squared cedar block (revi'in shel erez), closed underneath (no slit of sky along its foot). qa-r2-fix-world:
+    // a timber, not a wrapped box ⚙ — its grain runs east–west along the row, so its north and south faces and its top
+    // are long grain and its east and west faces end grain (materials' cedar_end once it exists, else the grain turned
+    // across the face), its vertical arrises chamfered
+    cedarBlock(X, Y, Z + shaftH, nn.topZ, capW / 2, d >= 1 ? 0.06 : 0);
     // iron hooks, three rows in the block (Middot 3:5; Tamid 3:5) at site.js's hookRowsZ, one above another — low for a
     // lamb, middle for a ram, high for a bull (Rash, Bartenura; EK II 58) — each row two toward the flaying gaps (E, W)
     // and one on N and S ⚙. All three rows are within a standing kohen's reach (+3.2 … +3.8 ≈ 1.5–1.8 m), where the

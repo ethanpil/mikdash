@@ -10,8 +10,31 @@ import { distToPolyline, rectDist, inRect } from './plan.js';
 
 const MAX_BY_DETAIL = [700, 1400, 2400, 3000];
 
-/** A short, thick, leaning trunk splitting into three gnarled leaders that spread into the crown (metres). */
-function trunkGeometry(seg, seed, far = false) {
+/**
+ * Olive forms ⚙ (qa-r1-fix-world: three instead of one, so groves are not rows of clones). Each: the bole
+ * [r0, r1, h, rx, rz] and its leaders [r0, r1, h, rx, rz, base] (metres, radians), and the crown: ring radius and its
+ * spread, lump radius and spread, the ring's height, the top lumps' height, the vertical squash, the crown's offset
+ * from the bole (the lean) and how many lumps sit over the centre.
+ * qa-r2-fix-world: the crowns read as flat-topped acacias (a tall bare trunk under a squashed plate of foliage). An
+ * olive is low and wide: a short, thick bole splitting low into twisted leaders that spread under the crown, and a
+ * domed, lumpy crown 5–7 m across whose outer masses droop to within ≈ 1 m of the ground — so the ring sits lower
+ * (1.6–2.25 m), its lumps are larger and rounder (squash 0.72–0.85), the top lumps stand ≈ 1.1 m over it, and the
+ * lumps' heights scatter more (canopyGeometry).
+ *   0: the broad tree — a short leaning bole splitting into three gnarled leaders, a wide domed crown
+ *   1: a younger, taller tree on two leaders, its crown higher and rounder
+ *   2: an old tree, its bole thick and low, three leaders sprawling, the crown wide, low and lopsided
+ */
+const FORMS = [
+  { bole: [0.36, 0.28, 0.95, 0.08, 0.12], leaders: [[0.21, 0.09, 1.45, 0.38, -0.72, [0.08, 0.7, 0.02]], [0.2, 0.09, 1.35, -0.68, 0.4, [0.1, 0.68, 0.06]], [0.18, 0.08, 1.3, 0.62, 0.58, [0.06, 0.72, -0.08]]],
+    crown: { ring: [1.85, 0.55], lump: [1.0, 0.32], y: 1.85, top: 2.95, squash: 0.8, shift: [0.1, -0.1], nTop: 2 } },
+  { bole: [0.28, 0.22, 1.3, -0.04, 0.08], leaders: [[0.18, 0.07, 1.6, 0.26, -0.46, [0.04, 1.05, 0.0]], [0.17, 0.07, 1.55, -0.4, 0.36, [0.05, 1.02, 0.04]]],
+    crown: { ring: [1.45, 0.4], lump: [0.95, 0.28], y: 2.25, top: 3.35, squash: 0.85, shift: [0.15, 0.05], nTop: 2 } },
+  { bole: [0.5, 0.36, 0.75, 0.18, -0.22], leaders: [[0.27, 0.1, 1.25, 0.62, -0.92, [0.14, 0.45, 0.05]], [0.25, 0.09, 1.35, -0.88, 0.5, [-0.04, 0.47, 0.1]], [0.18, 0.06, 1.2, 0.3, 1.08, [0.1, 0.5, -0.12]]],
+    crown: { ring: [2.1, 0.65], lump: [0.95, 0.36], y: 1.6, top: 2.55, squash: 0.72, shift: [0.45, -0.3], nTop: 1 } },
+];
+
+/** The trunk of a form: the bole and its leaders, each a slightly twisted, bulging tapered tube (metres). */
+function trunkGeometry(seg, seed, far = false, form = FORMS[0]) {
   const r = rng(seed);
   const parts = [];
   const limb = (r0, r1, h, rx, rz, base) => {
@@ -27,10 +50,8 @@ function trunkGeometry(seg, seed, far = false) {
     g.translate(...base);
     parts.push(g.toNonIndexed());
   };
-  limb(0.34, 0.26, 1.25, 0.06, 0.1, [0, -0.2, 0]);                 // bole
-  limb(0.2, 0.08, 1.7, 0.25, -0.62, [0.08, 0.95, 0.02]);            // three leaders
-  limb(0.19, 0.08, 1.6, -0.58, 0.32, [0.1, 0.92, 0.06]);
-  if (!far) limb(0.17, 0.07, 1.5, 0.55, 0.45, [0.06, 0.95, -0.08]);
+  limb(...form.bole, [0, -0.2, 0]);
+  form.leaders.forEach((L, i) => { if (!far || i < 2) limb(...L); });
   const g = mergeGeometries(parts, false);
   g.deleteAttribute('normal');
   g.computeVertexNormals();
@@ -39,20 +60,22 @@ function trunkGeometry(seg, seed, far = false) {
 
 /**
  * The crown: lumps round a ring and one or two over the centre, flattened, each vertex pushed in or out (an open,
- * broken outline rather than a ball); its base lifted ~1.7 m so the split trunk shows. The normals lean toward the
- * whole crown's centre so it shades as one mass, not as separate balls. Olive: ≈ 6.5 m wide, 3.3 m deep.
+ * broken outline rather than a ball); its base lifted so the split trunk shows. The normals lean toward the whole
+ * crown's centre so it shades as one mass, not as separate balls. Olive: ≈ 5–7 m wide, 3–3.5 m deep.
  */
-function canopyGeometry(lumpDetail, nRing, seed, nTop = 1) {
+function canopyGeometry(lumpDetail, nRing, seed, form = FORMS[0], far = false) {
   const r = rng(seed);
+  const c = form.crown, nTop = far ? 1 : c.nTop;
   const lumps = [];
   for (let i = 0; i < nRing; i++) {
     const a = (i / nRing) * Math.PI * 2 + r() * 0.5;
-    const rr = (nRing > 5 ? 1.75 : 1.55) + 0.5 * r();
-    const rad = nRing > 5 ? 0.82 + 0.3 * r() : 1.05 + 0.35 * r();
-    lumps.push([Math.cos(a) * rr, 2.45 + 0.6 * r(), Math.sin(a) * rr, rad]);
+    const rr = (nRing > 5 ? c.ring[0] : c.ring[0] - 0.2) + c.ring[1] * r();
+    const rad = nRing > 5 ? c.lump[0] + c.lump[1] * r() : c.lump[0] + 0.23 + (c.lump[1] + 0.05) * r();
+    // heights scattered over ≈ 0.9 m, the lumps reaching furthest out hanging lowest (the drooping outer masses)
+    lumps.push([c.shift[0] + Math.cos(a) * rr, c.y + 0.9 * r() - 0.45 * (rr - c.ring[0]), c.shift[1] + Math.sin(a) * rr, rad]);
   }
-  for (let i = 0; i < nTop; i++) lumps.push([0.15 + (i ? -0.9 : 0.3) * r(), 3.2 + 0.2 * i, -0.1 + (i ? 0.8 : -0.2) * r(), nTop > 1 ? 1.0 : 1.25]);
-  const C = [0, 2.75, 0];
+  for (let i = 0; i < nTop; i++) lumps.push([c.shift[0] + 0.15 + (i ? -0.9 : 0.3) * r(), c.top + 0.2 * i, c.shift[1] - 0.1 + (i ? 0.8 : -0.2) * r(), nTop > 1 ? 1.0 : 1.25]);
+  const C = [c.shift[0], (c.y + c.top) / 2 + 0.05, c.shift[1]];
   const parts = [];
   lumps.forEach(([cx, cy, cz, rad]) => {
     const ico = new IcosahedronGeometry(rad, lumpDetail);
@@ -64,7 +87,7 @@ function canopyGeometry(lumpDetail, nRing, seed, nTop = 1) {
       const key = `${x.toFixed(3)},${y.toFixed(3)},${z.toFixed(3)}`;
       if (!jit.has(key)) jit.set(key, 0.7 + 0.55 * r());
       const k = jit.get(key);
-      const px = cx + x * k, py = cy + y * k * 0.62, pz = cz + z * k;
+      const px = cx + x * k, py = cy + y * k * c.squash, pz = cz + z * k;
       const len = Math.hypot(x, y, z) || 1;
       let nx = px - C[0], ny = (py - C[1]) * 1.6, nz = pz - C[2];
       const cl = Math.hypot(nx, ny, nz) || 1;
@@ -91,9 +114,11 @@ export function buildTrees(ctx, T, detail, feat = {}) {
     for (const r of plan.keepOut) if (inRect(r, X, Y, m(2))) return true;
     for (const f of plan.flats) if (rectDist(f.rect, X, Y) < m(4)) return true;
     for (const c of corridors) if (distToPolyline(c.pts, X, Y).d < c.half + m(5)) return true;
-    if (plan.inViewCone(X, Y)) return true;
     return Math.hypot(X - cx, Y - cy) > R * 0.92;
   };
+  // a tree in a viewpoint's cone only where its crown (≤ 5.5 m) stays under the sight line (qa-r1-fix-world: was none in
+  // the cones at all, which left the near slope bare from the lookouts)
+  const sightOk = (X, Y, h) => plan.sightTop(X, Y, T.heightZ) > h + m(5.5);
   const cand = [];
   const slopeOk = (X, Y) => {
     const h = T.heightZ(X, Y), hx = T.heightZ(X + m(3), Y), hy = T.heightZ(X, Y + m(3));
@@ -102,7 +127,7 @@ export function buildTrees(ctx, T, detail, feat = {}) {
   const add = (X, Y, kind) => {
     if (blocked(X, Y)) return;
     const { h, ok } = slopeOk(X, Y);
-    if (ok) cand.push({ X, Y, Z: h, kind });
+    if (ok && sightOk(X, Y, h)) cand.push({ X, Y, Z: h, kind });
   };
   // olives in rows on the terrace benches: 3.5–5 m uphill of each wall, 8.5–12 m apart
   for (const row of feat.rows || []) {
@@ -156,10 +181,10 @@ export function buildTrees(ctx, T, detail, feat = {}) {
   const list = cand.slice(0, max);
   if (!list.length) return null;
 
-  // two levels of detail swapped by distance to the camera (near: 10 detailed lumps, casting; far: 4 low-poly lumps)
+  // two levels of detail swapped by distance to the camera (near: 10 detailed lumps, casting; far: 4 low-poly lumps), in
+  // two (low) or three olive forms (FORMS), each form its own pair of instanced meshes per level
   const foliageKey = ctx.mats.has('olive_foliage') ? 'olive_foliage' : 'plaster';
-  const farTrunk = trunkGeometry(4, 11, true), farCrown = canopyGeometry(0, 3, 17);
-  const nearTrunk = trunkGeometry(detail >= 2 ? 9 : 7, 11), nearCrown = canopyGeometry(1, 8, 17, 2);
+  const NF = detail === 0 ? 2 : 3;
   const NEAR_MAX = [0, 60, 140, 220][Math.max(0, Math.min(3, detail))];
   const NEAR_R = [0, 70, 110, 150][Math.max(0, Math.min(3, detail))];
   const mk = (geo, key, n, name) => {
@@ -170,14 +195,21 @@ export function buildTrees(ctx, T, detail, feat = {}) {
   };
   // olive bark on the trunks (world-4: they had the altar firewood's walnut bark, timber_rough)
   const trunkKey = ctx.mats.has?.('olive_bark') ? 'olive_bark' : 'timber_rough';
-  const trunks = mk(farTrunk, trunkKey, list.length, 'terrain:olive-trunks');
-  const crowns = mk(farCrown, foliageKey, list.length, 'terrain:olive-crowns');
-  const nTrunks = NEAR_MAX ? mk(nearTrunk, trunkKey, NEAR_MAX, 'terrain:olive-trunks-near') : null;
-  const nCrowns = NEAR_MAX ? mk(nearCrown, foliageKey, NEAR_MAX, 'terrain:olive-crowns-near') : null;
+  const counts = new Array(NF).fill(0);
+  const formOf = list.map(() => { const f = Math.min(NF - 1, Math.floor(rand() * NF)); counts[f]++; return f; });
+  const far = [], near = [];
+  for (let f = 0; f < NF; f++) {
+    const F = FORMS[f], sfx = f ? `.${f}` : '';
+    // far crowns: four ring lumps and one over the centre (were three and one: a flat, three-cornered plate) — 100 triangles
+    far.push({ t: mk(trunkGeometry(4, 11 + f, true, F), trunkKey, counts[f], `terrain:olive-trunks${sfx}`), c: mk(canopyGeometry(0, 4, 17 + f, F, true), foliageKey, counts[f], `terrain:olive-crowns${sfx}`) });
+    if (NEAR_MAX) near.push({ t: mk(trunkGeometry(detail >= 2 ? 9 : 7, 11 + f, false, F), trunkKey, NEAR_MAX, `terrain:olive-trunks-near${sfx}`), c: mk(canopyGeometry(1, 8, 17 + f, F), foliageKey, NEAR_MAX, `terrain:olive-crowns-near${sfx}`) });
+  }
   const mtx = new Matrix4(), q = new Quaternion(), s = new Vector3(), p = new Vector3(), up = new Vector3(0, 1, 0), col = new Color();
   // olive: grey-green with a silvery bias; garden trees (fig, pomegranate): deeper, warmer green. With the neutral
   // 'plaster' stand-in the colour carries the whole tint; with a real foliage material it only varies it.
-  const tintOlive = foliageKey === 'plaster' ? [0.13, 0.148, 0.122] : [1, 1, 1];
+  // qa-r2-fix-world: the olive's silver-grey-green (toward #7d8a6a; olive_foliage's base is #6c7462) — the leaves' pale
+  // undersides show as the wind turns them, so a grove reads lighter and greyer than the garden trees
+  const tintOlive = foliageKey === 'plaster' ? [0.15, 0.17, 0.132] : [1.22, 1.3, 1.08];
   const tintGarden = foliageKey === 'plaster' ? [0.085, 0.118, 0.06] : [0.85, 0.95, 0.8];
   const mats = new Float32Array(list.length * 16), cols = new Float32Array(list.length * 3), wpos = new Float32Array(list.length * 3);
   list.forEach((t, i) => {
@@ -194,37 +226,34 @@ export function buildTrees(ctx, T, detail, feat = {}) {
     col.setRGB(base[0] * v + silver * base[0], base[1] * v * (0.96 + 0.08 * rand()) + silver * base[1], base[2] * v + silver * base[2] * 1.2);
     col.toArray(cols, i * 3);
   });
-  const all = [trunks, crowns, nTrunks, nCrowns].filter(Boolean);
+  const all = [...far, ...near].flatMap((x) => [x.t, x.c]);
   for (const im of all) { im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; }
-  if (nTrunks) { nTrunks.castShadow = detail >= 1; nCrowns.castShadow = detail >= 1; }
+  for (const x of near) { x.t.castShadow = detail >= 1; x.c.castShadow = detail >= 1; }
   // assign instances: near ones (closest to the camera, within NEAR_R) to the detailed meshes, the rest to the far ones
   const tmpC = new Color();
   let lastX = Infinity, lastZ = Infinity;
+  const put = (pair, k, i) => {
+    mtx.fromArray(mats, i * 16); pair.t.setMatrixAt(k, mtx); pair.c.setMatrixAt(k, mtx);
+    tmpC.fromArray(cols, i * 3); pair.c.setColorAt(k, tmpC);
+  };
   const assign = (cx2, cz2) => {
-    const near = [];
+    const close = [];
     if (NEAR_MAX) {
       for (let i = 0; i < list.length; i++) {
         const dx = wpos[i * 3] - cx2, dz = wpos[i * 3 + 2] - cz2, d2 = dx * dx + dz * dz;
-        if (d2 < NEAR_R * NEAR_R) near.push([d2, i]);
+        if (d2 < NEAR_R * NEAR_R) close.push([d2, i]);
       }
-      near.sort((a, b) => a[0] - b[0]);
-      near.length = Math.min(near.length, NEAR_MAX);
+      close.sort((a, b) => a[0] - b[0]);
+      close.length = Math.min(close.length, NEAR_MAX);
     }
     const isNear = new Uint8Array(list.length);
-    near.forEach(([, i], k) => {
-      isNear[i] = 1;
-      mtx.fromArray(mats, i * 16); nTrunks.setMatrixAt(k, mtx); nCrowns.setMatrixAt(k, mtx);
-      tmpC.fromArray(cols, i * 3); nCrowns.setColorAt(k, tmpC);
-    });
-    let k = 0;
-    for (let i = 0; i < list.length; i++) {
-      if (isNear[i]) continue;
-      mtx.fromArray(mats, i * 16); trunks.setMatrixAt(k, mtx); crowns.setMatrixAt(k, mtx);
-      tmpC.fromArray(cols, i * 3); crowns.setColorAt(k, tmpC);
-      k++;
+    const nk = new Array(NF).fill(0), fk = new Array(NF).fill(0);
+    for (const [, i] of close) { isNear[i] = 1; put(near[formOf[i]], nk[formOf[i]]++, i); }
+    for (let i = 0; i < list.length; i++) if (!isNear[i]) put(far[formOf[i]], fk[formOf[i]]++, i);
+    for (let f = 0; f < NF; f++) {
+      far[f].t.count = far[f].c.count = fk[f];
+      if (near[f]) { near[f].t.count = near[f].c.count = nk[f]; near[f].t.visible = near[f].c.visible = nk[f] > 0; }
     }
-    trunks.count = crowns.count = k;
-    if (nTrunks) { nTrunks.count = nCrowns.count = near.length; nTrunks.visible = nCrowns.visible = near.length > 0; }
     for (const im of all) { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
   };
   assign(1e9, 1e9);

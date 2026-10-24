@@ -1,7 +1,7 @@
 // UI system (ARCHITECTURE.md §13).
 //   ctx.settings = { get(key), set(key, value), all(), defs }   persisted as localStorage 'mikdash.<key>'; bus 'settings:change'
 //   ctx.ui       = { toast(msg, ms?), fade(to, ms) | fade(ms) -> Promise, open(panel, opts?), close(), toggle(panel), panel,
-//                    hints(on), enter() }                       panels: 'time' | 'info' | 'map' | 'settings'
+//                    hints(on), enter() }                       panels: 'time' | 'info' | 'map' | 'settings' | 'about'
 // fade(to 0..1, ms) moves the black veil (the player's teleport contract: fade(1, 220) … fade(0, 320));
 // fade(ms) alone dips to black, resolves when black, then lifts by itself.
 // Nothing is mounted when ctx.params.ui is false (shot=1 or ui=0); the UI code is then never loaded.

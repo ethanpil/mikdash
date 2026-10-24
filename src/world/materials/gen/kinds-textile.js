@@ -1,9 +1,13 @@
 // Generator kinds: textiles, hides, rope (see kinds.js for the conventions).
 
 export const TEXTILE_KINDS = {
-  // Woven textiles. Plain weave of round, plied threads: shesh (six-ply linen); for the parochet every cord
-  // twists all four materials — techelet, argaman, tola'at shani and shesh (Shekalim 8:5; Yoma 71b).
-  // No figures are woven in (none attested for the Second-Temple parochot).
+  // Woven textiles. Plain weave of round, plied threads: shesh (six-ply linen); multicolour cords twisting all four
+  // materials — techelet, argaman, tola'at shani and shesh (uP0.w = 1); or (uP3.y = 1, the parochet since qa-r1) a
+  // weft-faced COMPOUND weave: every pass (nima) carries one six-ply thread of each material, 4 × 6 = 24 strands
+  // (Shekalim 8:5; Yoma 71b), and the design brings one of them to the face while the others float behind — which is
+  // what gives ma'aseh choshev its two different faces (Yoma 72b). The design is a reconstruction: broad horizontal
+  // bands of techelet, argaman and tola'at shani parted by narrow shesh lines, their edges stepping by whole picks; no
+  // figures (none attested for the Second-Temple parochot).
   // materials-2-fix: every per-thread variation (thickness slubs, dye tone, the linen ply's share) changes along
   // the thread within a few centimetres and is decorrelated thread to thread — slow variations constant along long
   // threads, and a tile-scale drift of the linen share, read as a plaid across the 1 m tile.
@@ -13,7 +17,8 @@ export const TEXTILE_KINDS = {
 // uP0: x pitch (m), y thread fill, z slub amount, w multicolour plies (1) or single colour (0)
 // uP1: x twist pitch (m), y fuzz, z rough, w gap darkening
 // uP2: x ply count, y weave (0 plain, 1 2/2 twill), z linen ply share (multicolour), w per-cord share jitter
-// uP3: x ply blend toward the mean (wool fuzz)
+// uP3: x ply blend toward the mean (wool fuzz), y compound bands (1) instead of four-ply cords, z (compound) the hidden
+//      passes' colours showing through the binding
 // uC0 linen colour; uC1..uC4 ply colours (techelet, argaman, tola'at shani, shesh)
 float threadH(float across, float along, float up, float fw) {
   float x = across / fw;
@@ -63,6 +68,21 @@ void surf(vec2 p, inout S s) {
     col = fr < c1 ? uC1 : (fr < 2.0 * c1 ? uC2 : (fr < 3.0 * c1 ? uC3 : uC4));
     vec3 mean = (uC1 + uC2 + uC3) * c1 + uC4 * wl;
     col = mix(col, mean, uP3.x);                       // wool fuzz scatters light across the ply boundaries
+    if (uP3.y > 0.5) {
+      // compound weave: the face shows one material per band. Bands over the tile height (fractions): techelet 32 %,
+      // shesh 1.5 %, argaman 32 %, shesh 1.5 %, tola'at shani 31.5 %, shesh 1.5 % (2 m tile: 64 cm wool bands, 3 cm linen);
+      // each edge steps by one pick along a 6.25 cm zigzag, as a compound weave's pattern edges do
+      float zig = floor(abs(fract(p.x / 0.0625) * 2.0 - 1.0) + 0.5);
+      float fb = fract((float(ci.y) + zig) * uP0.x / uTile.y);
+      vec3 bc = fb < 0.32 ? uC1 : (fb < 0.335 ? uC4 : (fb < 0.655 ? uC2 : (fb < 0.67 ? uC4 : (fb < 0.985 ? uC3 : uC4))));
+      // the passes not on the face show a little through the binding (taking the edge off a flat, printed colour)
+      vec3 m4 = (uC1 + uC2 + uC3 + uC4) * 0.25;
+      bc = mix(bc, m4, uP3.z * (0.7 + 0.6 * h1(ci + ivec2(3, 9))));
+      // the six plies of one material: only a faint ripple along the twist
+      float pr = abs(fract(ph * 6.0) - 0.5) * 2.0;
+      col = bc * (1.0 + 0.07 * (pr - 0.5) + 0.05 * tn);
+      mean = bc;
+    }
     col *= 1.0 + 0.05 * tn;
     // cords narrower than ~4 texels alias into dots and a checker: fade the structure into a fine heather of the
     // same mean colour (sets give the parochet enough texels per cord on every tier)

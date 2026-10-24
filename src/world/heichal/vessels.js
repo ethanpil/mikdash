@@ -114,15 +114,50 @@ export function buildMenorah(H) {
     flames.push([tip[0] + L.dir * t(0.02), cy, tip[2] + t(0.1)]);
   }
   // the stone with three steps before it (Tamid 3:9; Rambam BhB 3:11), the kohen facing south toward the lamps
-  const st = e.params.stone.box;
-  const n = e.params.stone.steps, rise = (st.max[2] - st.min[2]) / n, run = (st.max[1] - st.min[1]) / n;
-  const sm = kit.m('marble_white', true, true);
-  for (let i = 0; i < n; i++) {
-    // step 1 (lowest) at the north edge; each next one half an amah higher, toward the Menorah
-    const y1 = st.max[1] - i * run, y0 = y1 - run;
-    sm.box([st.min[0], y0, st.min[2]], [st.max[0], y1, st.min[2] + rise * (i + 1)], 'xXyYZ');
-  }
+  stepStone(H, e.params.stone);
   return { flames, centre: [cx, cy, z0], lamps };
+}
+
+/**
+ * The stone with three steps (Tamid 3:9; Rambam BhB 3:11), the kohen facing south toward the lamps: step 1 (lowest) at
+ * the north edge, each next one higher toward the Menorah. One block of the Heichal's veined marble (marmara — the
+ * House's own stone, Bava Batra 4a) cut into its steps ⚙ (the Mishnah says only "a stone"): a section extruded across
+ * its width — risers set back a finger under the tread's nosing, its arris rounded off (detail ≥ 1), the treads very
+ * slightly dished and worn toward their front where the kohen stands (detail ≥ 2) — so the steps read as cut stone.
+ */
+function stepStone(H, stone) {
+  const { kit, d } = H;
+  const st = stone.box, n = stone.steps;
+  const rise = (st.max[2] - st.min[2]) / n, run = (st.max[1] - st.min[1]) / n;
+  const x0 = st.min[0], x1 = st.max[0], yN = st.max[1], z0 = st.min[2];
+  const key = H.ctx?.mats?.has?.('marble_veined') ? 'marble_veined' : 'marble_white';
+  const m = kit.m(key, true, true);
+  // the section in (s, z): s = distance south from the north edge; counter-clockwise seen from the west (−X)
+  const nose = d >= 1 ? 0.035 : 0, arr = d >= 1 ? 0.035 : 0, dish = d >= 2 ? 0.012 : 0;
+  const prof = [[n * run, 0], [n * run, n * rise]];                  // the back (south face) up to the top tread
+  for (let i = n - 1; i >= 0; i--) {
+    const s0 = i * run, zt = rise * (i + 1), zb = rise * i;
+    // the tread from its back (s0 + run) to its nosing, dished a little behind the nosing
+    if (dish) prof.push([s0 + run * 0.45, zt - dish]);
+    if (arr) prof.push([s0 + arr, zt], [s0 + arr * 0.29, zt - arr * 0.29], [s0, zt - arr]);   // the rounded arris
+    else prof.push([s0, zt]);
+    // the nosing's underside, then the riser set back under it down to the tread below (or the floor)
+    if (nose) prof.push([s0, zt - 0.09], [s0 + nose, zt - 0.11]);
+    prof.push([s0 + nose, zb]);
+  }
+  // (the polygon closes along the floor, from the set-back foot of step 1 to the back)
+  const P = (x, [s, z]) => [x, yN - s, z0 + z];
+  m.poly(prof.map((p) => P(x0, p)), [-1, 0, 0]);
+  m.poly(prof.map((p) => P(x1, p)), [1, 0, 0]);
+  for (let i = 0; i < prof.length; i++) {
+    const a = prof[i], b = prof[(i + 1) % prof.length];
+    const ds = b[0] - a[0], dz = b[1] - a[1];
+    if (Math.hypot(ds, dz) < 1e-6) continue;
+    // the section runs counter-clockwise in (s right, z up): the outward normal of an edge is (dz, −ds); s grows
+    // southward (site −Y)
+    const ns = dz, nzz = -ds;
+    m.quadH(P(x0, a), P(x0, b), P(x1, b), P(x1, a), [0, -ns, nzz]);
+  }
 }
 
 /** a table of the Shulchan's form: top with a gold zer, four legs, the misgeret low between them (lock #33) */

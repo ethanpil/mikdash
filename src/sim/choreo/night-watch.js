@@ -15,12 +15,18 @@
 //
 // Determinism: every pose is a pure function of (t, date, seed). The officer's timeline comes from the circuit's
 // authored waypoints (straight lengths — nav-independent) and the day's windows, computed once per date: he comes in by
-// the western Chuldah gate as his event begins, reaches the sleeping guard CUE_LEAD into that event, and is back at
-// his gate to go out as his event ends; nav only reshapes the line he walks between the waypoints.
+// the western Chuldah gate as his event begins, reaches the sleeping guard CUE_LEAD into that event, and reaches the foot
+// of the Chel steps on his way in to Nikanor's post DAWN_LEAD after the default opening (alot − 6) ⚙ — so the opening
+// view at those steps sees him and his torches; after his event ends he finishes the round's leg to the soreg's east
+// entry and walks across the Mount to his gate and out (qa-r1 SIM-2). Without that anchor (an odd window) his last
+// round ends back at his gate as his event ends. Nav only reshapes the line he walks between the waypoints.
+// "Go" to his row stands ahead of him on his way, a little aside, facing back to him (ctx.schedule.liveView; qa-r2).
+import { Box3, Ray, Vector3 } from 'three';
 import { headingTo, angleDiff, floorZ, navRoute, straightRoute } from '../lib/path.js';
 import { within, since, span, wrap, wanderer, rand, clamp, smooth, window4, upperBound } from '../lib/core.js';
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
 import { m2w, AMAH } from '../../core/units.js';
+import { DEFAULT_OFFSET_FROM_ALOT } from '../../time/index.js';
 import { mokedPlaces } from './g1/places.js';
 
 const SEED = 0x6e77;
@@ -38,6 +44,23 @@ const KAPORET_EARLY = 3;           // the guard behind the Kaporet is at his pos
 const WAKE = 0.75;                 // minutes before their window ends the sleepers are up on their knees ⚙
 const DOOR_PASS = [-0.17, -0.12, 0.12, 0.17]; // minutes round a pass: the Moked's doors swing for the officer's party ⚙
 const CLOAK_FIRE = 'sim.night-watch.cloak';
+// The round's phase (⚙ model choice: the sources fix none — "he went round every post", Middot 1:2; "all the night",
+// Rambam BhB 8:10): he reaches the foot of the Chel steps, on his way in to Nikanor's post, DAWN_LEAD minutes after the
+// default opening (src/time DEFAULT_OFFSET_FROM_ALOT) — in view of the start, at those steps, in its first minute
+const DAWN_LEAD = 0.5;
+// "Go" to his row (qa-r2 SIM-R2-5): a stand ahead of him on his way, a little to its side, facing back toward him, so he
+// comes toward the viewer: the first of these (m ahead, m aside) that is open floor with him and a cone round him in
+// clear view (no wall, pier or door leaf within VIEW_CONE.near) ⚙
+// (15 m first: at his 1.15 m/s about 13 s of him coming on before he passes the viewer, a pace to the side)
+const VIEW_AHEAD = [15, 12, 19, 9, 24, 6.5, 30, 36], VIEW_SIDE = [1.8, -1.8, 3, -3, 0];
+const VIEW_CONE = { deg: 20, near: 3, level: 4 };
+const VIEW_BEHIND = [-6, -9, -4];
+const VIEW_PASS = { strict: { cone: true, level: true }, level: { cone: false, level: true, behind: true }, sight: { cone: false, level: false, behind: true } };
+// the Mount's walkable floor inside its walls and stoas' back walls (site amot): the torch-bearers keep within it ⚙
+const MOUNT_IN = [3, 497];
+// m: at a post the torch-bearers stand this far ahead of him and to either side (the guard is STOP_OFFSET ahead); they
+// move there over his last FLANK_BLEND metres to it ⚙
+const FLANK_AHEAD = 0.9, FLANK_SIDE = 0.85, FLANK_BLEND = 2.5;
 // the incident, as fractions of his visit (from the unanswered greeting to the event's end): blows, the guard up, the
 // torch put to his garment, the fire out, the officer moves on (1) ⚙
 const INC = { strike: [0.04, 0.12], wake: 0.12, back: [0.12, 0.15], bearer: [0.16, 0.62], fire: [0.2, 0.26, 0.55, 0.7] };
@@ -89,16 +112,20 @@ export default {
       // the circuit: its timeline is fixed by the straight legs; the walked line is nav's once ready
       stops: C.stops, entry: C.entry, nom: nominal(C.stops, C.entry),
       route: straightRoute(C.stops, { loop: true }),
+      // after his event: out of the chel strip, across the Mount and down to his gate (the same split of timeline and line)
+      exitWay: C.exitWay, exitNom: C.exitWay ? wayNominal(C.exitWay) : null, exitRoute: C.exitWay ? straightRoute(C.exitWay) : null,
       // the Moked's doors on his way: their stops, and (per date) the minutes after p0 when the party passes them
       passDoors: C.passes.map((id) => ({ id, door: sim.door(id), idx: C.stops.reduce((a, s, i) => (s.pass === id ? [...a, i] : a), []), e: null })),
       gpaths: levites.map(() => null),
       pathsVer: null, pathsBusy: false, routeSource: 'straight',
       plan: null, planGen: -1,
       fmt: (m) => ctx.time?.format?.(m) ?? '--',
-      tmp: {}, tmpA: {}, tmpB: {}, tmpG: {}, pat: {},
+      tmp: {}, tmpA: {}, tmpB: {}, tmpG: {}, pat: {}, flank: {},
       patrol: null, cloak: null, cloakLevel: 0, cloakAt: null,
     };
     buildPaths(ctx, state);
+    // "Go" to the officer's row: ahead of him on his way, facing back to him (the data's view when he is not out)
+    try { state.offView = sim.schedule?.liveView?.('ish-har-habayit', (t) => officerView(ctx, state, sim, t)); } catch (e) { console.warn('[sim:night-watch] live view failed', e); }
     return state;
   },
 
@@ -137,12 +164,26 @@ export default {
       o.placeNear(X, Y, Z).heading(hd).pose(pose, ph).prop('staff').show();
       if (!shabbatNight) {
         // no light in hand on Shabbat night — by analogy with the dawn inspection (Rambam BhB 8:12) ⚙
-        const R = state.route, bw = O.walking && !O.gate;
+        const path = O.path || state.route.path, bw = O.walking && !O.gate;
+        // at a post they stand before him, one either side, between him and the guard; blended in over his last metres
+        // to it and out over his first metres from it (the path's "ahead" there would put them on the way back) ⚙
+        const F = postBlend(state, O, state.flank);
         for (let k = 0; k < 2; k++) {
           const b = state.bearers.slot(k);
-          const q = R.path.offset(O.dAhead, k ? -TORCH_SIDE : TORCH_SIDE, TORCH_AHEAD, k ? state.tmpB : state.tmpA);
+          const q = path.offset(O.dAhead, k ? -TORCH_SIDE : TORCH_SIDE, TORCH_AHEAD, k ? state.tmpB : state.tmpA);
           let X = q.X, Y = q.Y, Z = Number.isFinite(q.Z) ? q.Z : O.Z;
           let hd = bw ? q.heading : headingTo(X, Y, O.faceX, O.faceY);
+          if (F.w > 0) {
+            const h = (F.h * Math.PI) / 180, sd = k ? -FLANK_SIDE : FLANK_SIDE;
+            const fx = F.X + (Math.sin(h) * FLANK_AHEAD + Math.cos(h) * sd) / AMAH, fy = F.Y + (Math.cos(h) * FLANK_AHEAD - Math.sin(h) * sd) / AMAH;
+            X += (fx - X) * F.w; Y += (fy - Y) * F.w; Z += (F.Z - Z) * F.w;
+            if (F.w > 0.5) hd = F.h;
+          }
+          // on the Mount's floor they keep inside its walls: along the north wall the path's side offset put one in the
+          // wall (placed on its top, 40 amot up — qa-r2 SIM-R2-5) ⚙
+          if (Math.abs(O.Z) < 1 && O.X > MOUNT_IN[0] && O.X < MOUNT_IN[1] && O.Y > MOUNT_IN[0] && O.Y < MOUNT_IN[1]) {
+            X = clamp(X, MOUNT_IN[0], MOUNT_IN[1]); Y = clamp(Y, MOUNT_IN[0], MOUNT_IN[1]); Z = O.Z;
+          }
           if (O.incident && k === 0 && state.cloakAt && O.u > INC.bearer[0] && O.u < INC.bearer[1]) {
             // the torch is put to the garment the guard slept under
             const c = state.cloakAt;
@@ -172,8 +213,9 @@ export default {
   debug(s) {
     const R = s.route, P = s.plan, O = s.patrol, f = s.fmt;
     const r = R ? ` ${(R.path.length / 1000).toFixed(2)} km, round ${s.nom.T.toFixed(1)} min` : '';
-    const pl = P?.patrol ? ` · ${P.patrol.nEnd} rounds ×${P.patrol.s1.toFixed(3)}/${P.patrol.s2.toFixed(3)} · ${P.patrol.arrT.length} greetings` : '';
-    const st = O ? ` · ${O.incident ? `INCIDENT u=${O.u.toFixed(2)}` : O.gate ? 'at his gate' : O.walking ? `to ${s.stops[(O.stop + 1) % s.stops.length].post?.id ?? 'via'}` : `at ${s.stops[O.stop].post?.id}`}` : '';
+    const Q = P?.patrol;
+    const pl = Q ? ` · ${Q.dawn ? `dawn anchor ${f(wrap(Q.p0 + CUE_LEAD + Q.uOpen))}, out ${f(wrap(Q.p0 + CUE_LEAD + Q.uStop))}` : `${Q.nEnd} rounds`} ×${Q.s1.toFixed(3)}/${Q.s2.toFixed(3)} · ${Q.arrT.length} greetings` : '';
+    const st = O ? ` · ${O.incident ? `INCIDENT u=${O.u.toFixed(2)}` : O.exit ? (O.walking ? 'going out to his gate' : 'greeting his gate') : O.gate ? 'at his gate' : O.walking ? `to ${s.stops[(O.stop + 1) % s.stops.length].post?.id ?? 'via'}` : `at ${s.stops[O.stop].post?.id}`}` : '';
     const g = s.gpaths.filter(Boolean).length;
     return `route: ${s.routeSource}${r}${pl}\n   officer${st || ' off duty'} · guard paths ${g}/${s.gpaths.length} · watch ${f(P?.W.watch?.[0])}–${f(P?.W.watch?.[1])}`;
   },
@@ -210,14 +252,20 @@ function windows(ctx, sim) {
   if (!incidentPost) incident = null;
   const lockEv = sim.schedule.byId('locking-up');
   const lockStart = lockEv && Number.isFinite(lockEv.t0) ? lockEv.t0 : (watch ? wrap(watch[0] - 15) : NaN);
-  return { watch, upper: win(sim.event('watch-upper-chambers')) || watch, patrol, incident, incidentPost, lockStart };
+  // the default opening (alot − 6) + DAWN_LEAD: when he is at the foot of the Chel steps
+  const alot = ctx.time?.zmanim?.alot;
+  const dawn = Number.isFinite(alot) ? wrap(alot + DEFAULT_OFFSET_FROM_ALOT + DAWN_LEAD) : NaN;
+  return { watch, upper: win(sim.event('watch-upper-chambers')) || watch, patrol, incident, incidentPost, lockStart, dawn };
 }
 
 /**
  * The officer's night. His own timeline v (minutes): rounds of nom.T laid end to end from his first arrival at the
- * Chuldah post. Real time u (minutes since that arrival, = p0 + CUE_LEAD) maps onto it with two scales close to 1:
- * s1 until he reaches the sleeping guard exactly at the incident's anchor, s2 after it so that his last round ends
- * back at his gate, greeting it, just before his event ends. The visit to the sleeping guard lasts the incident.
+ * Chuldah post. Real time u (minutes since that arrival, = p0 + CUE_LEAD) maps onto it with scales close to 1:
+ * s1 until he reaches the sleeping guard exactly at the incident's anchor (the visit lasts the incident), s2 after it
+ * until the dawn anchor — the foot of the Chel steps on his way in to Nikanor (the stop marked 'dawn') at W.dawn —
+ * and 1 after that, to the first pass of the soreg's east entry (the stop marked 'exit') at or after his event's end;
+ * from there he walks the exit way to his gate, greets its guard and goes out (exitAt). Without a usable dawn anchor
+ * s2 is set so that his last round ends back at his gate, greeting it, just before his event ends.
  */
 function patrolPlan(state, W) {
   const nom = state.nom, T = nom.T, stops = state.stops;
@@ -240,43 +288,96 @@ function patrolPlan(state, W) {
   }
   const inc = Number.isFinite(uInc);
   const u2 = inc ? uInc + Linc : 0, v2 = inc ? vInc + DWELL : 0;
-  // the last arrival at his gate (stop 0) at v = nEnd·T, then his greeting there, then out
-  let nEnd = Math.max(Math.floor(v2 / T) + 1, Math.round((Utot - u2 + v2 - DWELL) / T));
-  if (nEnd < 1) nEnd = 1;
-  const s2 = (Utot - u2) / (nEnd * T + DWELL - v2);
-  // minutes after p0 of a moment v on his own timeline (ascending in v)
-  const eOf = (v) => CUE_LEAD + (!inc || v <= vInc ? v * (inc ? s1 : s2) : u2 + (v - v2) * s2);
+  const Q = { p0, len, inMin, Utot, uInc, vInc, kInc, L: Linc, s1, s2: 1, nEnd: 0, inc, u2, v2, dawn: false, vMax: 0 };
+  const D = dawnAnchor(state, W, Q);
+  if (D) {
+    Object.assign(Q, D);
+    Q.Utot = Infinity;
+    Q.vMax = D.vStop;
+  } else {
+    // the last arrival at his gate (stop 0) at v = nEnd·T, then his greeting there, then out
+    let nEnd = Math.max(Math.floor(v2 / T) + 1, Math.round((Utot - u2 + v2 - DWELL) / T));
+    if (nEnd < 1) nEnd = 1;
+    Q.nEnd = nEnd;
+    Q.s2 = (Utot - u2) / (nEnd * T + DWELL - v2);
+    Q.vMax = nEnd * T;
+  }
   // every greeting of the night (minutes after p0, clock time, stop, cue key), in order — precomputed, so the
   // per-frame check is a binary search and allocates nothing
   const arrE = [], arrK = [], arrKey = [];
-  for (let r = 0; r <= nEnd; r++) {
+  for (let r = 0; r * T <= Q.vMax + 1e-9; r++) {
     for (let k = 0; k < stops.length; k++) {
       if (!stops[k].post) continue;
       const v = r * T + nom.tDwell[k];
-      if (v > nEnd * T + 1e-9) break;
-      arrE.push(eOf(v)); arrK.push(k); arrKey.push(`shalom:${r}:${stops[k].post.id}`);
+      if (v > Q.vMax + 1e-9) break;
+      arrE.push(CUE_LEAD + uOf(Q, v)); arrK.push(k); arrKey.push(`shalom:${r}:${stops[k].post.id}`);
     }
   }
+  if (Q.dawn && stops[0].post) { arrE.push(CUE_LEAD + Q.uStop + Q.xS0); arrK.push(0); arrKey.push(`shalom:out:${stops[0].post.id}`); }
   // the Moked's doors: when the party passes each (going in and coming out, every round), minutes after p0
+  const vDoors = Q.dawn ? Q.vStop : Q.nEnd * T;
   for (const pd of state.passDoors) {
     const es = [];
-    for (let r = 0; r < nEnd; r++) for (const i of pd.idx) es.push(eOf(r * T + nom.tDwell[i]));
+    for (let r = 0; r * T < vDoors; r++) for (const i of pd.idx) { const v = r * T + nom.tDwell[i]; if (v < vDoors) es.push(CUE_LEAD + uOf(Q, v)); }
     pd.e = Float64Array.from(es);
   }
-  return {
-    p0, len, inMin, Utot, uInc, vInc, kInc, L: Linc, s1, s2, nEnd, inc, u2, v2,
-    arrE: Float64Array.from(arrE), arrT: Float64Array.from(arrE, (e) => wrap(p0 + e)), arrK, arrKey,
-  };
+  Q.arrE = Float64Array.from(arrE);
+  Q.arrT = Float64Array.from(arrE, (e) => wrap(p0 + e));
+  Q.arrK = arrK; Q.arrKey = arrKey;
+  return Q;
 }
 
-/** the officer at time t → state.pat { X, Y, Z, heading, d, dAhead, walking, stop, faceX/Y, incident, u, gate } */
-function patrolAt(state, P, t) {
-  const Q = P.patrol, nom = state.nom, R = state.route, O = state.pat;
+/**
+ * The dawn anchor (⚙ model choice, see DAWN_LEAD): v of his arrival at the 'dawn' stop nearest a scale of 1 from the
+ * previous anchor (the incident, or his first greeting), then ×1 to the first pass of the 'exit' stop at or after his
+ * event's end. null when the opening is not inside his window or no exit way exists (then the old rule holds).
+ */
+function dawnAnchor(state, W, Q) {
+  const nom = state.nom, T = nom.T, stops = state.stops, X = state.exitNom;
+  const kD = stops.findIndex((s) => s.dawn), kX = stops.findIndex((s) => s.exit);
+  if (kD < 0 || kX < 0 || !X || !Number.isFinite(W.dawn) || !W.patrol) return null;
+  const uOpen = since(W.dawn, Q.p0) - CUE_LEAD;
+  const uFrom = Q.inc ? Q.u2 : 0, vFrom = Q.inc ? Q.v2 : 0;
+  // the opening falls in his window, at least half a round after his start (or the incident), not after his window
+  if (!(uOpen > uFrom + T / 2 && uOpen + CUE_LEAD < Q.len)) return null;
+  const tD = nom.tDwell[kD];
+  let r = Math.round((uOpen - uFrom + vFrom - tD) / T);
+  while (r * T + tD <= vFrom + T / 4) r++;
+  const vOpen = r * T + tD;
+  const sc = (uOpen - uFrom) / (vOpen - vFrom);
+  // ×1 after the anchor, to the first pass of the exit stop at or after his event's end
+  const vEnd = vOpen + since(W.patrol[1], W.dawn);
+  const tX = nom.tDwell[kX];
+  let rx = Math.floor((vEnd - tX) / T);
+  if (rx * T + tX < vEnd - 1e-9) rx++;
+  const vStop = rx * T + tX, uStop = uOpen + (vStop - vOpen);
+  const atS0 = X.at[X.iS0], atE = X.at[X.iE];
+  const xS0 = atS0 / PATROL_SPEED / 60, xOut = (atE - atS0) / PATROL_SPEED / 60;
+  const len = CUE_LEAD + uStop + xS0 + DWELL + xOut;
+  // out before the Levites leave their posts (the night watch's end) ⚙
+  if (W.watch && since(wrap(Q.p0 + len), W.watch[0]) > span(W.watch[0], W.watch[1])) return null;
+  return { dawn: true, kD, kX, uOpen, vOpen, vStop, uStop, xS0, xOut, len, s1: Q.inc ? Q.s1 : sc, s2: sc };
+}
+
+/** minutes after his first greeting (u) of moment v on his own timeline (ascending in v) */
+function uOf(Q, v) {
+  if (Q.inc && v <= Q.vInc) return v * Q.s1;
+  if (Q.dawn && v >= Q.vOpen) return Q.uOpen + (v - Q.vOpen);
+  return Q.inc ? Q.u2 + (v - Q.v2) * Q.s2 : v * (Q.dawn ? Q.s1 : Q.s2);
+}
+
+/**
+ * The officer at time t → O { X, Y, Z, heading, d, dAhead, path, walking, stop, faceX/Y, incident, u, gate, exit }
+ * (state.pat by default; tmp = a scratch for path samples)
+ */
+function patrolAt(state, P, t, O = state.pat, tmp = state.tmp) {
+  const Q = P.patrol, nom = state.nom, R = state.route;
   const e = since(t, Q.p0);
   if (e >= Q.len) return null;
   const s0 = state.stops[0];
-  O.incident = false; O.u = 0; O.stop = 0; O.gate = false;
-  let u = e - CUE_LEAD;
+  O.incident = false; O.u = 0; O.stop = 0; O.gate = false; O.exit = false; O.path = R.path;
+  const u = e - CUE_LEAD;
+  if (Q.dawn && u >= Q.uStop) return exitAt(state, Q, u - Q.uStop, O, tmp);
   if (u < 0 || u >= Q.Utot) {
     // coming in by his gate (from the portal to the guard) / going out after his last greeting there
     const k = u < 0 ? clamp((e - (CUE_LEAD - Q.inMin)) / Q.inMin) : 1 - clamp((u - Q.Utot) / Q.inMin);
@@ -289,9 +390,11 @@ function patrolAt(state, P, t) {
     return O;
   }
   let v;
-  if (!Q.inc || u < Q.uInc) v = u / (Q.inc ? Q.s1 : Q.s2);
-  else if (u < Q.u2) { v = Q.vInc; O.incident = true; O.u = (u - Q.uInc) / Q.L; }
-  else v = Q.v2 + (u - Q.u2) / Q.s2;
+  if (Q.inc && u < Q.uInc) v = u / Q.s1;
+  else if (Q.inc && u < Q.u2) { v = Q.vInc; O.incident = true; O.u = (u - Q.uInc) / Q.L; }
+  else if (Q.dawn && u >= Q.uOpen) v = Q.vOpen + (u - Q.uOpen);
+  else if (Q.inc) v = Q.v2 + (u - Q.u2) / Q.s2;
+  else v = u / (Q.dawn ? Q.s1 : Q.s2);
   const round = Math.floor(v / nom.T + 1e-9);
   const w = Math.max(0, v - round * nom.T);
   let i = nom.tDwell.length - 1;
@@ -300,13 +403,171 @@ function patrolAt(state, P, t) {
   const walking = !O.incident && w >= nom.tWalk[i];
   const at = R.at;
   const d = walking ? at[i] + clamp((w - nom.tWalk[i]) / (nom.tNext[i] - nom.tWalk[i] || 1)) * (at[i + 1] - at[i]) : at[i];
-  const q = R.path.sample(d, state.tmp);
+  const q = R.path.sample(d, tmp);
   const st = state.stops[i];
   O.X = q.X; O.Y = q.Y; O.Z = Number.isFinite(q.Z) ? q.Z : st.Z;
   O.walking = walking; O.stop = i; O.d = d; O.dAhead = d;
   O.faceX = st.post ? st.post.X : q.X; O.faceY = st.post ? st.post.Y : q.Y;
   O.heading = walking || !st.post ? q.heading : headingTo(q.X, q.Y, st.post.X, st.post.Y);
   return O;
+}
+
+/** after his rounds (dawn variant): along the exit way to his gate's guard, the greeting, and out through the portal */
+function exitAt(state, Q, w, O, tmp) {
+  const X = state.exitNom, XR = state.exitRoute, s0 = state.stops[0];
+  const atS0 = X.at[X.iS0];
+  let ds = 0, walking = true;
+  if (w < Q.xS0) ds = w * 60 * PATROL_SPEED;
+  else if (w < Q.xS0 + DWELL) { ds = atS0; walking = false; }
+  else ds = Math.min(X.at[X.iE], atS0 + (w - Q.xS0 - DWELL) * 60 * PATROL_SPEED);
+  // the nominal metres onto the walked line, leg by leg (as the circuit: nav reshapes the line, not the timeline)
+  const d = mapLegs(X.at, XR.at, ds);
+  const q = XR.path.sample(d, tmp);
+  O.X = q.X; O.Y = q.Y; O.Z = Number.isFinite(q.Z) ? q.Z : s0.Z;
+  O.walking = walking; O.stop = 0; O.d = d; O.dAhead = d; O.path = XR.path; O.exit = true;
+  O.faceX = walking ? q.X : s0.post.X; O.faceY = walking ? q.Y : s0.post.Y;
+  O.heading = walking ? q.heading : headingTo(q.X, q.Y, s0.post.X, s0.post.Y);
+  return O;
+}
+
+/**
+ * Where the torch-bearers flank him at a post: out { w (0..1: how far they have moved there), X, Y, Z (his stand),
+ * h (toward the guard) } — 1 while he stands at a post, rising over his last FLANK_BLEND metres to one and falling over
+ * his first metres from one (not during the incident: its own staging)
+ */
+function postBlend(state, O, out) {
+  out.w = 0;
+  if (O.incident) return out;
+  const stops = state.stops;
+  const set = (st, w) => {
+    out.w = w * w * (3 - 2 * w); out.X = st.X; out.Y = st.Y; out.Z = st.Z;
+    out.h = headingTo(st.X, st.Y, st.post.X, st.post.Y);
+    return out;
+  };
+  if (O.gate) {
+    // between his gate's portal and its guard
+    const s0 = stops[0], dd = Math.hypot(O.X - s0.X, O.Y - s0.Y) * AMAH;
+    return dd < FLANK_BLEND && s0.post ? set(s0, 1 - dd / FLANK_BLEND) : out;
+  }
+  if (O.exit) {
+    const X = state.exitRoute, i = state.exitNom.iS0, s0 = stops[0];
+    const dd = Math.abs(X.at[i] - O.d);
+    return dd < FLANK_BLEND && s0.post ? set(s0, 1 - dd / FLANK_BLEND) : out;
+  }
+  const i = O.stop, st = stops[i];
+  if (!O.walking) return st.post ? set(st, 1) : out;
+  const at = state.route.at, n = stops.length;
+  const next = stops[(i + 1) % n];
+  const toNext = at[i + 1] - O.d, fromThis = O.d - at[i];
+  if (next.post && toNext < FLANK_BLEND) return set(next, 1 - toNext / FLANK_BLEND);
+  if (st.post && fromThis < FLANK_BLEND) return set(st, 1 - fromThis / FLANK_BLEND);
+  return out;
+}
+
+/** a distance along waypoint legs measured one way (nomAt) → the same fraction of the same leg another way (at) */
+function mapLegs(nomAt, at, ds) {
+  let i = upperBound(nomAt, ds) - 1;
+  if (i < 0) i = 0;
+  if (i > nomAt.length - 2) i = nomAt.length - 2;
+  const L = nomAt[i + 1] - nomAt[i];
+  return at[i] + clamp(L > 1e-9 ? (ds - nomAt[i]) / L : 0) * (at[i + 1] - at[i]);
+}
+
+/**
+ * "Go" to his row: a stand ahead of him on the line he walks, a little to its side, facing back toward him — he comes
+ * toward the viewer (behind him he walked out of the frame in seconds — qa-r2 SIM-R2-5). The first candidate (VIEW_AHEAD
+ * × VIEW_SIDE) on open floor at his level, with nothing solid at +1 m, him in sight from the eye and a cone of ±20° round
+ * him clear for VIEW_CONE.near metres (walls, piers, door leaves — the Moked's wicket); none: the nearest up his round.
+ * Cached for 2 s of the clock; null when he is not out.
+ */
+const _vo = {}, _vt = {}, _vq = {};
+let _vc = { key: '', v: null };
+function officerView(ctx, state, sim, t) {
+  if (!Number.isFinite(t)) return null;
+  const P = nightPlan(ctx, state, sim);
+  if (!P.patrol) return null;
+  const key = `${sim.generation}:${Math.round(t * 30)}:${state.pathsVer}`;
+  if (_vc.key === key && _vc.ctx === ctx) return _vc.v;
+  const O = patrolAt(state, P, t, _vo, _vt);
+  let v = null;
+  if (O) {
+    // at his gate's portal (coming in / going out by it): from his first stop on, up his round
+    const path = O.gate ? state.route.path : O.path || state.route.path;
+    const d0 = O.gate ? 0 : O.d;
+    const doors = doorBoxes(ctx);
+    let first = null;
+    // (in a passage or on a stair nothing passes the cone: then nothing close ahead and him in sight; then him in sight
+    // alone, from behind him too — down a stair the treads hide him from above)
+    for (const pass of [VIEW_PASS.strict, VIEW_PASS.level, VIEW_PASS.sight]) {
+      for (const a of pass.behind ? [...VIEW_AHEAD, ...VIEW_BEHIND] : VIEW_AHEAD) {
+        for (const side of VIEW_SIDE) {
+          const dd = d0 + a;
+          const q = path.offset(path.loop ? dd : clamp(dd, 0, path.length), side, 0, _vq);
+          const zHint = Number.isFinite(q.Z) ? q.Z : O.Z;
+          const Z = floorZ(ctx, q.X, q.Y, zHint);
+          if (!Number.isFinite(Z)) continue;
+          const c = { at: [q.X, q.Y, Z], heading: headingTo(q.X, q.Y, O.X, O.Y) };
+          first ||= c;
+          if (Math.abs(Z - zHint) <= 1 && clearView(ctx, c, O, doors, pass)) { v = c; break; }
+        }
+        if (v) break;
+      }
+      if (v) break;
+    }
+    v ||= first;
+  }
+  _vc = { key, ctx, v };
+  return v;
+}
+
+/** world AABBs of the door leaves as they stand now (ctx.movables 'door:*'), leaf by leaf (a door's group box would
+ *  span its open gateway) */
+function doorBoxes(ctx) {
+  const out = [];
+  const M = ctx.movables;
+  if (!M?.forEach) return out;
+  M.forEach((obj, id) => {
+    if (!String(id).startsWith('door:') || !obj?.isObject3D || obj.visible === false) return;
+    obj.updateMatrixWorld?.(true);
+    obj.traverse((m) => {
+      if (!m.isMesh || m.visible === false) return;
+      const b = new Box3().setFromObject(m);
+      if (!b.isEmpty()) out.push(b);
+    });
+  });
+  return out;
+}
+
+const _o = new Vector3(), _d = new Vector3(), _ray = new Ray(), _hit = new Vector3();
+/** the viewer's stand: nothing solid at +1 m; him in sight from the eye; a ±VIEW_CONE.deg cone toward him clear near by */
+function clearView(ctx, c, O, doors, pass = VIEW_PASS.strict) {
+  const ph = ctx.physics;
+  if (!ph?.raycast) return true;
+  const x = c.at[0] * AMAH, z = -c.at[1] * AMAH, y = c.at[2] * AMAH;
+  if (ph.insideAt?.(x, y + 1.0, z)) return false;
+  _o.set(x, y + 1.6, z);
+  const blocked = (dir, far) => {
+    const h = ph.raycast(_o, dir, far);
+    if (h && h.distance < far) return true;
+    _ray.set(_o, dir);
+    for (const b of doors) if (_ray.intersectBox(b, _hit) && _hit.distanceTo(_o) < far) return true;
+    return false;
+  };
+  // him: from the eye to his chest
+  _d.set(O.X * AMAH - x, (Number.isFinite(O.Z) ? O.Z : c.at[2]) * AMAH + 1.3 - (y + 1.6), -O.Y * AMAH - z);
+  const L = _d.length();
+  if (L < 1.5) return false;
+  _d.multiplyScalar(1 / L);
+  if (blocked(_d, L - 0.5)) return false;
+  // straight ahead (level) nothing within VIEW_CONE.level metres; the cone round him: nothing within VIEW_CONE.near
+  const h0 = Math.atan2(_d.x, -_d.z);
+  if (pass.level && blocked(new Vector3(Math.sin(h0), 0, -Math.cos(h0)), VIEW_CONE.level)) return false;
+  if (!pass.cone) return true;
+  for (const s of [-1, 1]) {
+    const a = h0 + (s * VIEW_CONE.deg * Math.PI) / 180;
+    if (blocked(new Vector3(Math.sin(a), 0, -Math.cos(a)), VIEW_CONE.near)) return false;
+  }
+  return true;
 }
 
 /** "Shalom alecha!" as he reaches each post — only for arrivals the continuous clock runs through */
@@ -482,6 +743,13 @@ function strikeSpot(ctx, state, p, O) {
   return state.strike;
 }
 
+/** a stand on the Mount behind a gate's guard (he faces into his gateway), on the floor nearest the post */
+function behindOf(ctx, p) {
+  const r = (p.face * Math.PI) / 180;
+  const X = p.X - Math.sin(r) * STOP_OFFSET, Y = p.Y - Math.cos(r) * STOP_OFFSET;
+  return [X, Y, floorZ(ctx, X, Y, p.Z) ?? p.Z];
+}
+
 /** the officer stops in front of the guard, on the floor nearest the post */
 function standOf(ctx, p) {
   const r = (p.face * Math.PI) / 180;
@@ -509,6 +777,9 @@ function circuit(ctx, levites) {
   const post = (id, at) => {
     const p = byId.get(id);
     if (!p) return;
+    // at the Mount's own gates the guard faces into his gateway: the officer greets him from the Mount, behind him
+    // (in front of him stood in the shut gate's passage, the bearers in its wall — qa-r2 SIM-R2-5) ⚙
+    if (!at && /^gate-(tadi|shushan|kiponus)$/.test(id)) at = behindOf(ctx, p);
     stops.push({ post: p, ...(at ? { X: at[0], Y: at[1], Z: at[2] ?? p.Z } : standOf(ctx, p)) });
   };
   const flightFoot = (gate, dy) => { const f = el(`azarah.gate.${gate}.flight`)?.params?.foot; return f ? [f[0], f[1] + dy, f[2]] : null; };
@@ -551,11 +822,11 @@ function circuit(ctx, levites) {
   post('mount-se');
   viaP(out); via(rx, 316); via(rx, 253);
   post('azarah-se');
-  via(rx, 253); via(rx, 316); viaP(out); viaP(inEN);
+  via(rx, 253); via(rx, 316); viaP(out, { dawn: true }); viaP(inEN);
   post('gate-nikanor');
   viaP(inEN); viaP(out); via(rx, 345); via(rx, 407);
   post('azarah-ne');
-  via(rx, 407); via(rx, 345); viaP(out); via(413, 330.5); via(413, 418); via(236, 428);
+  via(rx, 407); via(rx, 345); viaP(out, { exit: true }); via(413, 330.5); via(413, 418); via(236, 428);
   if (moked) {
     viaP(moked.foot); viaP(moked.door, { pass: DOOR_CHEL, straight: true });
     for (const p of hallWay) viaP(p, { straight: true });
@@ -591,7 +862,13 @@ function circuit(ctx, levites) {
   const s0 = stops[0];
   const entry = g ? { X: s0.X, Y: g.min[1] + 0.8, Z: s0.Z } : { X: s0.X, Y: s0.Y - 2, Z: s0.Z };
   const passes = moked ? [DOOR_CHEL, PISH] : [];
-  return { stops, entry, passes };
+  // after his event: from the soreg's east entry (the 'exit' stop) out of the strip, across the open south of the
+  // Mount to the western Chuldah stair, down the tunnel to his gate's guard, and out ⚙
+  const P3 = (p) => ({ X: p[0], Y: p[1], Z: p[2] ?? 0 });
+  // (a last point out beyond the portal: only for the torches going ahead of him through it)
+  const exitWay = tw ? [P3(out), P3([413, 330.5, 0]), P3([413, 240, 0]), P3([169, 80, 0]), P3(tw.high), P3(tw.low), { X: s0.X, Y: s0.Y, Z: s0.Z }, { ...entry },
+    { X: entry.X, Y: entry.Y - 6, Z: entry.Z }] : null;
+  return { stops, entry, passes, exitWay };
 }
 
 /** the circuit's timeline from its straight legs (nav-independent): dwell at each post, walk at PATROL_SPEED */
@@ -608,13 +885,23 @@ function nominal(stops, entry) {
   return { tDwell, tWalk, tNext, T, inMin: Math.max(0.01, inLen / PATROL_SPEED / 60) };
 }
 
-/** nav-refined lines (async): the circuit, then each Levite's way from his gate to his post */
+/** the exit way's straight lengths (m) per waypoint: its guard's stop (iS0) and the portal (iE) are the last but two/one */
+function wayNominal(way) {
+  const r = straightRoute(way);
+  return { at: r.at, iS0: way.length - 3, iE: way.length - 2 };
+}
+
+/** nav-refined lines (async): the circuit, his way out at dawn, then each Levite's way from his gate to his post */
 function buildPaths(ctx, state) {
   state.pathsBusy = true;
   const ver = ctx.physics?.version ?? 0;
   (async () => {
     const r = await navRoute(ctx, state.stops, { loop: true });
     if (r.source !== 'straight (no nav)') { state.route = r; state.routeSource = r.source; state.routeFailed = r.failed; }
+    if (state.exitWay) {
+      const x = await navRoute(ctx, state.exitWay);
+      if (x.source !== 'straight (no nav)') { state.exitRoute = x; state.exitSource = x.source; }
+    }
     for (let i = 0; i < state.levites.length; i++) {
       const p = state.levites[i], x = p.exit;
       if (!x) continue;

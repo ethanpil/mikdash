@@ -390,19 +390,32 @@ function buildStringcourses(H, ab, xKodE, UL, lint) {
     ? [[0, 0], [0.12, 0], [0.12, 0.22], [0.2, 0.34], [0.2, 0.5], [0.24, 0.56], [0.24, 0.68], [0.34, 0.86], [0.36, 0.86], [0.36, 1], [0, 1]]
     : [[0, 0], [0.2, 0], [0.36, 0.86], [0.36, 1], [0, 1]];
   const m = kit.m('marble_white', true, true);
-  const e = 0.36;
+  const e0 = 0.36;
   const AY = H.axisY;
+  // the cedar posts at the aliyah door rise past the cornices on the south face: the courses are notched round them
+  const posts = H.posts.map((p) => [p.x - 0.4, p.x + 0.4]).sort((a, b) => a[0] - b[0]);
+  const along = (x0, x1) => {
+    const out = [];
+    let a = x0;
+    for (const [p0, p1] of posts) { if (p1 <= a || p0 >= x1) continue; if (p0 > a) out.push([a, p0]); a = Math.max(a, p1); }
+    if (a < x1) out.push([a, x1]);
+    return out;
+  };
   for (const z of zs) {
-    // aliyah block: S, N and W faces
-    sweep(m, prof, [ab.x0 - e, ab.y0], [xKodE, ab.y0], z, [0, -1]);
-    sweep(m, prof, [xKodE, ab.y1], [ab.x0 - e, ab.y1], z, [0, 1]);
-    sweep(m, prof, [ab.x0, ab.y1 + e], [ab.x0, ab.y0 - e], z, [-1, 0]);
-    // Ulam block: east face (broken by the lintel beam lying at this height), north and south ends, exposed west faces.
-    // At the first ceiling line (+62) it projects further (½ amah): the storey line of the 100-amah front ⚙
+    // qa-r1-fix-world: deeper cornices, so the house reads as built storeys from the Mount and the hills, not a slab —
+    // the +62 kiyur 0.6 amah round the aliyah block (¾ round the Ulam block), the crowning +107 kiyur 1 amah all round
     const low = z < zs[1] - 1;
-    const sc = low ? H.kiyurUlamScale : 1;
+    const sa = low ? H.kiyurLowScale : H.kiyurRoofScale;
+    const pa = prof.map(([u, v]) => [u * sa, v]), e = e0 * sa;
+    // aliyah block: S (notched for the cedar posts), N and W faces
+    for (const [x0, x1] of along(ab.x0 - e, xKodE)) sweep(m, pa, [x0, ab.y0], [x1, ab.y0], z, [0, -1]);
+    sweep(m, pa, [xKodE, ab.y1], [ab.x0 - e, ab.y1], z, [0, 1]);
+    sweep(m, pa, [ab.x0, ab.y1 + e], [ab.x0, ab.y0 - e], z, [-1, 0]);
+    // Ulam block: east face (broken by the lintel beam lying at this height), north and south ends, exposed west faces.
+    // At the first ceiling line (+62) it is the storey line of the 100-amah front ⚙
+    const sc = low ? H.kiyurUlamScale : H.kiyurRoofScale;
     // at +62 it lies on a plain (set-back) course: its back fills the recess
-    const pu = prof.map(([u, v]) => [u === 0 && low ? -H.rovadRecess : u * sc, v]), eu = e * sc;
+    const pu = prof.map(([u, v]) => [u === 0 && low ? -H.rovadRecess : u * sc, v]), eu = e0 * sc;
     const beam = lint.params.beams.find((b) => b.z[0] < z + 1 - 1e-6 && b.z[1] > z + 1e-6);
     const east = beam ? [[UL.min[1] - eu, AY - beam.length / 2], [AY + beam.length / 2, UL.max[1] + eu]] : [[UL.min[1] - eu, UL.max[1] + eu]];
     for (const [y0, y1] of east) sweep(m, pu, [UL.max[0], y0], [UL.max[0], y1], z, [1, 0]);
@@ -415,13 +428,15 @@ function buildStringcourses(H, ab, xKodE, UL, lint) {
 /** a restrained cavetto coping crowning the ma'akeh's outer face, under the kalya orev (no battlements — §25) */
 function buildCoping(H, path, parTop) {
   const { kit, d } = H;
-  const prof = d >= 1 ? [[0, 0], [0.06, 0], [0.06, 0.16], [0.12, 0.3], [0.3, 0.6], [0.34, 0.62], [0.34, 0.8], [0, 0.8]] : [[0, 0], [0.34, 0.6], [0.34, 0.8], [0, 0.8]];
+  // qa-r1-fix-world: projection 0.55 amah (H.copingOut; was 0.34) — the cavetto's shadow is the roof line seen from afar
+  const k = H.copingOut / 0.34;
+  const prof = (d >= 1 ? [[0, 0], [0.06, 0], [0.06, 0.16], [0.12, 0.3], [0.3, 0.6], [0.34, 0.62], [0.34, 0.8], [0, 0.8]] : [[0, 0], [0.34, 0.6], [0.34, 0.8], [0, 0.8]]).map(([u, v]) => [u * k, v]);
   const m = kit.m('marble_white', true, true);
   const n = path.length;
   let area = 0;
   for (let i = 0; i < n; i++) { const p = path[i], q = path[(i + 1) % n]; area += p[0] * q[1] - q[0] * p[1]; }
   const ccw = area > 0;
-  const z = parTop - 0.8, e = 0.34;
+  const z = parTop - 0.8, e = H.copingOut;
   for (let i = 0; i < n; i++) {
     const p = path[i], q = path[(i + 1) % n];
     const dx = Math.sign(q[0] - p[0]), dy = Math.sign(q[1] - p[1]);

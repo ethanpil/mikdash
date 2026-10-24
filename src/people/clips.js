@@ -519,8 +519,11 @@ export const HUMAN_CLIPS = {
       const lift = d.chest[1] + 0.01;
       P.root(0, lift, 0, 90, 0, 0);
       P.rot('neck', -10, 0, 0); P.rot('head', -6, 8, 0);
+      // the right knee a little drawn up, its heel on the floor (qa-r1: under the mantle a knee, not a flat slab, tells the
+      // eye where the body is)
       for (const [s, sg] of [['r', 1], ['l', -1]]) {
-        P.rot(`thigh_${s}`, 8, 0, 2 * sg); P.rot(`shin_${s}`, -14, 0, 0); P.rot(`foot_${s}`, -25, 0, 2 * sg);
+        if (s === 'r') { P.rot('thigh_r', 21, 0, 3); P.rot('shin_r', -40, 0, 0); P.rot('foot_r', -5, 0, 2); }
+        else { P.rot(`thigh_${s}`, 8, 0, 2 * sg); P.rot(`shin_${s}`, -14, 0, 0); P.rot(`foot_${s}`, -25, 0, 2 * sg); }
       }
       breathe(P, ph * 3, 1.4);
       // model space while lying: +y up off the floor, +z toward the head. The wrists over the flanks on the belly's
@@ -1248,6 +1251,58 @@ function carryLambArms(P, r, ph, lift = 0) {
   openHand(P, 'r', V(0.155 * k, y, -0.2 * k), V(0.75, 0.2, -0.6), V(-0.45, 0.1, -0.9), { curl: 50, icurl: 42, thumb: 18, elbow: [0.35, -1, 0.55] });
   openHand(P, 'l', V(-0.155 * k, y + 0.01, -0.2 * k), V(-0.75, 0.2, -0.6), V(0.45, 0.1, -0.9), { curl: 50, icurl: 42, thumb: 18, elbow: [0.35, -1, 0.55] });
 }
+// ------------------------------------------------------------------------------------------- pose variants (qa-r1)
+// A crowd or a row of kohanim in one pose must not be clones: some poses are baked in a few variants ('<pose>~k'), and
+// each figure keeps one (system.js variantOf: an actor by its seed, a crowd member by its own offset). CLIP_VARIANTS
+// lists how many there are beside the base clip. The variants are small, natural differences of stance and gesture —
+// how a man stands at rest, how far apart he lifts his hands — never a different act.
+export const CLIP_VARIANTS = { stand: 3, raise_hands: 3 };
+
+/** a variant of 'stand': weight on one leg (the other foot a little forward and out), the head turned and tilted, arms
+ *  a touch bent or hanging further back; o: { w (weight shift −1…1), foot: [x, z], head: [pitch, yaw, roll], arm } */
+function standVariant(o) {
+  return {
+    frames: 24, loop: true, rate: o.rate ?? 0.12,
+    fn(P, r, ph) {
+      const k = r.dims.H / 1.67, w = sin(ph * TAU), sh = o.w;
+      const fx = o.foot[0] * k, fz = o.foot[1] * k;
+      // the leg that does not bear the weight steps a little forward and out (its side is −sign(w))
+      const side = sh > 0 ? { lx: -fx, lz: fz } : { rx: fx, rz: fz };
+      stance(P, r, {
+        px: 0.022 * sh * k + 0.007 * w, pr: -3.2 * sh - 0.9 * w, sr: 1.6 * sh + 0.6 * w, cr: 0.8 * sh + 0.4 * w,
+        head: o.head[0], hy: o.head[1] + 2.4 * sin(ph * TAU + 1.3), hr: o.head[2] + 0.8 * w, neck: o.neck ?? 2.5, ...side,
+      });
+      armHang(P, 'l', o.arm?.l || {}); armHang(P, 'r', o.arm?.r || {});
+      breathe(P, ph * 2);
+    },
+  };
+}
+HUMAN_CLIPS['stand~1'] = standVariant({ w: 1, foot: [0.025, -0.07], head: [-1, 9, 2.5], arm: { r: { elbow: 16, flex: 6 } } });
+HUMAN_CLIPS['stand~2'] = standVariant({ w: -0.8, foot: [0.03, -0.05], head: [3.5, -11, -1.5], neck: 4, arm: { l: { elbow: 22, flex: 2, ftwist: 30 } } });
+HUMAN_CLIPS['stand~3'] = standVariant({ w: 0.35, foot: [0.04, 0.03], head: [-4.5, 4, -2.5], neck: 0.5, rate: 0.1, arm: { l: { flex: -2, elbow: 14 }, r: { flex: -3, elbow: 12 } } });
+
+/** a variant of 'raise_hands' (Birkat Kohanim in the Mikdash, hands above the head — Tamid 7:2): o = { x, y, z (the
+ *  wrists: half spread, height in H, forward), spread (fingers), out (palms turned outward), head [pitch, yaw, roll],
+ *  lift (the right hand a little higher than the left) } */
+function raiseVariant(o) {
+  return {
+    frames: 16, loop: true, rate: 0.2,
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      stance(P, r, { head: o.head[0], neck: -2, hy: o.head[1], hr: o.head[2] });
+      for (const [s, sg] of [['r', 1], ['l', -1]]) {
+        const lift = sg > 0 ? o.lift : -o.lift;
+        openHand(P, s, V(sg * o.x * k, d.H * (o.y + lift), -o.z * k), V(-sg, 0.15, 0.05 + o.out), V(sg * (0.08 + o.out * 0.5), 1, -0.1),
+          { curl: o.curl ?? 4, icurl: 2, thumb: o.thumb ?? 0, spread: o.spread, elbow: [1, -0.5, 0.2] });
+      }
+      breathe(P, ph);
+    },
+  };
+}
+SERVICE_CLIPS['raise_hands~1'] = raiseVariant({ x: 0.19, y: 1.06, z: 0.19, spread: 13, out: 0.12, head: [5, 3, 2], lift: 0.006, thumb: 6 });
+SERVICE_CLIPS['raise_hands~2'] = raiseVariant({ x: 0.125, y: 1.09, z: 0.12, spread: 6, out: -0.05, head: [-3, -2, -1.5], lift: -0.008, curl: 8 });
+SERVICE_CLIPS['raise_hands~3'] = raiseVariant({ x: 0.165, y: 1.08, z: 0.17, spread: 11, out: 0.2, head: [1, 5, 0], lift: 0.012, thumb: 3 });
+
 Object.assign(HUMAN_CLIPS, SERVICE_CLIPS);
 
 // ------------------------------------------------------------------------------------------- people-4 poses

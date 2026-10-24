@@ -6,6 +6,20 @@
   <title>Mikdash — Walk the Second Temple</title>
   <meta name="description" content="An immersive, source-grounded 3D walk through Har HaBayit and the Second Temple, following the daily service hour by hour." />
   <meta name="theme-color" content="#0d0b08" />
+  <!-- share cards: the site-URL placeholder is filled in at build time (vite.config.js siteUrl) -->
+  <link rel="canonical" href="%MK_SITE_URL%" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Mikdash" />
+  <meta property="og:title" content="Mikdash — Walk the Second Temple" />
+  <meta property="og:description" content="An immersive, source-grounded 3D walk through Har HaBayit and the Second Temple, following the daily service hour by hour." />
+  <meta property="og:url" content="%MK_SITE_URL%" />
+  <meta property="og:image" content="%MK_SITE_URL%og-image.jpg" />
+  <meta property="og:image:type" content="image/jpeg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Early-morning sun on the Heichal of the Second Temple and its courts, seen from above the north-east of Har HaBayit, the smoke of the altar rising straight up and Jerusalem beyond. A render from Mikdash." />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%226%22 fill=%22%230d0b08%22/%3E%3Cpath d=%22M8 26V12h16v14M12 26v-8h8v8M6 12l10-6 10 6%22 stroke=%22%23d4a640%22 stroke-width=%222%22 fill=%22none%22/%3E%3C/svg%3E" />
   <style>
     html, body { margin: 0; height: 100%; background: #0d0b08; overflow: hidden; }
@@ -16,14 +30,65 @@
     #boot-progress { height: 100%; width: 0; background: #d4a640; transition: width .3s; }
     body.booted #boot { opacity: 0; pointer-events: none; }
     body.shot #boot { display: none; }
+    #boot .boot-msg { max-width: min(460px, calc(100vw - 32px)); margin: 18px auto 0; text-align: center; }
+    #boot .boot-msg p { margin: 0 0 10px; }
+    #boot .boot-msg .lead { font-size: 17px; }
+    #boot .boot-msg .hint { opacity: .8; font-size: 14px; }
+    #boot .boot-msg button { margin-top: 8px; padding: 8px 26px; font: inherit; color: #1a140b; background: #d4a640;
+      border: 0; border-radius: 6px; cursor: pointer; }
+    #boot .boot-msg button:focus-visible { outline: 2px solid #f0dca8; outline-offset: 3px; }
+    #boot .boot-msg details { margin-top: 18px; text-align: left; font-size: 12px; opacity: .7; }
+    #boot .boot-msg summary { cursor: pointer; text-align: center; }
+    #boot .boot-msg pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; margin: 8px 0 0;
+      padding: 8px 10px; background: #17130d; border-radius: 4px; font: 11px/1.45 ui-monospace, Consolas, monospace; }
+    body.boot-failed #boot { display: grid; opacity: 1; pointer-events: auto; }
+    body.boot-failed #boot .bar, body.boot-failed #boot-label { display: none; }
   </style>
+  <noscript><style>#boot .bar, #boot-label { display: none; }</style></noscript>
+  <script>
+    // Web fonts (Google Fonts), requested at boot so the faces are in before the intro, never render- or boot-blocking
+    // (media=print until loaded; display=swap: Georgia / David until then). The latin and Hebrew faces are fetched as
+    // soon as the sheet is in, not at the UI's first layout, which waits for the world build and the shader warm-up
+    // (6 files, ~190 kB: the set the UI uses in its first seconds anyway). None in screenshot mode or with the UI off
+    // (params.js `ui`); offline, no request (so no console error) until the browser is back online.
+    // src/ui/index.js skips its own insert when link[data-mk-fonts] exists.
+    (function () {
+      var q = new URLSearchParams(location.search), on = function (k) { return q.get(k) === '1' || q.get(k) === 'true'; };
+      if (on('shot') || q.get('ui') === '0') return;
+      var add = function (rel, href, cors) {
+        var l = document.createElement('link');
+        l.rel = rel;
+        if (href) l.href = href;
+        if (cors) l.crossOrigin = 'anonymous';
+        return document.head.appendChild(l);
+      };
+      var sheet = add('stylesheet');
+      sheet.setAttribute('data-mk-fonts', '');
+      sheet.media = 'print';
+      sheet.onload = function () {
+        sheet.media = 'all';
+        if (document.fonts) document.fonts.forEach(function (f) {
+          if (/\bU\+0+-0*FF\b|\bU\+0*590-0*5FF\b/i.test(f.unicodeRange)) f.load().catch(function () {}); // "U+0-FF" in Chromium
+        });
+      };
+      var go = function () {
+        add('preconnect', 'https://fonts.googleapis.com');
+        add('preconnect', 'https://fonts.gstatic.com', true);
+        sheet.href = 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500'
+          + '&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Frank+Ruhl+Libre:wght@400;500;700&display=swap';
+      };
+      if (navigator.onLine === false) addEventListener('online', go, { once: true }); else go();
+    })();
+  </script>
 </head>
 <body>
   <canvas id="scene"></canvas>
   <div id="ui-root"></div>
   <div id="boot"><div><div style="font-size:34px;letter-spacing:.06em;text-align:center">מקדש</div>
     <div style="text-align:center;opacity:.8">Mikdash</div><div class="bar"><div id="boot-progress"></div></div>
-    <div id="boot-label" style="text-align:center;margin-top:8px;opacity:.7;font-size:13px">Loading…</div></div></div>
+    <div id="boot-label" style="text-align:center;margin-top:8px;opacity:.7;font-size:13px">Loading…</div>
+    <noscript><div class="boot-msg"><p class="lead">Mikdash needs JavaScript and WebGL 2.</p>
+      <p class="hint">Turn on JavaScript for this site, then reload the page.</p></div></noscript></div></div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

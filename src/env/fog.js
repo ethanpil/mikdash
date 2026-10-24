@@ -3,8 +3,8 @@
 // Three's stock fog is one colour mixed in AFTER tone mapping. We replace the chunks so that fog
 //  * is applied in linear HDR before tone mapping (same result with or without the post pipeline),
 //  * uses physical extinction (Rayleigh rgb + height-dependent aerosol) along the actual view ray,
-//  * takes its in-scattered colour from the sky in that direction (a 2nd-order Fourier fit of the horizon
-//    radiance around the dominant light, measured from the sky LUT every refresh).
+//  * takes its in-scattered colour from the sky in that direction (the horizon radiance measured from the sky LUT every
+//    refresh at 0, 45, 90, 135 and 180° from the dominant light's azimuth, interpolated geometrically between them).
 // It also clamps HDR output to the half-float range (sun glints on gold would otherwise overflow to Inf).
 //
 // The extra uniforms are not part of any material: they are uploaded directly into every compiled program
@@ -28,9 +28,11 @@ const PARS_FRAGMENT = /* glsl */`
     uniform float fogNear;
     uniform float fogFar;
   #endif
-  uniform vec3 mkFogA0;      // horizon radiance Fourier terms (output units)
+  uniform vec3 mkFogA0;      // horizon radiance at 0, 45, 90, 135, 180° from mkFogRefDir's azimuth (output units)
   uniform vec3 mkFogA1;
   uniform vec3 mkFogA2;
+  uniform vec3 mkFogA3;
+  uniform vec3 mkFogA4;
   uniform vec3 mkFogRefDir;  // direction of the dominant light (world)
   uniform vec3 mkFogExtR;    // Rayleigh extinction, 1/m
   uniform vec4 mkFogParams;  // x aerosol extinction at y=0 (1/m), y 1/aerosol scale height (1/m), z zenith/horizon ratio, w the draw distance (m; 0 off)
@@ -61,7 +63,12 @@ const PARS_FRAGMENT = /* glsl */`
     vec2 r = mkFogRefDir.xz;
     float rl = length( r );
     float cphi = ( hl > 1e-4 && rl > 1e-4 ) ? dot( h / hl, r / rl ) : 0.0;
-    vec3 Linf = max( mkFogA0 + mkFogA1 * cphi + mkFogA2 * ( 2.0 * cphi * cphi - 1.0 ), vec3( 0.0 ) );
+    // qa-r2-fix-env-render: between the measured samples, geometrically (exact at them, never below zero). A 2nd-order
+    // Fourier fit of the five rang below zero ≈ 110° from a just-risen Sun, red first: blue-violet far ridges
+    float u = min( acos( clamp( cphi, - 1.0, 1.0 ) ) * 1.2732395, 3.9999 );
+    vec3 La = u < 1.0 ? mkFogA0 : u < 2.0 ? mkFogA1 : u < 3.0 ? mkFogA2 : mkFogA3;
+    vec3 Lb = u < 1.0 ? mkFogA1 : u < 2.0 ? mkFogA2 : u < 3.0 ? mkFogA3 : mkFogA4;
+    vec3 Linf = exp( mix( log( max( La, vec3( 1e-12 ) ) ), log( max( Lb, vec3( 1e-12 ) ) ), fract( u ) ) );
     Linf *= mix( 1.0, mkFogParams.z, clamp( dir.y, 0.0, 1.0 ) ); // looking up: thinner, darker air light
     // render-env-2-fix: where the far haze closes over the world's end, its air light follows the dome right there (the
     // sky-view LUT's skyline profile: darker just above and below a far silhouette than the 0.5–3.5° band the Fourier
@@ -133,14 +140,14 @@ ${ORIGINAL_TONEMAP}`;
 }
 
 // mkWBd: white-balance gain − 1 (render/tonemap.js applies it in the direct path's tone mapping; zero = neutral)
-const NAMES = ['mkFogA0', 'mkFogA1', 'mkFogA2', 'mkFogRefDir', 'mkFogExtR', 'mkFogParams', 'mkWBd', 'mkFogSky0', 'mkFogSky1'];
+const NAMES = ['mkFogA0', 'mkFogA1', 'mkFogA2', 'mkFogA3', 'mkFogA4', 'mkFogRefDir', 'mkFogExtR', 'mkFogParams', 'mkWBd', 'mkFogSky0', 'mkFogSky1'];
 
 /** Uploads the aerial-perspective uniforms into every program that uses them. */
 export class FogUniforms {
   constructor(renderer) {
     this.renderer = renderer;
     this.values = {
-      mkFogA0: [0, 0, 0], mkFogA1: [0, 0, 0], mkFogA2: [0, 0, 0], mkFogRefDir: [0, 1, 0],
+      mkFogA0: [0, 0, 0], mkFogA1: [0, 0, 0], mkFogA2: [0, 0, 0], mkFogA3: [0, 0, 0], mkFogA4: [0, 0, 0], mkFogRefDir: [0, 1, 0],
       mkFogExtR: [0, 0, 0], mkFogParams: [0, 0, 1, 0], mkWBd: [0, 0, 0], mkFogSky0: [1, 1, 1, 1], mkFogSky1: [1, 1, 1, 0],
     };
     this.version = 1;

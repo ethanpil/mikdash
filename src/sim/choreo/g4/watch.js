@@ -25,6 +25,43 @@ function row(id, title, summary, sources) {
   };
 }
 
+// a few paces ahead of the mourner beyond the prostration places (on his right, toward the soreg), facing back to him.
+// The first stand of a few that is open Mount floor (not a gate's flight, not inside the soreg or a parapet) with him in
+// clear view (qa-r2 SIM-R2-2's guard: by the southern gates' flights it stood on a flight, or 2.5 m from its side) ⚙
+const AHEAD = [7, 9.5, 5, 12], RIGHT = [4, 2.5, 5.5];
+let _mv = { key: '', view: null };
+function mournerView(ctx, s) {
+  const key = `${Math.round(s.X * 2)},${Math.round(s.Y * 2)},${Math.round(s.heading / 5)}`;
+  if (_mv.key === key && _mv.ctx === ctx) return _mv.view;
+  const h = (s.heading * Math.PI) / 180, Z = Math.max(0, s.Z);
+  const rx = Math.cos(h), ry = -Math.sin(h);           // his right (the soreg side: he goes clockwise)
+  const ph = ctx.physics, V = ctx.camera?.position?.constructor;
+  let view = null;      // none open: the first (as before)
+  for (const a of AHEAD) {
+    for (const r of RIGHT) {
+      const X = s.X + (Math.sin(h) * a + rx * r) / AMAH, Y = s.Y + (Math.cos(h) * a + ry * r) / AMAH;
+      const v = { at: [X, Y, Z], heading: (s.heading + 180 + 25 + 360) % 360 };
+      view ||= v;
+      if (!ph?.bvh || !V || openStand(ph, V, X, Y, Z, s)) { _mv = { key, ctx, view: v }; return v; }
+    }
+  }
+  _mv = { key, ctx, view };
+  return view;
+}
+/** open floor at the Mount's level, nothing solid at +1 m, the mourner in sight from the eye */
+function openStand(ph, V, X, Y, Z, s) {
+  const x = X * AMAH, z = -Y * AMAH, y0 = Z * AMAH;
+  const f = ph.levelFloor ? ph.levelFloor(x, z, y0) : ph.floorAt(x, z);
+  if (f == null || Math.abs(f - y0) > 0.3) return false;
+  if (ph.insideAt(x, f + 1.0, z)) return false;
+  const o = new V(x, f + 1.6, z), tx = s.X * AMAH, tz = -s.Y * AMAH, ty = Math.max(0, s.Z) * AMAH + 1.3;
+  const d = new V(tx - o.x, ty - o.y, tz - o.z);
+  const L = d.length();
+  d.multiplyScalar(1 / L);
+  const hit = ph.raycast(o, d, L);
+  return !(hit && hit.distance < L - 0.4);
+}
+
 export function mountSource(ctx, getPlan) {
   const pro = row('g4:prostration', { en: 'Prostrating opposite a repaired breach', he: 'השתחוויה כנגד הפרצות' },
     'Opposite each of the thirteen breaches the Greek kings made in the soreg, repaired, those going round prostrate full length (Middot 2:3).',
@@ -78,11 +115,7 @@ export function mountSource(ctx, getPlan) {
           : '"Why do you go round to the left?" — "I am a mourner." — "May He who dwells in this House comfort you" (Middot 2:2).';
         mou.description = mou.summary;
         mou.pos[0] = _s.X; mou.pos[1] = _s.Y; mou.pos[2] = _s.Z;
-        // a few paces ahead of him beyond the prostration places (on his right, toward the soreg), facing back to him
-        const h = (_s.heading * Math.PI) / 180;
-        const ax = _s.X + (Math.sin(h) * 7) / AMAH, ay = _s.Y + (Math.cos(h) * 7) / AMAH;
-        const rx = Math.cos(h), ry = -Math.sin(h);           // his right (the soreg side: he goes clockwise)
-        mou.view = { at: [ax + (rx * 4.0) / AMAH, ay + (ry * 4.0) / AMAH, Math.max(0, _s.Z)], heading: (_s.heading + 180 + 25 + 360) % 360 };
+        mou.view = mournerView(ctx, _s);
         out.push(mou);
         break;
       }

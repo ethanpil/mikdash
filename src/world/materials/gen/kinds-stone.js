@@ -1,11 +1,15 @@
 // Generator kinds: masonry, stone, lime, ground (see kinds.js for the conventions).
 
 export const STONE_KINDS = {
-  // Herodian marble ashlar: courses of white (shayish), blue-green (kochla) and veined (marmara) marble,
-  // one course set out and one drawn in (apik shefa v'a'eil shefa — Bava Batra 4a), left unplastered.
-  // Drafted margins with a slightly raised, pointed boss (uP1.x = 1) or plain fine-dressed faces (uP1.x = 0, the
-  // inner-face variant). Row code = colour type * 2 + set-out flag. Courses follow the layout's course table when
-  // it has one (b.h = that course's height).
+  // Herodian marble ashlar: stones of white (shayish), blue-green (kochla) and veined (marmara) marble, one course set
+  // out and one drawn in (apik shefa v'a'eil shefa — Bava Batra 4a), left unplastered. qa-r1: the marble is chosen per
+  // STONE, not per course (Rashi Sukkah 51b: "the stones differ in appearance one from another") — shayish ~53 %,
+  // marmara ~30 %, kochla ~17 % (shares: reconstruction); the row code's colour type is only a nominal label now.
+  // Drafted margins with a slightly raised, pointed boss (uP1.x = 1; faded out where a margin is under ~1.5 texels) or
+  // plain fine-dressed faces (uP1.x = 0). Row code = colour type * 2 + set-out flag. Courses follow the layout's course
+  // table when it has one (b.h = that course's height).
+  // qa-r1: worn arrises — along the joints, here and there and more at the corners, the edge is chipped back a few mm:
+  // paler fresh stone, rougher, more rounded (at least 2 texels wide).
   // materials-2-fix: the dressing is sized to what the texture resolves — the boss is pointed with 1.5–3 mm pits on
   // ~2–3.4 cm cells (≥ 3 texels on high; faded below), rough (0.8) against the smoother combed margin (0.55); the
   // comb strokes themselves are millimetre-scale and live in the close-range detail layer (d_comb, patch.js), masked
@@ -22,10 +26,11 @@ void surf(vec2 p, inout S s) {
   Blk b = blk(p);
   float rh = b.h;
   float outF = mod(b.code, 2.0);
-  int ct = int(floor(b.code * 0.5 + 0.01));
   vec3 bh = blkHash(b, 101);
   vec3 bk = blkHash(b, 131);
   vec3 bm = blkHash(b, 151);
+  float tsel = blkHash(b, 171).x;
+  int ct = tsel < 0.17 ? 1 : (tsel < 0.47 ? 2 : 0);
   float ex = min(b.lx, b.len - b.lx);
   float ey = min(b.ly, rh - b.ly);
   vec2 lp = vec2(b.lx, b.ly) + bh.xy * 37.0;
@@ -38,6 +43,8 @@ void surf(vec2 p, inout S s) {
   vec4 pk2 = vL(lp + vec2(0.37, 0.11), vec2(0.022), vec2(0.61, 0.11));
   vec4 sw = nT(p, vec2(9.0, 0.35), vec2(0.37, 0.13));
   float tex = max(uTile.x / uRes.x, uTile.y / uRes.y);
+  // the drafted margin needs ~1.5 texels across its narrowest side to read as a band, not a printed outline
+  float mOn = uP1.x * smoothstep(1.5, 2.5, uP0.x * 0.75 / tex);
   // dry hairline joints: arrises rounded a few mm, chipped here and there (more at block corners)
   float corner = 1.0 - smoothstep(0.0, 0.15, max(ex, ey));
   float chip = 0.004 * smoothstep(0.6, 0.9, nA.z) + 0.006 * corner * smoothstep(0.35, 0.8, nA.w);
@@ -47,15 +54,15 @@ void surf(vec2 p, inout S s) {
   float arris = sqrt(tA * (2.0 - tA));
   // drafted margin: a flat combed band 8-14 cm, its width different on each side of the stone; then a bevel 3-5 cm
   // wide whose line wanders a few mm (cut by hand, not ruled) up to the boss, raised 1-1.5 cm
-  vec4 mws = uP0.x * (0.75 + 0.5 * vec4(bh.z, bm.x, bm.y, bm.z));
+  vec4 mws = uP0.x * (0.8 + 0.4 * vec4(bh.z, bm.x, bm.y, bm.z));
   float wob = 0.005 * nD.x + 0.0025 * nA.y + 0.0012 * nC.z;
   float em = min(min(b.lx - mws.x, b.len - b.lx - mws.y), min(b.ly - mws.z, rh - b.ly - mws.w)) + wob - chip * 0.5;
   float bw = uP3.x * (0.8 + 0.45 * bk.z);
   float bev = clamp(em / bw, 0.0, 1.0);
   // a chamfer: nearly straight, its two arrises only slightly rounded (a uniform lit / shaded band, not a line)
-  float boss = uP1.x * mix(bev, bev * bev * (3.0 - 2.0 * bev), 0.35);
-  float marg = uP1.x * (1.0 - boss);
-  float fine = max(boss, 1.0 - uP1.x);
+  float boss = mOn * mix(bev, bev * bev * (3.0 - 2.0 * bev), 0.35);
+  float marg = mOn * (1.0 - boss);
+  float fine = max(boss, 1.0 - mOn);
   // pits: bowl-shaped, of varied depth, present in most cells; faded below ~3 texels a cell (low / medium tiers),
   // where the detail layer carries the fine pecking near the camera instead
   // (a bowl: depth falls smoothly to its rim — a crisp edge reads as a printed dot)
@@ -68,19 +75,24 @@ void surf(vec2 p, inout S s) {
   float vis1 = smoothstep(2.2, 3.8, 0.034 / tex);
   float vis2 = smoothstep(2.2, 3.8, 0.022 / tex);
   // not on the bevel's crest (pits there cut it into a dashed line)
-  float onBoss = boss * smoothstep(0.0, 0.015, em - bw) * uP1.x;
+  float onBoss = boss * smoothstep(0.0, 0.015, em - bw) * mOn;
   float pit = (pit1 * vis1 + pit2 * vis2 * 0.6) * onBoss;
   float pitA = pit;
   float plane = outF * uP0.w;
   // the boss face is hand-dressed, not a plane: a few mm of undulation; the margin is flat to a fraction of a mm
   float hBoss = uP0.y * (0.75 + 0.5 * bh.x) + 0.0025 * nD.y + 0.0015 * nB.z - pit * uP1.y;
   float hFace = plane + boss * hBoss + nB.x * 0.0012 * (0.4 + fine) + marg * 0.0004 * nC.y
-              + (1.0 - uP1.x) * (nC.w * 0.0002 + nD.y * 0.001);
+              + (1.0 - mOn) * (nC.w * 0.0002 + nD.y * 0.001);
+  // worn arrises (qa-r1): a 2-3 cm band along the joint, gated along its length, heavier toward the corners
+  float wearW = max(0.022, tex * 2.0);
+  float wear = (1.0 - smoothstep(uP0.z, uP0.z + wearW, e)) * smoothstep(0.05, 0.45, nA.w + 0.45 * corner + 0.25 * nB.y) * face;
+  hFace -= wear * 0.0018;
   s.h = mix(plane - uP2.x, hFace, arris * face);
   // stone-to-stone variation: each block from its own part of the bed — value, and a warm cream .. cool grey cast
   // (kochla stones vary more: paler and deeper blocks break the course into a shimmer, not a stripe)
-  float tone = 1.0 + uP3.y * (ct == 1 ? 2.2 : 1.0) * (bh.x - 0.5) * 2.0;
-  vec3 hue = mix(vec3(1.025, 1.0, 0.96), vec3(0.975, 1.0, 1.03), bk.x);
+  // (qa-r2: from warm cream to neutral only — the cool half of the old range drew blue-grey tiles in shade)
+  float tone = 1.0 + uP3.y * (ct == 1 ? 1.5 : 1.0) * (bh.x - 0.5) * 2.0;
+  vec3 hue = mix(vec3(1.025, 1.0, 0.96), vec3(0.99, 1.0, 1.01), bk.x);
   vec3 base = (ct == 0 ? uC0 : (ct == 1 ? uC1 : uC2)) * tone * mix(vec3(1.0), hue, uP3.z);
   vec3 vein = ct == 0 ? uC3 : (ct == 1 ? uC4 : uC5);
   float vm;
@@ -90,14 +102,15 @@ void surf(vec2 p, inout S s) {
   // kochla: some blocks nearly grey, about a third of them pale — close to the shayish in value with only a hint
   // of green: the course shimmers instead of reading as a painted band
   if (ct == 1) {
-    col = mix(col, vec3(lum(col)) * vec3(1.01, 1.0, 0.985), 0.5 * bk.z * bk.z);
-    col = mix(col, mix(uC0 * tone, col, 0.35), smoothstep(0.6, 0.78, fract(bk.z * 3.7 + bh.y)) * 0.7);
+    col = mix(col, vec3(lum(col)) * vec3(1.02, 1.0, 0.97), 0.5 * bk.z * bk.z);
+    col = mix(col, mix(uC0 * tone, col, 0.35), smoothstep(0.6, 0.78, fract(bk.z * 3.7 + bh.y)) * 0.4);
   }
   // the pointed boss reads a touch stippled where its pits resolve; the smoother margin is NOT lighter (a pale margin
   // drew a grout-like outline round every block from 20 m); the hairline joint only mildly dark
   col *= 1.0 - 0.025 * pitA - 0.01 * marg;
   col = mix(col * 0.85, col, face);
   col *= 1.0 + 0.012 * nC.y;
+  col = mix(col, col * vec3(1.04, 1.035, 1.025), wear * 0.75);
   // restrained weathering (the building was new): a set-out course sheds rain over its foot, so the drawn-in course
   // below is sheltered along its top (a faint warm dust patina); dust washed off each set-out course's ledge runs
   // down its face in a few faint streaks
@@ -114,8 +127,8 @@ void surf(vec2 p, inout S s) {
   float rB = 0.8 + 0.035 * nC.w + 0.03 * pit;
   float rM = 0.55 + 0.025 * nC.w;
   float rP = 0.65 + 0.02 * nC.w;
-  float rF = uP1.x > 0.5 ? mix(rM, rB, boss) : rP;
-  s.rough = mix(0.86, rF + (ct == 1 ? 0.015 : 0.0) - 0.03 * vm + 0.02 * shel + 0.02 * streak, face);
+  float rF = mix(rP, mix(rM, rB, boss), mOn);
+  s.rough = mix(0.86, rF + (ct == 1 ? 0.015 : 0.0) - 0.03 * vm + 0.02 * shel + 0.02 * streak + 0.07 * wear, face);
   s.ao = mix(0.8, 1.0, face) * (1.0 - uP2.w * band) * (1.0 - 0.06 * pit);
   s.a = b.lx / uDMax;
 }`,
@@ -178,6 +191,7 @@ void surf(vec2 p, inout S s) {
 // uP0: x joint half-width, y joint depth, z arris width, w pit amount
 // uP1: x stone (0 limestone, 1 marble), y rough base, z tilt (m), w undulation (m)
 // uP2: x vein amount, y rough variation, z stain amount, w wear (tooling worn away: 0 fresh .. 1 polished)
+// uP3: x slab-to-slab value spread (± ; 0 = the old ±9 %), y warm-tinted slabs (0 = the old full tint)
 // uC0..2 palette, uC3 joint fill, uC4 vein colour
 void surf(vec2 p, inout S s) {
   Blk b = blk(p);
@@ -193,16 +207,26 @@ void surf(vec2 p, inout S s) {
   // edges: rounded and chipped (chips larger near corners)
   float corner = 1.0 - smoothstep(0.0, 0.2, max(ex, ey));
   float e = min(ex, ey) + uP0.x * 0.9 * nA.x - 0.012 * corner * smoothstep(0.0, 0.6, nA.y);
-  float face = smoothstep(uP0.x, uP0.x + uP0.z, e);
+  // qa-r2: where a texel is wider than the joint and its arris (the low tier's ~4.8 cm), the joint (both sides) is widened
+  // to half a texel and its arris to 0.6 texel, shallower and at a lighter tone — sub-texel joints broke into stray dashes, and
+  // with the slabs' tints now close nothing else drew the slabs
+  float texP = max(uTile.x / uRes.x, uTile.y / uRes.y);
+  float lowRes = smoothstep(0.03, 0.045, texP);
+  float jw = mix(uP0.x, max(uP0.x, texP * 0.25), lowRes);
+  float face = smoothstep(jw, jw + mix(uP0.z, max(uP0.z, texP * 0.6), lowRes), e);
   float tilt = ((b.lx / b.len - 0.5) * (bh.x - 0.5) + (b.ly / uRowH - 0.5) * (bh.y - 0.5)) * 2.0 * uP1.z;
   // weathering: worn hollows, pitting, half-worn tooling
   float pit = uP0.w * smoothstep(0.55, 0.8, -nM2.w + 0.4 * g.y);
   float wear = uP2.w;
   float relief = tilt + nB.x * uP1.w + nM2.x * 0.003 + strokes * 0.0007 * (1.0 - wear) + g.x * 0.0004 - pit * 0.003;
-  s.h = mix(-uP0.y, relief, face);
+  s.h = mix(-uP0.y * (1.0 - 0.6 * lowRes), relief, face);
+  // qa-r1: where the texture is too coarse to carry the mottling inside a slab (the low tier's ~4.8 cm texels), the
+  // slab-to-slab tint alone read as a high-contrast checkerboard: halve the palette and value spread there (lowRes)
   vec3 base = bh.z < 0.45 ? uC0 : (bh.z < 0.8 ? uC1 : uC2);
-  base *= 0.9 + 0.18 * bh.x;
-  base = mix(base, base * vec3(1.03, 1.0, 0.95), smoothstep(0.5, 1.0, fract(bh.y * 7.7)));
+  base = mix(base, (uC0 + uC1 + uC2) / 3.0, 0.5 * lowRes);
+  float spread = uP3.x > 0.0 ? uP3.x : 0.09;
+  base *= 0.99 + spread * (bh.x - 0.5) * 2.0 * (1.0 - 0.5 * lowRes);
+  base = mix(base, base * vec3(1.03, 1.0, 0.95), smoothstep(0.5, 1.0, fract(bh.y * 7.7)) * (uP3.y > 0.0 ? uP3.y : 1.0));
   float vm;
   vec3 mcol = marble(lp, true, bh.y < 0.8 ? 0 : 2, base, uC4, base, vm);
   vec3 lcol = base * (1.0 + 0.08 * nB.y + 0.05 * g.x);
@@ -216,7 +240,7 @@ void surf(vec2 p, inout S s) {
   col *= 1.0 - uP2.z * smoothstep(0.15, 0.75, nB.w);
   float edgeDirt = (1.0 - smoothstep(uP0.x, uP0.x + 0.04, e)) * 0.18;
   col = mix(col, uC3, edgeDirt);
-  col = mix(mix(uC3, col * 0.85, 0.35), col, face);
+  col = mix(mix(mix(uC3, col * 0.85, 0.35), col * 0.9, 0.85 * lowRes), col, face);
   s.alb = col;
   s.rough = mix(0.95, uP1.y + uP2.y * (bh.y - 0.5) * 2.0 + 0.06 * g.x - 0.08 * vm + 0.12 * pit + 0.05 * nB.w + 0.05 * low - 0.06 * wear * (1.0 - low), face);
   s.ao = mix(0.45, 1.0, face) * (1.0 - 0.25 * pit);
@@ -331,12 +355,13 @@ void surf(vec2 p, inout S s) {
   // but the lime keeps its character — cloth-wipe strokes, a darker, glossier lane of bare-foot traffic along v,
   // hairline crazing, patched repairs and worn, darkened arrises at the low spots.
   whitewash: {
-    hRange: 0.04, ao: [0.08, 0.012, 0.55],
+    hRange: 0.04, ao: [0.08, 0.012, 0.7],
     src: /* glsl */`
 // uP0: x big stone height, y small stone height, z lime level, w cloth-wipe stroke amp
 // uP1: x paint (0 whitewash, 1 ochre), y rough, z outline warp (m), w stone tone through thin lime
 // uP2: x foot wear (walking surfaces), y soot, z blood stain, w stain wash-out (0 fresh .. 1 almost gone)
-// uP3: x traffic-lane period across v (m; 0 = none), y crazing, z patches
+// uP3: x traffic-lane period across v (m; 0 = none), y crazing, z patches, w broad undulation (m): the hand-limed
+//      cast face over whole stones "large and small" swells and dips over 0.5–1.5 m (qa-r1)
 // uC0 lime white, uC1 grime, uC2 paint colour, uC3 soot, uC4 dried blood
 float cap(float d) { float t = smoothstep(1.0, 0.0, d); return t * (2.0 - t); }   // soft pillow, zero slope at its foot
 void surf(vec2 p, inout S s) {
@@ -357,6 +382,8 @@ void surf(vec2 p, inout S s) {
   vec4 lane = nT(p, vec2(0.6, 1.2), vec2(0.17, 0.39));       // wander and strength of the traffic bands
   vec4 cz = vT(p + wp.xy * 0.02, vec2(0.09), vec2(0.53, 0.21));   // crazing of the lime skin
   vec4 pv = vT(p + wp.zw * 0.05, vec2(0.55), vec2(0.77, 0.61));   // patched repairs
+  vec4 un = nT(p, vec2(0.6), vec2(0.36, 0.58));                    // broad undulation of the limed mass (~1 m)
+  vec4 un2 = nT(p, vec2(1.6), vec2(0.81, 0.07));                   // and its smaller swells (~0.4 m)
   float tex = max(uTile.x / uRes.x, uTile.y / uRes.y);
   // whole rounded field-stones, large and small, closely packed: low pillows (a round dome) softly limited
   // toward the (warped) cell border by F2-F1, whose iso-lines round the polygon corners, over a wide ramp
@@ -367,21 +394,23 @@ void surf(vec2 p, inout S s) {
   // thick, renewed lime buries the stones' feet in broad soft fillets
   float h = smax(stones, uP0.z + n.x * 0.0015, 0.008);
   float ws = wipe * wgate;
-  h += ws * uP0.w + g.x * 0.0003;
+  h += ws * uP0.w + g.x * 0.0003 + uP3.w * (un.x * 0.75 + un2.y * 0.35);
   // walking surfaces: a bare-foot lane every uP3.x across v (wandering), worn a little hollow, darker and glossier;
   // hairline crazing (>= 2 texels wide); a few patches of newer lime, slightly proud and whiter, their edges feathered
   float lx = uP3.x > 0.0 ? abs(fract(p.x / max(uP3.x, 1e-3) + 0.1 * lane.x) - 0.5) * 2.0 : 1.0;
   float traffic = uP2.x * (1.0 - smoothstep(0.1, 0.55, lx + 0.15 * scuff.y)) * smoothstep(-0.5, 0.4, lane.y + 0.5 * scuff.z) * step(0.001, uP3.x);
   float crW = max(0.0012, tex * 1.1);
-  float craze = uP3.y * (1.0 - smoothstep(0.0, crW / 0.09, cz.y)) * smoothstep(0.25, 0.7, patchN.w + 0.3 * n.y) * 0.6;
+  // (faded where a hairline would be wider than ~1 cm: on the low tier the crazing drew a coarse net)
+  float craze = uP3.y * (1.0 - smoothstep(0.0, crW / 0.09, cz.y)) * smoothstep(0.25, 0.7, patchN.w + 0.3 * n.y) * 0.6
+              * (1.0 - smoothstep(0.007, 0.012, tex));
   float patchM = uP3.z * step(0.82, pv.z) * (1.0 - smoothstep(0.32, 0.42, pv.x + 0.04 * wp.x));
   h += -traffic * 0.0015 - craze * 0.0004 + patchM * 0.0012;
   s.h = h;
-  float low = 1.0 - smoothstep(0.0, uP0.z * 1.4, h);
+  float low = 1.0 - smoothstep(0.0, uP0.z * 1.4, h - uP3.w * (un.x * 0.75 + un2.y * 0.35));
   float crown = smoothstep(uP0.z, uP0.z + 0.004, stones);
   vec3 col = uC0 * (1.0 + 0.02 * ws + 0.012 * g.x + 0.012 * n.y);
   col = mix(col, col * vec3(0.975, 0.96, 0.935), crown * uP1.w);
-  col = mix(col, uC1, low * 0.15 + drip * 0.06);
+  col = mix(col, uC1, low * 0.22 + drip * 0.06);
   vec3 paint = uC2 * (1.0 + 0.08 * wipe + 0.04 * g.x + 0.05 * n.z) * (1.0 - 0.1 * low);
   col = mix(col, paint, uP1.x * (0.94 + 0.06 * smoothstep(-0.4, 0.4, wipe)));
   // walking surfaces: bare feet polish the lime in broad patches, grime keeps to the low spots and joints
@@ -400,8 +429,9 @@ void surf(vec2 p, inout S s) {
   col = mix(col, uC3 * (0.85 + 0.3 * g.x), soot * 0.55);
   // blood (the shirayim and the lower bloods): mostly washed out — faint brown-red runs and a few patches
   float run = smoothstep(0.55, 0.9, 1.0 - abs(runN.y)) * smoothstep(-0.2, 0.5, runN.z);
-  float stain = uP2.z * clamp(run * 0.8 + smoothstep(0.35, 0.8, patchN.x) * 0.45, 0.0, 1.0) * (1.0 - uP2.w * 0.7);
-  col = mix(col, uC4 * (0.9 + 0.2 * g.y), stain * 0.42);
+  // qa-r1: darker and more present (the day's bloods since the last Erev Shabbat wipe), still broken into runs/patches
+  float stain = uP2.z * clamp(run * 0.85 + smoothstep(0.3, 0.75, patchN.x) * 0.55, 0.0, 1.0) * (1.0 - uP2.w * 0.7);
+  col = mix(col, uC4 * (0.9 + 0.2 * g.y), stain * 0.62);
   s.alb = col;
   s.rough = uP1.y + 0.04 * g.x - 0.03 * crown - 0.18 * pol - 0.14 * traffic + 0.06 * soot - 0.04 * stain + 0.06 * patchM + 0.05 * craze;
   s.ao = 1.0 - 0.25 * craze;

@@ -2,14 +2,16 @@
 // ctx.time (ARCHITECTURE.md §6): t (minutes since local midnight, cyclic), zmanim (GRA), seasonal-hour
 // conversion, Hebrew date, sun/moon/planets for the sky. Pure function of (date, t) — no accumulated state.
 //
-// Wrap-around: the clock runs on ONE civil date. Past 24:00 it wraps to 00:00 of the SAME date (the date never
-// advances by itself), so the service day loops seamlessly; change the date explicitly with setDate().
+// Midnight: while the clock PLAYS past 24:00 it continues at 00:00 of the NEXT civil date (and back past 00:00 at a
+// negative speed), emitting 'time:date' — Friday night runs on into Shabbat, the Hebrew date never steps backward
+// (qa-r1-fix-env-render ENV-6). set(t) still takes a minute of the CURRENT date (t is wrapped into [0,1440)).
+// Dates are proleptic Gregorian, any year 1–9999 (years 0–99 are not shifted to 1900+, ENV-7).
 import { Vector3 } from 'three';
 import { PRIORITY } from '../core/engine.js';
 import {
   solarPosition, moonPosition, moonIlluminanceTOA, localSiderealTime, planetPositions, SITE_GEO,
 } from './astro.js';
-import { computeZmanim, hebrewDate, localMidnightUTC } from './zmanim.js';
+import { computeZmanim, hebrewDate, localMidnightUTC, utcDayMs, addDays, formatDate } from './zmanim.js';
 
 export const DEFAULT_DATE = '2026-11-02'; // Monday, 22 Cheshvan 5787 — an ordinary weekday
 export const DEFAULT_OFFSET_FROM_ALOT = -6; // "slightly before dawn"
@@ -35,8 +37,9 @@ function parseDate(str) {
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(String(str || '').trim());
   if (!m) return null;
   const y = +m[1], mo = +m[2], d = +m[3];
-  const chk = new Date(Date.UTC(y, mo - 1, d));
-  if (chk.getUTCMonth() !== mo - 1 || chk.getUTCDate() !== d) return null;
+  if (y < 1) return null; // no year 0 in the civil reckoning
+  const chk = new Date(utcDayMs(y, mo, d));
+  if (chk.getUTCFullYear() !== y || chk.getUTCMonth() !== mo - 1 || chk.getUTCDate() !== d) return null;
   return { y, m: mo, d };
 }
 
@@ -154,7 +157,17 @@ export function createTime(bus, opts = {}) {
       if (time.paused || !dt) { time.frameDelta = 0; return; }
       const dm = (dt * time.speed) / 60;
       time.frameDelta = dm;
-      time.t = wrap(time.t + dm);
+      const raw = time.t + dm;
+      time.t = wrap(raw);
+      const days = Math.floor(raw / 1440);
+      if (days !== 0 && time.date) {
+        // played through midnight: the next (or, backward, the previous) civil date — a continuous step, so
+        // frameDelta stays; listeners re-select the day's schedule and zmanim on 'time:date'
+        applyDate(addDays(time.date, days));
+        updateSky(true);
+        bus?.emit('time:date', { date: time.dateString });
+        return;
+      }
       updateSky(false);
     },
   };
@@ -163,13 +176,12 @@ export function createTime(bus, opts = {}) {
 
   function applyDate(d) {
     time.date = { ...d };
-    time.dateString = `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
-    time.weekday = new Date(Date.UTC(d.y, d.m - 1, d.d)).getUTCDay();
+    time.dateString = formatDate(d);
+    time.weekday = new Date(utcDayMs(d.y, d.m, d.d)).getUTCDay();
     time.dayType = time.weekday === 5 ? 'friday' : time.weekday === 6 ? 'shabbat' : 'weekday';
     time.zmanim = computeZmanim(d, time.geo);
     time.hebrew = hebrewDate(d);
-    const next = new Date(Date.UTC(d.y, d.m - 1, d.d + 1));
-    time.hebrewEvening = hebrewDate({ y: next.getUTCFullYear(), m: next.getUTCMonth() + 1, d: next.getUTCDate() });
+    time.hebrewEvening = hebrewDate(addDays(d, 1));
     lastPlanetMs = -Infinity;
   }
 

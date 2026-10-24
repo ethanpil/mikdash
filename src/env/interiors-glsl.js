@@ -111,15 +111,18 @@ vec3 mkDbgPath = vec3( 0.0 ); // debug view 3: r inside the union, g the cell li
 // held across the unrolled light loop
 
 // how far inside a box: 1 inside, fading to 0 at margin outside; outward-facing surfaces in the shell -> 0 —
-// except on the box's floor face: a floor is solid ground, never an opening to the sky
-float mkInside( vec3 p, vec3 n, vec3 bmin, vec3 bmax, float margin, float shell ) {
+// except on the box's floor face: a floor is solid ground, never an opening to the sky — and on the faces in joins
+// (bits 0–5: world −x, +x, −y, +y, −z, +z), which border another room, not the open (qa-r1-fix-env-render)
+float mkInside( vec3 p, vec3 n, vec3 bmin, vec3 bmax, float margin, float shell, int joins ) {
   vec3 lo = p - bmin, hi = bmax - p;
   vec3 dm = min( lo, hi );
   float d = min( dm.x, min( dm.y, dm.z ) );
   float s = smoothstep( - margin, 0.0, d );
   vec3 o = dm.x <= dm.y && dm.x <= dm.z ? vec3( lo.x < hi.x ? - 1.0 : 1.0, 0.0, 0.0 )
     : dm.y <= dm.z ? vec3( 0.0, lo.y < hi.y ? - 1.0 : 1.0, 0.0 ) : vec3( 0.0, 0.0, lo.z < hi.z ? - 1.0 : 1.0 );
-  return d < shell && o.y > - 0.5 ? s * ( 1.0 - smoothstep( 0.3, 0.6, dot( n, o ) ) ) : s;
+  int fb = abs( o.x ) > 0.5 ? ( o.x > 0.0 ? 1 : 0 ) : abs( o.y ) > 0.5 ? ( o.y > 0.0 ? 3 : 2 ) : ( o.z > 0.0 ? 5 : 4 );
+  bool joined = ( ( joins >> fb ) & 1 ) != 0;
+  return d < shell && o.y > - 0.5 && ! joined ? s * ( 1.0 - smoothstep( 0.3, 0.6, dot( n, o ) ) ) : s;
 }
 
 // An aperture's frame, built once per aperture without branches: its outward normal and two in-plane axes (axis code
@@ -157,6 +160,27 @@ float mkApHit( vec3 d, vec3 r, float soft0, float soft1, vec2 he, MkApF F ) {
   vec2 q = abs( vec2( dot( r, F.u ), dot( r, F.v ) ) * t - vec2( dot( d, F.u ), dot( d, F.v ) ) );
   float soft = soft0 + soft1 * t;
   return ( 1.0 - smoothstep( he.x - soft, he.x + soft, q.x ) ) * ( 1.0 - smoothstep( he.y - soft, he.y + soft, q.y ) );
+}
+
+// qa-r1-fix-env-render: a row of n windows evenly spaced along the aperture's u axis (bits of its axis word: 4–7 n,
+// 8–15 period, 16–21 inner width, 22–27 outer width in 4 cm, 28–31 the wall's depth in 20 cm), each narrow at the room's
+// face (the aperture plane) and wide at the outer face (Menachot 86b). The ray r leaves through one only if it passes
+// both ends of that window; the beam keeps the key light's full strength. d = aperture centre − p.
+float mkSlot( vec3 d, vec3 r, vec2 he, MkApF F, uint bits ) {
+  float dn = dot( r, F.n );
+  if ( dn <= 1e-3 ) return 0.0;
+  float n = float( ( bits >> 4 ) & 15u ), period = float( ( bits >> 8 ) & 255u ) * 0.04;
+  float wi = float( ( bits >> 16 ) & 63u ) * 0.02, wo = float( ( bits >> 22 ) & 63u ) * 0.02; // half widths
+  float depth = float( bits >> 28 ) * 0.2;
+  float t = max( dot( d, F.n ), 0.0 ) / dn;
+  vec2 q = vec2( dot( r, F.u ), dot( r, F.v ) ) * t - vec2( dot( d, F.u ), dot( d, F.v ) );
+  vec2 sh = vec2( dot( r, F.u ), dot( r, F.v ) ) / dn * depth; // where the ray meets the outer face
+  float c = ( n - 1.0 ) * 0.5;
+  float u = q.x - ( clamp( floor( q.x / max( period, 0.01 ) + c + 0.5 ), 0.0, n - 1.0 ) - c ) * period;
+  float s = 0.02 + 0.005 * t; // the Sun's penumbra over the way from the window
+  float pu = ( 1.0 - smoothstep( wi - s, wi + s, abs( u ) ) ) * ( 1.0 - smoothstep( wo - s, wo + s, abs( u + sh.x ) ) );
+  float pv = ( 1.0 - smoothstep( he.y - s, he.y + s, abs( q.y ) ) ) * ( 1.0 - smoothstep( he.y - s, he.y + s, abs( q.y + sh.y ) ) );
+  return pu * pv;
 }
 
 // depth of p inside a room's coarse (half-float) box
@@ -236,13 +260,27 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
   // a passage and the Ulam) the second one too when the first rejects the surface as facing out of it
   int bi = int( slot + 0.5 );
   vec4 A = mkVolA[ bi ], B = mkVolB[ bi ], C = mkVolC[ bi ];
-  float best = mkInside( P, N, A.xyz + C.z, B.xyz - C.z, C.z, B.w );
+  // mkVolB.w = shell (m) + 4 × the faces joining another room (env/interiors.js)
+  float sh = mod( B.w, 4.0 );
+  int jn = int( B.w * 0.25 );
+  float best = mkInside( P, N, A.xyz + C.z, B.xyz - C.z, C.z, sh, 0 );
+  // qa-r1-fix-env-render: where two rooms meet, a surface facing out of one faces INTO the other, never into the open:
+  // its insideness is at least either room's own (without the shell rule), and on a face joining another room a surface
+  // beyond that room's reach stays in its own. Both were mixed toward open sky and lit near white — the inner parochet's
+  // east face in the amah traksin, seen through the outer one's pinned-back south end.
+  float other = 0.0;
+  bool swapped = false;
   if ( best < 0.5 && depth2 > 0.0 ) {
     int bj = int( slot2 + 0.5 );
     vec4 A2 = mkVolA[ bj ], B2 = mkVolB[ bj ], C2 = mkVolC[ bj ];
-    float s2 = mkInside( P, N, A2.xyz + C2.z, B2.xyz - C2.z, C2.z, B2.w );
-    if ( s2 > best ) { best = s2; bi = bj; A = A2; C = C2; hw = hw2; }
+    float s2 = mkInside( P, N, A2.xyz + C2.z, B2.xyz - C2.z, C2.z, mod( B2.w, 4.0 ), 0 );
+    if ( s2 > best ) {
+      other = mkInside( P, N, A.xyz + C.z, B.xyz - C.z, C.z, 0.0, 0 );
+      best = s2; bi = bj; A = A2; C = C2; hw = hw2; swapped = true;
+    } else other = mkInside( P, N, A2.xyz + C2.z, B2.xyz - C2.z, C2.z, 0.0, 0 );
   }
+  if ( ! swapped && jn != 0 && best < 0.5 ) best = max( best, mkInside( P, N, A.xyz + C.z, B.xyz - C.z, C.z, sh, jn ) );
+  best = max( best, other );
   if ( best <= 0.0 ) return;
   #ifdef MK_DEBUG
   mkDbgPath.b = 1.0;
@@ -265,13 +303,20 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
     if ( open <= 0.0 ) continue;
     float w = open * float( U.y >> 24 ) * ( 1.0 / 255.0 );
     vec2 he = vec2( float( U.z & 0xffffu ), float( U.z >> 16 ) ) * 0.01;
-    MkApF F = mkApFrame( float( U.w & 255u ) );
+    MkApF F = mkApFrame( float( U.w & 7u ) );
     vec3 d = ac - P;
     float va = mkAperture( d, he, F, w );
     v += va;
     if ( k == 0 ) mkVm = va;
-    if ( ! ownProbe ) hit = max( hit, mkApHit( d, Rw, 0.05, rough, he, F ) * w );
-    sun = max( sun, mkApHit( d, K.xyz, K.w, 0.01, he, F ) * open );
+    // qa-r2-fix-env-render (ENV-R2-10, low): a rough lobe sees an opening it meets edge-on as a sliver — the exit is
+    // weighted by the opening's foreshortening (dot(r, n)), which the test above, in the opening's own plane, misses: it
+    // stayed near a constant as r turned parallel to the plane and then fell to 0, drawing a hard-edged bright band (the
+    // Ulam's 20 × 40 opening seen down the porch from Beit HaChalifot's niche wall). Glossy lobes keep the exact test
+    if ( ! ownProbe ) hit = max( hit, mkApHit( d, Rw, 0.05, rough, he, F ) * w * mix( 1.0, smoothstep( 0.0, 0.35, dot( Rw, F.n ) ), smoothstep( 0.2, 0.6, rough ) ) );
+    // the key light: through an open rectangle in proportion to its openness; through a row of splayed windows (F1) at
+    // full strength, but only where a ray can pass one of them (qa-r1-fix-env-render)
+    float ks = mkApHit( d, K.xyz, K.w, 0.01, he, F );
+    sun = max( sun, ks > 0.0 && ( U.w & 8u ) != 0u ? mkSlot( d, K.xyz, he, F, U.w ) * min( open * 64.0, 1.0 ) : ks * open );
   }
   mkHit = best * hit;
   mkSun = mix( 1.0, sun, best );
@@ -421,7 +466,7 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
     float sc = PC.w;
     // PD.w = weight (0..1) + 2 × the probe's sky share × 255 (render-audio-3)
     float shareQ = floor( PD.w * 0.5 );
-    float w = sc > 0.0 ? mkInside( Pw, Nw, lo + sm.y, hi - sm.y, sm.y, sm.x ) * ( PD.w - 2.0 * shareQ ) * rem : 0.0;
+    float w = sc > 0.0 ? mkInside( Pw, Nw, lo + sm.y, hi - sm.y, sm.y, sm.x, 0 ) * ( PD.w - 2.0 * shareQ ) * rem : 0.0;
     if ( w >= 1e-3 ) {
       vec4 PE = mkPrE[ k ];
       // PE.w = slice + 8 (outdoor) + 16 × (cap index + 16 × mode) + V at the probe (fraction)
@@ -439,11 +484,19 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
       // light; fitted to captures moved along the axis) — for the share of the probe's light that came in as skylight
       float vr = vRef > 0.0 ? mix( 1.0, min( mq > 0.5 ? sqrt( mkVm / vRef ) : mkV / vRef, 1.0 + 0.5 * ( cg - 16.0 * mq ) ), shareQ * ( 1.0 / 255.0 ) ) : 1.0;
       irr *= vr;
-      vec3 rad = sc * mkTextureCubeUV( envMap, Rp, min( roughness * sqrt( kr ), 1.0 ), slice );
+      float eR = roughness * sqrt( kr );
+      vec3 rad = sc * mkTextureCubeUV( envMap, Rp, min( eR, 1.0 ), slice );
       // a rough lobe gathers its light like the irradiance, over a cone no box projection places: the same scale (the
       // parochet's 4 % specular at roughness 0.85 is as bright as its 5.6 % diffuse); glossy gold keeps its projected image.
-      // The main-opening mode only (the Kodesh, where it was measured): the Ulam's reflections stay as render-env-2 had them
-      if ( mq > 0.5 ) rad *= mix( 1.0, vr, smoothstep( 0.35, 0.8, roughness ) );
+      // qa-r2-fix-env-render (ENV-R2-10): in every interior probe's room, not the Kodesh's alone — in the Ulam's dim wings
+      // (Beit HaChalifot, V a fifth of the probe's) the stone's diffuse light was scaled down to the wing's but its rough
+      // reflections kept the bright mid-porch's: a third of the niche wall's brightness, mottled by its pecked bosses into a
+      // "wet" band. The gold leaves, the vine and the nivreshet (roughness < 0.35) keep their reflections as they were.
+      rad *= mix( 1.0, vr, smoothstep( 0.35, 0.8, roughness ) );
+      // …and past the probe's widest blur (eR > 1) the lobe's footprint is larger than any lobe the probe holds (a surface
+      // far from the reflected one, which the probe sees close): such a lobe tends to the cosine-weighted radiance about
+      // the normal, blended toward it by 1 − 1 / eR²
+      if ( eR > 1.0 ) rad = mix( rad, irr, 1.0 - 1.0 / ( eR * eR ) );
       if ( outdoor ) {
         float E = envMapIntensity; // scene units per unit sky irradiance
         irr = mkV * mix( irr, LbN * E, mkS );

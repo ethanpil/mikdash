@@ -17,7 +17,7 @@
 import { Script, headingOf } from './script.js';
 import { upSteps, intoKodesh, outOfKodesh } from './places.js';
 import { add, win, cue, SRV } from './day.js';
-import { CUE_LEAD, PROSTRATE_S } from './plan.js';
+import { CUE_LEAD, PROSTRATE_S, BLESS_DOWN } from './plan.js';
 import { rand } from '../../lib/core.js';
 
 const PR = PROSTRATE_S / 60;            // minutes of one prostration
@@ -556,7 +556,7 @@ export function buildMorning(ctx, P, W, D) {
   const rowsY = [326.2, 328.8, 331.4, 334.0, 336.6, 339.2];
   const rowX = [r0, r1, r2];
   const bSpot = (k) => { const row = Math.floor(k / 6), j = k % 6; return [rowX[row].X, rowsY[j], rowX[row].Z]; };
-  const bRaise = bk0 + CUE_LEAD, bDown = bk0 + 2.0;
+  const bRaise = bk0 + CUE_LEAD, bDown = bk0 + BLESS_DOWN;
   BR.forEach((S, k) => {
     const sp = bSpot(k);
     S.walk([[150, S.cur[1] > ax ? ax + 1.0 : ax - 1.0, HE], ...outOfKodesh(P, sp[1]), sp], { speed: 0.95 + 0.1 * rand(SEED, 'bs', k) });

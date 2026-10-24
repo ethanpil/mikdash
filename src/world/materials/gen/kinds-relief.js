@@ -46,7 +46,8 @@ export const RELIEF_KINDS = {
     hRange: 0.03, ao: [0.02, 0.004, 0.45],
     src: SDF + /* glsl */`
 // uP0: x (unused), y band height (m), z module width (m), w seam gap (m)
-// uP1: x rough on raised, y rough in recesses, z hammer dish depth (m)
+// uP1: x rough on raised, y rough in recesses, z hammer dish depth (m), w blow-to-blow roughness (±; qa-r2: the gold
+//      beaten over the carving varies with the hammering, 0.25–0.4, so the relief's facets catch the light one by one)
 
 // ---------------------------------------------------------------- open flowers (the bands)
 float rosette(vec2 q, float R, float re) {
@@ -302,7 +303,7 @@ void surf(vec2 p, inout S s) {
   float raised = smoothstep(0.001, 0.012, h);
   vec3 col = vec3(0.925 + 0.06 * raised + 0.012 * burn) * vec3(1.0, 0.988, 0.965);
   s.alb = mix(col, col * 0.45, seam);
-  s.rough = mix(uP1.y, uP1.x, raised) + 0.03 * burn - 0.03 * skin * raised;
+  s.rough = mix(uP1.y, uP1.x, raised) + 0.03 * burn - 0.03 * skin * raised + uP1.w * (dv.z - 0.5) * 2.0 * (1.0 - 0.5 * raised);
   s.rough = mix(s.rough, 0.6, seam);
   s.metal = mix(1.0, 0.5, seam);
 }`,

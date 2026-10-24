@@ -43,10 +43,16 @@ export function createSettingsPanel(app) {
     return [r, val];
   }
 
-  /** reload at the same place/time with the new build-time setting */
-  function reload() {
+  /**
+   * reload at the same place/time with the new build-time setting. The changed one is read from storage after the
+   * reload, so its URL parameter goes; the other stays as this page has it (a shared ?amah=chazonish link keeps its
+   * scale when the quality changes, a ?q= its tier when the amah does).
+   */
+  function reload(key) {
     const u = new URL(location.href);
-    for (const k of ['q', 'amah', 'pos', 'at', 'look', 't', 'date']) u.searchParams.delete(k);
+    u.searchParams.delete(key === 'quality' ? 'q' : 'amah');
+    if (u.searchParams.has('amah')) u.searchParams.set('amah', AMAH_KEY);
+    for (const k of ['pos', 'at', 'look', 't', 'date']) u.searchParams.delete(k);
     const eye = ctx.player?.eye;
     if (eye) { const s = w2m(eye); u.searchParams.set('pos', [s.X, s.Y, s.Z].map((n) => n.toFixed(2)).join(',')); }
     if (Number.isFinite(ctx.player?.heading)) u.searchParams.set('look', `${ctx.player.heading.toFixed(1)},${(ctx.player.pitch || 0).toFixed(1)}`);
@@ -58,13 +64,17 @@ export function createSettingsPanel(app) {
   }
 
   const qNow = ctx.quality?.key;
+  // a ?q= link overrides the stored choice (core/quality.js resolveTier): show what runs, and let any other pick apply
+  const qUrl = new URLSearchParams(location.search).get('q');
+  const qCur = TIERS[qUrl] ? qUrl : S.get('quality');
   const tierHelp = (k) => (k === 'auto' ? 'Chosen for this device' : TIERS[k]?.label || k);
   const qSeg = seg('quality', 'Quality', ['auto', 'low', 'medium', 'high', 'ultra'].map((k) => [k, k[0].toUpperCase() + k.slice(1), tierHelp(k)]), {
-    onPick: (v) => { if (v === S.get('quality')) return; S.set('quality', v); reload(); },
+    current: qCur,
+    onPick: (v) => { if (v === qCur) return; S.set('quality', v); reload('quality'); },
   });
   const amahSeg = seg('amah', 'Length of the amah', Object.entries(AMAH_STANDARDS).map(([k, v]) => [k, { naeh: 'R’ Chaim Naeh', feinstein: 'R’ Moshe Feinstein', chazonish: 'Chazon Ish' }[k], v.label]), {
     current: AMAH_KEY,
-    onPick: (v) => { if (v === AMAH_KEY) return; S.set('amah', v); reload(); },
+    onPick: (v) => { if (v === AMAH_KEY) return; S.set('amah', v); reload('amah'); },
   });
 
   body.append(
@@ -77,6 +87,8 @@ export function createSettingsPanel(app) {
       row('Subtitles', 'Calls, cries and song, in English and Hebrew', toggle('captions', 'Subtitles')),
       row('Music', 'How the Levites’ song is voiced', seg('musicStyle', 'Music', [['mishnah', 'Mishnah', 'Voices with lyres, harps and the one cymbal (Arachin 2)'], ['sg1612', 'Shiltei HaGiborim', 'The 1612 reading of the instruments (a later, Renaissance lens)']]), true)),
     section('Controls',
+      row('Keys and gestures', 'Walking, looking, flying, the panels and the map (also the ? key)',
+        h('button.mk-btn.mk-btn--sm', { type: 'button', on: { click: () => app.open('about', { section: 'controls' }) } }, 'Show all')),
       row('Look sensitivity', 'Mouse and touch', range('mouseSensitivity', 'Look sensitivity', { min: 0.2, max: 3, step: 0.05, fmt: (v) => `${v.toFixed(2)}×` })),
       row('Invert vertical look', null, toggle('invertY', 'Invert vertical look')),
       row('Field of view', null, range('fov', 'Field of view', { min: 40, max: 95, step: 1, fmt: (v) => `${Math.round(v)}°` })),

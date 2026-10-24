@@ -112,6 +112,36 @@ export function civilShort(time) {
 
 export const DAY_TYPE_LABEL ={ weekday: 'Weekday', friday: 'Erev Shabbat', shabbat: 'Shabbat' };
 
+/**
+ * The day in words, by the halachic day, which begins at sunset: "slightly before dawn on an ordinary Monday",
+ * "dusk on Monday evening, as Tuesday begins", "Monday evening, the night of Tuesday", "Shabbat night (Friday
+ * evening)", "motza'ei Shabbat (Saturday night)".
+ * `when` is the part of the day before sunset (dawn, daytime, night after midnight …).
+ */
+export function dayPhrase(time, t = time?.t, when = '') {
+  const z = time?.zmanim;
+  const wd = time?.weekday;
+  if (!z || !Number.isInteger(wd)) return '';
+  const tt = wrap(t);
+  const civil = WEEKDAYS[wd], next = WEEKDAYS[(wd + 1) % 7];
+  const civilEn = wd === 6 ? 'Saturday' : civil;
+  if (tt < z.sunset) return `${when || 'daytime'} on ${time.dayType === 'weekday' ? 'an ordinary ' : ''}${civil}`;
+  const dusk = tt < z.tzeit;
+  if (wd === 5) return dusk ? 'dusk as Shabbat begins (Friday evening)' : 'Shabbat night (Friday evening)';
+  if (wd === 6) return dusk ? 'dusk as Shabbat ends (Saturday evening)' : 'motza\'ei Shabbat (Saturday night)';
+  // not "Tuesday night (Monday evening)": in English "Tuesday night" is the night after Tuesday
+  return dusk ? `dusk on ${civilEn} evening, as ${next} begins` : `${civilEn} evening, the night of ${next}`;
+}
+
+/** the day-type badge by the halachic day: Friday after sunset is Shabbat; Saturday after nightfall is motza'ei Shabbat */
+export function dayBadge(time, t = time?.t) {
+  const z = time?.zmanim;
+  const tt = wrap(t);
+  if (z && time.weekday === 5 && tt >= z.sunset) return 'Shabbat night';
+  if (z && time.weekday === 6 && tt >= z.tzeit) return 'Motza\'ei Shabbat';
+  return DAY_TYPE_LABEL[time?.dayType] || time?.dayType || '';
+}
+
 /** shift a YYYY-MM-DD string by n days */
 export function addDays(dateString, n) {
   const [y, m, d] = dateString.split('-').map(Number);
@@ -130,12 +160,36 @@ export function prettyId(id) {
  */
 export function accessLead(text) {
   const t = String(text || '').trim();
-  const sentences = t.match(/[^.]*?\.(?=\s|$)|[^.]+$/g) || [];
   let out = '';
-  for (const s of sentences.slice(0, 2)) {
-    out = `${out} ${s.trim()}`.trim();
+  for (const s of sentences(t).slice(0, 2)) {
+    out = `${out} ${s}`.trim();
     if (out.length >= 40) break;
   }
   return out || t;
 }
+
+/**
+ * Split prose into sentences. A sentence ends at a period followed by whitespace or the end, outside parentheses
+ * ("(Report §10.8)." and "(Middot 1:3)." stay whole) and not after a lone capital ("R. Eliezer").
+ */
+export function sentences(text) {
+  const t = String(text || '').trim();
+  const out = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (c === '(') depth++;
+    else if (c === ')') depth = Math.max(0, depth - 1);
+    else if (c === '.' && depth === 0 && (i + 1 === t.length || /\s/.test(t[i + 1])) && !/(^|[\s(])[A-Z]$/.test(t.slice(Math.max(0, i - 2), i))) {
+      out.push(t.slice(start, i + 1).trim());
+      start = i + 1;
+    }
+  }
+  const rest = t.slice(start).trim();
+  if (rest) out.push(rest);
+  return out;
+}
+
+/** does the text carry its own parenthesised citation, e.g. "(Kelim 1:8)" or "(Report §10.8)"? */
+export const hasCitation = (text) => /\([^()]*\d[^()]*\)/.test(String(text || ''));
 

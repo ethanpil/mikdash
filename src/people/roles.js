@@ -11,7 +11,9 @@ export const GARB = { black: 4, white: 5 };
 const GARB_COL = ['#2a2622', '#1f1c1a', '#ece8dd', '#f2efe7'];
 const pal = (skin, hair, ga, gb, stripe) => [...skin, ...hair, ...ga, ...gb, ...stripe, ...GARB_COL].map((h) => new Color(h));
 const SKIN = ['#c89c78', '#86593a'];
-const HAIR = ['#1c1611', '#a69f95'];
+// (qa-r1: the darkest hair a very dark brown, ~3 % albedo, not a 1 % black — at a distance the beards and hair read as
+// flat black masks and helmets; the period's population: dark brown to black hair)
+const HAIR = ['#2e221a', '#a69f95'];
 const LINEN = ['#efeadf', '#f2eee5', '#ebe5d9', '#f0ece2'];
 
 export const ARCHETYPES = {

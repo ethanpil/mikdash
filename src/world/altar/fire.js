@@ -42,8 +42,11 @@ export function buildFire(A) {
 
   // ---------------------------------------------------------------- the tapuach: heaped ash at its angle of repose
   // a broad, slightly flattened crown, straight flanks (tan ≈ 0.84, 40°: site.js's 3 high on a radius of 4 leaves no
-  // room for gentler flanks), a soft talus toe running 0.6 amah past the radius into the floor drift; irregular
-  // low-frequency lobes; slumps and shovel scoops at detail ≥ 2.
+  // room for gentler flanks), a soft talus toe running 0.6 amah past the radius into the floor drift.
+  // qa-r2-fix-world: a heap of dumped, slumping ash, not a turned dome ⚙ — the crest stands off-centre toward the west
+  // (the ash is raked up onto it from the fires on the east, Tamid 2:2, so the east flank is the long one), the
+  // footprint is an irregular oval pushed out in a few slump tongues, the flanks carry broad low-frequency swells and
+  // shallow chutes where loose ash has run down the fall line, and (detail ≥ 2) shovel scoops.
   // Everything is sampled in plan (X, Y), so the surface is continuous through the crown (no pinched star).
   const SL = 0.84, RE = TR + 0.6;
   const span = 2 * TH / SL - RE, rTot = RE - span;      // flank length; crown radius + toe width
@@ -51,20 +54,42 @@ export function buildFire(A) {
   const prof = (r) => (r <= rCr ? TH - (SL / (2 * rCr)) * r * r
     : r <= rFl ? TH - SL * rCr / 2 - SL * (r - rCr)
       : r < RE ? (SL / (2 * apr)) * (RE - r) * (RE - r) : 0);
-  const lobe = (t) => 1 + 0.085 * nz(Math.cos(t) * 0.9 + 3.1, Math.sin(t) * 0.9 + 7.3, 2) + 0.03 * nz(Math.cos(t) * 2.2 + 11, Math.sin(t) * 2.2 + 5, 2);
+  const RT = rng(A.seed ^ 0x7a9c);                       // the heap's own stream (nothing else on the altar moves)
+  const angD = (a, b) => { let x = (a - b) % (2 * Math.PI); if (x > Math.PI) x -= 2 * Math.PI; if (x < -Math.PI) x += 2 * Math.PI; return x; };
+  const tongues = Array.from({ length: 4 }, (_, i) => ({ a: (i / 4) * 2 * Math.PI + 0.9 + RT() * 1.1, w: 0.32 + 0.22 * RT(), amp: 0.04 + 0.05 * RT() }));
+  const chutes = Array.from({ length: d >= 2 ? 9 : d >= 1 ? 6 : 0 }, () => ({ a: RT() * 2 * Math.PI, w: 0.22 + 0.2 * RT(), dep: 0.07 + 0.08 * RT() }));
+  const SKEW = [-0.5, 0.25];                             // the crest's offset from the centre (amot) ⚙
+  // (scaled by 0.96 so the mean footprint stays site.js's: the tongues push it out ≤ ½ amah in a few directions)
+  const lobe = (t) => 0.96 * (1 + 0.06 * Math.cos(2 * (t - 0.5)))              // an oval, its long axis WSW–ENE
+    * (1 + 0.085 * nz(Math.cos(t) * 0.9 + 3.1, Math.sin(t) * 0.9 + 7.3, 2) + 0.03 * nz(Math.cos(t) * 2.2 + 11, Math.sin(t) * 2.2 + 5, 2))
+    + tongues.reduce((s, g) => s + g.amp * Math.exp(-((angD(t, g.a) / g.w) ** 2)), 0);
   const scoops = [];
   if (d >= 2) for (let i = 0; i < 6; i++) {
     const a = R() * Math.PI * 2, rr = TR * (0.45 + 0.35 * R());
     scoops.push({ x: tcx + Math.cos(a) * rr, y: tcy + Math.sin(a) * rr, a, w: 0.35 + 0.2 * R(), l: 0.55 + 0.3 * R(), dep: 0.1 + 0.08 * R() });
   }
   const tapZ = (X, Y) => {
-    const dx = X - tcx, dy = Y - tcy, t = Math.atan2(dy, dx);
-    const r01 = Math.hypot(dx, dy) / (RE * lobe(t));
-    if (r01 >= 1) return Z - 0.03;
+    let dx = X - tcx, dy = Y - tcy, t = Math.atan2(dy, dx);
+    const r0 = Math.hypot(dx, dy) / (RE * lobe(t));
+    if (r0 >= 1) return Z - 0.03;
+    // the crest carried off-centre: the profile is read about a centre that moves with the height (none at the toe)
+    const k = (1 - r0) * (1 - r0);
+    dx -= SKEW[0] * k; dy -= SKEW[1] * k; t = Math.atan2(dy, dx);
+    const r01 = Math.min(0.999, Math.hypot(dx, dy) / (RE * lobe(t)));
     const flank = Math.sin(Math.PI * Math.min(1, r01 * 1.15));     // 0 at the crown's centre and at the toe
-    let h = prof(r01 * RE);
-    if (d >= 1) h += 0.16 * nz(X * 0.45 + 4, Y * 0.45 - 2, 3) * flank;                    // lumps of dumped shovelfuls
+    let h = prof(r01 * RE) * (1 + 0.07 * Math.cos(t - 3.6));          // a little fuller toward the WSW
+    h += 0.24 * nz(X * 0.26 + 13, Y * 0.26 - 7, 2) * flank;                                // broad swells of the dumps
+    for (const g of tongues) h += 1.6 * g.amp * Math.exp(-((angD(t, g.a) / g.w) ** 2)) * Math.max(0, Math.sin(Math.PI * Math.min(1, (r01 - 0.45) / 0.55)));
+    if (d >= 1) {
+      h += 0.16 * nz(X * 0.45 + 4, Y * 0.45 - 2, 3) * flank;                               // lumps of dumped shovelfuls
+      // chutes down the fall line on the flanks, widening toward the toe
+      const fl = Math.max(0, Math.sin(Math.PI * Math.min(1, Math.max(0, (r01 - 0.3) / 0.68))));
+      for (const c of chutes) { const q = angD(t, c.a) * r01 * RE / (c.w * (0.6 + 0.6 * r01)); h -= c.dep * Math.exp(-q * q) * fl; }
+    }
     if (d >= 2) h += 0.07 * nz(X * 1.6 - 9, Y * 1.6 + 3, 2) * flank;                       // slumps
+    // the crest is dumped ash too: lumps over the crown as well (they fade out toward the toe, which meets the floor)
+    const crown = Math.max(0, 1 - Math.max(0, r01 - 0.55) / 0.35);
+    if (d >= 1) h += (0.13 * nz(X * 0.62 + 2, Y * 0.62 + 9, 2) + (d >= 2 ? 0.05 * nz(X * 2.1 + 5, Y * 2.1 - 1, 2) : 0)) * crown * (1 - 0.5 * flank);
     for (const s of scoops) {                                                              // shovel scoops on the flanks
       const ux = X - s.x, uy = Y - s.y, ca = Math.cos(s.a), sa = Math.sin(s.a);
       const along = (ux * ca + uy * sa) / s.l, across = (-ux * sa + uy * ca) / s.w;
@@ -72,7 +97,7 @@ export function buildFire(A) {
     }
     return Z - 0.03 + Math.max(0, h);
   };
-  const rings = [8, 12, 20, 28][d], segs = [16, 28, 44, 60][d];
+  const rings = [8, 14, 24, 32][d], segs = [18, 32, 56, 72][d];
   // a movable of its own (grow(f), below); its collider stays the full mound
   const tapGeo = polarField(tcx, tcy, rings, segs, (t) => RE * lobe(t), (r01, t, X, Y) => tapZ(X, Y), (u) => 0.35 * u * u + 0.65 * u);
   ctx.addCollider(tapGeo.clone(), 'altar:tapuach');
@@ -296,21 +321,46 @@ export function buildFire(A) {
   if (d >= 1) {
     const oct = new OctahedronGeometry(1, 0);
     const q = new Quaternion(), e = new Euler(), sv = new Vector3(), pv = new Vector3(), mtx = new Matrix4();
-    const chunk = (X, Y, Zs, size, list = chars) => {
-      e.set(R() * 6.3, R() * 6.3, R() * 6.3);
+    const chunk = (X, Y, Zs, size, list = chars, rnd = R, sink = 0) => {
+      e.set(rnd() * 6.3, rnd() * 6.3, rnd() * 6.3);
       q.setFromEuler(e);
       const sz = size * A.AMAH;
-      sv.set(sz * (0.8 + 0.6 * R()), sz * (0.45 + 0.3 * R()), sz * (0.6 + 0.5 * R()));
-      pv.set(X * A.AMAH, (Zs + size * 0.12) * A.AMAH, -Y * A.AMAH);
+      sv.set(sz * (0.8 + 0.6 * rnd()), sz * (0.45 + 0.3 * rnd()), sz * (0.6 + 0.5 * rnd()));
+      pv.set(X * A.AMAH, (Zs + size * (0.12 - sink)) * A.AMAH, -Y * A.AMAH);
       list.push(applyWorldUV(oct.clone().applyMatrix4(mtx.compose(pv, q, sv))));
     };
-    const nT = [0, 26, 55, 85][d];
-    for (let i = 0; i < nT; i++) {                       // over the tapuach's flanks and toe, thicker toward the toe
+    // on the mound itself they go with it (the tapuach movable); on the floor drift beyond its toe they stay
+    const onHeap = (X, Y, size, rnd, sink) => { const zt = tapZ(X, Y), za = ashH(X, Y); chunk(X, Y, Math.max(zt, za), size, zt >= za ? tapChars : chars, rnd, sink); };
+    const nT = [0, 14, 28, 40][d];
+    for (let i = 0; i < nT; i++) {                       // scattered over the flanks and toe, thicker toward the toe
       const a = R() * Math.PI * 2, r01 = 0.4 + 0.6 * Math.sqrt(R());
-      const X = tcx + Math.cos(a) * RE * lobe(a) * r01, Y = tcy + Math.sin(a) * RE * lobe(a) * r01;
-      // on the mound itself they go with it (the tapuach movable); on the floor drift beyond its toe they stay
-      const zt = tapZ(X, Y), za = ashH(X, Y);
-      chunk(X, Y, Math.max(zt, za), 0.035 + 0.055 * R(), zt >= za ? tapChars : chars);
+      onHeap(tcx + Math.cos(a) * RE * lobe(a) * r01, tcy + Math.sin(a) * RE * lobe(a) * r01, 0.035 + 0.055 * R(), R, 0);
+    }
+    // qa-r2-fix-world: dark streaks of charcoal down the fall line — the coarse, half-burnt bits raked up with the ash
+    // roll furthest and gather in fans at the toe; most on the east flank, where the fire's ash is thrown up ⚙
+    const RS2 = rng(A.seed ^ 0x3c5d);
+    const nS = [0, 9, 16, 22][d];
+    for (let k = 0; k < nS; k++) {
+      const a0 = k < nS * 0.55 ? (RS2() - 0.5) * 2.2 : RS2() * 2 * Math.PI;      // the east sector first
+      for (let r01 = 0.3 + 0.15 * RS2(); r01 < 1.04; r01 += 0.035 + 0.04 * RS2()) {
+        const n2 = r01 > 0.75 ? 2 : 1;
+        for (let j = 0; j < n2; j++) {
+          const a = a0 + (RS2() - 0.5) * (0.05 + 0.16 * r01);
+          const rr = RE * lobe(a) * Math.min(1.02, r01 + (RS2() - 0.5) * 0.03);
+          onHeap(tcx + Math.cos(a) * rr, tcy + Math.sin(a) * rr, 0.025 + 0.04 * RS2() + 0.04 * r01 * RS2(), RS2, 0.18);
+        }
+      }
+    }
+    // a few charred stubs of gizrin raked up with the ash, half buried at the toe (not on the east, where the great
+    // pile's billets touch the heap) ⚙
+    if (d >= 2) for (let i = 0; i < 6; i++) {
+      const a = 0.9 + RS2() * (2 * Math.PI - 1.8), r01 = 0.82 + 0.12 * RS2(), rr = RE * lobe(a) * r01;
+      const X = tcx + Math.cos(a) * rr, Y = tcy + Math.sin(a) * rr, L = 0.35 + 0.3 * RS2(), yaw = a + Math.PI / 2 + (RS2() - 0.5) * 1.2;
+      const p0 = [X - Math.cos(yaw) * L / 2, Y - Math.sin(yaw) * L / 2], p1 = [X + Math.cos(yaw) * L / 2, Y + Math.sin(yaw) * L / 2];
+      const r = 0.05 + 0.03 * RS2();
+      const { matrix, len } = logBetween([p0[0], p0[1], tapZ(...p0) + r * 0.2], [p1[0], p1[1], tapZ(...p1) + r * 0.2]);
+      const g = logGeometry(len, r * A.AMAH * 0.7, r * A.AMAH, seg, RS2, 0.05, rows, 0.8, RS2() * Math.PI);
+      tapChars.push(g.side.applyMatrix4(matrix), g.caps.applyMatrix4(matrix));
     }
     const nB = [0, 20, 40, 64][d];
     for (let i = 0; i < nB; i++) {                       // on the great pile's coal bed, round its hollow heart
@@ -419,7 +469,8 @@ export function buildFire(A) {
       mesh.receiveShadow = true;
       tap.add(mesh);
     };
-    add(tapGeo, ASH);
+    // the heap's own ash key once materials adds it (greyer, streaked, roughness 1 — qa-r2-fix-world request), else the floor's
+    add(tapGeo, A.mat('ash_heap', ASH));
     if (tapChars.length) add(mergeGeometries(tapChars, false), CHAR);
     const tud = {
       kind: 'mound', id: 'altar.tapuach', f: 1,

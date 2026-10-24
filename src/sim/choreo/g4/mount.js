@@ -23,6 +23,7 @@
 //     apart along the circuit at every station (the arms of a full-length prostration reach ±0.5 m), booked in the
 //     G4Book — one figure per place, a party taking places one behind another.
 import { AMAH } from '../../../core/units.js';
+import { SITE } from '../../../data/site.js';
 import { clamp } from '../../lib/core.js';
 import { Route, Itin } from './lib.js';
 import { LaneBook } from './book.js';
@@ -82,7 +83,8 @@ export const BREACHES = [
 // is moved along where something stands in its way ⚙: no. 13 south of the Gazit's flight, no. 1 short of Sha'ar
 // HaDelek's spur, no. 8 west of Beit HaEven.
 export const NCOL = 11, COL_DX = 1.2, COL_LAT = 1.2;
-const COL_SHIFT = { 13: 8, 1: -3, 8: 6 };
+// (no. 9 and no. 10, 24 amot apart on the east side, would share their end places: each moved 0.8 m off the other)
+const COL_SHIFT = { 13: 8, 1: -3, 8: 6, 9: -0.8, 10: 0.8 };
 for (const b of BREACHES) {
   b.cols = Array.from({ length: NCOL }, (_, c) => (COL_SHIFT[b.n] || 0) + (c - (NCOL - 1) / 2) * COL_DX);
   // the places in order of preference: the middle of the row first
@@ -104,12 +106,28 @@ export function syncBreaches(ctx) {
 }
 
 // ------------------------------------------------------------------------------------------------ gates
+// The Chuldah passages as site.js builds them (context.chuldah.tunnel-w/-e): a level passage from the portal at the
+// Ophel's grade, then whole risers of ≈ ½ up to the Mount. The depth is the real elevation drop, so in amot it changes
+// with the amah standard (?amah=feinstein | chazonish): the walkers' profile is read from the site, never fixed
+// (qa-r2 SIM-R2-3: the Naeh numbers buried everyone in the stairs under the other standards). CHULDAH: z the passage
+// floor; y0 / y1 the foot and the head of the stair's tread-midpoint line (the stair's ends less half a tread).
+export const CHULDAH = (() => {
+  const s = SITE.elements['context.chuldah.tunnel-w']?.params?.stairPath;
+  if (!s) return { z: -27.083, y0: 44.75, y1: 71.75 };
+  const h = (s.tread ?? 0.5) / 2;
+  return { z: s.from[2], y0: s.from[1] - h, y1: s.to[1] - h };
+})();
+/** the walking line through a Chuldah passage at X x: from deep in the level passage up the stair to the Mount */
+export const chuldahLine = (x, inward = true) => {
+  const C = CHULDAH, pts = [[x, 26, C.z], [x, C.y0, C.z], [x, C.y1, 0]];
+  return inward ? pts : pts.reverse();
+};
 // Each gate: `in` from where a figure appears (out of sight: deep in a Chuldah tunnel, far out on Kiponus' bridge) to
 // its junction on the circuit (heading with the stream); `out` from the circuit to where it is gone. Lanes keep to the
 // right: in on one half of the passage, out on the other.
 const chuldah = (x) => ({
-  in: [[x + 2, 26, -27.083], [x + 2, 44.75, -27.083], [x + 2, 71.75, 0], [x + 2, 226, 0], [x + 4.5, 232.5, 0], [x + 9, 236, 0]],
-  out: [[x - 7, 236, 0], [x - 3.5, 232.5, 0], [x - 2, 226, 0], [x - 2, 71.75, 0], [x - 2, 44.75, -27.083], [x - 2, 26, -27.083]],
+  in: [...chuldahLine(x + 2), [x + 2, 226, 0], [x + 4.5, 232.5, 0], [x + 9, 236, 0]],
+  out: [[x - 7, 236, 0], [x - 3.5, 232.5, 0], [x - 2, 226, 0], ...chuldahLine(x - 2, false)],
 });
 export const GATES = {
   cw: { name: 'the western Chuldah gate', ...chuldah(165) },
@@ -133,11 +151,26 @@ export const GATE_IDS = ['cw', 'ce', 'k'];
 // From the circuit (with the stream) up to a place, and back down to the circuit (continuing with the stream).
 // Stairs by their tread-midpoint lines: the chel steps (12 × ½, Middot 2:3), the gates' 32-step flights, the Gazit's
 // flight to its chol door, Beit HaMoked's flight to its chel door.
+// The chel steps before Ezrat Nashim's east gate (site.js mount.chel.steps: twelve, each ½ high and ½ deep — Middot
+// 2:3), walked tread by tread: each tread at its own height, a riser climbed over 0.12 amah (qa-r2 SIM-R2-10: a slope
+// through them put the walkers up to 0.24 m under the treads).
+const CHEL_STEPS = (() => {
+  const e = SITE.elements['mount.chel.steps'], p = e?.params;
+  if (!p?.foot || !p?.head) return { xFoot: 406, xHead: 400, z0: 0, n: 12, rise: 0.5 };
+  return { xFoot: e.box.max[0], xHead: e.box.min[0], z0: p.foot[2], n: p.steps, rise: p.rise };
+})();
+/** the vertices up (west) the chel steps at Y y; reversed for the way down */
+function chelSteps(y, up = true) {
+  const S = CHEL_STEPS, dir = Math.sign(S.xHead - S.xFoot), tread = Math.abs(S.xHead - S.xFoot) / S.n, e = 0.06;
+  const out = [];
+  for (let k = 0; k < S.n; k++) { const x = S.xFoot + dir * k * tread; out.push([x - dir * e, y, S.z0 + k * S.rise], [x + dir * e, y, S.z0 + (k + 1) * S.rise]); }
+  return up ? out : out.reverse();
+}
 export const SPURS = {
   // the east entry of the soreg → the chel steps → the east gate of Ezrat Nashim
   en: {
-    in: [[420, 327, 0], [414, 332, 0], [406.25, 332, 0], [399.75, 332, 6], [393, 332, 6]],
-    out: [[393, 329, 6], [399.75, 329, 6], [406.25, 329, 0], [413, 329, 0], [420, 334, 0]],
+    in: [[420, 327, 0], [414, 332, 0], ...chelSteps(332), [393, 332, 6]],
+    out: [[393, 329, 6], ...chelSteps(329, false), [413, 329, 0], [420, 334, 0]],
   },
   // Sha'ar HaDelek's flight (south) into the Azarah
   delek: {
@@ -164,6 +197,18 @@ export const SPURS = {
     in: [[167.5, 452, 0], [164.5, 446, 0], [163.0, 424, 0], [161.5, 419.6, 0]],
     out: [[161.5, 419.6, 0], [159.5, 424, 0], [158.5, 446, 0], [155.5, 452, 0]],
   },
+  // Sha'ar HaBechorot's flight (south): to its foot on the chel (the flight is walked on private-offerings' graph) —
+  // the firstling's bringer (courts-daily g5Ways)
+  bechorot: {
+    in: [[154, 236, 0], [157.5, 239, 0], [161.5, 241.4, 0]],
+    out: [[161.5, 241.4, 0], [164.5, 239, 0], [167, 236, 0]],
+  },
+  // the foot of the chel steps (private-offerings' CHEL_FOOT: where the bringers of birds, meal-offerings and bikkurim
+  // and the owners carrying their meat appear and are gone)
+  chel: {
+    in: [[420, 327, 0], [414, 332, 0], [408.5, 330.5, 0]],
+    out: [[408.5, 330.5, 0], [413, 329, 0], [420, 334, 0]],
+  },
   // the foot of the Gazit's flight, stepping off the stream on the west side (the Shabbat court, its askers)
   flightFoot: {
     in: [[25, 385, 0], [24.6, 381.0, 0]],
@@ -181,6 +226,9 @@ for (const sp of Object.values(SPURS)) {
   sp.sIn = sOf(sp.in[0][0], sp.in[0][1]);
   sp.sOut = sOf(sp.out[sp.out.length - 1][0], sp.out[sp.out.length - 1][1]);
 }
+// the way down from the foot of the chel steps joins the court's way down at (413, 329): booked as one, its metres
+// counted as that way's from where they meet (leave())
+SPURS.chel.book = { spur: 'en', at: SPURS.en.outRoute.at(SPURS.en.out.findIndex((p) => p[0] === 413 && p[1] === 329)) - SPURS.chel.outRoute.at(1) };
 
 /** metres from a loop point counter-clockwise to the first gate exit (≥ minArc), and that gate */
 export function exitAfter(s, minArc = 30, allowed = GATE_IDS) {
@@ -246,7 +294,7 @@ export function buildFrom(book, who, t0, build, tries = 0) {
     it = build(mp);
     if (!mp || !mp.waitedAtEntry || k === tries) break;
     release(mp);
-    t0 += 0.035;
+    t0 += Math.max(0.035, it.entryWait || 0);
   }
   return { it, t0 };
 }
@@ -264,7 +312,12 @@ function laneWalk(it, a, b, cls, wo) {
   if (b - a < 1e-3) return;
   const v = SPEEDS[cls];
   const mp = it.mp;
-  if (mp && wo.lanes !== false) mp.taken.push(lanesOf(mp.book)[cls].add(a, mp.t0 + it.T, mp.t0 + it.T + (b - a) / v / 60, mp.who));
+  if (mp && wo.lanes !== false) {
+    const h = lanesOf(mp.book)[cls].add(a, mp.t0 + it.T, mp.t0 + it.T + (b - a) / v / 60, mp.who);
+    mp.taken.push(h);
+    // an animal led on a rope walks the same lane `lag` metres behind: its line is booked too
+    if (wo.lags) for (const g of wo.lags) mp.taken.push(h.lane.shadow(h, g, mp.who));
+  }
   let cur = a;
   while (cur < b - 1e-6) {
     const m = modL(cur), base = cur - m;
@@ -281,8 +334,9 @@ function laneWait(it, a, b, cls, lead, wo) {
   const mp = it.mp;
   if (!mp || wo.lanes === false || b - a < 1e-3) return 0;
   const lane = lanesOf(mp.book)[cls], dur = (b - a) / SPEEDS[cls] / 60;
+  const busy = (t) => lane.conflict(a, t, t + dur) || (wo.lags ? wo.lags.some((g) => lane.conflict(a - g, t, t + dur)) : false);
   let w = 0;
-  while (w < MAX_WAIT && lane.conflict(a, mp.t0 + it.T + lead + w, mp.t0 + it.T + lead + w + dur)) w += 0.035;
+  while (w < MAX_WAIT && busy(mp.t0 + it.T + lead + w)) w += 0.035;
   return w;
 }
 
@@ -309,16 +363,19 @@ export function walkLoop(it, s0, arc, opts) {
   }
   for (const x of opts.stops || []) stops.push(x);
   stops.sort((a, b) => a.d - b.d);
-  const wo = { pose: opts.pose || 'walk', prop: opts.prop ?? null, hand: opts.hand, lanes: opts.lanes };
+  const wo = { pose: opts.pose || 'walk', prop: opts.prop ?? null, hand: opts.hand, lanes: opts.lanes, lags: opts.lags || null };
   const mv = { pose: wo.pose, prop: wo.prop, hand: wo.hand };
   it.cols = it.cols || new Map();
   let done = 0, first = true;
   // where the next lane stretch from `d` would end (the next stop's step-out, or the end of the walk)
+  // (a station's place may lie anywhere along its row, up to its far end: the lane is looked at that far, or the walk on
+  // to a place beyond the station's middle would step into a lane nobody had looked at — qa-r1: the g4 sweep)
   const stretchEnd = (d, i) => {
     for (let k = i; k < stops.length; k++) {
       const st = stops[k];
-      const dn = st.d - (st.b || st.at ? STEP_OUT : 0);
-      if (dn > d + 0.01) return dn;
+      const far = st.b ? Math.max(0, ...st.b.cols.map((c) => dir * c)) : 0;
+      const dn = st.d + far - (st.b || st.at ? STEP_OUT : 0);
+      if (dn > d + 0.01) return Math.min(arc, dn);
     }
     return arc;
   };
@@ -328,7 +385,8 @@ export function walkLoop(it, s0, arc, opts) {
     const w = laneWait(it, s0 + d, s0 + stretchEnd(d, i), cls, lead, wo);
     if (w > 0) {
       it.stand(w, face ?? (it.end ? it.end.heading : 0), { pose: 'stand', prop: wo.prop, hand: wo.hand, turn: false });
-      if (first && it.mp) it.mp.waitedAtEntry = true;
+      // (only the itinerary's first step into a lane counts: the junction he came up to from his gate)
+      if (first && it.mp && !Number.isFinite(it.tLane)) it.mp.waitedAtEntry = true;
     }
     return w;
   };
@@ -339,8 +397,11 @@ export function walkLoop(it, s0, arc, opts) {
     else laneWalk(it, s0 + done, s0 + d, cls, wo);
     done = d;
   };
-  clear(0, 0, 0);
+  const w0 = clear(0, 0, 0);
   first = false;
+  // when he first steps into a lane (a party's next member keeps behind him: courts-daily memberStart), and how long he
+  // waited there (buildFrom sets him off that much later)
+  if (!Number.isFinite(it.tLane)) { it.tLane = it.T; it.entryWait = w0; }
   for (let i = 0; i < stops.length; i++) {
     const st = stops[i];
     if (st.b) {
@@ -353,8 +414,10 @@ export function walkLoop(it, s0, arc, opts) {
       const at = colPoint(pick.s);
       const cur = () => [it.end.X, it.end.Y, it.end.Z];
       if (pick.wait > 0) {
-        // every place taken: he waits a pace short of the one that frees first, then steps in
-        const wp = [at[0] + (it.end.X - at[0]) * 0.55, at[1] + (it.end.Y - at[1]) * 0.55, 0];
+        // every place taken: he waits a pace short of the one that frees first, then steps in — between it and the
+        // circuit's line, clear of every lane (toward his own lane, an outer lane's walker stood in the inner one)
+        const lp = linePoint(pick.s);
+        const wp = [at[0] + (lp[0] - at[0]) * 0.55, at[1] + (lp[1] - at[1]) * 0.55, 0];
         it.walkTo([cur(), wp], v * 0.8, mv);
         it.stand(pick.wait, b.face, { pose: 'stand', prop: wo.prop, hand: wo.hand });
         it.walkTo([wp, at], 0.6, mv);
@@ -377,7 +440,12 @@ export function walkLoop(it, s0, arc, opts) {
       go(Math.max(done, st.d - STEP_OUT));
       it.walkTo([[it.end.X, it.end.Y, it.end.Z], st.at], v * 0.8, mv);
       if (st.mark) it.mark = it.T;
-      it.stand(st.min, st.heading, { pose: st.pose || 'stand', phase: st.phase ?? null, prop: st.prop ?? wo.prop, hand: wo.hand });
+      // the stay: `min` minutes, or until itinerary minute `leaveAt` (a party leaving its places in order); act(it, min)
+      // fills it with its own legs (standing, turning to talk, bowing) instead of one stand
+      const min = Number.isFinite(st.leaveAt) ? Math.max(0.2, st.leaveAt - it.T) : st.min;
+      if (st.act) st.act(it, min);
+      else it.stand(min, st.heading, { pose: st.pose || 'stand', phase: st.phase ?? null, prop: st.prop ?? wo.prop, hand: wo.hand });
+      if (st.mark) it.markOut = it.T;
       const dOut = Math.min(arc, st.d + STEP_OUT);
       const backPt = opts.line ? linePoint(s0 + dir * dOut, 0, dir < 0) : linePoint(s0 + dOut, laneSide(s0 + dOut, cls));
       clear(dOut, i + 1, stepMin(st.at, backPt, v * 0.8), st.heading);
@@ -445,10 +513,17 @@ export function enterGate(it, gate, cls, o = {}) {
     let lb = mp.book.res.get(key);
     if (!lb) { lb = new LaneBook(v, 1e6, GAP); mp.book.res.set(key, lb); }
     const dur = R.length / v / 60;
+    const busy = (t) => lb.conflict(0, t, t + dur) || (o.lags ? o.lags.some((g) => lb.conflict(-g, t, t + dur)) : false);
     let w = 0;
-    while (w < 2 && lb.conflict(0, mp.t0 + it.T + w, mp.t0 + it.T + w + dur)) w += 0.03;
-    if (w > 0) it.stand(w, G.inRoute.hd[0] ?? 0, { at: R.P[0], pose: 'stand', prop: o.prop ?? null, hand: o.hand, turn: false });
-    mp.taken.push(lb.add(0, mp.t0 + it.T, mp.t0 + it.T + dur, mp.who));
+    while (w < 2 && busy(mp.t0 + it.T + w)) w += 0.03;
+    if (w > 0) {
+      // he waits where he appears: that spot is held meanwhile (one more coming up would walk into him)
+      mp.taken.push(lb.block(-0.6, 0.6, mp.t0 + it.T, mp.t0 + it.T + w, mp.who));
+      it.stand(w, G.inRoute.hd[0] ?? 0, { at: R.P[0], pose: 'stand', prop: o.prop ?? null, hand: o.hand, turn: false });
+    }
+    const h = lb.add(0, mp.t0 + it.T, mp.t0 + it.T + dur, mp.who);
+    mp.taken.push(h);
+    if (o.lags) for (const g of o.lags) mp.taken.push(lb.shadow(h, g, mp.who));
   }
   it.walk(R, 0, R.length, v, { side: o.side ?? GATE_SUB[cls], pose: o.pose, prop: o.prop, hand: o.hand });
   return it;
@@ -459,8 +534,8 @@ export function arrive(it, o) {
   const { gate, spur, pose, prop, hand, prostrate = true } = o;
   const cls = o.cls ?? classOf(o.v ?? 1.25), v = SPEEDS[cls];
   const G = GATES[gate], S = SPURS[spur];
-  enterGate(it, gate, cls, { pose, prop, hand });
-  walkLoop(it, G.sIn, fwd(G.sIn, S.sIn), { cls, pose, prop, hand, prostrate, prev: o.prev });
+  enterGate(it, gate, cls, { pose, prop, hand, lags: o.lags });
+  walkLoop(it, G.sIn, fwd(G.sIn, S.sIn), { cls, pose, prop, hand, prostrate, prev: o.prev, lags: o.lags });
   it.walk(S.inRoute, 0, S.inRoute.length, v, { side: SPUR_SUB[cls], pose, prop, hand });
   return it;
 }
@@ -469,13 +544,45 @@ export function leave(it, o) {
   const { spur, pose, prop, hand, exits = GATE_IDS, prostrate = true } = o;
   const cls = o.cls ?? classOf(o.v ?? 1.25), v = SPEEDS[cls];
   const S = SPURS[spur];
-  it.walk(S.outRoute, 0, S.outRoute.length, v, { side: SPUR_SUB[cls], pose, prop, hand });
   const ex = exitAfter(S.sOut, 20, exits);
+  // The way down a spur is booked like a gate's passage (two leaving together walked one line), and the lane at its foot
+  // is looked at before he sets off: a walker who can stay longer where he is (o.flex — he stood a while up there) is
+  // told how long (it.leaveWait) and rebuilt by his planner, rather than standing at the spur's head or at its foot,
+  // in the way of the next one down (qa-r1: the g4 sweep at the foot of the chel steps)
+  const mp = it.mp;
+  if (mp) {
+    const key = `spur:${S.book?.spur || spur}:${cls}`, at0 = S.book?.at || 0;
+    let lb = mp.book.res.get(key);
+    if (!lb) { lb = new LaneBook(v, 1e6, GAP); mp.book.res.set(key, lb); }
+    const dur = S.outRoute.length / v / 60;
+    const lane = lanesOf(mp.book)[cls], stretch = firstStretch(S.sOut, ex.arc, prostrate), sDur = stretch / v / 60;
+    const busy = (w) => {
+      const t = mp.t0 + it.T + w;
+      return lb.conflict(at0, t, t + dur) || (o.lanes !== false && stretch > 1e-3 && lane.conflict(S.sOut, t + dur, t + dur + sDur));
+    };
+    let w = 0;
+    while (w < MAX_WAIT && busy(w)) w += 0.035;
+    if (w > 0 && o.flex) it.leaveWait = (it.leaveWait || 0) + w;
+    else if (w > 0) {
+      // he cannot stay longer where he was: he waits at the head of the way down (held for the others), not at its foot
+      mp.taken.push(lb.block(at0 - 0.6, at0 + 0.6, mp.t0 + it.T, mp.t0 + it.T + w, mp.who));
+      it.stand(w, S.outRoute.hd[0] ?? 0, { at: S.out[0], pose: 'stand', prop: prop ?? null, hand, turn: false });
+    }
+    mp.taken.push(lb.add(at0, mp.t0 + it.T, mp.t0 + it.T + dur, mp.who));
+  }
+  it.walk(S.outRoute, 0, S.outRoute.length, v, { side: SPUR_SUB[cls], pose, prop, hand });
   walkLoop(it, S.sOut, ex.arc, { cls, pose, prop, hand, prostrate, prev: o.prev });
   const X = GATES[ex.id];
   it.walk(X.outRoute, 0, X.outRoute.length, v, { side: GATE_SUB[cls], pose, prop, hand });
   it.exitGate = ex.id;
   return it;
+}
+
+/** metres of lane a walk with the stream from loop point s0 covers before its first step out (a station's place) */
+function firstStretch(s0, arc, prostrate) {
+  let d = arc;
+  if (prostrate) for (const b of BREACHES) { const x = fwd(s0, b.s); if (x > 0.5 && x < arc - 0.5) d = Math.min(d, x + Math.max(0, ...b.cols) - STEP_OUT); }
+  return Math.max(0, d);
 }
 
 /** a whole visit: in by `gate`, with the stream to loop point sTo (≥ minArc), then build(it) at the target, then on
@@ -495,6 +602,25 @@ export function visit(it, o) {
   const ex = exitAfter(G.sIn, minArc, exits);
   walkLoop(it, G.sIn, ex.arc, { cls, pose, prop, hand, prostrate, prev: o.prev });
   it.walk(GATES[ex.id].outRoute, 0, GATES[ex.id].outRoute.length, v, { side: GATE_SUB[cls], pose, prop, hand });
+  it.exitGate = ex.id;
+  return it;
+}
+
+/**
+ * in by `gate`, with the stream through `stops` (walkLoop's stops, each with `s` = its loop distance instead of `d`)
+ * to the first exit at least 20 m after the last, and out — a visit that stops a while on the Mount itself
+ */
+export function visitStops(it, o) {
+  const { gate, stops, pose, prop, hand, prostrate = true, exits = GATE_IDS } = o;
+  const cls = o.cls ?? classOf(o.v ?? 1.25), v = SPEEDS[cls];
+  const G = GATES[gate];
+  enterGate(it, gate, cls, { pose, prop, hand });
+  const ds = stops.map((st) => ({ ...st, d: fwd(G.sIn, st.s) }));
+  const last = Math.max(...ds.map((x) => x.d));
+  const ex = exitAfter(modL(G.sIn + last), 20, exits);
+  walkLoop(it, G.sIn, last + ex.arc, { cls, pose, prop, hand, prostrate, prev: o.prev, stops: ds });
+  const X = GATES[ex.id];
+  it.walk(X.outRoute, 0, X.outRoute.length, v, { side: GATE_SUB[cls], pose, prop, hand });
   it.exitGate = ex.id;
   return it;
 }

@@ -56,18 +56,20 @@ export function createCard(app, opts) {
     setSpeed(SPEEDS[(i + d + SPEEDS.length) % SPEEDS.length][0], true);
     seg.querySelector(`[data-speed=${speed}]`)?.focus();
   });
-  const goText = h('span');
-  const goBtn = h('button.mk-btn.mk-btn--primary.mk-mapcard__go', { type: 'button', on: { click: () => opts.onGo(cur, speed) } }, icon('walk'), goText);
-  const spotBtn = h('button.mk-btn', { type: 'button', title: 'Go to the exact spot you picked on the map', on: { click: () => opts.onSpot(speed) } }, icon('pin'), 'This spot');
-  const infoBtn = h('button.mk-btn', { type: 'button', title: 'Everything about this place (opens the place panel)', on: { click: () => opts.onInfo(cur) } }, icon('info'), 'About');
+  // short landscape phones show "Go" beside the speeds and the other two as icons (styles.css), so all fit one row
+  const goText = h('span.mk-mapcard__golong');
+  const goBtn = h('button.mk-btn.mk-btn--primary.mk-mapcard__go', { type: 'button', on: { click: () => opts.onGo(cur, speed) } }, icon('walk'), goText, h('span.mk-mapcard__goshort', 'Go'));
+  const spotBtn = h('button.mk-btn', { type: 'button', title: 'Go to the exact spot you picked on the map', on: { click: () => opts.onSpot(speed) } }, icon('pin'), h('span.mk-mapcard__lbl', 'This spot'));
+  const infoBtn = h('button.mk-btn', { type: 'button', title: 'Everything about this place (opens the place panel)', 'aria-label': 'About this place', on: { click: () => opts.onInfo(cur) } }, icon('info'), h('span.mk-mapcard__lbl', 'About'));
   const noStand = h('p.mk-mapcard__nostand', 'No floor to stand on here — it is seen from the places around it.');
   const foot = h('div.mk-mapcard__foot', seg, h('div.mk-mapcard__acts', goBtn, spotBtn, infoBtn), noStand);
 
   const grab = h('div.mk-mapcard__grab', { 'aria-hidden': 'true' });
   const el = h('section.mk-mapcard.mk-live', { 'aria-label': 'Selected place', hidden: true },
     grab,
-    h('header.mk-mapcard__head', h('div.mk-mapcard__names', heEl, enEl, trEl), close),
-    h('div.mk-mapcard__meta', lvlEl, sanct, access, levels),
+    // the storey tag belongs to the name: it stays with it where short landscape moves the rest below the activity
+    h('header.mk-mapcard__head', h('div.mk-mapcard__names', heEl, enEl, trEl, lvlEl), close),
+    h('div.mk-mapcard__meta', sanct, access, levels),
     scroll, foot);
 
   // phones: drag the sheet down by its grabber to put it away (past a quarter of its height), else it springs back

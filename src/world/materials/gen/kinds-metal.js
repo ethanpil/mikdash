@@ -8,7 +8,9 @@ export const METAL_KINDS = {
     src: /* glsl */`
 // uP0: x seam gap (m), y overlap lip (m), z hammer dish depth (m), w dish cell (m)
 // uP1: x rough base, y per-sheet rough variation, z sheet waviness (m), w burnish
-// uP2: x per-sheet tone variation
+// uP2: x per-sheet tone variation, y blow-to-blow roughness (±), z rougher ridges between the dishes (+)
+// qa-r2: the roughness varies with the hammering (0.25–0.4): each blow of the hammer face leaves a dish burnished a
+// little more or less than its neighbours, the ridges between them less — facets that catch the light one by one
 void surf(vec2 p, inout S s) {
   Blk b = blk(p);
   vec3 bh = blkHash(b, 505);
@@ -30,7 +32,8 @@ void surf(vec2 p, inout S s) {
   float tone = 0.97 + uP2.x * (bh.y - 0.5) * 2.0 + 0.01 * burn;
   vec3 col = vec3(tone) * mix(vec3(1.0), vec3(1.0, 0.994, 0.985), bh.x);
   s.alb = mix(col, col * 0.4, seam);
-  float r = uP1.x + uP1.y * (bh.z - 0.5) * 2.0 + 0.03 * burn * uP1.w + 0.04 * (1.0 - smoothstep(0.0, 0.6, dv.x));
+  float r = uP1.x + uP1.y * (bh.z - 0.5) * 2.0 + 0.03 * burn * uP1.w + uP2.y * (dv.z - 0.5) * 2.0
+          + uP2.z * smoothstep(0.3, 0.7, dv.x);
   s.rough = mix(r, 0.6, seam);
   s.metal = mix(1.0, 0.5, seam);
   s.ao = 1.0 - 0.5 * seam;

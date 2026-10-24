@@ -10,7 +10,7 @@
 // day only, in the morning (Rambam Pesulei HaMukdashin 19:4–5). Minutes and traffic are reconstruction.
 import { OFFERING_TYPES, OFFERING_RULES, NESACHIM, offeringWindows } from '../../../data/offerings.js';
 import { hashStr, rand, rng } from '../../lib/core.js';
-import { Track, one, cyc, fix, WALK, tableOrder, carcassOf, WAVE_P } from './track.js';
+import { Track, one, cyc, fix, WALK, tableOrder, carcassOf, WAVE_P, sampleSeg } from './track.js';
 import { SitePath } from '../../lib/path.js';
 import { vesselAt } from '../g4/metzora.js';
 
@@ -19,7 +19,19 @@ const AM = 0.48;
 // seconds) and the whole song in minutes — the Levites sing it through as the basket reaches the court (Bikkurim 3:4)
 const BIK_SECTIONS = [34.6, 39.6, 49.8];
 const SONG_MIN = BIK_SECTIONS.reduce((a, b) => a + b, 0) / 60;
-export const POOLS = { kohen: 44, israelite: 16, kohen_offduty: 3, nazir: 3, levi: 6, lamb: 10, ram: 6, goat: 6, ewe: 4, she_goat: 4 };
+// the owners' and their animals' pools hold the walk over the Mount before and after each offering too (WAY_RES) — qa-r1
+export const POOLS = { kohen: 44, israelite: 30, kohen_offduty: 3, nazir: 3, levi: 6, lamb: 14, ram: 8, goat: 9, ewe: 6, she_goat: 6 };
+/** a pool's figure seeds (Slot spec.seed): private-offerings' pools, and courts-daily's figures that walk them in and out */
+export const poolSeed = (name) => 0x6735 + name.length * 131 + POOLS[name];
+/**
+ * The owners, bringers and animals appear at the foot of a gate's flight on the Mount (KOR_FOOT, BECH_FOOT, CHEL_FOOT)
+ * and are gone from there: courts-daily walks them up from the city to it and home again from it, as the same figures
+ * (its pools mirror these: poolSeed). A track that begins or ends at one keeps its pool figure free for that walk —
+ * WAY_RES minutes before / after — so the figure is never in two places ⚙ (qa-r1 SIM-1)
+ */
+export const WAY_NODES = ['KOR_FOOT', 'BECH_FOOT', 'CHEL_FOOT'];
+export const WAY_POOLS = ['israelite', 'lamb', 'ram', 'goat', 'ewe', 'she_goat'];
+export const WAY_RES = { pre: 14, post: 15 };
 /** the animal pools (their tracks lead on a rope, are carried, never book a shared place) */
 export const ANIMALS = new Set(['lamb', 'ram', 'goat', 'ewe', 'she_goat']);
 // The species the data allows, weighted ⚙ — every kind with its own hung, flayed and hide states (people-4): an olah of
@@ -63,6 +75,13 @@ export function dayInputs(ctx) {
  * Shabbat or when the day has no individual window.
  */
 export function buildPlan(ctx, G, ev) {
+  const g = buildPlanSteps(ctx, G, ev);
+  let r;
+  do r = g.next(); while (!r.done);
+  return r.value;
+}
+/** the same, as an iterator: a yield every few offerings placed (the boot's plan job slices it — qa-r2 SIM-R2-12) */
+export function* buildPlanSteps(ctx, G, ev) {
   const D = dayInputs(ctx);
   const P = {
     ok: false, G, D, key: `${D.dateString}|${D.dayType}`, seed: hashStr(`g5:${D.dateString}:${ctx.params?.seed ?? 5786}`),
@@ -191,7 +210,9 @@ export function buildPlan(ctx, G, ev) {
 
   // animals: lanes, slid later when a lane is busy; placed in order of arrival
   const order = [...freeJobs, ...linked.filter((j) => !j.skip)].sort((x, y) => x.arr - y.arr);
+  let nPlaced = 0;
   for (const job of order) {
+    if ((++nPlaced & 3) === 0) yield;
     const inst = placeAnimal(ctx, P, job);
     if (inst && job.after?.inst) { inst.link = job.after.inst.id; job.after.inst.link = inst.id; }
   }
@@ -211,13 +232,13 @@ export function buildPlan(ctx, G, ev) {
   }
 
   // the other birds: three kohanim's lanes, pairs and singles in arrival order
-  for (const job of birdJobs) if (!job.linked) placeSimple(ctx, P, job, 'bird');
+  for (const job of birdJobs) { if (job.linked) continue; if ((++nPlaced & 7) === 0) yield; placeSimple(ctx, P, job, 'bird'); }
 
   // meal-offerings
   shuffle(mealJobs, 'meal');
   const arrM = strat(mealJobs.length, P.win.meal[0] + 0.6, P.win.meal[1] - 30, 'arrM');
   mealJobs.forEach((j, k) => { j.arr = arrM[k]; });
-  for (const job of mealJobs) placeSimple(ctx, P, job, 'meal');
+  for (const job of mealJobs) { if ((++nPlaced & 7) === 0) yield; placeSimple(ctx, P, job, 'meal'); }
 
   // notar, yesterday's leftovers (by day only: Rambam Pesulei HaMukdashin 19:4)
   if (P.win.notar) commit(P, scriptNotar(P, { type: 'notar' }), 0, { kind: 'notar', type: 'notar', lane: 0, n: 0 });
@@ -259,14 +280,37 @@ function poolFree(P, pool, a, b) {
   for (let i = 0; i < slots.length; i++) if (!overlaps(slots[i], a - 0.05, b + 0.05)) return i;
   return -1;
 }
+const WAY_SET = new Set(WAY_POOLS);
+/** where a track appears / is gone on the Mount ({ a, b }: WAY_NODES ids or null; an animal is never led home) */
+export function wayEnds(P, tr) {
+  if (tr._ways) return tr._ways;
+  let a = null, b = null;
+  if (WAY_SET.has(tr.pool) && tr.segs.length) {
+    const s0 = tr.segs[0], s1 = tr.segs[tr.segs.length - 1];
+    const p0 = sampleSeg(s0, s0.t0, {}, {}), p1 = sampleSeg(s1, s1.t1, {}, {});
+    for (const k of WAY_NODES) {
+      const n = P.G.N[k];
+      if (!n) continue;
+      if (Math.hypot(p0.X - n.X, p0.Y - n.Y) < 3) a = k;
+      if (!ANIMALS.has(tr.pool) && Math.hypot(p1.X - n.X, p1.Y - n.Y) < 3) b = k;
+    }
+  }
+  return (tr._ways = { a, b });
+}
+/** the minutes a track holds its pool figure: its own, and the walks over the Mount before and after it */
+function holdOf(P, tr, s = 0) {
+  const w = wayEnds(P, tr);
+  return [tr.t0 + s - (w.a ? WAY_RES.pre : 0), tr.t1 + s + (w.b ? WAY_RES.post : 0)];
+}
 /** do all of a built offering's figures find a free figure in their pools when shifted by s? (tentative, in order) */
 function poolsFit(P, built, s) {
   const taken = [];
   let ok = true;
   for (const tr of built.tracks) {
-    const i = poolFree(P, tr.pool, tr.t0 + s, tr.t1 + s);
+    const [a, b] = holdOf(P, tr, s);
+    const i = poolFree(P, tr.pool, a, b);
     if (i < 0) { ok = false; break; }
-    P.pools[tr.pool][i].push([tr.t0 + s, tr.t1 + s]);
+    P.pools[tr.pool][i].push([a, b]);
     taken.push([tr.pool, i]);
   }
   for (const [pool, i] of taken) P.pools[pool][i].pop();
@@ -405,9 +449,10 @@ function commit(P, built, s, meta) {
   for (const tr of built.tracks) {
     tr.shift(s);
     tr.inst = inst;
-    const i = poolFree(P, tr.pool, tr.t0, tr.t1);
+    const [ha, hb] = holdOf(P, tr);
+    const i = poolFree(P, tr.pool, ha, hb);
     tr.slot = i;
-    if (i >= 0) P.pools[tr.pool][i].push([tr.t0, tr.t1]);
+    if (i >= 0) P.pools[tr.pool][i].push([ha, hb]);
     P.tracks.push(tr);
     inst.t0 = Math.min(inst.t0, tr.t0); inst.t1 = Math.max(inst.t1, tr.t1);
   }
@@ -511,6 +556,8 @@ function scriptAnimal(P, job, lane) {
   A.at(0, owner.p, 0);
   owner.walk(G, L.hold, { speed: SPEED.lead, pose: 'lead_walk', to: undefined });
   A.follow(owner.lastWalk, 1.0, { lead: 'O' });
+  // led up from the city on its rope (courts-daily): at the gate's foot it is a rope's length behind him, not under him
+  if (job.gate !== 'moked') A.segs[A.segs.length - 1].extrap = true;
   const tHold = owner.t;
   const tArriveEnd = Math.max(minutes(type, 'arrive', r, [3, 10]), tHold + 0.8);
   owner.hold(tArriveEnd, { pose: 'lead', h: headTo(owner.p, L.ring) });
@@ -681,7 +728,7 @@ function scriptAnimal(P, job, lane) {
   K2.step(L.tableStand, { pose: 'carry_walk', speed: 0.8, prop: 'entrails_bazach' });
   K2.holdFor(Math.max(0.6, dR * 0.35), { pose: 'flay', h: 180 });
   K2.walk(G, S.medSpot[lane], { speed: SPEED.kohen, pose: 'carry_walk', prop: 'entrails_bazach' });
-  K2.holdFor(Math.max(0.4, dR * 0.2), { pose: 'carry', h: 180, prop: 'entrails_bazach' });
+  K2.holdFor(Math.max(0.4, dR * 0.2), { pose: 'carry', h: S.medFace?.[lane] ?? 180, prop: 'entrails_bazach' });
   K2.walk(G, L.tableStand, { speed: SPEED.kohen, pose: 'carry_walk', prop: 'entrails_bazach' });
   if (K2.t < tR0 + dR) K2.hold(tR0 + dR, { pose: 'flay', h: 180 });
   else K2.holdFor(0.15, { pose: 'carry', h: 180, prop: 'entrails_bazach' });
@@ -919,7 +966,7 @@ function scriptAnimal(P, job, lane) {
     // the waving owner is handed his meat where he stands, by a kohen come down the east side (S.wave)
     if (waved) meet = [WV.owner[0] + 1.3, WV.owner[1], 16];
     else if (type === 'bechor') meet = add(owner.p, -1.2, 0, 16);
-    else meet = [242.4, L.ring[1] + 0.5, 16];
+    else meet = [241.7, L.ring[1] + 0.5, 16];          // on the pavement by the duchan (X 242: its step — qa-r2 floors)
     K2.walk(G, meet, { speed: SPEED.carry, pose: 'carry_shoulder_walk', prop: 'lamb_carcass', to: waved ? 'E_M' : undefined });
     const tMeet = K2.t;
     if (type === 'maaser') { owner.hold(Math.max(owner.t, tMeet - 0.4), { pose: 'stand', h: 270 }); owner.step([243.7, L.ring[1] + 0.5, 14.5], { pose: 'walk', speed: 0.6 }); }
@@ -961,10 +1008,13 @@ function sovevBack(G) {
 /** the wine: from the silver table up the WEST half of the kevesh straight to the cups at the SW horn (Zevachim 6:3) */
 function wineRoute(G, from, i) {
   const c = G.S.cups.pos;
-  const pts = [from, [G.N.K_FW.X - 0.5, G.N.K_FW.Y, 16], [211.0 + i * 0.8, 283.5, G.kevZ(283.5)], [211.0 + i * 0.8, 305.5, G.kevZ(305.5)],
+  // (round the kevesh's south-west corner (X 209, Y 275.5) from the waiting places west of it, not across it — qa-r2
+  // floors: the straight leg went through the ramp)
+  const kb = G.kevesh || { min: [209, 275.5] };
+  const pts = [from, [kb.min[0] - 0.7, kb.min[1] - 0.5, 16], [G.N.K_FW.X - 0.5, G.N.K_FW.Y, 16], [211.0 + i * 0.8, 283.5, G.kevZ(283.5)], [211.0 + i * 0.8, 305.5, G.kevZ(305.5)],
     [210.5, 307.4, 25], [c[0] + 0.4 + i * 0.9, c[1] + 0.2, 25]];
   const path = new SitePath(pts);
-  return { path, near: Uint8Array.from([0, 0, 0, 1, 1, 1]), length: path.length };
+  return { path, near: Uint8Array.from([0, 0, 0, 0, 1, 1, 1]), length: path.length };
 }
 function reverseRoute(r) {
   const pts = [...r.path.points].reverse().map((p) => [p.X, p.Y, p.Z]);
@@ -1127,7 +1177,8 @@ function scriptMeal(P, job, lane) {
   // the owner up from the Mount, through Ezrat Nashim and Nikanor, to the foot of the duchan in Ezrat Yisrael; the
   // kohen steps down onto its lowest step to take the vessel (the owner has no need to enter: Kelim 1:8) ⚙
   const yHand = 324.5 - lane * 2.6;
-  const oHand = [244.75, yHand, 13.5], kHand = [243.45, yHand, 14.5];
+  // (the owner clear of the duchan's lowest step, which reaches X 244.75 under the larger amot — qa-r2 floors)
+  const oHand = [245.2, yHand, 13.5], kHand = [243.45, yHand, 14.5];
   O.at(0, [G.N.CHEL_FOOT.X, G.N.CHEL_FOOT.Y + (lane - 1) * 1.2, 0], 270);
   O.walk(G, oHand, { speed: SPEED.owner, pose: 'carry_walk', prop: vessel });
   const tMeet = O.t;
@@ -1136,7 +1187,7 @@ function scriptMeal(P, job, lane) {
   O.holdFor(0.25, { pose: 'carry', h: 270, prop: vessel });
   K.hold(O.t, { pose: 'stand', h: 90 });
   const dV = minutes(type, "hava'ah", r, [3, 6]);
-  mark(B, "hava'ah", 0, Math.max(O.t, dV * 0.5), { zone: 'ezrat-yisrael', view: view(G.V.nikanor), parent: 'meal-offerings' });
+  mark(B, "hava'ah", 0, Math.max(O.t, dV * 0.5), { zone: 'ezrat-yisrael', view: view(G.V.hava), parent: 'meal-offerings' });
   O.walk(G, 'CHEL_FOOT', { speed: SPEED.owner });
   let t = O.t - 0.0;
   t = K.t;

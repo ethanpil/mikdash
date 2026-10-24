@@ -76,8 +76,10 @@ function g4Places(ctx, G) {
     hooks: [hook(0, 'S'), hook(7, 'S'), hook(0, 'W'), hook(7, 'E')],
     // inside the Parvah: where these sets' hides are laid, clear of G5's places and of chambers-daily's salters ⚙
     hideSpots: [[124.6, 271.2, D16], [136.4, 271.6, D16]],
-    // in Lishkat HaMedichin: a third row of places for the stomach's rinsing, behind G5's two (S.medSpot) ⚙
-    medSpots: G.S.medSpot.slice(0, 3).map((p) => [p[0], p[1] - 5.2, D16]),
+    // in Lishkat HaMedichin: a third row of places for the stomach's rinsing, the aisle's south side facing the south
+    // table, behind G5's two (S.medSpot; g5/geo.js medichin — qa-r2 SIM-R2-10: on the stair's treads and the table's top
+    // before) ⚙
+    medSpots: G.S.med.xs.map((x) => [x, G.S.med.yC, D16]),
     // the nazir's waving: a row north of G5's waving places east of the altar (S.wave), the nazir east facing west and
     // the kohen west of him, 1.3 amot apart (Menachot 61b) ⚙
     // the pair people's WAVE_UNDER.partner apart (0.74 m origin to origin, both at scale 1 — people-4-fix)
@@ -115,10 +117,12 @@ function sovevBack(G) {
 }
 function wineRoute(G, from, i) {
   const c = G.S.cups.pos;
-  const pts = [from, [G.N.K_FW.X - 0.5, G.N.K_FW.Y, 16], [211.0 + i * 0.8, 283.5, G.kevZ(283.5)], [211.0 + i * 0.8, 305.5, G.kevZ(305.5)],
+  // (round the kevesh's south-west corner from the waiting places west of it, not across it — qa-r2 floors)
+  const kb = G.kevesh || { min: [209, 275.5] };
+  const pts = [from, [kb.min[0] - 0.7, kb.min[1] - 0.5, 16], [G.N.K_FW.X - 0.5, G.N.K_FW.Y, 16], [211.0 + i * 0.8, 283.5, G.kevZ(283.5)], [211.0 + i * 0.8, 305.5, G.kevZ(305.5)],
     [210.5, 307.4, 25], [c[0] + 0.4 + i * 0.9, c[1] + 0.2, 25]];
   const path = new SitePath(pts);
-  return { path, near: Uint8Array.from([0, 0, 0, 1, 1, 1]), length: path.length };
+  return { path, near: Uint8Array.from([0, 0, 0, 0, 1, 1, 1]), length: path.length };
 }
 function reverseRoute(r) {
   const pts = [...r.path.points].reverse().map((p) => [p.X, p.Y, p.Z]);
@@ -647,7 +651,8 @@ export function scriptNazir(G, k, seed, places, back, F = null) {
   const tC2 = Math.max(C2.t, tNazirOut + 0.05);
   C2.hold(tC2, { pose: 'carry_shoulder', h: 90, prop: 'loaves_todah' });
   // (out by the west corridor: eastward from his place he would pass the kohen holding the ram's legs)
-  C2.walk(G, add([G.N.STEP_FOOT.X, G.N.STEP_FOOT.Y, G.N.STEP_FOOT.Z], 0, 1.6), { speed: SPEED.owner, pose: 'carry_shoulder_walk', prop: 'loaves_todah', from: 'R_W', to: 'NIK_W' });
+  // (off the graph at the landing, not at the gate: down the steps placed by the physics — qa-r2 floors)
+  C2.walk(G, add([G.N.STEP_FOOT.X, G.N.STEP_FOOT.Y, G.N.STEP_FOOT.Z], 0, 1.6), { speed: SPEED.owner, pose: 'carry_shoulder_walk', prop: 'loaves_todah', from: 'R_W', to: 'LAND' });
   // through Nikanor's gateway (kept clear of the metzora's rites there: nikanor-stations books them first)
   uses(B, 'gate:nikanor', gate0, Math.max(O.t, C2.t));
   // ---- the olah's limbs and the chatat's eimurim and meat, the libations of the olah and the ram
@@ -720,7 +725,9 @@ export function scriptWaving(G, k, seed, sy, place, F = null) {
   const atPot = [potAt[0] - 2.3, potAt[1] + 0.2, 6], atBasket = [basketAt[0] + 0.2, basketAt[1] + 1.4, 6];
   // down to the chamber
   const g1 = G.route('MOK_X', foot, { to: 'STEP_FOOT' });
-  const down = pathOf([...g1.path.points.map((p) => [p.X, p.Y, p.Z]), ...chamberIn.slice(1), atBasket, atPot]);
+  // (the graph's stair flags kept: over the duchan and the fifteen steps the physics places him — qa-r2 floors: he sank
+  // 0.3 amah into the duchan on a straight slope)
+  const down = pathOf([...g1.path.points.map((p) => [p.X, p.Y, p.Z]), ...chamberIn.slice(1), atBasket, atPot], [...g1.near, ...chamberIn.slice(1).map(() => 0), 0, 0]);
   const dDown = down.length / SPEED.kohen / 60;
   K1.at(-dDown, [G.N.MOK_X.X, G.N.MOK_X.Y, G.N.MOK_X.Z], 180);
   K1.walkRoute(down, { speed: SPEED.kohen });
@@ -731,7 +738,7 @@ export function scriptWaving(G, k, seed, sy, place, F = null) {
   // up with the nazir behind him to the waving place (his own side: from the west)
   const upPts = [atPot, ...[...chamberIn].reverse().slice(1)];
   const g2 = G.route(foot, W.kohenIn, { from: 'STEP_FOOT' });
-  const up = pathOf([...upPts, ...g2.path.points.slice(1).map((p) => [p.X, p.Y, p.Z]), W.kohen]);
+  const up = pathOf([...upPts, ...g2.path.points.slice(1).map((p) => [p.X, p.Y, p.Z]), W.kohen], [...upPts.map((_, i) => (i === upPts.length - 1 ? 1 : 0)), ...Array.from(g2.near).slice(1), 0]);
   K1.walkRoute(up, { speed: 1.0, pose: 'carry_walk', prop: 'limb_foreleg', prop2: 'chavitin' });
   const tW = K1.t + 0.25;
   K1.hold(tW, { pose: 'carry', h: 90, prop: 'limb_foreleg', prop2: 'chavitin' });

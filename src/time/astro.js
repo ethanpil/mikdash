@@ -249,7 +249,10 @@ export function planetPositions(ms, lat = SITE_GEO.lat, lon = SITE_GEO.lon) {
     const p = heliocentric(name, T);
     const g = [p[0] - earth[0], p[1] - earth[1], p[2] - earth[2]];
     const r = Math.hypot(...p), delta = Math.hypot(...g), R = Math.hypot(...earth);
-    const lambda = norm360(atan2(g[1], g[0]));
+    // the elements are referred to the J2000 ecliptic and equinox; the equinox of the date precesses (general precession
+    // in longitude, 5029.1″ per century): negligible today, 27° by 70 CE (qa-r1-fix-env-render: any year is accepted).
+    // Standish's table-1 elements themselves are fitted to 1800–2050: far from it the planets are approximate.
+    const lambda = norm360(atan2(g[1], g[0]) + 1.396971 * T + 0.0003086 * T * T);
     const beta = asin(g[2] / delta);
     const { ra, dec } = eclipticToEquatorial(lambda, beta, eps);
     const h = equatorialToHorizontal(ra, dec, lst, lat);

@@ -2,7 +2,7 @@
 // travel status, the fade veil, and floating tags over active events. Updated from one throttled ticker.
 import { Vector3 } from 'three';
 import { h, he, icon, setText } from './dom.js';
-import { seasonal, seasonalLabel, clock, accessLead } from './format.js';
+import { seasonal, seasonalLabel, clock, accessLead, hasCitation } from './format.js';
 import { m2w, w2m } from '../core/units.js';
 import { LADDER, RESTRICTED_RUNG } from './data.js';
 
@@ -36,7 +36,8 @@ export function createHud(app) {
     type: 'button', 'aria-label': `${label} (${key})`, title: `${label} — ${key}`, 'aria-expanded': 'false', 'data-tool': name,
     on: { click: () => app.toggle(name) },
   }, icon(ico));
-  const tools = h('div.mk-tools', toolBtn('info', 'info', 'About this place', 'I'), toolBtn('map', 'map', 'Map', 'M'), toolBtn('settings', 'settings', 'Settings', 'G'));
+  const tools = h('div.mk-tools', toolBtn('info', 'info', 'About this place', 'I'), toolBtn('map', 'map', 'Map', 'M'), toolBtn('settings', 'settings', 'Settings', 'G'),
+    toolBtn('about', 'book', 'Method, sources, controls & credits', '?'));
   const tr = h('div.mk-tr', chip, tools);
 
   // ---------------- compass ----------------
@@ -60,17 +61,24 @@ export function createHud(app) {
   const status = h('div.mk-status.mk-glass.mk-live', { hidden: true, role: 'status' }, icon('walk'), statusText, statusStop);
   const touch = matchMedia?.('(pointer: coarse)').matches;
   const hint = (k, t) => h('span', ...k.map((x) => h('span.mk-kbd', x)), t);
-  const hints = h('div.mk-hints', { 'aria-hidden': 'true' }, touch
-    ? [h('span', 'Left thumb · walk'), h('span', 'Right thumb · look'), h('span', 'Tap the clock for time')]
-    : [hint(['W', 'A', 'S', 'D'], 'walk'), hint(['Shift'], 'run'), hint(['T'], 'time'), hint(['I'], 'this place'), hint(['M'], 'map'), hint(['Esc'], 'free the mouse')]);
+  // touch devices get ghost controls where the thumbs go instead of the key bar (which phones have no room for)
+  const hints = touch
+    ? h('div.mk-touchhint', { 'aria-hidden': 'true' },
+      h('div.mk-touchhint__joy', h('i'), h('span', 'Drag to walk')),
+      h('div.mk-touchhint__look', h('b', icon('back'), icon('fwd')), h('span', 'Drag to look')),
+      h('div.mk-touchhint__pill', 'Two-finger tap: walk / run · tap the clock for the hour'))
+    : h('div.mk-hints', { 'aria-hidden': 'true' },
+      hint(['W', 'A', 'S', 'D'], 'walk'), hint(['Shift'], 'run'), hint(['T'], 'time'), hint(['I'], 'this place'), hint(['M'], 'map'),
+      hint(['Esc'], 'free the mouse'), hint(['?'], 'all controls'));
   hints.hidden = true;
   const captions = h('div.mk-captions', { 'aria-live': 'polite' });
-  const bottom = h('div.mk-bottom', status, hints, captions);
+  const bottom = h('div.mk-bottom', status, touch ? null : hints, captions);
 
   const toasts = h('div.mk-toasts', { 'aria-live': 'polite' });
   const labels = h('div.mk-labels');
   // tags last in the tab order (after the place, the clock and the tools); they paint underneath (z-index -1)
   root.append(loc, locLive, tr, compass, bottom, toasts, labels);
+  if (touch) root.append(hints);
 
   // ---------------- veil (fade for teleports) ----------------
   const veil = h('div.mk-veil', { 'aria-hidden': 'true' });
@@ -97,14 +105,25 @@ export function createHud(app) {
   }
 
   // ---------------- toasts & captions ----------------
-  function toast(msg, ms = 3200) {
+  /** opts.id: a toast with the same id replaces it, and dismiss(id) takes it away early */
+  function toast(msg, ms = 3200, { id } = {}) {
     const text = typeof msg === 'string' ? msg : (msg?.en || '');
     if (!text) return;
+    if (id) dismiss(id, true);
     const el = h('div.mk-toast.mk-glass', typeof msg === 'object' && msg.he ? [he(msg.he, 'mk-toast__he'), ' '] : null, text);
+    if (id) el.dataset.toast = id;
     toasts.append(el);
     while (toasts.children.length > 3) toasts.firstChild.remove();
     requestAnimationFrame(() => el.classList.add('in'));
     setTimeout(() => { el.classList.remove('in'); setTimeout(() => el.remove(), 400); }, ms);
+  }
+  function dismiss(id, now = false) {
+    for (const el of toasts.querySelectorAll(`[data-toast="${id}"]`)) {
+      el.removeAttribute('data-toast');
+      if (now) { el.remove(); continue; }
+      el.classList.remove('in');
+      setTimeout(() => el.remove(), 400);
+    }
   }
 
   function caption(e) {
@@ -123,22 +142,30 @@ export function createHud(app) {
   ctx.bus.on('caption', caption);
 
   // ---------------- hints ----------------
-  let hintTimer = 0;
+  let hintTimer = 0, hintHide = 0;
+  const canvas = ctx.renderer?.domElement || document.getElementById('scene');
+  // touch: the ghosts go with the first touch on the view (the real joystick appears under the thumb)
+  const firstTouch = (e) => { if (e.pointerType !== 'mouse') hideHints(); };
   function showHints() {
     hints.hidden = false;
     hints.classList.remove('out');
     clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => hideHints(), 14000);
+    clearTimeout(hintHide);
+    hintTimer = setTimeout(() => hideHints(), touch ? 9000 : 14000);
+    if (touch) canvas?.addEventListener('pointerdown', firstTouch);
   }
   function hideHints() {
+    canvas?.removeEventListener('pointerdown', firstTouch);
+    clearTimeout(hintTimer);
     hints.classList.add('out');
-    setTimeout(() => { hints.hidden = true; }, 950);
+    clearTimeout(hintHide);
+    hintHide = setTimeout(() => { hints.hidden = true; }, 950);
   }
 
   // ---------------- travel status ----------------
   /** text: the whole phrase ("Walking to the Chel"), or null to hide */
   function travel(text) {
-    if (!text) { status.hidden = true; return; }
+    if (!text) { status.hidden = true; setText(statusText, ''); return; } // no stale "Walking to …" left in the DOM
     setText(statusText, text);
     status.hidden = false;
   }
@@ -161,13 +188,22 @@ export function createHud(app) {
     noticed.set(id, now);
     const L = LADDER[r];
     const access = String(z?.access || '').trim();
-    const rule = accessLead(access) || `${L.rule}.`; // its lead sentence(s) (no lookbehind: old Safari)
+    const rule = accessLead(access) || `${L.rule}.`; // its lead sentence(s)
     const observer = r >= 9 ? ' You see it here as an observer.' : '';
-    toast({ en: `${z?.name?.en || L.en} — ${rule}${observer}${L.src ? ` (${L.src})` : ''}`, he: z?.name?.he || L.he }, 7000);
+    // the ladder's Mishnah only when the place's own rule cites nothing
+    const src = L.src && !hasCitation(rule) ? ` (${L.src})` : '';
+    toast({ en: `${z?.name?.en || L.en} — ${rule}${observer}${src}`, he: z?.name?.he || L.he }, 7000, { id: 'access' });
+    accessRung = r;
   }
+  let accessRung = null; // the rung of the access notice on screen, or null
+  /** the access notice is about where you stand: it goes when you step down out of it or set off elsewhere (a Go) */
+  function dismissAccess() { if (accessRung !== null) { dismiss('access'); accessRung = null; } }
   function setZone(id, animate = true) {
     if (id === zoneId) return;
     zoneId = id;
+    const rNew = data.rung(id);
+    // stepping down below the notice's rung leaves the place it is about; a deeper place brings its own notice
+    if (accessRung !== null && (rNew === null || rNew < accessRung)) dismissAccess();
     const z = data.zone(id);
     setText(locHe, z?.name?.he || '');
     locHe.hidden = !z?.name?.he;
@@ -195,8 +231,14 @@ export function createHud(app) {
   ctx.bus.on('zone:change', (e) => setZone(typeof e?.zone === 'string' ? e.zone : (e?.zone?.id ?? data.currentZoneId())));
 
   // ---------------- tags over active events ----------------
-  const tags = new Map(); // ev.id -> { el, ev, pos: Vector3 }
+  // Projected each frame, then decluttered in screen space: the most important first (then the nearest), each above its
+  // anchor and pushed up past the tags already placed, with a leader down to its anchor; kept inside the view and clear
+  // of the location card, the clock and the tool column. On a coarse pointer the tags take no pointer events (a look-drag
+  // that starts on one must reach the canvas, as the player's touch look lives there); a tap that barely moved is
+  // hit-tested against them instead.
+  const tags = new Map(); // ev.id -> { el, ev, pos: Vector3, imp, … }
   const v = new Vector3();
+  const LEAD = 18, GAP = 4, EDGE = 8;
   let tagList = [];
   function syncTags(active) {
     const on = ctx.settings?.get('labels') !== false;
@@ -208,55 +250,117 @@ export function createHud(app) {
       const p = data.eventPos(ev);
       if (!p) continue;
       const el = h('button.mk-tag.mk-live', { type: 'button', title: ev.summary || '', on: { click: () => app.open('time', { focusEvent: ev.id }) } },
-        h('span.mk-tag__dot'), ev.title?.en || ev.id);
+        h('span.mk-tag__dot'), h('span.mk-tag__t', ev.title?.en || ev.id));
       el.style.opacity = '0';
       el.tabIndex = -1; // out of the tab order until it is actually visible
       el.setAttribute('aria-hidden', 'true');
       labels.append(el);
-      tags.set(ev.id, { el, ev, pos: m2w(p[0], p[1], (p[2] ?? 16) + 4.5) });
+      tags.set(ev.id, { el, ev, imp: ev.importance || 1, pos: m2w(p[0], p[1], (p[2] ?? 16) + 4.5) });
     }
     tagList = [...tags.values()];
   }
+  const remeasure = () => { for (const t of tags.values()) t.w = 0; };
+  document.fonts?.addEventListener?.('loadingdone', remeasure);
+  window.addEventListener('resize', remeasure);
+  // HUD pieces the tags keep clear of, measured in the slow tick (they only move on resize and panel docking)
+  let avoid = [];
+  function measureAvoid() {
+    avoid = [loc, chip, tools].map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
+      .map((r) => ({ x0: r.left - GAP, x1: r.right + GAP, y0: r.top - GAP, y1: r.bottom + GAP }));
+  }
+  const hits = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+  const vis = [], placed = [];
   function placeTags() {
     if (!tagList.length) return;
     const cam = ctx.camera;
     const W = innerWidth, H = innerHeight;
+    vis.length = 0;
     for (const t of tagList) {
       v.copy(t.pos).project(cam);
       const dist = cam.position.distanceTo(t.pos);
-      const vis = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && dist > 4;
-      const op = vis ? Math.max(0, Math.min(1, (260 - dist) / 120)) : 0;
+      const onScreen = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1 && dist > 4;
+      const op = onScreen ? Math.max(0, Math.min(1, (260 - dist) / 120)) : 0;
       const o = op.toFixed(2);
       if (t.o !== o) {
         t.o = o;
         const on = op > 0.2;
         t.el.style.opacity = o;
-        t.el.style.pointerEvents = on ? 'auto' : 'none';
+        if (!touch) t.el.style.pointerEvents = on ? 'auto' : 'none';
         if (on !== t.on) {
           t.on = on;
           t.el.tabIndex = on ? 0 : -1;
           if (on) t.el.removeAttribute('aria-hidden'); else t.el.setAttribute('aria-hidden', 'true');
         }
       }
-      if (op > 0) {
-        t.w ||= t.el.offsetWidth;
-        const half = t.w / 2 + 8;
-        const x = Math.max(half, Math.min(W - half, (v.x + 1) * 0.5 * W));
-        const tr = `translate(${x.toFixed(1)}px, ${((1 - v.y) * 0.5 * H).toFixed(1)}px) translate(-50%, calc(-100% - 18px))`;
-        if (t.tr !== tr) { t.tr = tr; t.el.style.transform = tr; }
-      }
+      if (op > 0) { t.ax = (v.x + 1) * 0.5 * W; t.ay = (1 - v.y) * 0.5 * H; t.dist = dist; vis.push(t); } else t.box = null;
     }
+    vis.sort((a, b) => b.imp - a.imp || a.dist - b.dist);
+    placed.length = 0;
+    for (const [i, t] of vis.entries()) {
+      if (!t.w) { t.w = t.el.offsetWidth; t.hh = t.el.offsetHeight; }
+      // a tag pushed up has its leader running down behind the tags placed before it: those paint on top
+      const zi = String(vis.length - i);
+      if (t.zi !== zi) { t.zi = zi; t.el.style.zIndex = zi; }
+      const w = t.w, hh = t.hh;
+      const clampX = (x) => Math.max(EDGE + w / 2, Math.min(W - EDGE - w / 2, x));
+      let x = clampX(t.ax), y1 = t.ay - LEAD;
+      const box = () => ({ x0: x - w / 2, x1: x + w / 2, y0: y1 - hh, y1 });
+      // out of the HUD's way: sideways (away from the screen edge the piece sits on), else below it
+      for (const r of avoid) {
+        if (!hits(box(), r)) continue;
+        x = clampX(r.x0 > W / 2 ? r.x0 - w / 2 : r.x1 + w / 2);
+        if (hits(box(), r)) y1 = r.y1 + hh;
+      }
+      // up past the tags already placed (each move can meet another: at most one pass per placed tag)
+      for (let k = 0; k < placed.length; k++) {
+        const b = box();
+        const hit = placed.find((p) => hits(b, { x0: p.x0 - GAP, x1: p.x1 + GAP, y0: p.y0 - GAP, y1: p.y1 + GAP }));
+        if (!hit) break;
+        y1 = hit.y0 - GAP;
+      }
+      y1 = Math.max(y1, EDGE + hh);
+      const b = box();
+      placed.push(b);
+      t.box = b;
+      const tf = `translate(${b.x0.toFixed(1)}px, ${b.y0.toFixed(1)}px)`;
+      if (t.tf !== tf) { t.tf = tf; t.el.style.transform = tf; }
+      // the leader runs from the tag down to its anchor (its own x, kept within the tag's rounded ends)
+      const lh = Math.max(0, Math.round(t.ay - y1)), lx = Math.round(Math.max(-(w / 2 - 12), Math.min(w / 2 - 12, t.ax - x)));
+      if (t.lh !== lh) { t.lh = lh; t.el.style.setProperty('--lh', `${lh}px`); }
+      if (t.lx !== lx) { t.lx = lx; t.el.style.setProperty('--lx', `${lx}px`); }
+    }
+  }
+  /** the visible tag under a screen point (a little slop for fingers) */
+  function tagAt(x, y, slop = 6) {
+    for (const t of tagList) if (t.on && t.box && x > t.box.x0 - slop && x < t.box.x1 + slop && y > t.box.y0 - slop && y < t.box.y1 + slop) return t;
+    return null;
+  }
+  if (touch) {
+    let down = null;
+    // timed by the events' own stamps: a short tap handled late on a busy page is still a tap (qa-r2, as map/view.js)
+    const stamp = (e) => (e.timeStamp > 0 ? e.timeStamp : performance.now());
+    window.addEventListener('pointerdown', (e) => {
+      down = e.pointerType !== 'mouse' && e.isPrimary ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: stamp(e) } : null;
+    }, { capture: true, passive: true });
+    window.addEventListener('pointerup', (e) => {
+      const d = down;
+      down = null;
+      if (!d || e.pointerId !== d.id || e.target !== canvas || app.panelOpen?.() || app.introOpen?.()) return;
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || stamp(e) - d.t > 500) return; // a drag: the look's
+      const t = tagAt(e.clientX, e.clientY);
+      if (t) app.open('time', { focusEvent: t.ev.id });
+    }, { capture: true, passive: true });
   }
 
   // ---------------- per-tick update ----------------
   // the gold mark points at the centre of Kodesh HaKodashim, read from the site model (the direction of prayer)
   const khk = data.zoneCenter('kodesh-hakodashim');
   khkMark.hidden = !khk;
-  let lastHeading = NaN, lastPosKey = '';
+  let lastHeading = Infinity, lastPosKey = ''; // Infinity, not NaN: any comparison with NaN is false (the strip never moved)
   function updateCompass() {
     const hd = ctx.player?.heading;
     if (!Number.isFinite(hd)) return;
-    const turned = Math.abs(hd - lastHeading) >= 0.05;
+    const turned = !(Math.abs(hd - lastHeading) < 0.05);
     if (turned) {
       lastHeading = hd;
       strip.style.transform = `translateX(${(140 - (hd + 180) * PX_PER_DEG).toFixed(1)}px)`;
@@ -289,9 +393,12 @@ export function createHud(app) {
   let tSlow = 0, lastActiveKey = '';
   function tick(dt) {
     updateCompass();
-    if (!app.panelOpen?.()) placeTags(); // the tags are hidden under an open panel
     tSlow += dt;
-    if (tSlow < 0.25) return;
+    const slow = tSlow >= 0.25;
+    const open = app.panelOpen?.(); // the tags are hidden under an open panel
+    if (slow && tagList.length && !open) measureAvoid(); // layout reads before this frame's tag writes
+    if (!open) placeTags();
+    if (!slow) return;
     tSlow = 0;
     updateTime();
     setZone(data.currentZoneId());
@@ -308,7 +415,7 @@ export function createHud(app) {
   function refresh() { zoneId = undefined; lastActiveKey = ''; setZone(data.currentZoneId(), false); updateTime(); }
 
   return {
-    root, tick, toast, fade, travel, showHints, hideHints, refresh, setZone,
+    root, tick, toast, dismiss, dismissAccess, fade, travel, showHints, hideHints, refresh, setZone,
     /** HUD pieces an open panel may cover (app.js fades the covered ones out) */
     coverable: [loc, chip, tools, compass],
     setExpanded(name, open) {

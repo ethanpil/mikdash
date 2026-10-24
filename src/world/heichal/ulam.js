@@ -247,8 +247,9 @@ function vine(H) {
   const leafN = [60, 140, 260, 400][d], clN = [16, 34, 60, 90][d];
   const A = AMAH;
   // the vine's gold a little less than mirror-bright (chased sheet and cast grapes) ⚙ (instanced: the variant adds no
-  // draw call)
-  const vineGold = kit.variant('gold-vine', 'gold_vessel', { roughness: 1.25 });
+  // draw call). qa-r1-fix-world: roughness × 1.25 → × 0.9, so the leaves turned toward the sun throw a glint that carries
+  // to the Mount and the hills (the smooth, randomly turned leaves no longer twinkle as a field of lights up close)
+  const vineGold = kit.variant('gold-vine', 'gold_vessel', { roughness: 0.9 });
   kit.set('vine-leaf', () => leafGeometry(0.2, d), vineGold, { cast: d >= 2 });
   const e = new Euler(), q = new Quaternion(), s = new Vector3();
   for (let i = 0; i < leafN; i++) {

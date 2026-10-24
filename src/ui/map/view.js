@@ -6,7 +6,8 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const ease = (u) => 1 - (1 - u) ** 3;
 
 /**
- * opts: { el, size() -> {W, H}, insets() -> {l, t, r, b} (px covered by overlays), extent [[x0,y0],[x1,y1]],
+ * opts: { el, root (el's container with the overlays: claims late second taps), size() -> {W, H},
+ *         insets() -> {l, t, r, b} (px covered by overlays), extent [[x0,y0],[x1,y1]],
  *         kMax, reduced() -> bool, onChange(), onTap(px, py, e), onDoubleTap(px, py, e), onHover(px, py, e), onLeave() }
  */
 export function createView(opts) {
@@ -127,9 +128,28 @@ export function createView(opts) {
   const stamp = (e) => (e.timeStamp > 0 ? e.timeStamp : performance.now());
   const slop = (type) => (type === 'mouse' ? 5 : 10);
 
+  /** a tap may pair with the last one into a double tap: by the events' own times, the first's up to this one's down */
+  const pairs = (p, t) => !!lastTap && t - lastTap.t < 340 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 26;
+
   el.addEventListener('pointerdown', (e) => {
     if (e.button > 0) return;
     if (e.target.closest('button, input, select, a, [data-nodrag]')) return;
+    down(e);
+  });
+  // The second tap of a double tap belongs to the map even if what the first tap opened (the card, a control sliding
+  // aside) is under it by the time the event is handled: mappanel's tap guard lasts 380 ms from the first tap's handling,
+  // and an event delivered late by a busy page or machine is hit-tested after that. Decided by the event's own time.
+  opts.root?.addEventListener('pointerdown', (e) => {
+    if (e.button > 0 || ptrs.size || el.contains(e.target) || !pairs(local(e), stamp(e))) return;
+    e.preventDefault();
+    e.stopPropagation();
+    down(e);
+    // the click that follows still targets what was under the finger (a speed button, Go): it is not one
+    const swallow = (c) => { c.preventDefault(); c.stopPropagation(); };
+    opts.root.addEventListener('click', swallow, { capture: true, once: true });
+    setTimeout(() => opts.root.removeEventListener('click', swallow, true), 700);
+  }, true);
+  function down(e) {
     const p = local(e);
     ptrs.set(e.pointerId, { ...p, x0: p.x, y0: p.y, t0: stamp(e), type: e.pointerType });
     try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
@@ -144,7 +164,7 @@ export function createView(opts) {
       drag = { moved: false, x: p.x, y: p.y };
       samples = [{ x: p.x, y: p.y, t: performance.now() }];
     }
-  });
+  }
   el.addEventListener('pointermove', (e) => {
     const p = local(e);
     const q = ptrs.get(e.pointerId);
@@ -192,15 +212,19 @@ export function createView(opts) {
       }
       return;
     }
-    // a tap: a second one close in time and place is a double tap
+    // a tap: a second one close in time and place is a double tap (timed from the first's up to its down, as the
+    // platforms do, so a second touch held a little longer still counts)
     const p = local(e), now = stamp(e);
     if (now - q.t0 > 650) return;
-    if (lastTap && now - lastTap.t < 340 && Math.hypot(p.x - lastTap.x, p.y - lastTap.y) < 26) {
+    if (pairs(p, q.t0)) {
+      // at the place the first tap named: the map may have begun to pan since (the card's reveal)
+      const { X, Y } = lastTap, t = tf();
       lastTap = null;
-      opts.onDoubleTap?.(p.x, p.y, e);
+      opts.onDoubleTap?.(t.x(X), t.y(Y), e);
       return;
     }
-    lastTap = { x: p.x, y: p.y, t: now };
+    const t = tf();
+    lastTap = { x: p.x, y: p.y, t: now, X: t.X(p.x), Y: t.Y(p.y) };
     opts.onTap?.(p.x, p.y, e);
   };
   el.addEventListener('pointerup', end);

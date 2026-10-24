@@ -39,7 +39,11 @@
 // never write fx levels themselves: a hand-over between two choreos driving one fire is just two windows of wants.
 //
 // Plans: a module may export plan(ctx, state, sim) -> its per-date plan (built on demand, cached on sim.generation);
-// another choreo reads it with sim.planOf(id) (the module is initialised first if it was not yet).
+// another choreo reads it with sim.planOf(id) (the module is initialised first if it was not yet). A module that also
+// exports planRank (a number) plans its day in the boot's plan job instead (lib/planjob.js — qa-r2 SIM-R2-12): steps in
+// planRank order, in slices between frames from 'firstFrame' on (all at once then on a screenshot boot); its plan()
+// asks sim.planNow() before building (false until the job is done: no figures meanwhile). planSteps(ctx, state, sim),
+// when exported, is the plan as an iterator (yielding every few arrivals).
 import { Box3, Vector3 } from 'three';
 import { PRIORITY } from '../core/engine.js';
 import { m2w } from '../core/units.js';
@@ -47,6 +51,7 @@ import { wrap, near } from './lib/core.js';
 import { SIM, cueAt } from './lib/cue.js';
 import { ActorPool, CrowdHandle } from './lib/actors.js';
 import { movable, FireBoard, sound, caption } from './lib/world.js';
+import { PlanJob } from './lib/planjob.js';
 
 const MODULES = import.meta.glob('./choreo/*.js');
 const LOD_NEAR = 120, LOD_MID = 350;           // meters
@@ -66,6 +71,7 @@ export async function createRuntime(ctx, schedule) {
   const byId = new Map(); // choreo id or alias → entry
   const doorReg = new Map(), doorList = [];
   const fireBoard = new FireBoard(ctx);
+  const plans = new PlanJob(ctx);
   const runtime = {
     entries,
     /** sim minutes of continuous forward play since load (never decreases; cue bookkeeping) */
@@ -85,6 +91,8 @@ export async function createRuntime(ctx, schedule) {
     fires: fireBoard,
     /** a choreo's per-date plan (its module's exported plan()), or null — see sim.planOf */
     planOf: (id) => planOf(id),
+    /** the boot's plan job (lib/planjob.js): stats { ms, slices, flushedMs, startedAt, doneAt, order } */
+    plans,
     update,
     /** stop and free everything (choreos' dispose(), their figures) */
     dispose() {
@@ -226,6 +234,8 @@ export async function createRuntime(ctx, schedule) {
       },
       /** another choreo's per-date plan: its module's exported plan(ctx, state, sim), built now if needed; null without it */
       planOf: (id) => planOf(id),
+      /** may this module build its per-date plan now? (the boot's plan job — false in the warm-up's undrawn frames) */
+      planNow: () => plans.planNow(),
       sound: (id, pos, opts) => sound(ctx, id, pos, opts),
       caption: (text, opts) => caption(ctx, text, opts),
       cueAt: (key, tCue, fn) => cueAt(e.state, key, tCue, fn),
@@ -291,7 +301,7 @@ export async function createRuntime(ctx, schedule) {
   });
 
   // ---- the frame
-  let warmPending = false;
+  let warmPending = false, plansSeen = false;
   function update() {
     const t0 = performance.now();
     const time = ctx.time;
@@ -300,6 +310,9 @@ export async function createRuntime(ctx, schedule) {
     const pp = F.pp = ctx.player?.position || ctx.camera.position;
     if (warmPending) { warmPending = false; if (warmFrame()) return; }
     const t = time.t, fd = time.frameDelta || 0;
+    // the boot's plan job just finished (often inside the first drawn frame's updates): re-pose everything once more,
+    // the fires snapping to the planned levels rather than easing in
+    if (!plansSeen && plans.done) { plansSeen = true; jumpPending = true; }
     const jump = jumpPending || fd < 0;
     if (jump) {
       jumpPending = false;
@@ -478,6 +491,21 @@ export async function createRuntime(ctx, schedule) {
   remap();
   // initialise every choreo now (pools spawned hidden) and warm their figures on the first frame
   for (const e of entries) if (!e.failed && !e.inited) init(e);
+  // the heavy per-date plans: steps of the boot's plan job, in the order they read one another's (planRank)
+  const ranked = entries.filter((e) => e.inited && !e.failed && Number.isFinite(e.mod.planRank) && typeof e.mod.plan === 'function')
+    .sort((a, b) => a.mod.planRank - b.mod.planRank);
+  for (const e of ranked) {
+    plans.add(e.id, () => {
+      if (typeof e.mod.planSteps === 'function') return e.mod.planSteps(ctx, e.state, e.sim);
+      e.mod.plan(ctx, e.state, e.sim);
+      return undefined;
+    });
+  }
+  plans.seal();
+  // ?planjob=0: plan the day here, in init, as before the job (an A/B switch for boot measurements)
+  if (ctx.params?.raw?.get?.('planjob') === '0') { plans.ready = true; plans.flush(); }
+  // after the first image; a screenshot boot (shot=1, the dev tests) plans it all at once then
+  ctx.bus.on('firstFrame', () => { if (ctx.params?.shot) { plans.ready = true; plans.seal(); plans.flush(); } else plans.start(); });
   warmPending = entries.some((e) => e.pools.length > 0);
   offUpdate = ctx.engine.onUpdate(() => update(), PRIORITY.sim);
   return runtime;

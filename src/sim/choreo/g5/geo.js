@@ -123,7 +123,15 @@ export function buildGeo(ctx) {
     const x0 = (b.min[0] + b.max[0]) / 2 - ((cols - 1) * dx) / 2;
     return [x0 + (l % cols) * dx, b.max[1] - 3.2 - Math.floor(l / cols) * dy, D16];
   };
-  S.medSpot = [0, 1, 2, 3, 4, 5].map((l) => inRoom('azarah.chamber.medichin', { min: [140.25, 263], max: [152.25, 275] }, l, 3, 2.6, 2.6));
+  // Lishkat HaMedichin as build-courts furnishes it (world/courts/chambers.js rinsers): the winding stair in its SW corner
+  // (site.js params.mesibah), two marble tables east of it along the chamber, a trough along its north wall west of the
+  // door. The stomach is rinsed at the tables (Tamid 4:2) ⚙: three places north of the north table facing it (lanes 0–2),
+  // three in the aisle between the tables facing the north table (3–5); G4's sets take the aisle's other side, facing the
+  // south table (sets.js medSpots). Off the stair's treads and the tables' tops (qa-r2 SIM-R2-10: they stood 0.5–0.8 m
+  // under them) ⚙
+  S.med = medichin(el);
+  S.medSpot = [0, 1, 2, 3, 4, 5].map((l) => (l < 3 ? [S.med.xsA[l], S.med.yA, D16] : [S.med.xs[l - 3], S.med.yB, D16]));
+  S.medFace = [0, 1, 2, 3, 4, 5].map((l) => (l < 3 ? 180 : 0));
   S.parSpot = [0, 1, 2, 3, 4, 5].map((l) => inRoom('azarah.chamber.parvah', { min: [120.25, 263], max: [140.25, 275] }, l, 3, 3.0, 2.6));
   S.melSpot = [0, 1, 2].map((l) => inRoom('azarah.chamber.melach', { min: [75, 263], max: [95, 275] }, l, 3, 2.6, 2.6));
   // the lower west half of the kevesh, where the eimurim are salted (Rambam MK 6:4): north of the olah's limbs and
@@ -162,7 +170,7 @@ export function buildGeo(ctx) {
   // the Moked: kohanim come and go through its gate (Beit HaMoked, their house in the court's north wall — Middot 1:6–8)
   const mg = el('azarah.gate.moked')?.box;
   const mx = mg ? (mg.min[0] + mg.max[0]) / 2 : 210.75;
-  node('MOK_X', mx, 404.5, D16);          // inside the hall (vanish)
+  node('MOK_X', mx, 404.5, D16, true);    // inside the hall (vanish): its floor by the physics (15.5 there — qa-r2 floors)
   node('MOK', mx, 388.0, D16);            // just inside the court
   // the Korban gate and its flight to the chel (Middot 1:5): owners of most-holy offerings come and go
   node('KOR_FOOT', 161.5, 419.6, 0, true);
@@ -228,6 +236,9 @@ export function buildGeo(ctx) {
   const rsZ = (y) => (rs ? rs.from[2] + ((rs.to[2] - rs.from[2]) * (y - rs.from[1])) / (rs.to[1] - rs.from[1]) : 22);
   node('RS_1', 226.0, 302.5, rsZ(302.5));
   node('RS_2', 226.0, 306.3, SOV);
+  // onto the sovev's south side before turning east along it: the straight leg from the ramp's head to the SE corner cut
+  // across the gap east of the ramp, off the ledge (qa-r2 SIM-R2-10: 2.9 m over the pavement) ⚙
+  node('RS_3', 226.0, 307.0, SOV);
   // the sovev (a 1-amah ledge at +22 round the altar)
   node('SV_SE', 231.5, 307.0, SOV);
   node('SV_NE', 231.5, 336.0, SOV);
@@ -251,7 +262,12 @@ export function buildGeo(ctx) {
   node('S_MED', 147.25, 277.6, D16);
   node('S_PAR', 130.25, 277.6, D16);
   node('S_MEL', 85.0, 277.6, D16);
-  node('MED_IN', 147.25, 271.5, D16);
+  // in Lishkat HaMedichin: inside its door, then round the north table's west end (clear of the trough and the stair)
+  // into the aisle between the tables (S.med) — a straight leg from the door would cross the table (SIM-R2-10)
+  node('MED_IN', S.med.door[0], S.med.door[1], D16);
+  node('MED_W', S.med.west[0], S.med.west[1], D16);
+  node('MED_A', S.med.aisleW[0], S.med.aisleW[1], D16);
+  node('MED_B', S.med.aisle[0], S.med.aisle[1], D16);
   node('PAR_IN', 130.25, 271.0, D16);
   node('MEL_IN', 85.0, 271.0, D16);
   // the Bechorot gate and its flight (Middot 1:4)
@@ -265,7 +281,7 @@ export function buildGeo(ctx) {
   node('EY_S', 249.5, 300.0, EY, true);
   node('NIK_W', 253.8, 330.5, EY);
   node('NIK_E', 261.0, 330.5, EY);
-  node('LAND', 269.8, 330.5, EY);
+  node('LAND', 269.8, 330.5, EY, true);    // the head of the fifteen steps: legs from it go down them (physics placed)
   node('STEP_FOOT', 278.6, 330.5, EN, true);
   node('EN_E', 392.5, 330.5, EN);
   node('EN_OUT', 401.0, 330.5, EN, true);
@@ -283,10 +299,11 @@ export function buildGeo(ctx) {
     ['K_SW', 'K_FW'], ['K_FW', 'K_FE'], ['K_FE', 'K_SE'],
     ['K_FE', 'KE_MID'], ['KE_MID', 'KE_RS'], ['KE_RS', 'KE_TOP'], ['KE_TOP', 'TP_SE'], ['TP_SE', 'TP_E'], ['TP_E', 'TP_NE'], ['TP_NE', 'TP_NW'],
     ['TP_NW', 'TP_W'], ['TP_W', 'TP_SW'], ['TP_SW', 'KW_TOP'], ['KW_TOP', 'KW_RY'], ['KW_RY', 'KW_SALT'], ['KW_SALT', 'K_FW'],
-    ['KE_RS', 'RS_1'], ['RS_1', 'RS_2'], ['RS_2', 'SV_SE'], ['SV_SE', 'SV_NE'], ['SV_NE', 'SV_NW'], ['SV_NW', 'SV_SW'],
+    ['KE_RS', 'RS_1'], ['RS_1', 'RS_2'], ['RS_2', 'RS_3'], ['RS_3', 'SV_SE'], ['SV_SE', 'SV_NE'], ['SV_NE', 'SV_NW'], ['SV_NW', 'SV_SW'],
     ['KW_RY', 'RY_1'], ['RY_1', 'RY_2'], ['RY_2', 'RY_Y'], ['KE_RS', 'KW_RY'],
     ['AW_SW', 'S_1'], ['KW_2', 'S_2'], ['S_1', 'S_2'], ['S_2', 'S_B'], ['S_B', 'S_MED'], ['S_MED', 'S_PAR'], ['S_PAR', 'S_MEL'],
     ['S_MED', 'MED_IN'], ['S_PAR', 'PAR_IN'], ['S_MEL', 'MEL_IN'],
+    ['MED_IN', 'MED_W'], ['MED_W', 'MED_A'], ['MED_A', 'MED_B'],
     ['S_B', 'BECH_IN'], ['BECH_IN', 'BECH_HEAD'], ['BECH_HEAD', 'BECH_FOOT'], ['K_SW', 'S_2'],
     ['E_R', 'EY_N'], ['E_A', 'EY_A'], ['E_M', 'EY_M'], ['EY_N', 'EY_A'], ['EY_A', 'EY_M'], ['EY_M', 'EY_S'],
     ['EY_M', 'NIK_W'], ['NIK_W', 'NIK_E'], ['NIK_E', 'LAND'], ['LAND', 'STEP_FOOT'], ['STEP_FOOT', 'EN_E'], ['EN_E', 'EN_OUT'], ['EN_OUT', 'CHEL_FOOT'],
@@ -318,7 +335,7 @@ export function buildGeo(ctx) {
   // keep-right: half a shoulder's width to the right on open pavement corridors (0.52 amah = 25 cm)
   const KEEP = 0.52;
   // (not at gates, chamber doors, the ramp's foot, or past the bird kohanim's places and cages by the SW corner)
-  const NO_KEEP = new Set(['MOK_X', 'MOK', 'KOR_IN', 'BECH_IN', 'SWN', 'SWS', 'MED_IN', 'PAR_IN', 'MEL_IN', 'K_FE', 'K_FW', 'KW_1', 'AW_SS', 'AW_SW']);
+  const NO_KEEP = new Set(['MOK_X', 'MOK', 'KOR_IN', 'BECH_IN', 'SWN', 'SWS', 'MED_IN', 'MED_W', 'MED_A', 'MED_B', 'PAR_IN', 'MEL_IN', 'K_FE', 'K_FW', 'KW_1', 'AW_SS', 'AW_SW']);
   const KEEP_OK = (n) => !n.near && Math.abs(n.Z - D16) < 1e-3 && !NO_KEEP.has(n.id);
   const spCache = new Map();
   function shortest(from, to) {
@@ -476,14 +493,56 @@ export function buildGeo(ctx) {
     // south-east of the hearth, off the way to its east side: the frying places and the eaters beyond ⚙
     kitchen: { at: [241.4, 288.4, D16], heading: 338 },
     deshen: { at: [236, 286, D16], heading: 270 },
-    korban: { at: [176, 380, D16], heading: 330 },
-    bechorot: { at: [176, 284, D16], heading: 240 },
-    south: { at: [160, 287, D16], heading: 230 },
-    nikanor: { at: [250, 346, EY], heading: 170 },
+    // (qa-r2 SIM-R2-2: korban, bechorot and south stood inside the Heichal's otem, nikanor inside Lishkat Pinchas; each
+    // now on open pavement with a clear line to what it watches — src/sim/dev/tests/views.js guards them) ⚙
+    // in the north strip before the Korban gate, 4 amot off the Heichal's base and 8 off the way in: into the gateway
+    // (the flight beyond it) and the owners leading their animals in toward the viewer
+    korban: { at: [168, 384.5, D16], heading: 330 },
+    // in the south strip before the Bechorot gate, east of the way in: into the gateway and down its flight
+    bechorot: { at: [170, 272, D16], heading: 215 },
+    // the south strip's east end: the hide carried west along the strip, past Lishkat HaMedichin, into the Parvah (the
+    // chambers' doors are on their north faces, flush along the strip: the view looks along them)
+    south: { at: [182.5, 274, D16], heading: 276 },
+    // on the landing at the head of the fifteen steps, south of the way up: through the open gate into the niche between
+    // Lishkat Pinchas and the chavitin makers' chamber, where the birds are handed over and the owners pass
+    nikanor: { at: [267.5, 325.8, EY], heading: 289 },
+    // Ezrat Yisrael's west side south of the chavitin makers' chamber: the meal-offerings handed over at the foot of the
+    // duchan (plan.js hava'ah), the men standing in the court about them
+    hava: { at: [246.3, 309.5, EY], heading: 355 },
     ey: { at: [252, 372, EY], heading: 190 },
     en: { at: [292, 338, EN], heading: 255 },
-    moked: { at: [222, 380, D16], heading: 330 },
+    // west of the hooks' pillars (altar.nanasin), off the corridor to the rings: Beit HaMoked's gate over the pillars'
+    // north ends, and the kohen leading the lamb out of it and south past the viewer (it stood among the pillars, one
+    // 2 m before it — qa-r2 SIM-R2-2's guard) ⚙
+    moked: { at: [195, 383.5, D16], heading: 66 },
   };
 
-  return { lanes, S, N, route, nearestNode, kevZ: K, V, D16, EY, EN, SOV, TOP };
+  return { lanes, S, N, route, nearestNode, kevZ: K, V, D16, EY, EN, SOV, TOP, kevesh: el('altar.kevesh')?.box || null };
+}
+
+/**
+ * Lishkat HaMedichin's furniture as build-courts lays it out (world/courts/chambers.js southTrio / rinsers: the winding
+ * stair round site.js params.mesibah, r 1.9; two marble tables 1.6 amot high east of it; a trough along the north wall
+ * west of the door) → the rinsing places and the way to them (site amot) ⚙. Mirrors the builder's numbers: the g5 dev
+ * test checks the places against the physics floor.
+ */
+function medichin(el) {
+  const e = el('azarah.chamber.medichin');
+  const b = e?.box || { min: [140.25, 263, 16], max: [152.25, 275, 36] };
+  const m = e?.params?.mesibah;
+  const sr = 1.9, sc = m?.box ? [m.box.min[0] + 1 + sr + 0.05, m.box.min[1] + 1 + sr + 0.05] : [143.2, 265.95];
+  const r = { min: [b.min[0] + 1, b.min[1] + 1], max: [b.max[0] - 1, b.max[1] - 1] };
+  const tx = [sc[0] + sr + 0.2 + 0.5, r.max[0] - 0.5];                 // the tables' west and east ends
+  const t1 = [r.min[1] + 1, r.min[1] + 2.6], t2 = [r.min[1] + 5.5, r.min[1] + 7];   // the south and north tables (Y)
+  const len = tx[1] - tx[0];
+  const cols = (a, c) => [0, 1, 2].map((k) => tx[0] + a + k * c);
+  const door = e?.params?.door?.x ? [(e.params.door.x[0] + e.params.door.x[1]) / 2, r.max[1] - 1.0] : [147.25, 273];
+  return {
+    tables: { x: tx, south: t1, north: t2 },
+    // north of the north table (facing it, south); the aisle's north side (facing the north table); its south side
+    // (facing the south table) — 1.5–1.75 amot apart along each row
+    xsA: cols(len - 0.35 - 3.0, 1.5), xs: cols(0.75, (len - 1.5) / 2),
+    yA: t2[1] + 0.7, yB: t2[0] - 0.7, yC: t1[1] + 0.7,
+    door, west: [tx[0] - 1.2, t2[1] + 0.75], aisleW: [tx[0] - 1.1, (t1[1] + t2[0]) / 2 + 0.15], aisle: [(tx[0] + tx[1]) / 2, (t1[1] + t2[0]) / 2],
+  };
 }

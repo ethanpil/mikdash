@@ -159,7 +159,28 @@ function createTerrain(ctx) {
       const n2 = noise.fbm(x / 26 + 40, y / 26 - 13, 3);
       h += amp * (2.4 * n1 + 0.55 * n2);
     }
+    // qa-r1-fix-world: micro-relief, only in the near field of the Har HaMishchah viewpoints, where the grid is fine
+    // enough to carry it (plan.detail; 2.5–6 m cells)
+    const wd = plan.inDetail(X, Y) * amp;
+    if (wd > 0) h += wd * micro(X, Y, h);
     return { h, g };
+  }
+
+  /**
+   * Micro-relief (m) ⚙: low hummocks, and broken limestone benches along the contours: the karst of the Judean hills
+   * weathers into shelves a metre or so high, the soil lying on each shelf, a short rock step to the next. Benches come
+   * in patches and only on sloping ground (not on the crest's flat, not on scarps the cells cannot resolve).
+   */
+  function micro(X, Y, h) {
+    const x = X * A, y = Y * A;
+    const hum = 0.2 * noise.fbm(x / 6.5 + 31, y / 6.5 - 7, 2);
+    const e = 2 / A;
+    const s = Math.hypot(macro(X + e, Y) - macro(X - e, Y), macro(X, Y + e) - macro(X, Y - e)) / 4;
+    const k = smooth(0.04, 0.1, s) * (1 - smooth(0.36, 0.5, s)) * smooth(-0.15, 0.3, noise.fbm(x / 38 + 5.5, y / 38 - 3.1, 2));
+    if (k <= 0) return hum;
+    const S = 1.25, f = h / S - Math.floor(h / S);
+    const bench = (smooth(0.62, 1, f) - f) * S;              // 0 at a riser's head, −0.62 S at the foot of the next riser
+    return hum + 0.65 * k * bench;
   }
 
   function heightASL(X, Y) { return sample(X, Y).h; }

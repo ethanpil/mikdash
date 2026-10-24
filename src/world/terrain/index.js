@@ -13,13 +13,15 @@
 import { Group, Mesh, BufferGeometry, Float32BufferAttribute, Uint32BufferAttribute, MeshBasicMaterial } from 'three';
 import { AMAH, m2w } from '../../core/units.js';
 import { getTerrain } from './height.js';
-import { solveLines, buildGrid } from './grid.js';
+import { solveLines, buildGrid, gridSampler } from './grid.js';
+import { buildCover } from './cover.js';
 import { groundMaterial, TINT, UV_SCALE } from './material.js';
 import { Kit, smooth } from '../mount/kit.js';
 import { buildTrees } from './trees.js';
 import { buildCity } from './city.js';
 import { buildDraped, buildBurningPlace } from './context.js';
 import { buildFeatures } from './features.js';
+import { distToPolyline } from './plan.js';
 
 export async function build(ctx) {
   const t0 = performance.now();
@@ -43,9 +45,16 @@ export async function build(ctx) {
   // ground is cut out under the floor and the tank
   const bp = T.plan.burning, bf = T.plan.flats.find((f) => f.id === 'burning-place').rect;
   const bpX = [bf[0], bf[2], ...bp.cut.flatMap((r) => [r[0], r[2]])], bpY = [bf[1], bf[3], ...bp.cut.flatMap((r) => [r[1], r[3]])];
-  const lineSets = (s) => ({
-    xs: solveLines({ lo: cx - R, hi: cx + R, f0: fp.x0, f1: fp.x1, Llo: 260, Lhi: 520, A, specials: [...footS, ...footN, fp.x0, fp.x1, ...bpX] }, Math.round(1.12 * s)),
-    ys: solveLines({ lo: cy - R, hi: cy + R, f0: fp.y0, f1: fp.y1, Llo: 300, Lhi: 300, A, specials: [fp.y0, fp.y1, 0, 500, ...bpY] }, Math.round(0.9 * s)),
+  // qa-r1-fix-world: lines along the Parah path's edges and centre (its worn band is drawn by the ground itself — the
+  // vertex weights below), and the fine bands over the near field of the Har HaMishchah viewpoints (plan.detail), where
+  // the ground carries its micro-relief (height.js). Not in the shadow proxy.
+  const pp = T.plan.parahPath, dt = T.plan.detail, ti = Math.max(0, Math.min(3, detail));
+  const band = (a, b, sp) => { const out = []; const n = Math.max(1, Math.round((b - a) * A / sp)); for (let i = 0; i <= n; i++) out.push(a + (b - a) * i / n); return out; };
+  const fineX = [...band(dt.x0, dt.xFine, dt.coarse[ti]), ...band(dt.xFine, dt.x1, dt.fine[ti])];
+  const fineY = [...band(dt.y0, dt.y1, dt.fine[ti]), pp.pts[0][1] - pp.half, pp.pts[0][1], pp.pts[0][1] + pp.half];
+  const lineSets = (s, fine = true) => ({
+    xs: solveLines({ lo: cx - R, hi: cx + R, f0: fp.x0, f1: fp.x1, Llo: 260, Lhi: 520, A, specials: [...footS, ...footN, fp.x0, fp.x1, ...bpX] }, Math.round(1.12 * s), fine ? fineX : []),
+    ys: solveLines({ lo: cy - R, hi: cy + R, f0: fp.y0, f1: fp.y1, Llo: 300, Lhi: 300, A, specials: [fp.y0, fp.y1, 0, 500, ...bpY] }, Math.round(0.9 * s), fine ? fineY : []),
   });
   const within = (r, X0, Y0, X1, Y1) => X0 >= r[0] - 1e-6 && X1 <= r[2] + 1e-6 && Y0 >= r[1] - 1e-6 && Y1 <= r[3] + 1e-6;
   const inside = (X0, Y0, X1, Y1) => within([fp.x0, fp.y0, fp.x1, fp.y1], X0, Y0, X1, Y1) || bp.cut.some((r) => within(r, X0, Y0, X1, Y1));
@@ -80,6 +89,12 @@ export async function build(ctx) {
     const strata = smooth(0.66, 0.8, fr) * (1 - smooth(0.9, 0.97, fr)) * smooth(0.995, 0.96, ny) * smooth(-0.15, 0.25, T.noise.fbm(X * A / 140 + 4, Y * A / 140 - 9, 2)) * near;
     rock = Math.max(rock, 0.85 * strata);
     rock *= 1 - graded[v];
+    // qa-r1-fix-world: the Parah path is the ground itself, worn to the limestone along its middle and to trodden soil
+    // at its edges (it was a separate pale strip with hard edges); the material's noisy layer edges wear it ragged
+    if (Math.abs(Y - pp.pts[0][1]) < pp.half + 4 && X > pp.pts[0][0] - 2 && X < pp.pts[1][0] + 6) {
+      const dp = distToPolyline(pp.pts, X, Y).d;
+      rock = Math.max(rock, (0.4 + 0.2 * fine) * (1 - smooth(pp.half * 0.3, pp.half * 1.1, dp)));
+    }
     if (mode === 'blend') {
       col.set([rock, (1 - rock) * (1 - green), (1 - rock) * green], v * 3);
     } else {
@@ -110,7 +125,7 @@ export async function build(ctx) {
   { const p = new BufferGeometry(); p.setAttribute('position', cgrid.attributes.position); p.setIndex(cgrid.index); ctx.addCollider(p, 'terrain'); }
   // shadow caster: a coarse grid sunk 0.6 m (no self-acne on the visual surface), depth only — never drawn in colour
   if (detail >= 1) {
-    const lc = lineSets(Math.min(110, seg));
+    const lc = lineSets(Math.min(110, seg), false);
     const drop = 0.6 / A;
     const pg = buildGrid(lc.xs, lc.ys, (X, Y) => { const s = sampleZ(X, Y); return { z: s.z - drop, g: s.g }; }, inside);
     const proxyGeo = new BufferGeometry();
@@ -140,8 +155,11 @@ export async function build(ctx) {
   group.add(kit.build());
   const trees = buildTrees(ctx, T, detail, feat);
   if (trees) group.add(trees);
+  // grass, garrigue and stones round the camera, on the rendered ground (qa-r1-fix-world)
+  const cover = buildCover(ctx, T, detail, gridSampler(xs, ys, grid), feat);
+  if (cover) group.add(cover);
 
-  group.userData.stats = { gridLines: [xs.length, ys.length], terrainTris: triCount, tiles: tiles.length, houses: city.houses, trees: trees?.userData.count || 0, rocks: feat.rocks, terraceSegs: feat.terraceSegs, plots: feat.plots, ms: Math.round(performance.now() - t0) };
+  group.userData.stats = { gridLines: [xs.length, ys.length], terrainTris: triCount, tiles: tiles.length, houses: city.houses, compounds: city.compounds, smokes: city.smokes, smokeState: city.smokeState, trees: trees?.userData.count || 0, cover: cover?.userData.stats, rocks: feat.rocks, terraceSegs: feat.terraceSegs, plots: feat.plots, ms: Math.round(performance.now() - t0) };
   return group;
 }
 

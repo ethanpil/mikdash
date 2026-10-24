@@ -19,10 +19,18 @@
 // lime_whitewash = the altar, heichal_whitewash = washed ashlar.
 // terrain_blend takes vertex colours as layer weights (r rock, g soil, b vegetation); olive_foliage takes instanceColor
 // as a tint; embers glow (emission in the env unit convention, updated every frame); outdoor-only keys set
-// userData.mkInterior = false (env compiles its room path out: MK_NO_ROOMS).
+// userData.mkInterior = false (env compiles its room path out: MK_NO_ROOMS) — roof_plaster is one (qa-r1: every
+// roof_plaster face is a building's top; the Beit HaMoked dome sat inside its hall's room box and was lit as interior).
+// qa-r1: the Herodian walls darken with dust over their bottom ~0.5 m and get a contact-AO band at the foot (the floor
+// beside each face from the nav grid, once it is built: footReady); the altar's lime keys carry soot and ash placed
+// from the site model; metal keys' environment reflection is warmed / softened per key (SPEC.ibl).
 // URL: ?matfx=0 disables the shader patch; ?mattex=0 forces flat (untextured) materials; ?matout=0 keeps env's
 // interior terms in the outdoor-only materials (profiling the opt-out).
-import { MeshStandardMaterial, MeshPhysicalMaterial, DoubleSide, Color, Vector2, Vector3, Vector4 } from 'three';
+import {
+  MeshStandardMaterial, MeshPhysicalMaterial, DoubleSide, Color, Vector2, Vector3, Vector4, DataTexture, RGFormat, FloatType,
+  NearestFilter, ClampToEdgeWrapping, NoColorSpace,
+} from 'three';
+import { AMAH } from '../../core/units.js';
 import { Baker } from './gen/baker.js';
 import { SETS } from './gen/sets.js';
 import { courseStarts } from './gen/layout.js';
@@ -30,11 +38,26 @@ import { applyPatch, envHasNoRooms } from './patch.js';
 
 // measured F0 of gold, linear (1.0, 0.766, 0.336) -> sRGB #ffe39d (pure gold; the other grades are tints)
 const GOLD = '#ffe39d';
+// qa-r2: the plating (walls, floors, gate leaves) as NATURAL gold — gold with ~20 % silver, as most ancient gold was
+// (reconstruction: the sources name the plating's metal, not its grade, Middot 4:1, Shekalim 4:4) — F0 ≈ linear
+// (0.965, 0.815, 0.456): less saturated than pure gold, which under the Kodesh's warm interior light and the AgX look
+// read as flat orange paint (on-screen b − r −97 → −79 at d3); the vessels keep pure gold ("zahav tahor")
+const GOLD_PLATE = '#fbe9b4';
+
+// the parochet's wool sheen (high/ultra, MeshPhysical): [colour (sRGB), roughness] — dark and tinted by the dyes
+const SHEEN_PAROCHET = ['#4a3444', 0.55];
+
+// the shader patch's per-stone variation of the Herodian walls: [albedo, roughness, hue] — qa-r2: hue ±1.5 % → ±0.5 %
+// (with the texture's own per-stone cast it drew a patchwork of blue-grey and beige blocks; value stays ±3.5 %)
+const BLOCK_HERODIAN = [0.035, 0.05, 0.01];
 
 // macro variation presets: [albedo amp, roughness amp, scale (m), tint amp, tint (sRGB)]
 const MAC = {
   wall: [0.05, 0.05, 23, 0.25, '#e4d8c3'],
   pave: [0.07, 0.10, 11, 0.30, '#d6c8ad'],
+  // qa-r2: the Mount's pavement — dust and wear over 20–60 m (a 150 m period: 4 base cells per period), warm grey-brown
+  // dust settling in drifts; the slabs themselves vary only ±3 % (a checkerboard from afar otherwise)
+  mount: [0.045, 0.06, 150, 0.4, '#dccdb2'],
   stone: [0.05, 0.05, 9, 0.2, '#e0d4bf'],
   marble: [0.03, 0.04, 7, 0.1, '#e8e0d0'],
   lime: [0.025, 0.03, 9, 0.2, '#e8e2d6'],
@@ -46,11 +69,15 @@ const MAC = {
   leaf: [0.09, 0.06, 7, 0.25, '#c9cba8'],
   earth: [0.1, 0.05, 9, 0.3, '#b8a68b'],
   terrain: [0.12, 0.05, 23, 0.3, '#aaa498'],   // neutral grey-brown drift (the warm ground tint read orange on the hills)
+  // qa-r1: the altar's hand-applied lime — thicker and thinner coats, older and fresher patches, over 3–5 m
+  altar: [0.06, 0.04, 5, 0.3, '#ddd6c8'],
   none: [0, 0, 10, 0, '#ffffff'],
 };
 // close-range detail presets: [detail set, uv scale (1/m), normal strength, albedo amp, roughness amp]
 const DET = {
   stone: ['d_stone', 5, 0.55, 0.05, 0.06],
+  // qa-r1: gold (sheet, vessels, relief) — the metal detail's normal / roughness noise mottled the gold in dim interiors
+  gold: ['d_metal', 5, 0.16, 0.006, 0.03],
   marble: ['d_stone', 5, 0.25, 0.03, 0.04],
   lime: ['d_stone', 5, 0.35, 0.03, 0.04],
   metal: ['d_metal', 5, 0.35, 0.015, 0.08],
@@ -61,6 +88,26 @@ const DET = {
 // Herodian drafted margins (patch.js MK_COMB): [comb detail set, margin -> boss roughness step lo, hi, normal strength,
 // top/bottom margin band (m: below it the strokes run vertically, above it horizontally)]
 const COMB = ['d_comb', 0.64, 0.72, 0.7, 0.15];
+// metal environment reflection (patch.js MK_METAL): [desaturation, blend toward the mean ambient, peak cap (× ambient)].
+// Gold: blue skylight times gold's F0 is olive-green (the gates in shade read teal) and a sunlit doorway reflected in
+// the Kodesh's gold clipped to white; bronze: the low tier's coarse environment drew brown / teal clouds in its doors.
+const IBL = {
+  none: [0, 0, 0],
+  gold: [0.6, 0.18, 6],
+  bronze: [0.35, 0.12, 8],
+  bronzeLow: [0.5, 0.45, 4],
+};
+// the dust band at a Herodian wall's foot (patch.js MK_FOOT): [grime band height (m), contact-AO height (m), AO depth,
+// grime amount]
+const FOOT = [0.5, 0.16, 0.45, 1.0];
+// the altar's soot and ash (patch.js MK_ALTAR): [soot amount, ash amount]; the three ma'arachot: [pile id, radius (m),
+// strength] (piles from site.js altar.maarachah-area)
+const ALTAR = [0.8, 0.65];
+// the routes worn across the Mount's pavement (patch.js mkWear; paving_mount): [amount, half-width (m), lightening,
+// smoothing]. The way the crowds walk from the two Chuldah gates (Middot 1:3: the people's entry and exit) round the
+// soreg's south-east corner to the chel steps on the east axis (Rambam BhB 6:1) — placed from the site model
+const WEAR = [1, 7, 0.06, 0.07];
+const ALTAR_FIRES = [['great', 3.0, 0.9], ['incense', 1.6, 0.6], ['kiyum-haesh', 2.0, 0.6]];
 
 // Progressive start (materials-2-fix): a cold start compiled all 30 generator programs before the world was built —
 // ≈ 8 s of compile work on the HD 4600, 1.3–3.3 s of wall time (the redrawn Kodesh relief alone 1.9 s), and
@@ -87,6 +134,10 @@ const LATER_GROUPS = [
  *     (multipliers when the set has an ORM map), normal: normalScale,
  *   macro / detail: presets above, block: [albedo, roughness, hue] amplitudes (masonry/sheet sets),
  *   physical, sheen: [colour, roughness] (high/ultra), side, alphaTest,
+ *   foot: dust band and contact AO at a wall's foot (qa-r1), altar: the altar's soot / ash masks (qa-r1),
+ *   wear: the Mount's worn routes (qa-r2, patch.js mkWear),
+ *   ibl: metal environment-reflection treatment (IBL presets), low: { rough, ibl, block } overrides on the low tier
+ *     (rough and block are multipliers),
  *   flat: [colour, roughness, metalness] used when texture generation is unavailable,
  *   info: { en, he, note, sources, confidence }
  * }
@@ -94,18 +145,18 @@ const LATER_GROUPS = [
 export const SPEC = {
   // ----------------------------------------------------------------- stone
   herodian_wall: {
-    set: 'herodian', macro: MAC.wall, block: [0.06, 0.05, 0.03], detail: DET.stone, comb: true, flat: ['#ddd6c6', 0.6, 0],
+    set: 'herodian', macro: MAC.wall, block: BLOCK_HERODIAN, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
     info: {
-      en: 'Herodian marble ashlar — courses of white, blue-green and veined marble in an irregular sequence, one course set out and one drawn in, left unplastered ("like the waves of the sea"); drafted, comb-dressed margins and a raised, pointed boss',
-      sources: ['Bava Batra 4a', 'Sukkah 51b', 'Part VII §21 #1, §25', 'Part V §13.11'],
-      confidence: 'derived', note: 'course height 1.1 m, block lengths 2–5 m, course sequence, margin/boss dimensions and dressing: reconstruction',
+      en: 'Herodian marble ashlar — stones of white, blue-green and veined marble, each stone its own ("the stones differ in appearance one from another", Rashi), one course set out and one drawn in, left unplastered ("like the waves of the sea"); drafted, comb-dressed margins and a raised, pointed boss',
+      sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi', 'Part VII §21 #1, §25', 'Part V §13.11'],
+      confidence: 'derived', note: 'course height 1.1 m, block lengths 2–5 m, the marbles\' shares, margin/boss dimensions and dressing, the dust at the foot: reconstruction',
     },
   },
   herodian_wall_inner: {
-    set: 'herodian_inner', macro: MAC.wall, block: [0.06, 0.05, 0.03], detail: DET.stone, flat: ['#ddd6c6', 0.65, 0],
+    set: 'herodian_inner', macro: MAC.wall, block: BLOCK_HERODIAN, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
     info: {
-      en: 'Same marble coursing with plain fine-dressed faces (no drafted margins) — inner/court faces, close-range facades',
-      sources: ['Bava Batra 4a'], confidence: 'reconstruction', note: 'face finish of inner faces unattested',
+      en: 'The same marble ashlar on the inner / court faces — drafted, combed margins round a lower, finer boss',
+      sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi'], confidence: 'reconstruction', note: 'face finish of inner faces unattested',
     },
   },
   marble_white: {
@@ -132,14 +183,14 @@ export const SPEC = {
     },
   },
   paving_mount: {
-    set: 'paving_mount', macro: MAC.pave, block: [0.06, 0.08, 0.03], detail: DET.stone, flat: ['#cfc4ad', 0.8, 0],
+    set: 'paving_mount', macro: MAC.mount, block: [0.015, 0.06, 0.008], low: { block: 0.5 }, detail: DET.stone, wear: true, flat: ['#cfc4ad', 0.8, 0],
     info: {
       en: 'Har HaBayit pavement — large weathered pale marble slabs in rows',
       sources: ['Ezrat Kohanim I p.184 (Part X)'], confidence: 'reconstruction', note: 'slab sizes (rows 1.25 m) reconstruction',
     },
   },
   paving_azarah: {
-    set: 'paving_azarah', macro: MAC.pave, block: [0.05, 0.08, 0.02], detail: DET.marble, flat: ['#d6cdbd', 0.55, 0],
+    set: 'paving_azarah', macro: MAC.pave, block: [0.05, 0.08, 0.02], low: { block: 0.5 }, detail: DET.marble, flat: ['#d6cdbd', 0.55, 0],
     info: {
       en: 'Azarah floor — "precious stones" (avanim yekarot): large fitted fine marble slabs, tight joints, worn smooth by bare feet',
       sources: ['Rambam BhB 1:10', 'Zevachim 24a', 'Part VII §21 #9'], confidence: 'derived', note: 'slab sizes and stone colour: reconstruction',
@@ -150,14 +201,14 @@ export const SPEC = {
     info: { en: 'Stone steps (Chel, the 15 steps, Ulam steps) — dressed hard limestone', sources: ['Middot 2:3, 2:5, 3:6'], confidence: 'derived' },
   },
   lime_whitewash: {
-    set: 'whitewash', macro: MAC.lime, detail: DET.lime, flat: ['#f2efe6', 0.85, 0],
+    set: 'whitewash', macro: MAC.altar, detail: DET.lime, altar: true, flat: ['#ebe6db', 0.85, 0],
     info: {
-      en: 'The altar (and kevesh): whole rounded field-stones in a lime/lead/pitch slurry, whitewashed with lime twice a year (Pesach, Sukkot) — no iron trowel; Rebbi: wiped with a cloth every Erev Shabbat. (The Heichal, washed once a year at Pesach, is heichal_whitewash.)',
-      sources: ['Middot 3:4', 'Zevachim 54a', 'Rambam BhB 1:14–16, 2:16'], confidence: 'derived', note: 'stone sizes / lime thickness reconstruction',
+      en: 'The altar (and kevesh): whole rounded field-stones in a lime/lead/pitch slurry, whitewashed with lime twice a year (Pesach, Sukkot) — no iron trowel; Rebbi: wiped with a cloth every Erev Shabbat. The limed mass swells over the stones, its skin finely crazed; soot toward the top and over each ma\'arachah, ash along the top edges and corners. (The Heichal, washed once a year at Pesach, is heichal_whitewash.)',
+      sources: ['Middot 3:4', 'Zevachim 54a', 'Rambam BhB 1:14–16, 2:16', 'Tamid 2:4–5'], confidence: 'derived', note: 'stone sizes / lime thickness, undulation, crazing, soot and ash placement: reconstruction',
     },
   },
   sikra_red: {
-    set: 'sikra', macro: MAC.lime, detail: DET.lime, flat: ['#8f2a1d', 0.8, 0],
+    set: 'sikra', macro: MAC.lime, detail: DET.lime, altar: true, flat: ['#8f2a1d', 0.8, 0],
     info: { en: 'Chut hasikra — red ochre line girding the altar at mid-height', sources: ['Middot 3:1', 'Zevachim 53a'], confidence: 'explicit' },
   },
   plaster: {
@@ -183,35 +234,38 @@ export const SPEC = {
   },
   // ----------------------------------------------------------------- metal (colour = F0, sRGB)
   gold_plate: {
-    set: 'goldplate', color: GOLD, rough: 0.85, metal: 1, macro: MAC.metal, block: [0.005, 0, 0.002], detail: DET.metal,
+    set: 'goldplate', color: GOLD_PLATE, rough: 1, metal: 1, macro: MAC.metal, block: [0.005, 0, 0.002], detail: DET.gold, ibl: IBL.gold,
     flat: ['#d4a640', 0.22, 1],
     info: {
       en: 'Beaten gold sheets (rikuei zahav) over walls and gate doors — visible seams, hammer dishing',
-      sources: ['Middot 2:3, 4:1', 'Shekalim 4:4', 'Part VII §24'], confidence: 'derived', note: 'sheet size 1 × 1.5–3 amot, hammering and waviness: reconstruction',
+      sources: ['Middot 2:3, 4:1', 'Shekalim 4:4', 'Part VII §24'], confidence: 'derived', note: 'sheet size 1 × 1.5–3 amot, hammering (roughness 0.25–0.4 blow by blow) and waviness, the grade (natural gold, ~20 % silver): reconstruction',
     },
   },
   gold_relief: {
-    set: 'relief', color: GOLD, metal: 1, macro: MAC.metal, detail: DET.metal, flat: ['#d4a640', 0.25, 1],
+    set: 'relief', color: GOLD_PLATE, metal: 1, macro: MAC.metal, detail: DET.gold, ibl: IBL.gold, flat: ['#d4a640', 0.25, 1],
     info: {
       en: 'Kodesh walls: gold fitted evenly over carved keruvim (children with wings rising upward, in pairs facing each palm), palm trees and open flowers — a modelled bas-relief up to ~2.3 cm deep',
       sources: ['Middot 4:1', 'Yoma 54a (keruvim d\'tzurta)', '1 Melachim 6:29', 'Sukkah 5b', 'Chagigah 13b', 'Shemot 25:20', 'Part VII §21 #20'],
-      confidence: 'reconstruction', note: 'motif drawing, scale and arrangement are reconstruction',
+      confidence: 'reconstruction', note: 'motif drawing, scale and arrangement, the hammered finish and the grade of the gold (natural gold, ~20 % silver) are reconstruction',
     },
   },
   gold_green: {
-    set: 'vessel', color: '#f0e6a6', metal: 1, macro: MAC.metal, detail: DET.metal, flat: ['#c8b04a', 0.25, 1],
+    set: 'vessel', color: '#f0e6a6', metal: 1, macro: MAC.metal, detail: DET.gold, ibl: IBL.gold, flat: ['#c8b04a', 0.25, 1],
     info: { en: 'Greenish gold — the daily machtah', sources: ['Yoma 44b–45a', 'Part VII §24'], confidence: 'derived' },
   },
   gold_red: {
-    set: 'vessel', color: '#fbbd90', metal: 1, macro: MAC.metal, detail: DET.metal, flat: ['#c9803a', 0.25, 1],
+    set: 'vessel', color: '#fbbd90', metal: 1, macro: MAC.metal, detail: DET.gold, ibl: IBL.gold, flat: ['#c9803a', 0.25, 1],
     info: { en: 'Zahav parvayim — red gold "like the blood of bulls" (Yom Kippur machtah)', sources: ['Yoma 44b–45a'], confidence: 'derived' },
   },
   gold_vessel: {
-    set: 'vessel', color: GOLD, metal: 1, rough: 0.9, macro: MAC.metal, detail: DET.metal, flat: ['#e0b34c', 0.18, 1],
+    set: 'vessel', color: GOLD, metal: 1, rough: 0.9, macro: MAC.metal, detail: DET.gold, ibl: IBL.gold, flat: ['#e0b34c', 0.18, 1],
     info: { en: 'Gold service vessels (menorah, table, incense altar, cups)', sources: ['Part VII §24'], confidence: 'derived' },
   },
   bronze_corinthian: {
-    set: 'bronze', color: '#f4d29e', metal: 1, macro: MAC.metal, detail: DET.metal, flat: ['#c99a55', 0.28, 1],
+    set: 'bronze', color: '#f4d29e', metal: 1, macro: MAC.metal, detail: DET.metal, ibl: IBL.bronze, flat: ['#c99a55', 0.28, 1],
+    // low: the coarse environment of the low tier reflected as brown / teal clouds in the polished leaves — rougher there,
+    // and its reflection pulled toward the warm mean ambient
+    low: { rough: 1.8, ibl: IBL.bronzeLow },
     info: {
       en: 'Corinthian bronze (nechoshet kelonita) — Nikanor\'s doors, unplated, "gleamed like gold": polished cast bronze with a warm sheen',
       sources: ['Yoma 38a', 'Middot 2:3'], confidence: 'explicit', note: 'surface finish (polish, casting waviness, patina in recesses): reconstruction',
@@ -259,11 +313,14 @@ export const SPEC = {
     info: { en: 'Shesh — fine six-ply white linen, plain weave', sources: ['Part VIII §34', 'Part VII §23'], confidence: 'derived', note: 'thread count reconstruction' },
   },
   parochet: {
-    set: 'parochet', side: DoubleSide, macro: MAC.cloth, detail: DET.cloth, sheen: ['#3a2440', 0.6], flat: ['#563d55', 0.85, 0],
+    // qa-r2: every cord twisted of the four materials (an even heathered mix, no stripes) with a soft wool sheen on
+    // high/ultra — dark and dye-tinted, so it lifts the folds at grazing angles without washing the cloth to pastel
+    // (qa-r1's pale mauve lobe did)
+    set: 'parochet', side: DoubleSide, macro: MAC.cloth, detail: DET.cloth, sheen: SHEEN_PAROCHET, flat: ['#4e2840', 0.85, 0],
     info: {
-      en: 'Parochet — every cord twisted of techelet (sky-blue wool), argaman (red-purple), tola\'at shani (crimson) and shesh (linen), 4 × 6 threads, a tefach thick; no woven figures',
-      sources: ['Shekalim 8:5', 'Yoma 71b', 'Rambam Klei HaMikdash 7:16, 8:13–15', 'Part VII §23'],
-      confidence: 'derived', note: 'cord size (8 mm, plain weave), twist, dye tones and the linen ply share (~8 %) are reconstruction; figures not attested and not drawn',
+      en: 'Parochet — a tefach thick, woven on 72 cords of 24 threads each: six each of techelet (sky-blue wool), argaman (red-purple), tola\'at shani (crimson) and shesh (linen), twisted together, so the four colours mix evenly in every cord; 2/2 twill',
+      sources: ['Shekalim 8:5', 'Yoma 71b–72b', 'Rambam Klei HaMikdash 7:16, 8:13–15', 'Part V §13.7', 'Part VII §23'],
+      confidence: 'derived', note: 'cord size (8 mm), twill, twist and dye tones: reconstruction; figures not attested and not drawn; the two faces are not differentiated (one texture both sides)',
     },
   },
   curtain_linen: {
@@ -286,7 +343,15 @@ export const SPEC = {
   debug: { set: null, flat: ['#ff00ff', 0.5, 0], info: { en: 'debug', sources: [], confidence: 'reconstruction' } },
 
   // ----------------------------------------------------------------- added keys
-  roof_plaster: { alias: 'roof_tile' },
+  // qa-r1: an outdoor-only key of its own (was an alias of roof_tile): every face that uses it is a building's top, and
+  // the Beit HaMoked dome, deep inside its hall's room box, was darkened by env as an interior surface (near-black)
+  roof_plaster: {
+    set: 'roof', outdoor: true, macro: MAC.lime, detail: DET.lime, flat: ['#c9c0ae', 0.9, 0],
+    info: {
+      en: 'Roof surface — ma\'azivah, the plaster / lime-concrete roof fill, and the plastered domes (Beit HaMoked); outdoor only',
+      sources: ['Middot 4:6', 'Middot 1:6', 'Part V §13.11'], confidence: 'derived',
+    },
+  },
   wood_lattice_screen: {
     set: 'lattice', side: DoubleSide, alphaTest: 0.5, macro: MAC.wood, detail: DET.wood, flat: ['#8b6f4a', 0.8, 0],
     info: {
@@ -370,16 +435,16 @@ export const SPEC = {
     info: { en: 'Soot crust (fire-blackened pot bottoms)', sources: [], confidence: 'reconstruction' },
   },
   lime_whitewash_worn: {
-    set: 'whitewash_worn', macro: MAC.lime, detail: DET.lime, flat: ['#ece8df', 0.72, 0],
+    set: 'whitewash_worn', macro: MAC.altar, detail: DET.lime, altar: true, flat: ['#e6e1d6', 0.72, 0],
     info: { en: 'The altar\'s lime on its walking surfaces (kevesh, sovev, walkway): stones buried and worn down, cloth-wipe strokes, darker glossier bare-foot lanes along V, hairline crazing, patched repairs', sources: ['Middot 3:3–4'], confidence: 'derived', note: 'wear: reconstruction' },
   },
   lime_whitewash_soot: {
-    set: 'whitewash_soot', macro: MAC.lime, detail: DET.lime, flat: ['#d9d4cb', 0.88, 0],
+    set: 'whitewash_soot', macro: MAC.altar, detail: DET.lime, altar: true, flat: ['#d6d0c6', 0.88, 0],
     info: { en: 'The altar\'s lime near the pyre: faint soot (washed twice a year, wiped weekly)', sources: ['Middot 3:4', 'Zevachim 54a'], confidence: 'reconstruction' },
   },
   lime_whitewash_stained: {
-    set: 'whitewash_stained', macro: MAC.lime, detail: DET.lime, flat: ['#e6dcd2', 0.88, 0],
-    info: { en: 'The altar\'s lime where blood is poured and placed (yesod, the lower corners, the horns): faint washed-out runs', sources: ['Zevachim 53a', 'Tamid 4:1', 'Middot 3:4'], confidence: 'reconstruction', note: 'very restrained by design' },
+    set: 'whitewash_stained', macro: MAC.altar, detail: DET.lime, altar: true, flat: ['#ddcfc5', 0.88, 0],
+    info: { en: 'The altar\'s lime where blood is poured and placed (the southern and western yesod, the NE and SW corners below the line, the horns): dark red-brown runs and patches, partly washed out (wiped every Erev Shabbat)', sources: ['Zevachim 53a', 'Tamid 4:1', 'Middot 3:1, 3:4'], confidence: 'reconstruction', note: 'strength of the stains: reconstruction' },
   },
   timber_split: {
     set: 'split_wood', macro: MAC.wood, detail: DET.wood, flat: ['#b39878', 0.82, 0],
@@ -406,7 +471,7 @@ export const SPEC = {
     info: { en: 'Mirror-polished gold (roughness ≈ 0.05–0.09) — Helena\'s nivreshet', sources: ['Yoma 37b'], confidence: 'derived', note: 'polish: reconstruction' },
   },
   gold_plate_door: {
-    set: 'golddoor', color: GOLD, metal: 1, rough: 0.9, macro: MAC.metal, detail: DET.metal, flat: ['#d4a640', 0.25, 1],
+    set: 'golddoor', color: GOLD_PLATE, metal: 1, rough: 0.9, macro: MAC.metal, detail: DET.gold, ibl: IBL.gold, flat: ['#d4a640', 0.25, 1],
     info: { en: 'Beaten gold over a door leaf — one sheet per panel, no seams; hammer dishing and waviness', sources: ['Middot 2:3, 4:1'], confidence: 'derived', note: 'the seamless sheet is reconstruction (the plating of the leaves is attested)' },
   },
   bread: {
@@ -422,15 +487,15 @@ export const SPEC = {
   // the same Herodian walls with course heights of 1.00–1.20 m from a course table: builders that model the set-out
   // courses from ctx.mats.courseAt(key, y) switch to these keys (the 1.1 m keys stay for the current geometry)
   herodian_wall_courses: {
-    set: 'herodian_c', macro: MAC.wall, block: [0.06, 0.05, 0.03], detail: DET.stone, comb: true, flat: ['#ddd6c6', 0.6, 0],
+    set: 'herodian_c', macro: MAC.wall, block: BLOCK_HERODIAN, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
     info: {
-      en: 'herodian_wall with course heights varying 1.00–1.20 m (a course table: ctx.mats.courseAt(key, y)), the same irregular marble sequence',
+      en: 'herodian_wall with course heights varying 1.00–1.20 m (a course table: ctx.mats.courseAt(key, y)), the marble chosen stone by stone',
       sources: ['Bava Batra 4a', 'Part V §13.11'], confidence: 'reconstruction', note: 'course heights: reconstruction',
     },
   },
   herodian_wall_inner_courses: {
-    set: 'herodian_inner_c', macro: MAC.wall, block: [0.06, 0.05, 0.03], detail: DET.stone, flat: ['#ddd6c6', 0.65, 0],
-    info: { en: 'herodian_wall_inner on the same course table as herodian_wall_courses', sources: ['Bava Batra 4a'], confidence: 'reconstruction' },
+    set: 'herodian_inner_c', macro: MAC.wall, block: BLOCK_HERODIAN, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
+    info: { en: 'herodian_wall_inner on the same course table as herodian_wall_courses', sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi'], confidence: 'reconstruction' },
   },
   // bark of one species per log (Tamid 2:3: fig, walnut and oil-tree, never olive or vine) and the olive groves' trunks
   timber_bark_fig: {
@@ -497,6 +562,18 @@ export function createMaterialLibrary(ctx) {
   }
   const cache = new Map();
   const shared = { details: new Map() };
+  // per-tier overrides (SPEC.low): the low tier is detail 0
+  const isLow = () => (q.detail ?? 1) < 1;
+  const lowOf = (s, k, dflt) => (isLow() && s.low?.[k] != null ? s.low[k] : dflt);
+  const iblOf = (s) => lowOf(s, 'ibl', s.ibl || IBL.none);
+  // the wall-foot floor map and its fade-in (patch.js MK_FOOT): one set of uniform objects shared by every foot key
+  const footU = {
+    mkFootMap: { value: null },
+    mkFoot: { value: new Vector4(0, 0, 1, 1) },
+    mkFootK: { value: new Vector4(0, FOOT[0], FOOT[1], FOOT[2]) },
+    mkFootG: { value: new Vector2(FOOT[3], 0) },
+  };
+  let altarU = null;
   const t0Lib = performance.now();
   let loading = null;
   const shotMode = raw?.get?.('shot') === '1';
@@ -550,10 +627,68 @@ export function createMaterialLibrary(ctx) {
     return shared.details.get(id)?.map || null;
   }
 
+  /**
+   * the altar's frame in world space for patch.js MK_ALTAR, from the site model: centre and half-width of the 28-square,
+   * its top, the court floor, the chut hasikra, and the three ma'arachot (site.js altar.maarachah-area piles); shared by
+   * the lime keys. Without the altar elements the amounts are 0 (no soot, no ash).
+   */
+  function altarUniforms() {
+    if (altarU) return altarU;
+    const u = {
+      mkAlt0: { value: new Vector4(0, 0, 1, -1e4) }, mkAlt1: { value: new Vector4(0, -1e4, 0, 0) },
+      mkAltF0: { value: new Vector4(0, 0, 1, 0) }, mkAltF1: { value: new Vector4(0, 0, 1, 0) }, mkAltF2: { value: new Vector4(0, 0, 1, 0) },
+    };
+    const el = (id) => { try { return ctx.elOpt?.(id) || null; } catch { return null; } };
+    const top = el('altar.top'), body = el('altar.body'), sik = el('altar.chut-hasikra'), maar = el('altar.maarachah-area');
+    if (top?.box && body?.box) {
+      const b = top.box;
+      u.mkAlt0.value.set(((b.min[0] + b.max[0]) / 2) * AMAH, -((b.min[1] + b.max[1]) / 2) * AMAH, ((b.max[0] - b.min[0]) / 2) * AMAH, b.max[2] * AMAH);
+      const zSik = sik?.params?.z ?? (body.box.min[2] + body.box.max[2]) / 2;
+      u.mkAlt1.value.set(body.box.min[2] * AMAH, zSik * AMAH, ALTAR[0], ALTAR[1]);
+      const piles = maar?.params?.piles || [];
+      ALTAR_FIRES.forEach(([id, r, k], i) => {
+        const pb = piles.find((x) => x.id === id)?.box;
+        if (pb) u[`mkAltF${i}`].value.set(((pb.min[0] + pb.max[0]) / 2) * AMAH, -((pb.min[1] + pb.max[1]) / 2) * AMAH, r, k);
+      });
+    }
+    altarU = u;
+    return u;
+  }
+
+  /**
+   * The routes worn across the Mount (patch.js mkWear), world x, z: each Chuldah passage's exit onto the Mount
+   * (site.js context.chuldah.tunnel-*.params.exit) to a point 8 amot outside the soreg's south-east corner, then north to
+   * the foot of the chel steps (mount.chel.steps.params.foot). Without the elements the amount is 0.
+   */
+  let wearU = null;
+  function wearUniforms() {
+    if (wearU) return wearU;
+    const u = {
+      mkWear: { value: new Vector4(0, WEAR[1], WEAR[2], WEAR[3]) },
+      mkWearA: { value: new Vector4() }, mkWearB: { value: new Vector4() }, mkWearC: { value: new Vector4() },
+    };
+    const el = (id) => { try { return ctx.elOpt?.(id) || null; } catch { return null; } };
+    const ew = el('context.chuldah.tunnel-w')?.params?.exit, ee = el('context.chuldah.tunnel-e')?.params?.exit;
+    const foot = el('mount.chel.steps')?.params?.foot, path = el('mount.soreg')?.params?.path;
+    if (ew && ee && foot && path?.length) {
+      const se = path.reduce((a, p) => (p[0] - p[1] > a[0] - a[1] ? p : a));
+      const c = [se[0] + 8, se[1] - 8];
+      const W = (a, b) => new Vector4(a[0] * AMAH, -a[1] * AMAH, b[0] * AMAH, -b[1] * AMAH);
+      u.mkWearA.value.copy(W(ew, c));
+      u.mkWearB.value.copy(W(ee, c));
+      u.mkWearC.value.copy(W(c, foot));
+      u.mkWear.value.x = WEAR[0];
+    }
+    wearU = u;
+    return u;
+  }
+
   function patchUniforms(s, set) {
     const mac = s.macro || MAC.none;
     const det = s.detail;
     const blk = (set?.layout && s.block) || null;
+    const blkA = blk ? blk[0] * lowOf(s, 'block', 1) : 0;
+    const ibl = iblOf(s);
     const dtex = det && patchState.detail ? detailTex(det[0]) : null;
     const ctex = s.comb && patchState.detail ? detailTex(COMB[0]) : null;
     const lay = set?.layout;
@@ -561,7 +696,7 @@ export function createMaterialLibrary(ctx) {
       mkMacroMap: { value: macroTex() },
       mkMacro: { value: new Vector4(mac[0], mac[1], 1 / mac[2], mac[3]) },
       mkTint: { value: new Color(mac[4]) },
-      mkBlock: { value: blk ? new Vector4(lay.q, lay.rowH, lay.dMax, blk[0]) : new Vector4(1, lay?.rowH || 1, 1, 0) },
+      mkBlock: { value: blk ? new Vector4(lay.q, lay.rowH, lay.dMax, blkA) : new Vector4(1, lay?.rowH || 1, 1, 0) },
       mkBlockR: { value: new Vector2(blk ? blk[1] : 0, blk ? blk[2] || 0 : 0) },
       mkDetailMap: { value: dtex },
       mkDetail: { value: dtex ? new Vector4(det[1], det[2], det[3], det[4]) : new Vector4(0, 0, 0, 0) },
@@ -570,6 +705,13 @@ export function createMaterialLibrary(ctx) {
       mkComb: { value: new Vector4(COMB[1], COMB[2], ctex ? COMB[3] : 0, COMB[4]) },
       mkCourseMap: { value: lay?.courseTex || null },
       mkCourse: { value: new Vector2(set?.tile?.[1] || 1, lay?.courseN || 1) },
+      mkMetal: { value: new Vector4(ibl[0], ibl[1], ibl[2], 0) },
+      // (every patched material carries the route-wear uniforms — the program is shared — zero unless it has routes)
+      ...(s.wear ? wearUniforms() : {
+        mkWear: { value: new Vector4(0, 1, 0, 0) }, mkWearA: { value: new Vector4() }, mkWearB: { value: new Vector4() }, mkWearC: { value: new Vector4() },
+      }),
+      ...(s.foot ? footU : {}),
+      ...(s.altar ? altarUniforms() : {}),
     };
   }
 
@@ -612,7 +754,7 @@ export function createMaterialLibrary(ctx) {
       m.normalScale.set(s.normal ?? 1, s.normal ?? 1);
       m.roughnessMap = set.orm;
       m.aoMap = set.orm;
-      m.roughness = s.rough ?? 1;
+      m.roughness = (s.rough ?? 1) * lowOf(s, 'rough', 1);
       if (set.metal) {
         m.metalnessMap = set.orm;
         m.metalness = s.metal ?? 1;
@@ -624,6 +766,7 @@ export function createMaterialLibrary(ctx) {
         m.userData.mkUniforms = uniforms;
         applyPatch(m, uniforms, patchState, {
           glow: !!s.glow, outdoor: !!s.outdoor, comb: !!s.comb, courses: !!set.layout?.courseTex, uvSwap,
+          foot: !!s.foot, altar: !!s.altar, metal: !!set.metal,
         });
       }
       if (s.glow) glowing(m, s.glow);
@@ -718,6 +861,100 @@ export function createMaterialLibrary(ctx) {
     return m;
   }
 
+  // ------------------------------------------------------------------ wall-foot floor map (patch.js MK_FOOT)
+  // The nav grid's main layer (0.5 m cells, world metres) holds every walkable floor per cell. Over the Mount and its
+  // walls (site −20…520 amot) the map keeps each cell's lowest and highest floor (world y; 9999 = none), RG32F, read
+  // NEAREST. Cells the walking grid leaves empty beside walls (a body radius off them) take their neighbours' floors
+  // (two rings). Built in an idle slice once the grid is ready, rebuilt whenever nav rebuilds; the band fades in.
+  let footFor = null;
+  let footFade = 0;
+  let footHooked = false;
+  let footResolve;
+  const footReady = new Promise((r) => { footResolve = r; });
+  function footWatch() {
+    if (!footHooked && ctx.engine?.onUpdate) {
+      footHooked = true;
+      ctx.engine.onUpdate((dt) => {
+        if (ctx.nav?.ready && ctx.nav.ready !== footFor) footWatch();
+        if (footU.mkFootMap.value && footFade < 1) {
+          footFade = shotMode ? 1 : Math.min(1, footFade + (dt || 0.016) / 1.5);
+          footU.mkFootK.value.x = footFade;
+        }
+      }, 45);
+    }
+    const nav = ctx.nav;
+    const r = nav?.ready;
+    if (!r || r === footFor) return;
+    footFor = r;
+    r.then(() => {
+      if (nav.ready !== r) return;
+      const ric = globalThis.requestIdleCallback || ((f) => setTimeout(f, 50));
+      ric(() => { try { buildFootMap(nav); } catch (e) { warnOnce(warned, 'foot', '[mats] wall-foot floor map failed', e); } }, { timeout: 2000 });
+    });
+  }
+  function buildFootMap(nav) {
+    const L = nav.grid?.main;
+    if (!L?.nodeStart || !L.nodeY || !(L.cell > 0)) return;
+    const cell = L.cell;
+    const cl = (v, n) => Math.min(n, Math.max(0, v));
+    const i0 = cl(Math.floor((-20 * AMAH - L.x0) / cell), L.nx), i1 = cl(Math.ceil((520 * AMAH - L.x0) / cell), L.nx);
+    const j0 = cl(Math.floor((-520 * AMAH - L.z0) / cell), L.nz), j1 = cl(Math.ceil((20 * AMAH - L.z0) / cell), L.nz);
+    const w = i1 - i0, h = j1 - j0;
+    if (w < 2 || h < 2) return;
+    let lo = new Float32Array(w * h).fill(NaN), hi = new Float32Array(w * h).fill(NaN);
+    const ns = L.nodeStart, ny = L.nodeY;
+    for (let j = 0; j < h; j++) {
+      for (let i = 0; i < w; i++) {
+        const c = (j + j0) * L.nx + (i + i0);
+        const a = ns[c], b = ns[c + 1];
+        if (a === b) continue;
+        let mn = Infinity, mx = -Infinity;
+        for (let k = a; k < b; k++) { const y = ny[k]; if (y < mn) mn = y; if (y > mx) mx = y; }
+        lo[j * w + i] = mn; hi[j * w + i] = mx;
+      }
+    }
+    for (let pass = 0; pass < 2; pass++) {
+      const lo2 = lo.slice(), hi2 = hi.slice();
+      for (let j = 0; j < h; j++) {
+        for (let i = 0; i < w; i++) {
+          const c = j * w + i;
+          if (lo[c] === lo[c]) continue;
+          let mn = Infinity, mx = -Infinity;
+          for (let dj = -1; dj <= 1; dj++) {
+            const jj = j + dj;
+            if (jj < 0 || jj >= h) continue;
+            for (let di = -1; di <= 1; di++) {
+              const ii = i + di;
+              if (ii < 0 || ii >= w) continue;
+              const v = lo[jj * w + ii];
+              if (v === v) { if (v < mn) mn = v; const u = hi[jj * w + ii]; if (u > mx) mx = u; }
+            }
+          }
+          if (mn !== Infinity) { lo2[c] = mn; hi2[c] = mx; }
+        }
+      }
+      lo = lo2; hi = hi2;
+    }
+    const data = new Float32Array(w * h * 2);
+    for (let c = 0; c < w * h; c++) {
+      const ok = lo[c] === lo[c];
+      data[c * 2] = ok ? lo[c] : 9999;
+      data[c * 2 + 1] = ok ? hi[c] : 9999;
+    }
+    const tex = new DataTexture(data, w, h, RGFormat, FloatType);
+    tex.minFilter = tex.magFilter = NearestFilter;
+    tex.wrapS = tex.wrapT = ClampToEdgeWrapping;
+    tex.generateMipmaps = false;
+    tex.colorSpace = NoColorSpace;
+    tex.needsUpdate = true;
+    const old = footU.mkFootMap.value;
+    footU.mkFootMap.value = tex;
+    footU.mkFoot.value.set(L.x0 + i0 * cell, L.z0 + j0 * cell, 1 / (w * cell), 1 / (h * cell));
+    old?.dispose?.();
+    stats.footMB = +((w * h * 8) / 1048576).toFixed(1);
+    footResolve();
+  }
+
   function get(key) {
     let m = cache.get(key);
     if (!m) {
@@ -798,9 +1035,11 @@ export function createMaterialLibrary(ctx) {
       // programs linked alongside the first view's (main.js warm-up), and their bakes, queued in the warm-up's idle time,
       // ran on the GPU inside the first drawn frame (0.3–0.8 s later first view on the HD 4600). The intro covers the
       // view while they bake; a screenshot still bakes everything at 'ready'
-      ctx.bus?.on?.(shotMode ? 'ready' : 'firstFrame', () => { this.loaded(); });
+      ctx.bus?.on?.(shotMode ? 'ready' : 'firstFrame', () => { this.loaded(); footWatch(); });
       ctx.bus?.on?.('quality:change', () => this.rebuild(ctx.quality));
     },
+    /** resolves when the wall-foot floor map (patch.js MK_FOOT) has been built from the nav grid and uploaded */
+    get footReady() { return footReady; },
     /**
      * Compile the later groups and bake their queued sets (in place: the materials already hold the textures) — group by
      * group in idle time, a few sets per slice; in screenshot mode everything at once. Resolves when all are baked.
@@ -878,6 +1117,7 @@ export function createMaterialLibrary(ctx) {
         m.normalMap = set.normal;
         m.roughnessMap = m.aoMap = set.orm;
         if (set.metal) m.metalnessMap = set.orm;
+        m.roughness = (s.rough ?? 1) * lowOf(s, 'rough', 1);
         const u = m.userData.mkUniforms;
         if (u) {
           const fresh = patchUniforms(s, set);
@@ -890,6 +1130,7 @@ export function createMaterialLibrary(ctx) {
     dispose() {
       for (const m of cache.values()) m.dispose();
       cache.clear();
+      footU.mkFootMap.value?.dispose?.();
       baker?.dispose();
     },
   };

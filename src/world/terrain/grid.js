@@ -26,15 +26,18 @@ export function axisLines({ lo, hi, f0, f1, s0, Llo, Lhi, A, specials = [] }) {
   return all.filter((x, i) => i === 0 || x - all[i - 1] > 1e-6);
 }
 
-/** Find s0 so that axisLines yields about `target` lines. */
-export function solveLines(opts, target) {
+/**
+ * Find s0 so that axisLines yields about `target` lines. `extra` specials are added after solving (they refine a band
+ * without coarsening the rest of the grid; the regular lines next to them are dropped as for any special).
+ */
+export function solveLines(opts, target, extra = []) {
   let a = 0.2, b = 400;
   for (let i = 0; i < 40; i++) {
     const m = Math.sqrt(a * b);
     const n = axisLines({ ...opts, s0: m }).length;
     if (n > target) a = m; else b = m;
   }
-  return axisLines({ ...opts, s0: b });
+  return axisLines({ ...opts, s0: b, specials: [...(opts.specials || []), ...extra] });
 }
 
 /**
@@ -74,4 +77,37 @@ export function buildGrid(xs, ys, sampleZ, skip) {
   g.computeVertexNormals();
   g.userData.graded = graded;
   return g;
+}
+
+/**
+ * Height of the RENDERED grid at site (X, Y): the cell's own triangle, with buildGrid's diagonals (qa-r1-fix-world: the
+ * ground cover sits on the drawn surface, not on the analytic field the cells only sample). Keeps only the vertex
+ * heights. Returns (X, Y, out) -> world y (m) or null outside; out.gx / out.gy = the slope (m per m east / north).
+ */
+export function gridSampler(xs, ys, geometry) {
+  const nx = xs.length, ny = ys.length, P = geometry.attributes.position.array;
+  const H = new Float32Array(nx * ny);
+  for (let k = 0; k < H.length; k++) H[k] = P[k * 3 + 1];
+  const find = (arr, v) => {
+    let lo = 0, hi = arr.length - 1;
+    if (!(v > arr[0] && v < arr[hi])) return -1;
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (arr[mid] <= v) lo = mid; else hi = mid; }
+    return lo;
+  };
+  const AM = m2w(1, 0, 0, new Vector3()).x - m2w(0, 0, 0, new Vector3()).x;   // metres per amah
+  return (X, Y, out) => {
+    const i = find(xs, X), j = find(ys, Y);
+    if (i < 0 || j < 0) return null;
+    const du = xs[i + 1] - xs[i], dv = ys[j + 1] - ys[j];
+    const u = (X - xs[i]) / du, v = (Y - ys[j]) / dv;
+    const a = j * nx + i, ha = H[a], hb = H[a + 1], hc = H[a + nx], hd = H[a + nx + 1];
+    let h, su, sv;                                     // su, sv: rise per cell along u, v
+    if ((i + j) & 1) {
+      if (u >= v) { su = hb - ha; sv = hd - hb; } else { su = hd - hc; sv = hc - ha; }
+      h = ha + u * su + v * sv;
+    } else if (u + v <= 1) { su = hb - ha; sv = hc - ha; h = ha + u * su + v * sv; }
+    else { su = hd - hc; sv = hd - hb; h = hd - (1 - u) * su - (1 - v) * sv; }
+    if (out) { out.gx = su / (du * AM); out.gy = sv / (dv * AM); }
+    return h;
+  };
 }

@@ -2,14 +2,18 @@
 // burning place of the Parah on the crest of Har HaMishchah (context.parah.pyre) with its beit tevilah.
 import { Group, Mesh, CylinderGeometry, Matrix4, Vector3, Quaternion } from 'three';
 import { AMAH, m2w } from '../../core/units.js';
+import { rng } from '../mount/kit.js';
 import { mergeGeometries, applyWorldUV } from '../geom.js';
 
 const LIFT = 0.17;   // m: paving top above the graded bed (a little margin against the mesh's interpolation)
 
-/** Paved strips along the plan's streets and the Parah path (top = graded centre-line ground + LIFT, skirts down). */
+/**
+ * Paved strips along the plan's streets (top = graded centre-line ground + LIFT, skirts down). The Parah path is no
+ * longer a strip (qa-r1-fix-world): the ground itself is graded and worn along it (terrain/index.js).
+ */
 export function buildDraped(ctx, T, kit, detail) {
   const A = AMAH;
-  const list = [...T.plan.streets.map((s) => ({ ...s, key: 'paving_mount' })), { ...T.plan.parahPath, key: 'terrain_rock' }];
+  const list = T.plan.streets.map((s) => ({ ...s, key: 'paving_mount' }));
   const R = (ctx.quality?.drawDistance || 4000) / A;
   const cx = (T.fp.x0 + T.fp.x1) / 2, cy = (T.fp.y0 + T.fp.y1) / 2;
   for (const s of list) {
@@ -58,7 +62,12 @@ export function buildBurningPlace(ctx, T, kit, group, detail) {
   // a plain stone floor for the pyre (its place is fixed by Middot 2:4 / Parah 3:9; the floor itself is a reconstruction),
   // its top flush with the crest ground of site.js so a standing eye on it is exactly groundEye; the ground round it lies
   // LIFT (0.17 m) lower, the Parah path's paving meets its top. Closed underneath (the ground is cut out under it).
-  kit.faces([x0, y0, top - 1.2], [x1, y1, top], { t: 'steps_stone', b: 'ashlar_plain', e: 'ashlar_plain', w: 'ashlar_plain', n: 'ashlar_plain', s: 'ashlar_plain' });
+  // qa-r1-fix-world: laid as courses of separate slabs (it was one flat plane that read as a white sheet): each slab
+  // with worn, unevenly chamfered arrises, a few millimetres of lift and tilt of its own, open joints a centimetre wide
+  // down to an earth bed ⚙
+  const JD = 0.07 / AMAH;                                 // joint depth
+  kit.faces([x0, y0, top - 1.2], [x1, y1, top - JD], { t: 'roof_earth', b: 'ashlar_plain', e: 'ashlar_plain', w: 'ashlar_plain', n: 'ashlar_plain', s: 'ashlar_plain' });
+  layFloor(kit, [x0, y0, x1, y1], top, JD, (ctx.params?.seed ?? 5786) * 17 + 5);
   for (const [a0, a1, c0, c1] of [[hx0, hx1, hy0, my0], [hx0, hx1, my1, hy1], [hx0, mx0, my0, my1], [mx1, hx1, my0, my1]]) {
     kit.box([a0, c0, top - 0.6], [a1, c1, rim], 'ashlar_plain');
   }
@@ -107,4 +116,57 @@ export function buildBurningPlace(ctx, T, kit, group, detail) {
   pyreGroup.userData = { kind: 'pyre', show(v = true) { pyreGroup.visible = !!v; }, note: 'Parah 3:8–9 — hidden by default; the sim shows it (and may add a pyre fire at context.parah.pyre) for the Parah scene' };
   group.add(pyreGroup);
   ctx.movables.set('parah.pyre', pyreGroup);
+}
+
+/**
+ * Slabs over the rect [x0, y0, x1, y1] (amot), top at `top`: courses running north–south (1.1–1.5 amot wide), slabs of
+ * 1.3–2.6 amot along each, the joints staggered; each slab a frustum — its arrises worn back 1.5–5 cm (more on the
+ * floor's outer edge) — with a lift of up to ±11 mm and a tilt of up to ±9 mm across. Outer edges flush with the rect.
+ */
+function layFloor(kit, [x0, y0, x1, y1], top, jd, seed) {
+  const A = AMAH, r = rng(seed);
+  const J = 0.012 / A;                                     // half a joint
+  const xs = [x0];
+  while (xs[xs.length - 1] < x1 - 1e-6) {
+    const w = 1.1 + 0.4 * r();
+    xs.push(x1 - xs[xs.length - 1] < w + 0.9 ? x1 : xs[xs.length - 1] + w);
+  }
+  for (let i = 0; i + 1 < xs.length; i++) {
+    const ys = [y0];
+    let y = y0 + (i % 2 ? 0.6 + 0.8 * r() : 0);
+    if (y > y0) ys.push(y);
+    while (y < y1 - 1e-6) { const L = 1.3 + 1.3 * r(); y = y1 - y < L + 0.8 ? y1 : y + L; ys.push(y); }
+    for (let j = 0; j + 1 < ys.length; j++) {
+      const a0 = xs[i] + (i ? J : 0), a1 = xs[i + 1] - (i + 2 < xs.length ? J : 0);
+      const b0 = ys[j] + (j ? J : 0), b1 = ys[j + 1] - (j + 2 < ys.length ? J : 0);
+      const edge = i === 0 || i + 2 === xs.length || j === 0 || j + 2 === ys.length;
+      const lift = (r() - 0.5) * 0.022 / A, tx = (r() - 0.5) * 0.018 / A, ty = (r() - 0.5) * 0.018 / A;
+      const ch = (0.015 + (edge ? 0.035 : 0.022) * r()) / A;
+      // most slabs weathered grey with the hilltop's lichen and pitting, a few still fresh-dressed
+      slab(kit, a0, b0, a1, b1, top + lift, tx, ty, ch, top - jd, r() < 0.7 ? 'terrain_rock' : 'steps_stone');
+    }
+  }
+}
+
+/** one slab: its top (`key`) chamfered all round by c (amot) over vertical sides down to zb; tx / ty tilt the top (amot across) */
+function slab(kit, a0, b0, a1, b1, zt, tx, ty, c, zb, key) {
+  const z = (X, Y) => zt + tx * ((X - a0) / (a1 - a0) - 0.5) + ty * ((Y - b0) / (b1 - b0) - 0.5);
+  const i0 = a0 + c, i1 = a1 - c, j0 = b0 + c, j1 = b1 - c, dz = c * 0.9;   // the arris drops a little less than it is worn back
+  const T = (X, Y) => [X, Y, z(X, Y)], F = (X, Y) => [X, Y, z(X, Y) - dz];
+  const o = { castShadow: false };
+  kit.quad([T(i0, j0), T(i1, j0), T(i1, j1), T(i0, j1)], [0, 0, 1], key, o);
+  kit.quad([F(a0, j0), T(i0, j0), T(i0, j1), F(a0, j1)], [-1, 0, 1], key, o);
+  kit.quad([T(i1, j0), F(a1, j0), F(a1, j1), T(i1, j1)], [1, 0, 1], key, o);
+  kit.quad([F(i0, b0), F(i1, b0), T(i1, j0), T(i0, j0)], [0, -1, 1], key, o);
+  kit.quad([T(i0, j1), T(i1, j1), F(i1, b1), F(i0, b1)], [0, 1, 1], key, o);
+  kit.quad([F(a0, b0), F(i0, b0), T(i0, j0), F(a0, j0)], [-1, -1, 1], key, o);
+  kit.quad([F(a1, b0), F(a1, j0), T(i1, j0), F(i1, b0)], [1, -1, 1], key, o);
+  kit.quad([F(a1, b1), F(i1, b1), T(i1, j1), F(a1, j1)], [1, 1, 1], key, o);
+  kit.quad([F(a0, b1), F(a0, j1), T(i0, j1), F(i0, b1)], [-1, 1, 1], key, o);
+  // sides down to the bed
+  const side = (p, q, n) => kit.quad([[...p, zb], [...q, zb], F(...q), F(...p)], n, 'ashlar_plain', { castShadow: false, collide: false });
+  side([a0, b0], [a0, b1], [-1, 0, 0]);
+  side([a1, b0], [a1, b1], [1, 0, 0]);
+  side([a0, b0], [a1, b0], [0, -1, 0]);
+  side([a0, b1], [a1, b1], [0, 1, 0]);
 }

@@ -13,7 +13,7 @@
 // Each offering in progress is also a watchable sub-event of the schedule (g5/dynamic.js via ctx.schedule.addSource):
 // listed under its stage's event in "Happening now" and counted on the map, with a spot to watch it from.
 import { buildGeo } from './g5/geo.js';
-import { buildPlan, POOLS, ANIMALS } from './g5/plan.js';
+import { buildPlan, buildPlanSteps, POOLS, ANIMALS, poolSeed } from './g5/plan.js';
 import { segAt, sampleSeg, phaseOf, HOLD, WALK, CARRIED, CARCASS } from './g5/track.js';
 import { createSource } from './g5/dynamic.js';
 import { crossed, cueAt } from '../lib/cue.js';
@@ -30,6 +30,7 @@ const LANES = 6, BIRD_LANES = 3;
 
 export default {
   id: 'private-offerings',
+  planRank: 0,        // its plan is the first step of the boot's plan job (runtime.js; G4 reads it)
   lead: 2,
   lag: 8,             // owners carrying their meat out through Ezrat Nashim after the last fats are on the fire
 
@@ -40,7 +41,7 @@ export default {
     const imp = { kohen: 2, israelite: 2, kohen_offduty: 2, nazir: 2, levi: 1, lamb: 2, ram: 2, goat: 2, ewe: 2, she_goat: 2 };
     for (const [name, n] of Object.entries(POOLS)) {
       const animal = ANIMALS.has(name);
-      pools[name] = sim.pool({ name: `g5-${name}`, ...(animal ? { animal: name } : { role: name }), count: n, seed: SEED + name.length * 131 + n, importance: imp[name] || 1, prop: animal ? undefined : null });
+      pools[name] = sim.pool({ name: `g5-${name}`, ...(animal ? { animal: name } : { role: name }), count: n, seed: poolSeed(name), importance: imp[name] || 1, prop: animal ? undefined : null });
     }
     const state = {
       G, pools, plan: null, planKey: '', planGen: -1, free: null, propsOn: new Set(), fires: new Map(),
@@ -51,8 +52,8 @@ export default {
     // the watchable instances, for the schedule (additive API: ctx.schedule.addSource)
     state.source = createSource(ctx, () => getPlan(ctx, state, sim));
     try { ctx.schedule?.addSource?.(state.source); } catch (e) { console.warn('[sim:g5] schedule source failed', e); }
-    // build the current date's plan now (behind the loader) rather than in the first frame that needs it
-    try { getPlan(ctx, state, sim); } catch (e) { console.error('[sim:g5] plan failed', e); }
+    // the current date's plan: the boot's plan job builds it after 'ready', while the GPU links the first view's programs
+    // (planRank; qa-r2 SIM-R2-12 — it was built here, before 'ready')
     return state;
   },
 
@@ -90,6 +91,8 @@ export default {
    * places' bookings), P.G (the court geometry).
    */
   plan(ctx, state, sim) { return getPlan(ctx, state, sim); },
+  /** the same, as an iterator (the boot's plan job slices it — qa-r2 SIM-R2-12) */
+  planSteps(ctx, state, sim) { return planSteps(ctx, state, sim); },
 
   debug(s) {
     const P = s.plan;
@@ -108,17 +111,34 @@ function getPlan(ctx, state, sim) {
   const key = `${ctx.time?.dateString}|${ctx.time?.dayType}`;
   if (state.plan && state.planKey === key && state.planGen === sim.generation) return state.plan;
   if (state.building) return state.plan;           // re-entry (a schedule lookup during the build)
+  // not before the boot's plan job has built it (no figures meanwhile — runtime.js planRank)
+  if (sim.planNow && !sim.planNow()) return null;
+  for (const _ of planSteps(ctx, state, sim));     // eslint-disable-line no-unused-vars
+  return state.plan;
+}
+/** the day's plan as an iterator (G5's placements yield every few offerings) */
+function* planSteps(ctx, state, sim) {
+  const key = `${ctx.time?.dateString}|${ctx.time?.dayType}`;
+  if (state.plan && state.planKey === key && state.planGen === sim.generation) return;
+  if (state.building) return;
   state.building = true;
-  const t0 = performance.now();
+  let t = 0;
   const ev = (id) => { const e = sim.event(id); return e && Number.isFinite(e.t0) ? e : null; };
   let P;
-  try { P = buildPlan(ctx, state.G, ev); } catch (e) { console.error('[sim:g5] plan failed', e); P = { ok: false, insts: [] }; }
-  P.ms = performance.now() - t0;
+  try {
+    const g = buildPlanSteps(ctx, state.G, ev);
+    for (;;) {
+      const a = performance.now();
+      const r = g.next();
+      t += performance.now() - a;
+      if (r.done) { P = r.value; break; }
+      yield;
+    }
+  } catch (e) { console.error('[sim:g5] plan failed', e); P = { ok: false, insts: [] }; } finally { state.building = false; }
+  P.ms = t;
   // by role, for leads (an animal's rope in its owner's hand)
   for (const inst of P.insts || []) { inst.byRole = {}; for (const tr of inst.tracks) inst.byRole[tr.role] = tr; inst.kayitz = !!inst.job?.kayitz; }
   state.plan = P; state.planKey = key; state.planGen = sim.generation;
-  state.building = false;
-  return P;
 }
 
 /** the track of one pool slot that holds t (tracks in a slot never overlap) */
@@ -161,6 +181,8 @@ function poseSlot(ctx, state, P, slot, tr, t, dt, forced) {
   else ph = phaseOf(s, t);
   slot.pose(s.pose, ph);
   if (s.kind !== CARRIED && slot._pkey !== s.pkey) setProps(slot, s.prop, s.hand, s.prop2, s.pkey);
+  // a carried animal holds nothing: stated, so its slot's prop cache never depends on the jump history (qa-r2: g5.js)
+  else if (s.kind === CARRIED && slot._pkey !== 'carried') setProps(slot, null, 'right', null, 'carried');
   // an animal on its owner's rope
   if (ANIMALS.has(tr.pool)) {
     const lt = s.lead ? tr.inst.byRole?.[s.lead] : null;

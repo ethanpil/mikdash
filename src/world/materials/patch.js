@@ -21,7 +21,17 @@
 //             dresses (vertical on the top/bottom margins, horizontal on the sides);
 //   courses — the set has a course table: block ids and the course-local height come from a 1-cm course map;
 //   uvSwap  — grain-along-v views of a u set (the *_v wood keys): every map's UV (and the detail UV) is swapped in
-//             the vertex shader; the tangent frame follows the swapped UVs, so the normal map stays right.
+//             the vertex shader; the tangent frame follows the swapped UVs, so the normal map stays right;
+//   foot    — (qa-r1, the Herodian walls) dust and splash over the bottom ~0.5 m of a wall and a contact-AO band at
+//             its foot: the floor beside the face comes from a shared floor map (the nav grid's lowest / highest walkable
+//             floor per 0.5 m cell, built by index.js once the grid is ready; faded in, off until then);
+//   altar   — (qa-r1, the altar's lime keys) soot darkening toward the top and over each ma'arachah, an ash crust along
+//             the top arrises and down the corners, positioned in world space from the site model's altar;
+//   metal   — (qa-r1, every metal key; the values are uniforms, and all metals already share programs) a cool (sky-blue)
+//             cast in the environment reflection and the ambient is desaturated, the reflection is blended toward the
+//             mean ambient (a broad second lobe: beaten, not mirror, metal) and its peaks soft-capped against that
+//             ambient: gold under blue skylight stays yellow-gold instead of olive / teal, a bright doorway reflected in
+//             interior gold no longer clips to white, candle-lit gold keeps its amber (gold keys; bronze, more on low).
 // Programs stay shared: every patched material returns the same customProgramCacheKey per variant and keeps
 // its own uniform values.
 import { ShaderChunk, Material } from 'three';
@@ -67,6 +77,34 @@ uniform vec4 mkComb;       // x/y roughness of the margin -> boss step, z normal
 uniform highp sampler2D mkCourseMap;  // (row, row start m, row height m, code) per cm of the tile height
 uniform vec2 mkCourse;     // x tile height (m), y entries (cm)
 #endif
+#ifdef MK_FOOT
+uniform sampler2D mkFootMap; // per 0.5 m cell: (lowest, highest) walkable floor, world y (m); 9999 = none
+uniform vec4 mkFoot;       // xy world origin (x, z) of the map, zw 1 / its extent (m)
+uniform vec4 mkFootK;      // x fade-in (0 until the map exists), y grime band height (m), z contact-AO height (m), w AO depth
+uniform vec2 mkFootG;      // x grime amount
+#endif
+#ifdef MK_ALTAR
+uniform vec4 mkAlt0;       // xy altar centre (world x, z), z half-width of the 28-square (m), w its top (world y)
+uniform vec4 mkAlt1;       // x court floor y, y chut hasikra y, z soot amount, w ash amount
+uniform vec4 mkAltF0;      // the three ma'arachot: xy (world x, z), z radius (m), w strength
+uniform vec4 mkAltF1;
+uniform vec4 mkAltF2;
+#endif
+#ifdef MK_METAL
+uniform vec4 mkMetal;      // x env desaturation, y blend toward the mean ambient, z peak cap (x the mean ambient; 0 = off)
+#endif
+// qa-r2 (paving_mount): the routes worn across the Mount — x amount (0 = off: every other material), y half-width (m),
+// z lightening, w smoothing; A, B, C: three route segments (world x, z of their ends). A uniform, not a variant: the
+// pavement keeps the plain stone program (every patched material sets these, to zero when it has no routes)
+uniform vec4 mkWear;
+uniform vec4 mkWearA;
+uniform vec4 mkWearB;
+uniform vec4 mkWearC;
+float mkSegD( vec2 p, vec4 s ) {
+  vec2 ab = s.zw - s.xy;
+  float t = clamp( dot( p - s.xy, ab ) / max( dot( ab, ab ), 1e-6 ), 0.0, 1.0 );
+  return length( p - s.xy - ab * t );
+}
 float mkHash( vec2 p ) {
   vec3 p3 = fract( vec3( p.xyx ) * 0.1031 );
   p3 += dot( p3, p3.yzx + 33.33 );
@@ -77,16 +115,73 @@ float mkHash( vec2 p ) {
 const FRAG_MAP = /* glsl */`
 float mkRoughAdd = 0.0;
 vec2 mkDN = vec2( 0.0 );
+float mkFootAO = 1.0;
 {
   // two oblique projections, each a 2-D function on floors and on walls of either orientation (a plain xz lookup is
   // constant along y on walls and the old (x - z, y) one constant on floors: bands and diagonal stripes)
   vec4 mkM1 = texture2D( mkMacroMap, vec2( vMkWorld.x + 0.6 * vMkWorld.y, vMkWorld.z - 0.4 * vMkWorld.y ) * mkMacro.z );
   vec4 mkM2 = texture2D( mkMacroMap, vec2( vMkWorld.x - 0.5 * vMkWorld.z + 0.3 * vMkWorld.y, vMkWorld.y + 0.8 * vMkWorld.z ) * ( mkMacro.z * 1.7 ) + 0.37 );
   float mkMv = mkM1.r * 0.6 + mkM2.g * 0.4;
-  diffuseColor.rgb *= 1.0 + mkMacro.x * clamp( mkMv * 1.6, -1.0, 1.0 );
-  float mkTv = smoothstep( -0.1, 0.5, mkM1.b * 0.5 + mkM2.a * 0.5 );
+  // worn routes (paving_mount): dust scuffed away and the stone a little paler and smoother along the crowds' ways,
+  // their edges wandering with the macro noise
+  float mkWr = 0.0;
+  if ( mkWear.x > 0.0 ) {
+    float mkWd = min( mkSegD( vMkWorld.xz, mkWearA ), min( mkSegD( vMkWorld.xz, mkWearB ), mkSegD( vMkWorld.xz, mkWearC ) ) );
+    mkWr = mkWear.x * ( 1.0 - smoothstep( mkWear.y * 0.3, mkWear.y, mkWd + mkWear.y * 0.5 * mkMv ) );
+  }
+  diffuseColor.rgb *= 1.0 + mkMacro.x * clamp( mkMv * 1.6, -1.0, 1.0 ) * ( 1.0 - 0.6 * mkWr );
+  float mkTv = smoothstep( -0.1, 0.5, mkM1.b * 0.5 + mkM2.a * 0.5 ) * ( 1.0 - 0.85 * mkWr );
   diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * mkTint, mkMacro.w * mkTv );
-  mkRoughAdd += mkMacro.y * clamp( mkM2.r * 1.6, -1.0, 1.0 );
+  diffuseColor.rgb *= 1.0 + mkWear.z * mkWr;
+  mkRoughAdd += mkMacro.y * clamp( mkM2.r * 1.6, -1.0, 1.0 ) - mkWear.w * mkWr;
+  #ifdef MK_FOOT
+  {
+    // the face's own normal (facing the viewer), the floor 0.35 m out from it, and the height above that floor
+    vec3 mkFn = normalize( cross( dFdx( vMkWorld ), dFdy( vMkWorld ) ) );
+    mkFn *= dot( mkFn, cameraPosition - vMkWorld ) < 0.0 ? -1.0 : 1.0;
+    float mkVert = 1.0 - smoothstep( 0.35, 0.6, abs( mkFn.y ) );
+    vec2 mkNh = mkFn.xz / max( length( mkFn.xz ), 1e-4 );
+    vec2 mkFuv = ( vMkWorld.xz + mkNh * 0.35 - mkFoot.xy ) * mkFoot.zw;
+    vec2 mkFl = texture2D( mkFootMap, mkFuv ).rg;
+    float mkFy = mkFl.y <= vMkWorld.y + 0.08 ? mkFl.y : mkFl.x;
+    float mkHh = vMkWorld.y - mkFy;
+    float mkIn = step( 0.0, mkFuv.x ) * step( mkFuv.x, 1.0 ) * step( 0.0, mkFuv.y ) * step( mkFuv.y, 1.0 );
+    float mkOk = mkIn * mkVert * step( -0.1, mkHh ) * step( mkFy, 9000.0 ) * mkFootK.x;
+    // dust and splash, densest at the foot; an uneven top edge (the macro map along the wall)
+    vec4 mkGn = texture2D( mkMacroMap, vec2( ( vMkWorld.x - vMkWorld.z ) * 0.45, vMkWorld.y * 0.9 ) + 0.29 );
+    float mkGr = mkOk * ( 1.0 - smoothstep( 0.0, mkFootK.y, mkHh + 0.14 * mkGn.r + 0.06 * mkMv ) );
+    diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 0.80, 0.76, 0.69 ), mkGr * mkFootG.x );
+    mkRoughAdd += 0.05 * mkGr;
+    mkFootAO = 1.0 - mkFootK.w * mkOk * ( 1.0 - smoothstep( 0.0, mkFootK.z, mkHh ) );
+  }
+  #endif
+  #ifdef MK_ALTAR
+  {
+    // soot: over the upper body (smoke and heat; the smoke rises straight up, Avot 5:5, so streaks run vertically), more
+    // over each ma'arachah; limed twice a year and wiped weekly (Middot 3:4), so patchy and moderate
+    vec3 mkW = vMkWorld;
+    float mkTop = mkAlt0.w;
+    vec2 mkD0 = ( mkW.xz - mkAltF0.xy ) / mkAltF0.z;
+    vec2 mkD1 = ( mkW.xz - mkAltF1.xy ) / mkAltF1.z;
+    vec2 mkD2 = ( mkW.xz - mkAltF2.xy ) / mkAltF2.z;
+    float mkNear = max( mkAltF0.w * exp( - dot( mkD0, mkD0 ) ), max( mkAltF1.w * exp( - dot( mkD1, mkD1 ) ), mkAltF2.w * exp( - dot( mkD2, mkD2 ) ) ) );
+    float mkUp = smoothstep( mkAlt1.y + 0.4, mkTop, mkW.y );
+    float mkHi = smoothstep( mkTop - 2.0, mkTop, mkW.y );
+    vec4 mkSn = texture2D( mkMacroMap, vec2( ( mkW.x - mkW.z ) * 0.7, mkW.y * 0.18 ) + 0.53 );
+    float mkSoot = clamp( mkAlt1.z * ( 0.45 * mkUp * mkUp + mkNear * mkHi ) * ( 0.7 + 0.9 * mkSn.g + 0.5 * mkMv ), 0.0, 0.85 );
+    diffuseColor.rgb = mix( diffuseColor.rgb, diffuseColor.rgb * vec3( 0.40, 0.38, 0.36 ), mkSoot );
+    mkRoughAdd += 0.04 * mkSoot;
+    // ash crust: along the top arrises (the faces' top 0.45 m and the walkway's outer 0.5-0.9 m) and down the corners
+    vec2 mkDc = abs( mkW.xz - mkAlt0.xy ) - mkAlt0.z;
+    float mkCorner = ( 1.0 - smoothstep( 0.1, 1.1, abs( mkDc.x ) ) ) * ( 1.0 - smoothstep( 0.1, 1.1, abs( mkDc.y ) ) );
+    float mkEdge = smoothstep( mkTop - 0.45, mkTop - 0.03, mkW.y ) * ( 1.0 - smoothstep( 0.5, 0.9, - max( mkDc.x, mkDc.y ) ) );
+    float mkAsh = ( mkEdge * ( 0.55 + 0.45 * mkCorner ) + 0.45 * mkCorner * smoothstep( mkTop - 1.6, mkTop - 0.2, mkW.y ) )
+                * ( 1.0 - smoothstep( mkTop + 0.04, mkTop + 0.2, mkW.y ) );
+    mkAsh = clamp( mkAsh * mkAlt1.w * smoothstep( -0.25, 0.35, mkSn.b + 0.4 * mkMv + 0.3 * mkCorner ), 0.0, 1.0 );
+    diffuseColor.rgb = mix( diffuseColor.rgb, vec3( 0.34, 0.325, 0.31 ) * ( 0.85 + 0.3 * mkSn.a ), mkAsh * 0.6 );
+    mkRoughAdd += 0.06 * mkAsh;
+  }
+  #endif
   // the course this texel lies in: uniform rows, or the course table
   float mkRow = floor( vMkUv.y / mkBlock.y );
   float mkLy = vMkUv.y - mkRow * mkBlock.y;
@@ -249,6 +344,35 @@ const OUT_BEFORE_TONEMAP = /* glsl */`
 #endif
 `;
 
+// before lights_fragment_end: the IBL radiance of metals (MK_METAL above); `irradiance` + `iblIrradiance` hold the
+// ambient (sky, probes, env's interior terms) at this point
+const METAL_IBL = /* glsl */`
+#if defined( MK_METAL ) && defined( RE_IndirectSpecular ) && defined( RE_IndirectDiffuse )
+{
+  vec3 mkLw = vec3( 0.2126, 0.7152, 0.0722 );
+  vec3 mkA = ( iblIrradiance + irradiance ) * RECIPROCAL_PI;
+  float mkRl = dot( radiance, mkLw );
+  float mkAl = dot( mkA, mkLw );
+  // only a COOL (sky-blue) cast is taken out: warm light — candles, gold reflecting gold — keeps its colour
+  float mkCr = clamp( 2.0 * ( radiance.b - radiance.r ) / max( mkRl, 1e-6 ), 0.0, 1.0 );
+  float mkCa = clamp( 2.0 * ( mkA.b - mkA.r ) / max( mkAl, 1e-6 ), 0.0, 1.0 );
+  radiance = mix( radiance, vec3( mkRl ), mkMetal.x * mkCr );
+  mkA = mix( mkA, vec3( mkAl ), mkMetal.x * mkCa );
+  radiance = mix( radiance, mkA, mkMetal.y );
+  if ( mkMetal.z > 0.0 ) {
+    float mkR2 = dot( radiance, mkLw );
+    radiance *= ( 1.0 + 1.0 / mkMetal.z ) / ( 1.0 + mkR2 / max( mkAl * mkMetal.z, 1e-6 ) );
+  }
+}
+#endif
+`;
+const FOOT_AO = /* glsl */`
+#ifdef MK_FOOT
+reflectedLight.indirectDiffuse *= mkFootAO;
+reflectedLight.indirectSpecular *= mkFootAO;
+#endif
+`;
+
 const GLOW = /* glsl */`
 #ifdef USE_MAP
 totalEmissiveRadiance *= sampledDiffuseColor.a;
@@ -279,7 +403,10 @@ function patchShader(shader, uniforms, detail, opt) {
   }
   const blend = opt.blend && fs.includes('#include <color_fragment>') && fs.includes('#include <roughnessmap_fragment>')
     && fs.includes('#include <normal_fragment_maps>') && fs.includes('#include <aomap_fragment>');
-  const defs = `${detail ? '#define MK_DETAIL\n' : ''}${detail && opt.comb ? '#define MK_COMB\n' : ''}${opt.courses ? '#define MK_COURSES\n' : ''}`;
+  const metal = opt.metal && fs.includes('#include <lights_fragment_end>');
+  const foot = opt.foot && fs.includes('#include <aomap_fragment>');
+  const defs = `${detail ? '#define MK_DETAIL\n' : ''}${detail && opt.comb ? '#define MK_COMB\n' : ''}${opt.courses ? '#define MK_COURSES\n' : ''}`
+    + `${foot ? '#define MK_FOOT\n' : ''}${opt.altar ? '#define MK_ALTAR\n' : ''}${metal ? '#define MK_METAL\n' : ''}`;
   fs = fs.replace(mainRe, (m) => `${defs}${FRAG_PARS}\n${blend ? BLEND_PARS : ''}\n${m}`);
   if (blend) {
     fs = fs.replace('#include <map_fragment>', `${BLEND_MAP}\n${FRAG_MAP}`)
@@ -298,6 +425,8 @@ function patchShader(shader, uniforms, detail, opt) {
         nm.replace('mapN.xy *= normalScale;', 'mapN.xy *= normalScale;\n\tmapN.xy += mkDN;'));
     }
   }
+  if (metal) fs = fs.replace('#include <lights_fragment_end>', `${METAL_IBL}\n#include <lights_fragment_end>`);
+  if (foot) fs = fs.replace('#include <aomap_fragment>', `#include <aomap_fragment>\n${FOOT_AO}`);
   if (opt.glow && fs.includes('#include <emissivemap_fragment>')) {
     fs = fs.replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n${GLOW}`);
   }
@@ -320,18 +449,23 @@ function patchShader(shader, uniforms, detail, opt) {
 
 /**
  * Attach the enhancement to a material. `state.detail` (boolean) selects the program variant and may be
- * flipped later (set material.needsUpdate = true afterwards). `opt`: { blend, glow, outdoor, comb, courses, uvSwap }.
+ * flipped later (set material.needsUpdate = true afterwards). `opt`: { blend, glow, outdoor, comb, courses, uvSwap, foot,
+ * altar, metal } (foot / altar / metal need their uniforms in `uniforms`: index.js patchUniforms).
  */
 export function applyPatch(material, uniforms, state, opt = {}) {
   const prev = material.onBeforeCompile;
   const chained = prev && prev !== Material.prototype.onBeforeCompile ? prev : null;
   const prevKey = chained ? material.customProgramCacheKey.bind(material) : null;
-  const o = { blend: !!opt.blend, glow: !!opt.glow, outdoor: !!opt.outdoor, comb: !!opt.comb, courses: !!opt.courses, uvSwap: !!opt.uvSwap };
+  const o = {
+    blend: !!opt.blend, glow: !!opt.glow, outdoor: !!opt.outdoor, comb: !!opt.comb, courses: !!opt.courses, uvSwap: !!opt.uvSwap,
+    foot: !!opt.foot, altar: !!opt.altar, metal: !!opt.metal,
+  };
   // the fallback opt-out (env without MK_NO_ROOMS) follows userData.mkInterior, which setOutdoorOpt() flips too
   const out = () => o.outdoor && state.outdoor !== false && material.userData.mkInterior === false && !envHasNoRooms();
   // perf-1: the key names only what changes the program — the comb is compiled only with detail (MK_COMB), and the UV
   // swap is a uniform (in code only with the patch off, ?matfx=0)
-  const flags = () => `${o.blend ? 'B' : ''}${o.glow ? 'E' : ''}${out() ? 'O' : ''}${o.comb && state.detail ? 'C' : ''}${o.courses ? 'R' : ''}${o.uvSwap && !state.enabled ? 'S' : ''}`;
+  const flags = () => `${o.blend ? 'B' : ''}${o.glow ? 'E' : ''}${out() ? 'O' : ''}${o.comb && state.detail ? 'C' : ''}${o.courses ? 'R' : ''}${o.uvSwap && !state.enabled ? 'S' : ''}`
+    + `${o.foot ? 'F' : ''}${o.altar ? 'A' : ''}${o.metal ? 'M' : ''}`;
   material.onBeforeCompile = function onBeforeCompileMk(shader, renderer) {
     if (chained) chained.call(this, shader, renderer);
     if (!state.enabled) {

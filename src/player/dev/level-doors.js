@@ -179,7 +179,9 @@ run('default (unchanged)', EN, AZ, null, (p) => (!p ? 'no path' : Math.abs(len(p
 run('Nikanor and wickets blocked', EN, AZ, { blockedDoors: nik }, (p) => (!p ? 'no path' : through(p, nik) ? 'passes a blocked door' : null));
 run('Heichal great gate + north wicket blocked', AZ, [140, 330.5, 22], { blockedDoors: ['heichal.gate.great', 'heichal.gate.wicket-n'] },
   (p, ms) => (p ? 'found a way through' : ms > 100 ? `slow (${ms.toFixed(0)} ms)` : null));
-run('start in the shut Nikanor doorway', [259.75, 330.5, 13.5], EN, { blockedDoors: nik }, (p) => (!p ? 'no path out' : passes(p, nik) ? 'walks through the leaves' : null));
+// in the passage, west of the leaves: since world-4 they hang at the gate's east face (X 259.47–260.04), so the old
+// point (X 259.75) was inside the shut leaves themselves, which have no "own side" to step back to (qa-r1-player.md)
+run('start in the shut Nikanor doorway', [257.5, 330.5, 13.5], EN, { blockedDoors: nik }, (p) => (!p ? 'no path out' : passes(p, nik) ? 'walks through the leaves' : null));
 
 // every door: from just in front of its shut leaves to just behind them, blocked (with the wickets in it) — never
 // through the leaves

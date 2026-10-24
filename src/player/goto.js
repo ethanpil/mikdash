@@ -1,12 +1,27 @@
 // Guided movement: goTo(target, speed) follows a nav path with smooth turning and gentle look-ahead,
 // glides when flying (down to a connected floor first when the target is a floor), teleports (with a fade
-// when ctx.ui.fade exists) for 'instant' and for the last stretch to targets the walk cannot reach.
+// when ctx.ui.fade exists) for 'instant' and for the last stretch to targets the walk cannot reach. A path through
+// a climb (nav/climbs.js) is walked in legs with the climb between; the arrival is framed (ARRIVAL).
 import { Vector3 } from 'three';
 import { m2w, a, EYE_HEIGHT, headingToYaw } from '../core/units.js';
+import { BODY } from './controller.js';
 
 /** m/s; 'instant' teleports */
 export const SPEEDS = { slow: 0.8, walk: 1.4, fast: 2.4, run: 4.5 };
 const DEG = Math.PI / 180;
+/**
+ * How a goTo arrives (docs/decisions/qa-r1-player.md). Pitch toward the target's `look` point (aimed `aimUp` over it:
+ * an event's point is the floor its people stand on) clamped to pitchMin…pitchMax, else `pitch`. The stand keeps
+ * `clear` m (plan) from a standing figure's feet and `clearLying` from a lying one's pelvis (the body reaches ~0.9 m
+ * each way), and no standing figure's body (radius `sightR`) may come within `cone`° of the sight line (to the look
+ * point, else to the floor `ahead` m along the arrival heading) short of its last `sightSkip` m (the action itself);
+ * otherwise the nearest clear point on rings `ringStep` apart out to `ringMax` m is taken.
+ */
+export const ARRIVAL = {
+  pitchMin: -25, pitchMax: 10, aimUp: 0.5, pitch: -4,
+  clear: 0.8, clearLying: 1.3, sightR: 0.3, cone: 6, sightSkip: 1.5, ahead: 4, ringStep: 0.5, ringMax: 3,
+};
+const LYING = new Set(['sleep', 'lie', 'prostrate']), LOW = new Set(['sit', 'kneel']);
 /** winding stairs: m along the path to the tread kept in the lower part of the frame, and to the view's aim */
 const NEWEL_LOOK = 1.2, NEWEL_YAW = 0.8;
 const warnedSpeeds = new Set();
@@ -37,6 +52,7 @@ export function pickFloor(ctx, physics, x, z, hintY = null, exact = false) {
  * Targets: anchor name | { anchor } | { at:[X,Y(,Z)], z?, heading?, pitch? } (site amot; floor found, an
  *          explicit Z picks the floor nearest it on any level) | { pos:[X,Y,Z] } (EYE position in site amot,
  *          like ?pos=; without Z it is an `at`) | world Vector3 (feet) | [X,Y].
+ * goTo also reads an object target's optional `look`: the point to watch, site [X, Y, Z?] or a world Vector3 (ARRIVAL).
  */
 export function resolveTarget(ctx, physics, target, hintY = null) {
   if (target == null) return null;
@@ -103,6 +119,138 @@ function nearOnLevel(physics, x, z, y, r) {
         const dy = Math.abs(f - y);
         if (dy <= 0.35 && dy < bd) { bd = dy; best = { x: px, y: f, z: pz }; }
       }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+// ---- arrival framing (ARRIVAL) ----
+
+/** A target's `look` (site [X, Y, Z?] amot, Z omitted = the walking floor there; or a world Vector3) → world Vector3 | null. */
+function lookPoint(physics, target) {
+  const l = target?.look;
+  if (l?.isVector3) return l.clone();
+  if (!Array.isArray(l) || !Number.isFinite(l[0]) || !Number.isFinite(l[1])) return null;
+  const p = m2w(l[0], l[1], Number.isFinite(l[2]) ? l[2] : 0);
+  if (!Number.isFinite(l[2])) p.y = physics.standFloor(p.x, p.z) ?? 0;
+  return p;
+}
+
+/** Compass heading (deg, [0, 360)) from feet to p. */
+const bearing = (f, p) => { const h = Math.atan2(p.x - f.x, f.z - p.z) / DEG; return h < 0 ? h + 360 : h; };
+
+/** View pitch (deg) from feet toward the look point, clamped. */
+function pitchToward(feet, look) {
+  const p = Math.atan2(look.y + ARRIVAL.aimUp - feet.y - EYE_HEIGHT, Math.hypot(look.x - feet.x, look.z - feet.z)) / DEG;
+  return Math.max(ARRIVAL.pitchMin, Math.min(ARRIVAL.pitchMax, p));
+}
+
+const shown = (o) => { for (; o; o = o.parent) if (!o.visible) return false; return true; };
+
+/**
+ * The drawn people and animals within r m (plan) of (x, z): { x, y, z (world feet), h, rad (sight radius), clear,
+ * lying }. Actors from ctx.people.actors, crowd members from ctx.people.system.crowds (world arrays).
+ */
+function figuresNear(ctx, x, z, r) {
+  const out = [];
+  const add = (fx, fy, fz, arch, scale, pose) => {
+    if (Math.hypot(fx - x, fz - z) > r) return;
+    const animal = !!arch?.isAnimal, H = (arch?.H || 1.7) * (scale || 1);
+    const lying = LYING.has(pose) || (animal && /^(lie|bound|struggle)/.test(pose || ''));
+    const half = animal ? (arch?.rig?.dims?.L || 1) * (scale || 1) / 2 : 0;
+    out.push({
+      x: fx, y: fy, z: fz, lying,
+      h: LOW.has(pose) ? H * 0.75 : H,
+      rad: animal ? 0.4 : ARRIVAL.sightR,
+      clear: Math.max(lying && !animal ? ARRIVAL.clearLying : ARRIVAL.clear, half + 0.35),
+    });
+  };
+  let actors = [];
+  try { actors = ctx.people?.actors || []; } catch { /* no people system */ }
+  for (const ac of actors) {
+    if (!ac?.visible || ac.disposed || ac.kind === 'prop' || !ac.object3D?.parent || !shown(ac.object3D)) continue;
+    ac.object3D.updateWorldMatrix(true, false);
+    const e = ac.object3D.matrixWorld.elements;
+    add(e[12], e[13], e[14], ac.arch, ac.scale, ac.poseName);
+  }
+  for (const c of ctx.people?.system?.crowds || []) {
+    if (!c?.visible || !c.count) continue;
+    for (let i = 0; i < c.count; i++) {
+      if (c.fadeM && c.fadeM[i] <= 0.004) continue;
+      add(c.x[i], c.y[i], c.z[i], c.arch?.[i], c.sc?.[i], c.poseName);
+    }
+  }
+  return out;
+}
+
+/**
+ * Does a figure stand within its clearance of the stand at feet, or cut its sight line: to the look point, else
+ * (dir: the arrival heading's unit plan vector {x, z}) to the floor ARRIVAL.ahead m along the heading?
+ */
+function standBlocked(feet, look, figs, dir = null) {
+  const ex = feet.x, ey = feet.y + EYE_HEIGHT, ez = feet.z;
+  let ax = 0, ay = 0, az = 0, L2 = 0, tMax = 0;
+  if (look || dir) {
+    if (look) { ax = look.x - ex; ay = look.y + ARRIVAL.aimUp - ey; az = look.z - ez; }
+    else { ax = dir.x * ARRIVAL.ahead; ay = ARRIVAL.aimUp - EYE_HEIGHT; az = dir.z * ARRIVAL.ahead; }
+    L2 = ax * ax + az * az;
+    const L = Math.sqrt(L2);
+    tMax = L > ARRIVAL.sightSkip ? (L - ARRIVAL.sightSkip) / L : 0;
+  }
+  const L = Math.sqrt(L2), cone = Math.tan(ARRIVAL.cone * DEG);
+  for (const f of figs) {
+    if (Math.abs(f.y - feet.y) < 1.2 && Math.hypot(f.x - ex, f.z - ez) < f.clear) return true;
+    if (tMax <= 0 || f.lying) continue;
+    // the sight segment's point nearest the figure's axis (plan), and its height there; the figure blocks when its
+    // body comes within `cone`° of the line (a near body fills the middle of the frame)
+    const t = Math.max(0, Math.min(tMax, ((f.x - ex) * ax + (f.z - ez) * az) / L2));
+    const y = ey + ay * t;
+    if (y > f.y && y < f.y + f.h && Math.hypot(ex + ax * t - f.x, ez + az * t - f.z) < f.rad + t * L * cone) return true;
+  }
+  return false;
+}
+
+const RC = { o: new Vector3(), d: new Vector3() };
+/** Is the straight line from p to q free of colliders (short of q by `short` m)? */
+function lineClear(physics, p, q, short = 0) {
+  RC.d.subVectors(q, p);
+  const L = RC.d.length() - short;
+  if (L <= 0.05) return true;
+  return !physics.raycast(RC.o.copy(p), RC.d, L);
+}
+
+/**
+ * The nearest stand on rings round feet (same level ±0.35 m) that the body fits, that no wall separates from feet,
+ * that sees the look point when feet does, and that standBlocked passes; on a ring, the one whose distance to the
+ * look point is nearest feet's (the framing keeps its scale), else the one farthest from the figures. Vector3 | null.
+ */
+function clearStand(physics, nav, feet, look, figs, dir = null) {
+  const aim = look ? look.clone().setY(look.y + ARRIVAL.aimUp) : null;
+  const eye = (p) => new Vector3(p.x, p.y + EYE_HEIGHT, p.z);
+  const knee = (p) => new Vector3(p.x, p.y + 0.5, p.z);
+  const sees = aim ? lineClear(physics, eye(feet), aim, 0.3) : false;
+  const d0 = look ? Math.hypot(look.x - feet.x, look.z - feet.z) : 0;
+  const fit = new Vector3();
+  for (let d = ARRIVAL.ringStep; d <= ARRIVAL.ringMax + 1e-6; d += ARRIVAL.ringStep) {
+    const m = Math.max(8, Math.round((2 * Math.PI * d) / ARRIVAL.ringStep));
+    let best = null, bs = Infinity;
+    for (let i = 0; i < m; i++) {
+      const an = (i / m) * 2 * Math.PI, x = feet.x + Math.cos(an) * d, z = feet.z + Math.sin(an) * d;
+      let y = null, bd = 0.35;
+      for (const f of physics.floorsAt(x, z)) { const dy = Math.abs(f - feet.y); if (dy <= bd) { bd = dy; y = f; } }
+      if (y === null || physics.insideAt(x, y + 0.05, z)) continue;
+      const c = new Vector3(x, y, z);
+      physics.collideCapsule(fit.copy(c), BODY.radius, BODY.stepUp, BODY.height);
+      if (Math.hypot(fit.x - x, fit.z - z) > 0.02) continue; // against a wall
+      if (!lineClear(physics, knee(feet), knee(c)) || !lineClear(physics, eye(feet), eye(c))) continue;
+      if (sees && !lineClear(physics, eye(c), aim, 0.3)) continue;
+      if (standBlocked(c, look, figs, dir)) continue;
+      if (nav?.isReady) { const n = nav.nearest(c, 0.5); if (!n || Math.abs(n.y - y) > 0.35) continue; }
+      let s;
+      if (look) s = Math.abs(Math.hypot(look.x - x, look.z - z) - d0);
+      else { let md = 3; for (const f of figs) md = Math.min(md, Math.hypot(f.x - x, f.z - z)); s = -md; }
+      if (s < bs) { bs = s; best = c; }
     }
     if (best) return best;
   }
@@ -216,18 +364,76 @@ export function createAuto(ctx, ctrl, physics, nav) {
     instant(j.r, j).then(() => { if (job === j) { j.phase = 'turn'; j.t = 0; } });
   }
 
-  /** End of a walk: arrived when within ~1 m (0.5 m in height) of the target, else hop the rest. */
+  /**
+   * Arrival framing for job j (ARRIVAL) at stand `feet`: when a figure stands too close or in the sight line, move
+   * j.r.feet to the nearest clear ring point (turning a given heading by the change in bearing to the look point);
+   * then a pitch toward the look point (or ARRIVAL.pitch) and, without a heading, the bearing to it — unless the
+   * target set them. Returns true when the stand moved.
+   */
+  function frame(j, feet) {
+    const r = j.r;
+    if (r.air) return false;
+    const look = j.look;
+    const dir = !look && r.heading != null ? { x: Math.sin(r.heading * DEG), z: -Math.cos(r.heading * DEG) } : null;
+    const reach = (look ? Math.hypot(look.x - feet.x, look.z - feet.z) : ARRIVAL.ahead) + ARRIVAL.ringMax + 2;
+    const figs = figuresNear(ctx, feet.x, feet.z, reach);
+    let moved = false;
+    if (standBlocked(feet, look, figs, dir)) {
+      const c = clearStand(physics, nav, feet, look, figs, dir);
+      if (c) {
+        if (look && !j.autoHeading) r.heading = (((r.heading + bearing(c, look) - bearing(feet, look)) % 360) + 360) % 360;
+        r.feet = c;
+        moved = true;
+      }
+    }
+    if (j.autoPitch) r.pitch = look ? pitchToward(r.feet, look) : ARRIVAL.pitch;
+    if (j.autoHeading && look) r.heading = bearing(r.feet, look);
+    return moved;
+  }
+
+  /**
+   * End of a walk: arrived when within ~1 m (0.5 m in height) of the target, else hop the rest. The figures have
+   * moved during the walk: frame once more from where the body stands, and walk on if a figure now blocks it.
+   */
   function arrive(j) {
     const f = ctrl.feet, t = j.r.feet;
-    if (Math.hypot(f.x - t.x, f.z - t.z) > 1.0 || Math.abs(f.y - t.y) > 0.5) hop(j);
-    else { j.phase = 'turn'; j.t = 0; }
+    if (Math.hypot(f.x - t.x, f.z - t.z) > 1.0 || Math.abs(f.y - t.y) > 0.5) { hop(j); return; }
+    if (!j.reframed) {
+      j.reframed = true;
+      const keep = j.r.feet;
+      if (frame(j, f.clone())) { walkPlan(j); return; }
+      j.r.feet = keep;
+    }
+    if (j.autoPitch && j.look) j.r.pitch = pitchToward(f, j.look);
+    if (j.autoHeading && j.look) j.r.heading = bearing(f, j.look);
+    j.phase = 'turn'; j.t = 0;
   }
 
   function walkPlan(j) {
     const path = nav.findPath(ctrl.feet, j.r.feet);
     if (!path) { hop(j); return; }
-    Object.assign(j, { path: preparePath(path), s: 0, seg: 0, lastS: 0, stuckT: 0, v: 0, t: 0 });
-    if (j.path.total < 0.15) arrive(j); else j.phase = 'walk';
+    // a path through a climb (nav/climbs.js) is walked in legs: to the climb's foot, the climb, on from its top
+    const c = path.climb;
+    j.full = path;
+    j.climb = c ? { via: path.slice(c.i0, c.i1 + 1), rest: path.slice(c.i1), heading: c.heading } : null;
+    walkLeg(j, c ? path.slice(0, c.i0 + 1) : path);
+  }
+
+  function walkLeg(j, pts) {
+    Object.assign(j, { path: preparePath(pts), s: 0, seg: 0, lastS: 0, stuckT: 0, v: 0, t: 0 });
+    if (j.path.total < 0.15) legEnd(j); else j.phase = 'walk';
+  }
+
+  /** A walking leg is done: climb when it led to a climb's foot (else hop the rest), or arrive. */
+  function legEnd(j) {
+    if (!j.climb) { arrive(j); return; }
+    const f = ctrl.feet, foot = j.climb.via[0];
+    if (Math.hypot(f.x - foot.x, f.z - foot.z) > 1.0 || Math.abs(f.y - foot.y) > 0.5) { j.climb = null; hop(j); return; }
+    const via = j.climb.via, cum = [0];
+    for (let k = 1; k < via.length; k++) cum.push(cum[k - 1] + via[k].distanceTo(via[k - 1]));
+    Object.assign(j.climb, { cum, total: cum[cum.length - 1], s: 0, v: 0 });
+    j.phase = 'climb'; j.t = 0;
+    ctrl.setMode('fly');
   }
 
   /** Fly to `to` (feet). thenWalk: a landing spot — move over it first, then descend, then walk the path. */
@@ -258,8 +464,12 @@ export function createAuto(ctx, ctrl, physics, nav) {
       if (!r) return Promise.resolve(false);
       const v = speedOf(speed);
       return new Promise((resolve) => {
-        const j = { target, r, speed: v, resolve, phase: 'plan', t: 0, v: 0, s: 0, seg: 0, lastS: 0, stuckT: 0, nudges: 0 };
+        const j = {
+          target, r, speed: v, resolve, phase: 'plan', t: 0, v: 0, s: 0, seg: 0, lastS: 0, stuckT: 0, nudges: 0,
+          look: lookPoint(physics, target), autoPitch: r.pitch == null, autoHeading: r.heading == null, reframed: false,
+        };
         job = j;
+        frame(j, r.feet);
         if (v === 0) {
           j.phase = 'instant';
           instant(r, j).then(() => { if (job === j) finish(true); });
@@ -327,6 +537,34 @@ export function createAuto(ctx, ctrl, physics, nav) {
         return cmd;
       }
 
+      if (j.phase === 'climb') {
+        // along the climb's via (up the post, over the parapet onto the top level) at the walking pace, easing in and out
+        const C = j.climb;
+        const acc = Math.max(1.2, j.speed);
+        const want = Math.min(j.speed, Math.sqrt(2 * acc * Math.max(0, C.total - C.s)) + 0.1);
+        C.v += Math.max(-2 * acc * dt, Math.min(acc * dt, want - C.v));
+        C.s = Math.min(C.total, C.s + C.v * dt);
+        let k = 1;
+        while (k < C.via.length - 1 && C.cum[k] < C.s) k++;
+        const A = C.via[k - 1], B = C.via[k], seg = C.cum[k] - C.cum[k - 1] || 1;
+        tmp.lerpVectors(A, B, Math.min(1, (C.s - C.cum[k - 1]) / seg));
+        // the view: out from the wall on the post (the courts open out below; facing the post showed only the post),
+        // the way ahead across the parapet
+        const vertical = Math.abs(B.y - A.y) > 0.5 * seg;
+        turnToward(vertical ? headingToYaw(C.heading + 180) : Math.atan2(-(B.x - A.x), -(B.z - A.z)), dt, 2.0);
+        const pT = (vertical ? -12 : -6) * DEG;
+        ctrl.pitch += (pT - ctrl.pitch) * (1 - Math.exp(-dt * 2.5));
+        if (C.s >= C.total - 1e-4) {
+          j.climb = null;
+          ctrl.setMode('walk');
+          ctrl.place(C.via[C.via.length - 1]);
+          walkLeg(j, C.rest);
+          return hold();
+        }
+        cmd.fly = tmp;
+        return cmd;
+      }
+
       if (j.phase === 'walk') {
         const P = j.path;
         // progress: project the body onto the next few segments (monotonic); a segment wholly above or below the
@@ -348,7 +586,7 @@ export function createAuto(ctx, ctrl, physics, nav) {
         const distGoal = Math.hypot(end.x - feet.x, end.z - feet.z);
         const remaining = Math.max(P.total - j.s, distGoal);
         // arrived only on the goal's own level (a stacked path can pass right over or under its end)
-        if (Math.abs(end.y - feet.y) < 0.6 && (distGoal < 0.18 || (P.total - j.s < 0.05 && distGoal < 0.6))) { arrive(j); return hold(); }
+        if (Math.abs(end.y - feet.y) < 0.6 && (distGoal < 0.18 || (P.total - j.s < 0.05 && distGoal < 0.6))) { legEnd(j); return hold(); }
 
         // steering: carrot slightly ahead on the path, never across the inside of a tight curve
         const look = reach(P, j.s, 0.55 + 0.3 * j.speed, 0.07, feet);

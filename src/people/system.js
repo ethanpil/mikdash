@@ -14,9 +14,10 @@ import { buildHumanGeometry } from './human.js';
 import { buildAnimalGeometry, halterPoint } from './animals.js';
 import { gripOffset } from './clips.js';
 import { PROPS, HELD_VESSELS, buildPropGeometry, propAttach, propTip } from './props.js';
-import { createPeopleMaterial, createPeopleDepthMaterials } from './material.js';
+import { createPeopleMaterial, createPeopleDepthMaterials, HUMAN_RIG_ID } from './material.js';
+import { ContactShadows, poseFootprint } from './contact.js';
 import { compileScene, rendersOffscreen } from '../render/warmup.js';
-import { CLIP_ALIASES } from './clips.js';
+import { CLIP_ALIASES, CLIP_VARIANTS } from './clips.js';
 import { m2w, headingToYaw, AMAH } from '../core/units.js';
 import { rng, hashStr, clamp, lerp, smooth } from './util.js';
 
@@ -25,15 +26,21 @@ const LOD1_PX = [110, 90, 72, 56];
 const LOD3_PX = [30, 24, 18, 14];   // smaller than this on screen → LOD3 even within the budget
 const MAX_HERO = [8, 14, 24, 48];
 const FAR_MULT = 3;                 // beyond maxFigures: up to FAR_MULT × maxFigures more, as LOD3
-const FAR_FADE = 0.2;               // the last 20 % of that far allowance dithers out (no popping)
+// qa-r1 PPL-5: every dither fade is TEMPORAL — a figure's alpha moves toward 0 or 1 over FADE_S of real frame time and
+// snaps on 'time:jump', on pause / resume and in stills — so no figure is ever left half dithered (a screen-door ghost)
+// while the clock stands still. (Before, the far-cap fade was a function of the figure's rank and the flowing crowds'
+// fade a function of the distance to the region edge: both froze mid-way whenever nothing moved.)
+const FADE_S = 0.25;
+const FAR_BAND = 0.06;              // the far allowance's last 6 % fades out (hysteresis: it fades in below 12 %)
 const WALK_SPEED = 1.25, RUN_SPEED = 3.6;
-const FLOW_FADE_M = 1.6;            // flowing crowds dither in/out within this distance of the region edge
+const FLOW_EDGE_M = 0.35;           // flowing crowds fade out this close to the region edge, and in this far past it
 const OFFDUTY_POSES = new Set(['sleep', 'lie']);
 const OFFDUTY_ARCH = 'israelite';   // a kohen's own clothes (Tamid 1:1): ordinary tunic + mantle, head bare
 const BATH_POSES = new Set(['bathe']);
 const MASK_HEADGEAR = 8, MASK_BARE = 16; // human.js GRP.HEADGEAR / GRP.BARE as instance mask bits
 // human.js GRP.HAIR / SHAVEN / BEARD / SHAVEN_FACE (people-4): the hair and beard on by default, the shaven shells off
 const MASK_HAIR = 32, MASK_SHAVEN = 64, MASK_BEARD = 128, MASK_SHAVEN_FACE = 256;
+const MASK_AVNET = 512;      // human.js GRP.AVNET: the hedyot's sha'atnez avnet, off outside the avodah (qa-r1)
 const SHAVE_BITS = MASK_HAIR | MASK_SHAVEN | MASK_BEARD | MASK_SHAVEN_FACE;
 /** the mask with the hair as `mode` leaves it: false/null/'none' (grown), 'head' (the scalp shaved), 'all' (head, beard
  *  and brows — Vayikra 14:9) */
@@ -43,6 +50,16 @@ function shaveMask(m, mode) {
   if (md === 'head' || md === 'all') m |= MASK_SHAVEN; else m |= MASK_HAIR;
   if (md === 'all') m |= MASK_SHAVEN_FACE; else m |= MASK_BEARD;
   return m;
+}
+/** a mask with the garment flags of setGarb applied: { avnet: false } takes the sha'atnez avnet off (Rambam KhM 8:11) */
+function garbMask(m, flags) {
+  if (flags && 'avnet' in flags) m = flags.avnet === false ? m & ~MASK_AVNET : m | MASK_AVNET;
+  return m;
+}
+/** setGarb's arguments: (name) | (name, flags) | (flags) → [name | undefined (colours unchanged), flags | null] */
+function garbArgs(name, flags) {
+  if (name && typeof name === 'object') return [name.color, name];
+  return [name, flags || null];
 }
 /** the garments' tint: 'black' | 'white' (roles.js GARB, palette 14–17) over the figure's own colours (keeps their
  *  per-figure shade); null = its own */
@@ -65,6 +82,16 @@ function poseVariant(def, pose) {
   if (def.bathArch && BATH_POSES.has(pose)) return def._bath || (def._bath = { arch: def.bathArch, prop: null });
   return null;
 }
+/** the figure's own variant of a clip ('stand' → 'stand~2', clips.js CLIP_VARIANTS) by v in [0, 1): an actor's by its
+ *  seed, a crowd member's by its offset — so a row of figures in one pose is not a row of clones (qa-r1) */
+function variantOf(arch, clip, v) {
+  const n = clip && CLIP_VARIANTS[clip.name];
+  if (!n) return clip;
+  const k = Math.floor(v * (n + 1)) % (n + 1);
+  return (k && arch.clip(`${clip.name}~${k}`)) || clip;
+}
+/** a crowd member's variant key: decorrelated from its phase offset */
+const memberVar = (c, i) => (c.off[i] * 7.31) % 1;
 /** the clip a prop asks for in a pose (PROPS[name].poses, e.g. wood on the shoulder → carry_log), if the rig has it */
 function propClip(arch, prop, pose) {
   const pp = prop && PROPS[prop.name]?.poses?.[pose];
@@ -89,6 +116,9 @@ const _e2 = new Float32Array(16);
 
 // distinct prop batches (draw calls) per frame by tier (low … ultra); see the draw loop
 const PROP_BATCH_CAP = [14, 22, 34, 56];
+// contact shadows (contact.js) on the tiers without shadow maps for every figure: low (none) and medium (only LOD0/1
+// cast); strength and the distance over which they fade out (m), by detail tier
+const CONTACT = [{ k: 0.7, f0: 35, f1: 60 }, { k: 0.38, f0: 45, f1: 75 }];
 
 // Material options of a figure batch at `lod` on a tier of `detail` (pattern group FIG | KG | BEAST). perf-1: options
 // that compile to the same program are made equal, so batches share programs (each costs 1.5–5 s to compile on
@@ -198,6 +228,7 @@ class Arch {
     this.sys = sys; this.key = key; this.def = def; this.isAnimal = isAnimal;
     this.entry = sys.atlas.ensure(def.rig);
     this.rig = this.entry.rig;
+    this.rigId = HUMAN_RIG_ID[def.rig] ?? 0;
     this.H = this.rig.dims.H || 1;
     // projected-size metric for LOD: animals are longer than tall
     this.size = isAnimal ? Math.max(this.H, (this.rig.dims.L || 0) * 1.2, 0.25) : this.H;
@@ -292,7 +323,7 @@ function makeMask(R, role) {
   let m = 0;
   if (R() < (role?.mantle ?? 1)) m |= 1;
   if (R() < (role?.headcloth ?? 0)) m |= 2;
-  m |= 4 | MASK_HEADGEAR;   // the priestly headgear on (setHeadgear)
+  m |= 4 | MASK_HEADGEAR | MASK_AVNET;   // the priestly headgear (setHeadgear) and the avnet (setGarb) on
   return shaveMask(m, role?.shaven);   // hair and beard grown unless the role is shaven (nazir_shaven)
 }
 /** site Z argument: number (exact) | { near: Z } (the floor nearest Z) | omitted (the walking floor) */
@@ -329,6 +360,7 @@ export class Actor {
     this.clip = arch ? (arch.clip('stand') || Object.values(arch.entry.clips)[0]) : null;
     this.phase = R();
     this.morph = makeMorph(R, this.kind !== 'human');
+    this.vkey = (((seed >>> 0) * 2654435761) >>> 0) / 4294967296;   // which variant of a pose it takes (variantOf)
     this.auto = true;
     this.prev = null;
     this.fade = 0;
@@ -349,7 +381,7 @@ export class Actor {
     if (roleDef?.pose) this.setPose(roleDef.pose);
   }
 
-  get poseName() { return this.clip?.name || null; }
+  get poseName() { return this.clip?.base || this.clip?.name || null; }
 
   /**
    * Site frame (amot). Z: a number = exact height; { near: Z } = the walking floor nearest that height
@@ -387,7 +419,7 @@ export class Actor {
     if (BATH_POSES.has(n) && !this.arch.isAnimal) warnBathe(this.role, this.roleDef);
     this._req = name;
     // a prop may be held its own way in a pose (a log or bundle on the shoulder: carry_log)
-    let clip = (!v && propClip(this.arch, this.prop, n)) || this.arch.clip(n);
+    let clip = (!v && propClip(this.arch, this.prop, n)) || variantOf(this.arch, this.arch.clip(n), this.vkey);
     if (!clip) {
       if (!this.sys._warnedPose.has(`${this.arch.key}:${n}`)) {
         this.sys._warnedPose.add(`${this.arch.key}:${n}`);
@@ -464,15 +496,26 @@ export class Actor {
   get shaven() { return this.mask & MASK_SHAVEN_FACE ? 'all' : this.mask & MASK_SHAVEN ? 'head' : false; }
   /** the garments in 'black' or 'white' (the mourner and the one under a ban, Middot 2:2 — roles mourner / menudeh are
    *  black by default); null = as the role has them (its garb, else the figure's own colours) (people-4). The tunic,
-   *  mantle and head-cloth classes change. */
-  setGarb(name = null) {
+   *  mantle and head-cloth classes change.
+   *  flags (qa-r1): { avnet: false } — a kohen not in the avodah: the avnet of wool and linen off, the other garments on
+   *  (Rambam Klei HaMikdash 8:11: the garments may be worn on the day of service outside the avodah, except the avnet,
+   *  which is sha'atnez); { avnet: true } puts it back (the default). Forms: setGarb(name), setGarb(name, flags),
+   *  setGarb(flags) (the colours unchanged; flags.color may name them). The Kohen Gadol's YK avnet is all linen and
+   *  stays; his golden avnet is under the me'il (the ephod and choshen are not forbidden: Kesef Mishneh on 8:11). */
+  setGarb(name, flags) {
     if (this.kind !== 'human') return this;
-    if (name && !GARB[name]) { console.warn(`[people] unknown garb "${name}" (black | white)`); name = null; }
-    const g = name || this.roleDef?.garb || null;
-    garbTint(this.tint, this._tint0, g);
-    this.garb = g;
+    [name, flags] = arguments.length ? garbArgs(name, flags) : [null, null];   // setGarb() = the role's own
+    if (name !== undefined) {
+      if (name && !GARB[name]) { console.warn(`[people] unknown garb "${name}" (black | white)`); name = null; }
+      const g = name || this.roleDef?.garb || null;
+      garbTint(this.tint, this._tint0, g);
+      this.garb = g;
+    }
+    this.mask = garbMask(this.mask, flags);
     return this;
   }
+  /** the avnet worn (setGarb flags) */
+  get avnet() { return !!(this.mask & MASK_AVNET); }
   /**
    * The figure's size against its rig (people-4-fix): s a number (clamped to 0.8–1.2), or null = back to the size drawn
    * from the seed (the role's range, e.g. kohen 0.95–1.05; readable as actor.scale). Poses that meet a partner or a
@@ -576,10 +619,27 @@ export class Crowd {
         else if (opts.heading?.at) hd = Math.atan2(opts.heading.at[0] - (x0 + x1) / 2, opts.heading.at[1] - (y0 + y1) / 2) * 180 / Math.PI;
         alongX = Math.abs(Math.sin(hd * Math.PI / 180)) > Math.abs(Math.cos(hd * Math.PI / 180));
       }
+      // the grid: nx columns (along X) × ny rows, chosen so each cell is near the wanted aspect (2.1 : 1 along the heading
+      // when prostrating, square otherwise), no cell is smaller than a person needs, and a congregation of six or more
+      // stands as a block of at least two ranks and two files whenever the region has the room — never a single file
+      // along a long, narrow region (qa-r1: the ma'amad stood in one queue along the wall of Ezrat Yisrael)
       const asp = prost ? 2.1 : 1; // cell length along the heading / across
-      const cellA = Math.sqrt((W * Hh) / Math.max(1, count));
-      const cw = prost && alongX ? cellA * Math.sqrt(asp) : prost ? cellA / Math.sqrt(asp) : cellA;
-      const nx = Math.max(1, Math.round(W / cw)), ny = Math.max(1, Math.ceil(count / nx));
+      const minA = (prost ? 2.25 : 0.7) / AMAH, minB = (prost ? 1.0 : 0.55) / AMAH;   // along / across (amot)
+      let nx = 1, ny = Math.max(1, count), best = Infinity;
+      for (let cx = 1; cx <= Math.max(1, count); cx++) {
+        const cy = Math.ceil(Math.max(1, count) / cx);
+        const along = alongX ? W / cx : Hh / cy, across = alongX ? Hh / cy : W / cx;
+        let err = Math.abs(Math.log((along / across) / (prost || alongX ? asp : 1)));
+        if (along < minA) err += 4 * Math.log(minA / along);
+        if (across < minB) err += 4 * Math.log(minB / across);
+        if (count >= 6) {
+          const ranks = alongX ? cx : cy, files = alongX ? cy : cx;
+          if (ranks === 1 && (alongX ? W : Hh) >= 2 * minA) err += 0.9;
+          if (files === 1 && (alongX ? Hh : W) >= 2 * minB) err += 0.9;
+        }
+        err += 0.02 * (cx * cy - count) / count;      // few empty cells
+        if (err < best - 1e-9) { best = err; nx = cx; ny = cy; }
+      }
       const cells = [];
       for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) cells.push([i, j]);
       for (let i = cells.length - 1; i > 0; i--) { const k = Math.floor(R() * (i + 1)); [cells[i], cells[k]] = [cells[k], cells[i]]; }
@@ -599,7 +659,10 @@ export class Crowd {
     this.bx = new Float32Array(n); this.bz = new Float32Array(n);
     this.yaw = new Float32Array(n); this.sc = new Float32Array(n); this.off = new Float32Array(n);
     this.tint = new Float32Array(n * 4); this.tint0 = new Float32Array(n * 4); this.mask = new Float32Array(n); this.morph = new Float32Array(n * 2);
-    this.fadeM = new Float32Array(n).fill(1);
+    this.fadeM = new Float32Array(n).fill(1);      // flowing crowds: each member's alpha (temporal, FADE_S)
+    this.farA = new Float32Array(n).fill(1);       // the far-cap fade: alpha, target and the frame it was last drawn
+    this.farT = new Uint8Array(n).fill(1);
+    this.farF = new Int32Array(n).fill(-9);
     this.pointH = new Float32Array(n).fill(NaN);
     this.autoY = new Uint8Array(n); this.hintY = new Float32Array(n).fill(NaN);
     this.arch = new Array(n); this.roleDef = new Array(n); this.role = new Array(n);
@@ -623,9 +686,10 @@ export class Crowd {
       this.sc[i] = lerp(sc[0], sc[1], R());
       const t = makeTint(R, def, animal);
       this.tint0.set(t, i * 4);
-      if (!animal && (opts.garb || def.garb)) garbTint(t, t.slice(), opts.garb || def.garb);
+      const [gName, gFlags] = garbArgs(opts.garb);
+      if (!animal && (gName || def.garb)) garbTint(t, t.slice(), gName || def.garb);
       this.tint.set(t, i * 4);
-      this.mask[i] = animal ? 0 : makeMask(R, def);
+      this.mask[i] = animal ? 0 : garbMask(makeMask(R, def), gFlags);
       this.off[i] = R();
       this.morph.set(makeMorph(R, animal), i * 2);
       this.pointH[i] = p.h ?? NaN;
@@ -688,14 +752,19 @@ export class Crowd {
     return this;
   }
   setVisible(b) { this.visible = !!b; this.sys._syncFlames(this); return this; }
-  /** every person in the crowd in 'black' | 'white' garments, or null = each as his role has it (people-4) */
-  setGarb(name = null) {
+  /** every person in the crowd in 'black' | 'white' garments, or null = each as his role has it (people-4); flags as
+   *  Actor.setGarb ({ avnet: false } — kohanim not in the avodah, qa-r1) */
+  setGarb(name, flags) {
+    [name, flags] = arguments.length ? garbArgs(name, flags) : [null, null];
     const t = [0, 0, 0, 0];
     for (let i = 0; i < this.capacity; i++) {
       if (this.arch[i].isAnimal) continue;
-      for (let q = 0; q < 4; q++) t[q] = this.tint0[i * 4 + q];
-      garbTint(t, t.slice(), name || this.roleDef[i]?.garb || null);
-      this.tint.set(t, i * 4);
+      if (name !== undefined) {
+        for (let q = 0; q < 4; q++) t[q] = this.tint0[i * 4 + q];
+        garbTint(t, t.slice(), name || this.roleDef[i]?.garb || null);
+        this.tint.set(t, i * 4);
+      }
+      this.mask[i] = garbMask(this.mask[i], flags);
     }
     return this;
   }
@@ -704,7 +773,8 @@ export class Crowd {
   memberVariant(i) { return this.off_ ? poseVariant(this.roleDef[i], this.poseName) : null; }
   memberArch(i) { const v = this.memberVariant(i); return v ? this.sys.arch(v.arch) : this.arch[i]; }
   memberProp(i) { const v = this.memberVariant(i); return v?.prop || (v ? null : this.prop); }
-  _tick(dt) {
+  /** dt: real seconds; snap: fades jump to their targets (time:jump, pause / resume, stills) */
+  _tick(dt, snap = false) {
     if (this.fade > 0) this.fade = Math.max(0, this.fade - dt / 0.35);
     if (!this.capacity) return;
     const c = this.arch[0].clip(this.poseName) || { rate: 0.2, loop: true };
@@ -721,15 +791,19 @@ export class Crowd {
       this._flowed = flowing;
       const g = this.region, W = g.x1 - g.x0, D = g.z1 - g.z0;
       const d = flowing ? this.flow : 0;
+      const step = snap ? 2 : dt / FADE_S;
       for (let i = 0; i < this.count; i++) {
         const fx = -Math.sin(this.yaw[i]), fz = -Math.cos(this.yaw[i]);
         let x = this.bx[i] + fx * d, z = this.bz[i] + fz * d;
         if (flowing) {
           x = g.x0 + (((x - g.x0) % W) + W) % W;
           z = g.z0 + (((z - g.z0) % D) + D) % D;
-          const ex = Math.abs(fx) > 0.15 ? clamp(Math.min(x - g.x0, g.x1 - x) / FLOW_FADE_M) : 1;
-          const ez = Math.abs(fz) > 0.15 ? clamp(Math.min(z - g.z0, g.z1 - z) / FLOW_FADE_M) : 1;
-          this.fadeM[i] = smooth(0, 1, ex * ez);
+          // within FLOW_EDGE_M of the edge it crosses (it wraps there) a member is out: it fades out as it reaches the
+          // edge and in again once past the other edge — over FADE_S of real time, never frozen part-way
+          const ex = Math.abs(fx) > 0.15 ? Math.min(x - g.x0, g.x1 - x) : 1e9;
+          const ez = Math.abs(fz) > 0.15 ? Math.min(z - g.z0, g.z1 - z) : 1e9;
+          const want = Math.min(ex, ez) > FLOW_EDGE_M ? 1 : 0;
+          this.fadeM[i] += clamp(want - this.fadeM[i], -step, step);
         } else this.fadeM[i] = 1;
         this.x[i] = x; this.z[i] = z;
       }
@@ -784,6 +858,21 @@ export class PeopleSystem {
     // the colour pass of a shadow proxy: every vertex outside the clip volume (nothing drawn, almost free)
     this.proxyMat = new ShaderMaterial({ vertexShader: 'void main() { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }', fragmentShader: 'void main() { gl_FragColor = vec4(0.0); }' });
     this.proxyMat.name = 'people-shadow-proxy';
+    const ct = CONTACT[this.detail | 0];
+    this.contactCfg = ct || null;
+    this.contact = ct ? new ContactShadows(this.root) : null;
+    if (this.contact) this.contact.mat.uniforms.uStrength.value = ct.k;
+    this._fp = new Map();   // pose footprints by baked frame (contact shadows)
+  }
+  /** the contact-shadow footprint of a figure in the frame pair fa (the nearer frame; scratch frames uncached) */
+  _footprint(arch, fa) {
+    const F = fa[2] < 0.5 ? fa[0] : fa[1];
+    const baked = F < this.atlas.frames;
+    if (baked && this._fp.has(F)) return this._fp.get(F);
+    // a scratch frame (a cross-fade, rewritten every frame) into a reused array: no garbage per frame
+    const fp = poseFootprint(this.atlas.master, arch.rig, F, arch.H * 0.55, baked ? [0, 0, 0, 0] : (this._fpTmp ||= [0, 0, 0, 0]));
+    if (baked) this._fp.set(F, fp);
+    return fp;
   }
   /** prop material by pattern group ('PROP' vessels/instruments/wood/cloth, 'FLESH' carcass and limbs) and LOD */
   propMat(group, lod) {
@@ -807,7 +896,10 @@ export class PeopleSystem {
     // where LOD 1 has pattern detail (medium+) the High Priest's, the animals' and the carcasses' programs are drawn
     // from a distance too (the courts at dawn): likely in a first view there; on low only up close
     if (all || d >= 1) opts.push(figureMatOpts(d, 1, 'BEAST'), propMatOpts(d, 1, 'FLESH'));
-    if (all) opts.push(figureMatOpts(d, 0, 'BEAST'), propMatOpts(d, 0, 'FLESH'));
+    // qa-r2: the animals' LOD0 program on every tier — animals are heroes from 0.6 × a figure's size, and the sim stands
+    // every pooled one before the camera at boot; issued after the others it was the last to link (low: +3 s to 'compiled')
+    opts.push(figureMatOpts(d, 0, 'BEAST'));
+    if (all) opts.push(propMatOpts(d, 0, 'FLESH'));
     if (!this._warmGeo) {
       const g = new BufferGeometry();
       g.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
@@ -818,6 +910,13 @@ export class PeopleSystem {
       this._warm = new Map();
     }
     const grp = new Group();
+    // the contact shadows' program (contact.js) — a stand-in with the same material and attribute layout but its own
+    // geometry: the real mesh's geometry loses its attributes when the mesh grows (a later warm-up would compile a second,
+    // attribute-less program — warmup-check: "two programs")
+    if (this.contact) {
+      if (!this._warmContact) { this._warmContact = new InstancedMesh(this.contact.warmGeometry(), this.contact.mat, 1); this._warmContact.frustumCulled = false; }
+      grp.add(this._warmContact);
+    }
     for (const o of opts) {
       const key = JSON.stringify(o);
       if (!this._warm.has(key)) {
@@ -981,7 +1080,7 @@ export class PeopleSystem {
     if (owner instanceof Crowd) {
       const i = f.i;
       arch = owner.memberArch(i);
-      clip = arch.clip(owner.poseName) || arch.clip('stand');
+      clip = variantOf(arch, arch.clip(owner.poseName) || arch.clip('stand'), memberVar(owner, i));
       phase = owner.memberPhase(i, clip);
       this._crowdMatrix(owner, i, e16);
     } else {
@@ -1004,6 +1103,8 @@ export class PeopleSystem {
     for (const p of this.props.values()) p.dispose();
     this.batches = [];
     for (const m of [...this.propMats.values(), this.proxyMat, this.depthFig.depth, this.depthFig.distance, this.depthProp.depth, this.depthProp.distance]) m.dispose();
+    this.contact?.dispose();
+    this._warmContact = null;
     this._makeShared();
   }
 
@@ -1080,8 +1181,13 @@ export class PeopleSystem {
     const budget = Math.max(0, this.quality?.maxFigures ?? 180);
     const farCap = budget * FAR_MULT;
 
+    // fades snap to their targets after a jump, when the clock is paused or resumed and in stills (shot mode): a
+    // screen-door figure must never be left frozen part-way
+    const paused = !!ctx.time?.paused;
+    const snap = this.snapping || paused !== this._paused || !!ctx.params?.shot;
+    this._paused = paused;
     for (const a of this.actors) a._tick(dt);
-    for (const c of this.crowds) c._tick(dt);
+    for (const c of this.crowds) c._tick(dt, snap);
 
     // ---- candidates (visible & in frustum)
     let total = 0;
@@ -1128,6 +1234,8 @@ export class PeopleSystem {
       sub.sort((i, j) => d[i] - d[j]);
     }
     for (const b of this.batches) b.begin();
+    const ct = this.contact, cfg = this.contactCfg;
+    if (ct) { ct.begin(); ct.mat.uniforms.uFocal.value = focal; }
     const st = this.stats;
     st.lod[0] = st.lod[1] = st.lod[2] = st.lod[3] = 0;
     st.props = 0;
@@ -1144,7 +1252,11 @@ export class PeopleSystem {
     };
     let heroes = 0;
     const e16 = this._e;
-    const fadeFrom = budget + farCap * (1 - FAR_FADE);
+    // the far cap: figures ranked in its last FAR_BAND fade out (and back in below 2 × FAR_BAND — hysteresis, so a
+    // figure on the boundary does not flicker as the camera moves), over FADE_S of real time
+    const band = Math.max(2, Math.round(farCap * FAR_BAND));
+    const cutOut = budget + farCap - band, cutIn = budget + farCap - 2 * band;
+    const fstep = snap ? 2 : dt / FADE_S;
     for (let k = 0; k < limit; k++) {
       const ci = order ? order[k] : k;
       const owner = C.owner[ci];
@@ -1153,7 +1265,7 @@ export class PeopleSystem {
       if (owner instanceof Crowd) {
         const i = C.idx[ci];
         arch = owner.memberArch(i);
-        clip = (!owner.off_ && propClip(arch, owner.prop, owner.poseName)) || arch.clip(owner.poseName) || arch.clip('stand');
+        clip = (!owner.off_ && propClip(arch, owner.prop, owner.poseName)) || variantOf(arch, arch.clip(owner.poseName) || arch.clip('stand'), memberVar(owner, i));
         phase = owner.memberPhase(i, clip);
         this._crowdMatrix(owner, i, e16);
         tint = owner.tint.subarray(i * 4, i * 4 + 4);
@@ -1181,22 +1293,37 @@ export class PeopleSystem {
         mA = a.morph[0]; mB = a.morph[1];
         if (prevClip && this._crossfade(a, arch, clip, phase, prevClip, prevPhase, fade)) { prevClip = null; fade = -1; }
       }
+      alpha *= this._farFade(owner, C.idx[ci], k, cutIn, cutOut, frame, fstep);
+      if (alpha <= 0.004) { // faded out at the far cap: not drawn, its torch out
+        const f = owner.flames?.length ? (owner instanceof Crowd ? owner.flames.find((q) => q.i === C.idx[ci]) : owner.flames[0]) : null;
+        if (f) f.hidden = frame;
+        continue;
+      }
       // LOD by projected height (LOD3 beyond the budget or when tiny)
       const px = (arch.size * focal) / Math.max(0.1, dist);
       let lod;
       if (k >= budget || px < lod3px) lod = 3;
-      else lod = px > lod0px && heroes < maxHero && alpha > 0.999 ? 0 : px > lod1px ? 1 : 2;
+      // (qa-r2: an animal is a hero from 0.6 × the figures' size on screen — a few at most, and at LOD1 a lamb is a
+      // barrel on posts — so a lamb is LOD0 to ≈ 5 m on high instead of 3)
+      else lod = px > lod0px * (arch.isAnimal ? 0.6 : 1) && heroes < maxHero && alpha > 0.999 ? 0 : px > lod1px ? 1 : 2;
+      if (this.forceLod != null && lod < 3) lod = this.forceLod;   // dev: ctx.people.system.forceLod = 0..2 (inspection shots)
       if (lod === 0) heroes++;
-      if (k >= fadeFrom) alpha *= 1 - smooth(fadeFrom, limit, k + 0.5);
       st.lod[lod]++;
       if (!(owner instanceof Crowd)) owner.lod = lod;
       if (fade === -1) { _fa[0] = _fa[1] = owner.scratch; _fa[2] = 0; } // blended pose in a scratch frame
       else this.atlas.sample(clip, phase, _fa);
       fade = 0;
+      // the contact shadow under it (not under birds), fading out with distance and with the figure
+      if (ct && arch.H > 0.3 && dist < cfg.f1) {
+        const fp = this._footprint(arch, _fa);
+        if (fp) ct.push(e16, fp, alpha * (1 - smooth(cfg.f0, cfg.f1, dist)));
+      }
       const b = this._batchFor(arch, lod);
-      if (b.flat) b.push(e16, _fa[0], _fa[1], 0, alpha, 0, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
-      else b.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, mA, mB, mask, tint[0], tint[1], tint[2], tint[3]);
-      if (lod === 0 && b === arch.batches[0]) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], alpha, 0, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
+      // (pAnimB.x: the human rig's row in material.js ARM_TABLE — the mantle kept outside the arms, qa-r2)
+      const rid = arch.rigId;
+      if (b.flat) b.push(e16, _fa[0], _fa[1], 0, alpha, rid, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
+      else b.push(e16, _fa[0], _fa[1], _fa[2], alpha, rid, mA, mB, mask, tint[0], tint[1], tint[2], tint[3]);
+      if (lod === 0 && b === arch.batches[0]) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], alpha, rid, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
       // props (none on LOD3 silhouettes except the big ones); a second prop (setProps) in the left hand
       const prop2 = owner instanceof Crowd ? null : owner.prop2;
       // ritual vessels in an actor's hands stay drawn at LOD 2 (crowds keep only the big props there)
@@ -1242,6 +1369,7 @@ export class PeopleSystem {
     this._updateFlames(frame);
     this._updateRopes();
     for (const b of this.batches) b.end();
+    ct?.end();
     st.figures = figures;
     st.drawn = limit;
     st.culled = figures - n;
@@ -1249,6 +1377,22 @@ export class PeopleSystem {
     st.far = st.lod[3];
     st.dropped = Math.max(0, n - limit);
     st.batches = this.batches.reduce((s, b) => s + (b.n > 0 ? 1 : 0), 0);
+  }
+
+  /**
+   * The far-cap fade of one figure (an actor, or member i of a crowd) at rank k this frame: its alpha moves toward 1
+   * (k < cutIn) or 0 (k ≥ cutOut) by fstep, keeping its target in between; a figure not drawn last frame starts at its
+   * target (it comes into view or into the allowance — at the screen's edge, or far away).
+   */
+  _farFade(owner, i, k, cutIn, cutOut, frame, fstep) {
+    const crowd = i >= 0;
+    let a = crowd ? owner.farA[i] : owner._farA ?? 1;
+    let t = crowd ? owner.farT[i] : owner._farT ?? 1;
+    const seen = (crowd ? owner.farF[i] : owner._farF) === frame - 1;
+    if (k >= cutOut) t = 0; else if (k < cutIn) t = 1;
+    a = seen ? a + clamp(t - a, -fstep, fstep) : t;
+    if (crowd) { owner.farA[i] = a; owner.farT[i] = t; owner.farF[i] = frame; } else { owner._farA = a; owner._farT = t; owner._farF = frame; }
+    return a;
   }
 
   /** lead ropes: from each led animal's halter (chin ring) to its leader's fist, sagging a little */
@@ -1348,6 +1492,7 @@ export class PeopleSystem {
     for (const a of this.archs.values()) a.dispose();
     for (const p of this.props.values()) p.dispose();
     this.ropes?.dispose();
+    this.contact?.dispose();
     this.root.removeFromParent();
   }
 }

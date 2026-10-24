@@ -13,8 +13,9 @@ let waiting = new Set();
 let settle = null;
 let done = Promise.resolve();
 
-/** the rigs the default first views need (man, elder, woman, boy and the courts' animals) */
-export const BOOT_RIGS = ['man', 'elder', 'woman', 'boy', 'lamb', 'ram', 'goat'];
+/** the rigs the default first views need (man, elder, woman, boy, child and the courts' animals) — qa-r2: the sim pools
+ *  ensure 'child' at every boot (the women's court crowds); it was baked on the main thread there (≈ 0.4–0.7 s on low) */
+export const BOOT_RIGS = ['man', 'elder', 'woman', 'boy', 'child', 'lamb', 'ram', 'goat'];
 
 export function startPrebake(rigs = BOOT_RIGS) {
   if (typeof Worker === 'undefined' || waiting.size) return done;

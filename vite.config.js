@@ -36,13 +36,32 @@ function bootChunks() {
   };
 }
 
+// qa-r1 CORE-2: share cards (og:url, og:image, canonical) need the site's absolute URL. The deploy workflow passes
+// MIKDASH_SITE_URL from actions/configure-pages (right for any Pages owner or custom domain); without it (dev, local
+// builds) the lines that need it, and the og:image details, are dropped rather than shipped with a guessed host.
+function siteUrl() {
+  const raw = (process.env.MIKDASH_SITE_URL || '').trim();
+  const url = raw ? new URL(raw.replace(/\/*$/, '/')).href : '';
+  return {
+    name: 'mikdash-site-url',
+    transformIndexHtml: {
+      order: 'pre',
+      handler: (html) => (url ? html.replaceAll('%MK_SITE_URL%', url)
+        : html.replace(/^.*(%MK_SITE_URL%|"og:image).*\r?\n/gm, '')),
+    },
+  };
+}
+
 // base './' so the build works under GitHub Pages' /mikdash/ subpath and locally.
 export default defineConfig({
   base: './',
-  plugins: [bootChunks()],
+  plugins: [siteUrl(), bootChunks()],
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 2000,
+    // the minifier drops the bundled packages' license headers: list them (with their texts) in one file instead.
+    // Not the default '.vite/license.md': upload-pages-artifact skips hidden paths, so it would never be deployed.
+    license: { fileName: 'third-party-licenses.md' },
   },
   server: { host: '127.0.0.1' },
 });

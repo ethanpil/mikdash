@@ -145,10 +145,29 @@ vec3 marble(vec2 q, bool local, int type, vec3 base, vec3 vein, vec3 alt, out fl
   vec4 c = nM(wq, vec2(1.2), vec2(0.37, 0.11), local);
   vec4 cl = nM(q, vec2(0.45), vec2(0.83, 0.27), local);      // large soft clouds of tone
   float gate = nM(q, vec2(0.3, 0.5), vec2(0.71, 0.43), local).z;
-  // veins: zero sets of noise sampled ANISOTROPICALLY (elongated along u, then warped): long, gently curving veins
-  // that run roughly together, fade in and out, and branch into a finer family — not closed squiggles
+  // veins (qa-r2): a branching, multi-scale NETWORK instead of a few thick isolated squiggles. Each family is the zero
+  // set of a noise channel (ridged: 1 - |n|), its distance in METRES from the centre line taken as |n| / |grad n|
+  // (finite differences in the noise domain — screen derivatives would jump at the block joints), so widths are
+  // physical and the same on every tier:
+  //   primaries   — the smooth channel sampled anisotropically (long, gently curving, roughly parallel veins along u,
+  //                 then warped), thin (marmara 4–12 mm, shayish 3–9 mm across) with a faint narrow halo;
+  //   secondaries — a rougher, 6-octave channel at ~2.3x the frequency (wandering, crinkled), shown mostly within reach
+  //                 of a primary, so they leave it as branches and fade away; thinner and fainter;
+  //   hairlines   — a third, finer family, very faint (only where the texture resolves them).
+  // Lines are drawn at least 1.4 texels wide (a 1-texel line beaded into dots along diagonals), at proportionally lower
+  // contrast when that is wider than the vein (an antialiased line: the same average darkening), so the low tiers get
+  // a faint network, not thick dashes.
   // (a periodic tile keeps whole cells per axis: ask for more cells across than along so it stays elongated)
-  float n1 = nM(wq, local ? vec2(0.3, 1.25) : vec2(0.3, 2.1), vec2(0.61, 0.29), local).z;
+  vec2 f1 = local ? vec2(0.3, 2.0) : vec2(0.3, 2.6);
+  vec2 f3 = f1 * vec2(2.4, 2.2);
+  vec2 q3 = wq + vec2(w2, w.z) * 0.18;
+  const float FD = 0.01;
+  float n1 = nM(wq, f1, vec2(0.61, 0.29), local).z;
+  float n1x = nM(wq + vec2(FD, 0.0), f1, vec2(0.61, 0.29), local).z;
+  float n1y = nM(wq + vec2(0.0, FD), f1, vec2(0.61, 0.29), local).z;
+  float n3 = nM(q3, f3, vec2(0.47, 0.61), local).x;
+  float n3x = nM(q3 + vec2(FD, 0.0), f3, vec2(0.47, 0.61), local).x;
+  float n3y = nM(q3 + vec2(0.0, FD), f3, vec2(0.47, 0.61), local).x;
   float n2 = nM(wq + vec2(w2, w.z) * 0.12, local ? vec2(0.8, 3.2) : vec2(0.7, 5.4), vec2(0.17, 0.53), local).z;   // smooth channel: wavy, not jagged
   float wv = nM(wq, vec2(1.4, 2.2), vec2(0.27, 0.05), local).z;
   vec4 kb = nM(q, vec2(0.7, 2.0), vec2(0.5, 0.3), local);
@@ -161,23 +180,28 @@ vec3 marble(vec2 q, bool local, int type, vec3 base, vec3 vein, vec3 alt, out fl
   // soft clouds of tone (and, here and there, a faint grey veil) — the stone is never a flat plane of colour
   vec3 col = base * (1.0 + 0.035 * c.x + 0.04 * cl.y + grain - 0.035 * smoothstep(0.2, 0.8, cl.w))
            * mix(vec3(1.0), vec3(1.012, 1.0, 0.982), smoothstep(-0.3, 0.4, c.w));
-  // a vein: a soft grey core inside a faint halo of FIXED width; the core thins and thickens a little along it
-  // (0.75x..1.15x — a swelling core with a halo scaled with it left dark blobs where veins faded out: "a crack with a
-  // stain"); core and halo fade out together, so a vein ends by dissolving, not in a smudge.
-  // Contrast stays low (natural marble, not ink): the core blends at most ~40 % toward the vein tone (marmara).
-  float wmul = 0.75 + 0.4 * smoothstep(-0.5, 0.5, wv);
-  float vw0 = type == 2 ? 0.03 : 0.022;
-  float vw = max(vw0 * wmul, tex * 2.5);
-  float a1 = abs(n1);
-  float core = 1.0 - smoothstep(0.0, vw, a1);
-  core *= core;
-  float halo = 1.0 - smoothstep(0.0, max(vw0 * 3.2, tex * 6.0), a1);
-  halo *= halo;
-  float fade = smoothstep(-0.45, 0.45, wv + 0.6 * cl.x);       // veins come and go along their length
-  float hair = (1.0 - smoothstep(0.0, max(0.012, tex * 2.0), abs(n2))) * smoothstep(0.2, 0.7, gate) * smoothstep(0.25, 0.6, 0.0045 / tex);
+  float d1 = abs(n1) * FD / max(length(vec2(n1x - n1, n1y - n1)), 1e-5);
+  float d3 = abs(n3) * FD / max(length(vec2(n3x - n3, n3y - n3)), 1e-5);
+  float tw = tex * 1.4;
+  // primary: width swells and thins along the vein (0.5x..1.5x), with a halo of fixed width; it fades in and out
+  float wmul = 0.5 + smoothstep(-0.6, 0.6, wv);
+  float w1 = (type == 2 ? 0.004 : 0.003) * wmul;
+  float we1 = max(w1 * 1.5, tw);
+  float p1 = (1.0 - smoothstep(0.0, we1, d1)) * min(1.0, 2.0 * w1 / we1);
+  float h1 = 1.0 - smoothstep(0.0, max(0.012, tex * 3.0), d1);
+  h1 *= h1;
+  float fade = smoothstep(-0.7, 0.3, wv + 0.6 * cl.x);
+  // secondaries: near a primary (|n1| small) they branch from it; a few float free where the gate is open
+  float near = 1.0 - smoothstep(0.0, 0.45, abs(n1));
+  float g3 = max(near * smoothstep(-0.6, 0.2, wv), 0.5 * smoothstep(0.2, 0.6, gate)) * smoothstep(-0.5, 0.3, sn + 0.5);
+  float w3 = (type == 2 ? 0.0022 : 0.0016) * (0.6 + 0.8 * smoothstep(-0.5, 0.5, sn));
+  float we3 = max(w3 * 1.5, tw);
+  float p3 = (1.0 - smoothstep(0.0, we3, d3)) * min(1.0, 2.0 * w3 / we3) * g3;
+  // hairlines (value-space width, faded where the texture cannot carry them)
+  float hair = (1.0 - smoothstep(0.0, max(0.01, tex * 2.0), abs(n2))) * smoothstep(0.2, 0.7, gate) * smoothstep(0.25, 0.6, 0.0045 / tex);
   float vv = type == 2
-    ? clamp((core * 0.4 + halo * 0.1) * (0.3 + 0.7 * on) * fade + hair * 0.08, 0.0, 1.0)
-    : clamp((core * 0.13 + halo * 0.04) * on * fade + hair * 0.02, 0.0, 1.0);
+    ? clamp((p1 * 0.7 + h1 * 0.08) * (0.4 + 0.6 * on) * fade + p3 * 0.5 + hair * 0.06, 0.0, 1.0)
+    : clamp((p1 * 0.28 + h1 * 0.03) * on * fade + p3 * 0.15 + hair * 0.015, 0.0, 1.0);
   // kochla: layered bedding along a wavy coordinate, elongated along u (the course): broad soft tonal zones plus
   // thinner layers that fade in and out along their length, at LOW contrast (a pale blue-green-grey stone whose
   // layers read like the ripples of water); fine grains and sparse pale layers; the same crystalline grain

@@ -48,12 +48,18 @@ export class Script {
    * passed overhead (a table top, the nanasin's cedar blocks, a roof) as placeNear can.
    */
   exact(b = true) { this.exactZ = !!b; return this; }
+  /**
+   * The avnet from the next step on: false once the man's avodah is done (it is sha'atnez, worn only in the avodah —
+   * Rambam Klei HaMikdash 8:11), true as he goes back to it; undefined = his pool's own (qa-r2 SIM-R2-1).
+   */
+  avnet(on) { this.av = on === undefined ? undefined : !!on; return this; }
   get tEnd() { return this.t0 + this.u; }
   /** absolute time of the end of the script so far */
   now() { return this.t0 + this.u; }
   _push(st) {
     st.u0 = this.u; st.u1 = this.u + Math.max(0, st.d);
     st.hIn = this.h;
+    st.av = this.av;
     this.u = st.u1;
     this.steps.push(st);
     return this;
@@ -156,7 +162,7 @@ export function evalScript(S, t, out, phaseFor) {
   const st = steps[lo];
   if (st.kind === 'hide') return out;
   const k = st.d > 1e-9 ? clamp((u - st.u0) / st.d) : 1;
-  out.vis = true; out.k = lo; out.kk = k; out.zx = !!st.zx;
+  out.vis = true; out.k = lo; out.kk = k; out.zx = !!st.zx; out.av = st.av;
   out.pr = st.props ? st.props[0] ?? null : null;
   out.pl = st.props ? st.props[1] ?? null : null;
   if (st.kind === 'walk') {
@@ -239,6 +245,7 @@ export function applyFigure(slot, st) {
   if (st.zx) slot.place(st.X, st.Y, st.Z); else slot.placeNear(st.X, st.Y, st.Z);
   slot.heading(st.h).pose(st.pose, st.ph);
   setProps(slot, st.pr, st.pl);
+  slot.avnet(st.av);
   slot.show();
   return true;
 }

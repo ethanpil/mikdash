@@ -62,6 +62,7 @@ export const ICON = {
   pin: svg('<path d="M12 21s-6.5-6.2-6.5-11a6.5 6.5 0 0113 0c0 4.8-6.5 11-6.5 11z" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="12" cy="10" r="2.3" fill="currentColor"/>'),
   ext: svg('<path d="M14 5h5v5M19 5l-8 8M18 14v5H5V6h5" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'),
   stop: svg('<rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/>'),
+  book: svg('<path d="M12 6.8c-1.9-1.5-4.6-2.1-7.8-1.8v12.6c3.2-.3 5.9.3 7.8 1.8 1.9-1.5 4.6-2.1 7.8-1.8V5c-3.2-.3-5.9.3-7.8 1.8zM12 6.8v12.6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>'),
   cal: svg('<rect x="4" y="5.5" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'),
 };
 

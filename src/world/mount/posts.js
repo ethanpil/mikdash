@@ -71,7 +71,10 @@ export function registerAnchors(ctx, app) {
   // Default spawn: on the axis 38 amot (≈18 m) east of the foot of the Chel steps, so the soreg, the twelve steps
   // and the Ezrat Nashim gate (with the altar's smoke column above the wall) frame together. At the foot itself the
   // risers fill the view, and the Heichal is hidden by the Ezrat Nashim east wall from anywhere on this axis.
-  add('start', [steps.foot[0] + 38, axis, 0], 270, 'Before dawn at the twelve steps of the Chel', { zone: 'har-habayit', pitch: 10 });
+  // qa-r2-fix-world: the eye turned 9° north of the axis (heading 279) — square on, the wall was a flat backdrop with the
+  // glow dead centre; turned, the glow of the Heichal through the gates sits left of centre and the wall recedes toward
+  // its north corner. Still on the axis (off it, the two gates no longer line up on the Heichal) ⚙
+  add('start', [steps.foot[0] + 38, axis, 0], 279, 'Before dawn at the twelve steps of the Chel', { zone: 'har-habayit', pitch: 10 });
   add('mount.chel.steps.foot', steps.foot, 270, 'At the foot of the twelve steps of the Chel', { zone: 'chel', pitch: 20 });
   // the same axis 53 amot further east: soreg, chel steps, the Ezrat Nashim gate and, through it, Nikanor and the Ulam
   add('mount.chel.approach', [steps.foot[0] + 53, axis, 0], 270, 'Approaching the Chel steps on the Temple axis', { zone: 'har-habayit', pitch: 9 });

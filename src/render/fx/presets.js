@@ -1,12 +1,23 @@
 // Fire kinds. Geometry is relative to spec.size (metres, "rough flame size"); per-tier arrays are
 // [low, medium, high, ultra].
 //
+// FLAMES (qa-r1-fix-env-render): a few soft-edged camera-facing cards per fire, each a procedural flipbook (rising,
+// domain-warped noise eroding a plume envelope: the licks come from the noise, not from separate sprites):
+//   cards   per tier; card 0 stands over the fuel's centre and is the widest and tallest, the others on a ring of
+//           ringR × size round it. cardW / cardH: [outer, central] width / height ÷ size.
+//   core    the hot core's added emission (× L at its peak): an additive layer over the alpha-blended flame body.
+//
 // PHOTOMETRY (physical; multiplied by env.preExposure like every env light — see src/env/index.js):
-//   L       flame luminance scale, cd/m² (core ≈ 1.25 L, body ≈ 0.45–0.7 L, tips less). Sooty wood/oil flames are
-//           ~1e4–3e4 cd/m² in their bright yellow region (a candle ≈ 1e4).
+//   L       flame luminance scale, cd/m² (body ≈ 0.3–0.6 L, a card's hot core up to ≈ 1 L + core × 0.88 L, tips less).
+//           Sooty wood/oil flames are ~1e4–3e4 cd/m² in their bright yellow region (a candle ≈ 1e4); soot at 1600 K is
+//           ≈ 2e4 cd/m² as a black body, at 1700 K ≈ 5e4 — the core is brighter than sunlit white stone (≈ 1–2e4).
 //   light   luminous intensity, cd ≈ projected flame area × mean luminance, scaled by (size/refSize)²;
-//           decay 2 (inverse square), placed `height`·size above the base (centre of the flames).
-//   Lember / Lbed  glowing sparks / coal bed luminance, cd/m² (orange heat ~1000–1100 °C).
+//           inverse square from `height`·size above the base (the flames' centre: the hearth's and brazier's higher, so
+//           their low logs do not throw spokes of shadow across the floor), softened within the flames' own radius
+//           (render/fx/lights.js FLAME_R: 1 / (d² + r²), no point-light hot spot beside the fire).
+//   charR / ash  (hearths) the coal-bed decal's char reach ÷ its radius, and how far it greys the floor there (0..1)
+//   Lember / Lbed  glowing sparks / the coal bed's hottest seams, cd/m² (≈ 1350–1450 K: 1.5e3–5e3 as a black body;
+//           the decal's seams average far less).
 //   light colour: ~1900 K firelight partly white-balanced (the eye adapts chromatically to firelight;
 //           the flames themselves keep their full colour in the shader ramp).
 //   halo    glare sprite: radius / size and centre luminance as a fraction of L (bloom covers it on
@@ -27,47 +38,53 @@
 export const KINDS = {
   pyre: {
     refSize: 2.0,
-    tongues: [6, 9, 12, 14],
+    cards: [3, 4, 4, 4],
     spread: 0.42,            // footprint radius / size
     bed: 1.35,               // coal-bed radius / footprint radius
-    tongueH: [0.55, 1.35],   // tongue height / size
-    tongueW: [0.32, 0.62],   // tongue width / size
+    bedH: 0.42,              // coal-bed decal's height (the logs it chars and lights) / size
+    ringR: 0.3,              // outer cards' ring radius / size
+    cardH: [0.95, 1.3],      // card height / size [outer, central]
+    cardW: [0.62, 0.95],     // card width / size
+    core: 1.5,
     turb: 1.0, speed: 1.0,
-    L: 2.0e4, Lember: 8e3, Lbed: 2e3,
+    L: 2.0e4, Lember: 8e3, Lbed: 4e3,
     embers: [20, 40, 64, 90],
     emberRise: 2.4, emberRate: [0.35, 0.7], emberSize: 0.012,
     halo: { radius: 0.6, frac: 0.03 },
     light: { candela: 1.5e4, distance: 70, color: 0xff9d55, flicker: 0.12, height: 0.6 },
-    smoke: { height: 46, width: 0.75, density: 0.5, rise: 2.4, spread: 3.2, kind: 0 },
+    smoke: { height: 46, width: 0.75, density: 0.38, rise: 2.4, spread: 4.2, kind: 0 },
   },
   hearth: {
     refSize: 0.8,
-    tongues: [3, 4, 5, 6],
-    spread: 0.38, bed: 1.4, tongueH: [0.5, 1.2], tongueW: [0.35, 0.6],
+    cards: [3, 3, 4, 4],
+    spread: 0.38, bed: 1.4, bedH: 0.5, ringR: 0.22, cardH: [1.05, 1.45], cardW: [0.75, 1.05], core: 1.5,
+    // qa-r2-fix-env-render: the decal reaches 2.8 × the bed's radius: the logs charred along their length, the floor round
+    // the kerb greyed by ash and soot to (1 − ash) of its albedo ⚙ (a hearth burning day and night, Tamid 1:1)
+    charR: 2.8, ash: 0.5,
     turb: 0.95, speed: 1.05,
-    L: 2.0e4, Lember: 8e3, Lbed: 2e3,
-    embers: [8, 14, 20, 28],
-    emberRise: 1.8, emberRate: [0.5, 0.9], emberSize: 0.012,
+    L: 2.0e4, Lember: 8e3, Lbed: 4e3,
+    embers: [10, 18, 26, 34],
+    emberRise: 2.2, emberRate: [0.5, 0.9], emberSize: 0.012,
     halo: { radius: 0.6, frac: 0.03 },
-    light: { candela: 2.5e3, distance: 30, color: 0xff9d58, flicker: 0.14, height: 0.6 },
+    light: { candela: 2.5e3, distance: 30, color: 0xff9d58, flicker: 0.14, height: 0.85 },
     smoke: null,
   },
   brazier: {
     refSize: 0.6,
-    tongues: [2, 3, 4, 4],
-    spread: 0.3, bed: 1.3, tongueH: [0.6, 1.15], tongueW: [0.4, 0.62],
+    cards: [2, 2, 3, 3],
+    spread: 0.3, bed: 1.3, bedH: 0.45, ringR: 0.18, cardH: [0.95, 1.2], cardW: [0.7, 0.95], core: 1.5,
     turb: 0.9, speed: 1.1,
-    L: 2.0e4, Lember: 8e3, Lbed: 2e3,
+    L: 2.0e4, Lember: 8e3, Lbed: 4e3,
     embers: [6, 10, 16, 22],
     emberRise: 1.4, emberRate: [0.55, 1.0], emberSize: 0.011,
     halo: { radius: 0.6, frac: 0.03 },
-    light: { candela: 1.2e3, distance: 24, color: 0xffa05a, flicker: 0.15, height: 0.6 },
+    light: { candela: 1.2e3, distance: 24, color: 0xffa05a, flicker: 0.15, height: 0.8 },
     smoke: null,
   },
   torch: {
     refSize: 0.35,
-    tongues: [1, 2, 2, 3],
-    spread: 0.1, tongueH: [0.85, 1.2], tongueW: [0.42, 0.6],
+    cards: [1, 2, 2, 2],
+    spread: 0.1, ringR: 0.06, cardH: [1.0, 1.25], cardW: [0.5, 0.62], core: 1.4,
     turb: 0.85, speed: 1.3,
     L: 2.5e4, Lember: 8e3, Lbed: 0,
     embers: [0, 3, 5, 7],
@@ -78,8 +95,8 @@ export const KINDS = {
   },
   lamp: {
     refSize: 0.08,
-    tongues: [1, 1, 1, 1],
-    spread: 0, tongueH: [1, 1], tongueW: [0.4, 0.4],
+    cards: [1, 1, 1, 1],
+    spread: 0, ringR: 0, cardH: [1, 1], cardW: [0.42, 0.42], core: 1.2,
     turb: 0.22, speed: 0.75,
     L: 1.2e4, Lember: 0, Lbed: 0,
     embers: [0, 0, 0, 0],

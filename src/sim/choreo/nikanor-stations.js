@@ -59,6 +59,7 @@ const TO_MEDICHIN = [[230.6, 382.0, 16], [235.0, 378, 16], [237.8, 345, 16], [23
 
 export default {
   id: 'nikanor-stations',
+  planRank: 3,        // the boot's plan job (g4/book.js ORDER)
   lead: 70,           // the head of the ma'amad is at his place from the ma'amad's start (sunrise − 8)
   lag: 30,
   importance: 1,
@@ -90,7 +91,7 @@ export default {
     };
     try { state.hung = ctx.people?.spawnProp?.('lamb_hung', { seed: SEED }) || null; state.hung?.setVisible(false); } catch { state.hung = null; }
     state.cast = new SetCast(ctx, { kohen: state.setK, lamb: state.setLamb, ewe: state.setEwe, israelite: state.agent });
-    try { state.offSource = ctx.schedule?.addSource?.(setsSource(ctx, 'g4-metzora', () => plan(ctx, state, sim).sets)); } catch (e) { console.warn('[sim:g4] source failed', e); }
+    try { state.offSource = ctx.schedule?.addSource?.(setsSource(ctx, 'g4-metzora', () => plan(ctx, state, sim)?.sets)); } catch (e) { console.warn('[sim:g4] source failed', e); }
     return state;
   },
 
@@ -99,6 +100,7 @@ export default {
 
   update(ctx, state, t, dt, sim) {
     const P = plan(ctx, state, sim);
+    if (!P) return;
     for (const tr of state.troupes) tr.update(ctx, sim, t, tr.cb);
     state.cast.update(sim, t, dt);
     asham(ctx, state, sim, t, P);
@@ -118,6 +120,10 @@ export default {
 
 // ================================================================================================ the plan
 function plan(ctx, state, sim) {
+  if (state.plan && state.planGen === sim.generation && state.planDate === ctx.time?.dateString) return state.plan;
+  // not in the boot's undrawn frames (the plan job builds it — runtime.js planRank, qa-r2 SIM-R2-12); a drawn frame
+  // first finishes that job
+  if (sim.planNow && !sim.planNow()) return null;
   if (state.plan && state.planGen === sim.generation && state.planDate === ctx.time?.dateString) return state.plan;
   planBefore(ctx, sim, WHO);
   const book = g4Book(ctx, sim);
@@ -283,10 +289,12 @@ function metzora(state, P, seed, sim, ctx) {
       }
       // he waits in the gateway until their blood is applied, then goes in, purified
       it.stand(Math.max(1, atoned + 0.5 - c()), 270, { at: gs });
-      it.walkTo([gs, [252.0, 329.8, 13.5], [248.6, 324.4, 13.5]], 0.9);
+      // (in Ezrat Yisrael west of the gateway's niche: the corner of the chavitin makers' chamber is at X 248, Y 324.5 —
+      // qa-r2: he bowed inside it)
+      it.walkTo([gs, [252.0, 329.8, 13.5], [247.0, 326.8, 13.5]], 0.9);
       it.stand(3.0, 270, { pose: 'bow', phase: (q) => (q < 0.15 ? q / 0.15 * 0.5 : q > 0.85 ? 0.5 + (q - 0.85) / 0.15 * 0.5 : 0.5) });
       it.stand(0.8, 270);
-      it.walkTo([[248.6, 324.4, 13.5], [252.6, 330.8, 13.5], [258, 331.0, 13.5], ...DOWN(331.0)], 1.05);
+      it.walkTo([[247.0, 326.8, 13.5], [252.6, 330.8, 13.5], [258, 331.0, 13.5], ...DOWN(331.0)], 1.05);
     },
   }));
   M.it = man.it;

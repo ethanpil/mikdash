@@ -32,7 +32,7 @@ export function defineVolumes(ctx) {
     // courses: without this the Kodesh coffers sat outside the room and mirrored daylight into the gold
     if (o.ceilingTop != null) max[2] = Math.max(max[2], o.ceilingTop);
     else if ((o.shell ?? SHELL_WALLS) <= SHELL_ZONE) max[2] += 1;
-    const v = { id, min: [...b.min], max, base: o.base ?? CLOSED_ROOM, margin: o.margin ?? 0.3, shell: o.shell ?? SHELL_WALLS, apertures: o.apertures || [], probe: o.probe || null, gold: !!o.gold };
+    const v = { id, min: [...b.min], max, base: o.base ?? CLOSED_ROOM, margin: o.margin ?? 0.3, shell: o.shell ?? SHELL_WALLS, joins: o.joins || [], apertures: o.apertures || [], probe: o.probe || null, gold: !!o.gold };
     vols.push(v);
     return v;
   };
@@ -68,6 +68,15 @@ export function defineVolumes(ctx) {
     const f1 = ctx.elOpt('heichal.windows.f1');
     const f2 = par('heichal.windows.f2').windows || [];
     const f1Open = f1 ? (f1.params.perSide * f1.params.widthInside) / Math.max(1, f1.box.max[0] - f1.box.min[0]) : 0;
+    // qa-r1-fix-env-render: the key light through F1 only where it can pass a real window — n slots evenly spaced along
+    // the band (as build-heichal places them), each wIn wide at the Kodesh face and wOut at the outer face, the wall's
+    // depth apart (Menachot 86b: narrow inside). The band's openness above stays the windows' share for the sky light.
+    const f1n = f1?.params.perSide || 0;
+    const f1Slot = f1 && f1n > 1 ? {
+      n: f1n, wIn: f1.params.widthInside, wOut: f1.params.widthOutside,
+      period: (f1.box.max[0] - f1.box.min[0] - f1.params.widthOutside) / (f1n - 1),
+      depth: Math.max(0, (f1.box.max[1] - f1.box.min[1] - (kod0.max[1] - kod0.min[1])) / 2),
+    } : null;
     const f2Rect = f2.length ? [[Math.min(...f2.map((w) => w.min[1])), Math.min(...f2.map((w) => w.min[2]))], [Math.max(...f2.map((w) => w.max[1])), Math.max(...f2.map((w) => w.max[2]))]] : null;
     const f2Open = f2Rect ? f2.reduce((sum, w) => sum + (w.max[1] - w.min[1]) * (w.max[2] - w.min[2]), 0) / ((f2Rect[1][0] - f2Rect[0][0]) * (f2Rect[1][1] - f2Rect[0][1])) : 0;
     // the great gate opens onto the roofed Ulam (≈45 % of open sky reaches its back wall); its doors and the
@@ -75,11 +84,13 @@ export function defineVolumes(ctx) {
     const gateOpen = () => door('heichal.gate.great')() * curtain('heichal.gate-curtain')();
     add('heichal.kodesh', kod, {
       base: 0.004, margin: 0.3, shell: SHELL_ZONE, probe: 'kodesh', ceilingTop: kiyurTop, gold: true,
+      // its west face is the parochot's line: the KhK beyond, not the open (qa-r1-fix-env-render)
+      joins: ['-X'],
       apertures: ap([
         face(kod, 0, +1, gate, gateOpen, 0.45),
         // F1: narrow inside, splayed outward, high in the N and S walls above the ta'im roofs (Part VII §22)
-        f1 && face(kod, 1, +1, f1.box, () => f1Open, 0.6),
-        f1 && face(kod, 1, -1, f1.box, () => f1Open, 0.6),
+        f1 && { ...face(kod, 1, +1, f1.box, () => f1Open, 0.6), slot: f1Slot },
+        f1 && { ...face(kod, 1, -1, f1.box, () => f1Open, 0.6), slot: f1Slot },
         // F2 over the gate (Zechariah's crowns) look into the Ulam's upper space: one rectangle over both windows,
         // openness = their share of it (one aperture less per fragment)
         f2.length && face(kod, 0, +1, null, () => f2Open, 0.3, f2Rect),
@@ -91,14 +102,23 @@ export function defineVolumes(ctx) {
   const khk = box('heichal.khk'), trk = box('heichal.amah-traksin');
   if (khk) {
     let b = trk ? { min: [Math.min(khk.min[0], trk.min[0]), khk.min[1], khk.min[2]], max: [Math.max(khk.max[0], trk.max[0]), khk.max[1], khk.max[2]] } : khk;
-    // render-env-2: grown through its west wall to the wall's outer face, where the lul (a 4-tefach slot behind the
-    // Kaporet, closed by a small curtain hung just inside the KhK face) passes: the curtain's back faces and the slot's
-    // jambs sat within the shell of the old west face and lit as open sky — the bright dotted edge of the lul curtain.
-    // The slot itself is no aperture: it runs 17 amot to the open air and is curtained (it shows no sky).
-    const wW = box('heichal.wall.west');
-    if (wW && box('heichal.lul-west')) b = grow(b, 0, -1, wW.min[0]);
+    // render-env-2: the lul (a 4-tefach slot behind the Kaporet, closed by a small curtain hung just inside the KhK face)
+    // passes the west wall: the curtain's back faces and the slot's jambs sat within the shell of the west face and lit
+    // as open sky — the bright dotted edge of the lul curtain. qa-r2-fix-env-render (ENV-R2-2): the KhK was then grown
+    // through the whole wall to its outer face at the foot (X 89, 7 amot thick), but the wall steps back to 5 amot above
+    // +44 (site.js profile): its outer face above the western ta'im's roof (+55) stood 2 amot inside the grown box, beyond
+    // the 0.4 m shell, and was lit as the dark room — a black band on the Heichal's west face up to the KhK's ceiling. Now
+    // the west face JOINS the slot's own volume (below) instead: the curtain's back faces stay in the KhK, the jambs are in
+    // the slot, and nothing outside the wall's inner face is in the room. The slot itself is no aperture: it runs 17 amot
+    // to the open air and is curtained (it shows no sky).
+    const wW = box('heichal.wall.west'), lul = box('heichal.lul-west');
+    const lulIn = wW && lul ? { min: [wW.min[0], lul.min[1], lul.min[2]], max: [b.min[0], lul.max[1], lul.max[2]] } : null;
     // "a dark chamber" behind the two parochot; gold-plated like the Kodesh (interreflection fill, interiors-glsl.js)
-    add('heichal.khk', b, { base: 0.0015, shell: SHELL_ZONE, ceilingTop: kiyurTop, gold: true });
+    // its east face is the outer parochet's line (qa-r1-fix-env-render: joins the Kodesh): the inner parochet's east face
+    // in the amah traksin, 0.3-0.5 m inside, faces out of the KhK's box but into the dark gap between the curtains
+    add('heichal.khk', b, { base: 0.0015, shell: SHELL_ZONE, ceilingTop: kiyurTop, gold: true, joins: lulIn ? ['+X', '-X'] : ['+X'] });
+    // the lul through the Heichal's west wall (inner face to outer face at its height): as dark as the KhK it opens from
+    if (lulIn) add('heichal.lul-west', lulIn, { base: 0.0015, margin: 0.05, shell: SHELL_ZONE, ceilingTop: lulIn.max[2], joins: ['+X'] });
   }
   const ulam = box('heichal.ulam');
   if (ulam) {

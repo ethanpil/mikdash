@@ -30,11 +30,11 @@
 
 // ======================================================================================== stations (site amot)
 export const STATIONS = {
-  'gate-korban': { zone: 'gate-korban', el: 'azarah.gate.korban', note: "Sha'ar HaKorban, middle gate of the north wall; the name only is in the Mishnah (Middot 1:5) — taken as the way the most-holy offerings came in (Report §7.3)", confidence: 'reconstruction' },
-  'gate-bechorot': { zone: 'gate-bechorot', el: 'azarah.gate.bechorot', note: "Sha'ar HaBechorot, middle gate of the south wall; the name only (Middot 1:4) — taken as the firstlings' gate (Report §7.3)", confidence: 'reconstruction' },
+  'gate-korban': { zone: 'gate-korban', el: 'azarah.gate.korban', note: "Sha'ar HaKorban, middle gate of the north wall; the name only is in the Mishnah (Middot 1:5) — Bartenura explains it as the way the most-holy offerings came in, to their slaughter in the north (Bartenura on Middot 1:5)", confidence: 'reconstruction' },
+  'gate-bechorot': { zone: 'gate-bechorot', el: 'azarah.gate.bechorot', note: "Sha'ar HaBechorot, middle gate of the south wall; the name only (Middot 1:4) — Bartenura explains it as the gate by which the firstlings came in (Bartenura on Middot 1:4)", confidence: 'reconstruction' },
   nikanor: { zone: 'nikanor', el: 'azarah.gate.nikanor', at: [257.5, 330.5, 13.5], note: "Sha'ar Nikanor: the metzora's, the yoledet's and the sotah's station (Negaim 14:8; Sotah 1:5)", confidence: 'explicit' },
   'kinnin-chest': { zone: 'ezrat-nashim', at: [285, 348, 6], note: "The chest marked “kinnin” for bird-pair money (Shekalim 6:5). Its place is not given; a yoledet who has immersed still may not pass into Ezrat Yisrael (Kelim 1:8) yet puts her money in it (Eruvin 32a), so the model sets it in Ezrat Nashim by the steps", confidence: 'reconstruction' },
-  seals: { zone: 'beit-hamoked', at: [217, 409, 16], note: 'Yochanan ben Pinchas sells the seal, Achiyah gives the libations (Shekalim 5:4); the model\'s chamber of seals in Beit HaMoked (Tamid 3:3; Report §9.2)', confidence: 'reconstruction' },
+  seals: { zone: 'beit-hamoked', at: [217, 409, 16], note: 'Yochanan ben Pinchas sells the seal, Achiyah gives the libations (Shekalim 5:4); Tamid 3:3 names a chamber of seals among the chambers of Beit HaMoked; its corner is the model\'s', confidence: 'reconstruction' },
   rings: { zone: 'slaughter-zone', el: 'altar.rings', note: '24 rings north of the altar; the tamid rings (2nd ring at the NW and NE) are kept clear at the temidim\'s hours (Tamid 4:1; Middot 3:5)', confidence: 'explicit' },
   tzafon: { zone: 'slaughter-zone', el: 'altar.tzafon', note: 'the halachic north, from the altar to the north wall (Zevachim 5:1; Rambam MK 5:2)', confidence: 'explicit' },
   nanasin: { zone: 'slaughter-zone', el: 'altar.nanasin', note: '8 dwarf pillars, cedar blocks, three rows of iron hooks; carcasses hung and flayed (Middot 3:5); flaying stations in params.flayingStations', confidence: 'explicit' },
@@ -70,7 +70,7 @@ export const STATIONS = {
 
 // ======================================================================================== attire (what to dress)
 const ATTIRE = {
-  kohen: 'Four white linen garments — ketonet, michnasayim, avnet (32 amot, wound), migba\'at — barefoot on the stone; hands and feet washed at the kiyor before the first service (Yoma 7:5; Report §34.1)',
+  kohen: 'Four white linen garments — ketonet, michnasayim, avnet (32 amot, wound), migba\'at — barefoot on the stone; hands and feet washed at the kiyor before the first service (Yoma 7:5; Zevachim 24a; Tamid 1:4)',
   owner: 'His own clothes (tunic, mantle); no staff, shoes, money-belt or dust on his feet on Har HaBayit (Berachot 9:5) — so barefoot; enters the Ezrat Kohanim only to lean, slaughter or wave (Kelim 1:8)',
   woman: 'Her own dress, head covered; a woman does not lean (Menachot 9:8) or wave, except a sotah and a nezirah (Rambam MK 9:16); a yoledet who has immersed still stays outside Ezrat Yisrael until her offering is made (Kelim 1:8)',
   nazir: 'Long uncut hair until the shaving in the nazirites\' chamber; shaved head after it (Nazir 6:7–8)',
@@ -84,7 +84,7 @@ const OWNER = (pose = 'stand', extra = {}) => A('israelite', 1, pose, { note: 't
 
 const arrive = (gate, animals, extra = {}) => ({
   id: 'arrive', label: 'The owner leads his animal in', actors: [OWNER('walk')], at: gate, props: [], animals,
-  minutes: [3, 10], attire: ATTIRE.owner, sources: ['Kelim 1:8', 'Berachot 9:5', 'Middot 2:2', 'Report §7.3'], confidence: 'reconstruction',
+  minutes: [3, 10], attire: ATTIRE.owner, sources: ['Kelim 1:8', 'Berachot 9:5', 'Middot 2:2', 'Middot 1:4–5', 'Bartenura on Middot 1:4–5'], confidence: 'reconstruction',
   note: 'Which gate is reconstruction (the gate names only are sourced). The animal is first checked for blemishes; Jerusalem had paid examiners of blemishes (Ketubot 106a) — where they sat is not recorded.', ...extra,
 });
 const sealStep = () => ({
@@ -187,7 +187,7 @@ const nesachimStep = (animal) => ({
   actors: [K(1, 'carry_walk', { prop: 'bowl', note: `flour (${NESACHIM[animal].solet} isaron) mixed with ${NESACHIM[animal].oil} log oil, salted, burned whole (Menachot 6:2)` }),
     K(1, 'pour', { prop: 'flask', note: `${NESACHIM[animal].wine} log wine: up the ramp, straight to the SW horn, poured into the cup, back down on his heel (Zevachim 6:2–3)` })],
   at: ['table-silver', 'kevesh', 'horn-sw', 'cups', 'maarachah'], props: ['bowl', 'flask'], animals: [], minutes: [3, 6], attire: ATTIRE.kohen,
-  sources: ['Menachot 9:3', 'Menachot 9:6', 'Menachot 6:2', 'Zevachim 6:2–3', 'Bamidbar 15:4–10', 'Report §65.1', 'Rambam MK 4:5'], confidence: 'explicit',
+  sources: ['Menachot 9:3', 'Menachot 9:6', 'Menachot 6:2', 'Zevachim 6:2–3', 'Bamidbar 15:4–10', 'Rambam MK 4:5'], confidence: 'explicit',
   note: 'Brought by day; they may follow the offering later, even the next day (Rambam MK 4:5).',
 });
 
@@ -306,7 +306,12 @@ export const OFFERING_TYPES = {
     blood: { rite: 'one', corners: ['any with a yesod'], level: 'against the yesod', remainder: null, sources: ['Zevachim 5:8', 'Rambam MK 5:17'] },
     burned: 'The eimurim', eaten: { by: 'kohanim and their households', where: 'anywhere in Jerusalem', until: 'two days and the night between', sources: ['Zevachim 5:8'] },
     hide: 'the kohen\'s', nesachim: 'none (Menachot 9:6)',
-    steps: [arrive('gate-bechorot', ['a firstling lamb, kid or calf'], { actors: [K(1, 'walk', { note: 'the kohen who received it brings it; in his own clothes until he serves' })] }), slaughter('rings', 'kalim'), carryBlood('altar-ne'), bloodOne(),
+    steps: [arrive('gate-bechorot', ['a firstling lamb, kid or calf'], {
+      label: 'The kohen it was given to brings it in by Sha\'ar HaBechorot', // ≤ 64 chars: g5/dynamic.js shortStep
+      actors: [K(1, 'walk', { note: 'the kohen who received it brings it; in his own clothes until he serves' })],
+      sources: ['Bamidbar 18:17–18', 'Middot 1:4', 'Bartenura on Middot 1:4', 'Berachot 9:5'],
+      note: 'The owner gives the firstling to a kohen, who offers it (Bamidbar 18:17–18). The gate is named for the firstlings (Middot 1:4); Bartenura explains that they were brought in by it. The animal is first checked for blemishes; Jerusalem had paid examiners of blemishes (Ketubot 106a) — where they sat is not recorded.',
+    }), slaughter('rings', 'kalim'), carryBlood('altar-ne'), bloodOne(),
       hangFlay('lamb', false), carryUp(1, 'The eimurim'), takeOut('The meat', 'for two days and the night between')],
     frequency: { lo: 2, hi: 8, unit: 'animals per weekday in Cheshvan' },
     sources: ['Zevachim 5:8', 'Menachot 9:6–7', 'Rambam MK 5:17', 'Rambam MK 9:25'],
@@ -346,7 +351,7 @@ export const OFFERING_TYPES = {
       id: 'haktarah', label: 'Head salted and thrown on the fire; the crop and feathers flung to the ash place; the body split and burned',
       actors: [K(1, 'throw')], at: ['maarachah', 'beit-hadeshen'], props: [], animals: [], minutes: [2, 4], attire: ATTIRE.kohen,
       sources: ['Zevachim 6:5', 'Zevachim 64a', 'Rambam MK 6:21–22'], confidence: 'explicit',
-      note: 'The throw of crop and feathers from the SE horn to the ash place east of the ramp was a long one (Zevachim 64a; Report §10.8).',
+      note: 'The throw of crop and feathers from the SE horn to the ash place east of the ramp was a long one (Zevachim 64a).',
     }],
     frequency: { lo: 20, hi: 60, unit: 'birds per weekday in Cheshvan' },
     sources: ['Zevachim 6:2', 'Zevachim 6:5', 'Kinnim 1:1', 'Chullin 1:5', 'Rambam MK 6:20–23'],
@@ -397,7 +402,7 @@ export const OFFERING_TYPES = {
     steps: [sealStep(), nesachimStep('lamb')],
     frequency: { lo: 0, hi: 0, unit: 'libation sets per weekday in Cheshvan', withEach: ['olah', 'shelamim', 'todah'], withSets: { metzora: ['asham', 'chatat'] },
       note: 'Not drawn by itself: one set comes with every animal olah, shelamim and todah, and with the metzora\'s chatat and asham (Menachot 9:6); lo/hi are computed from those below. A libation vowed alone is rare and not modelled.' },
-    sources: ['Menachot 9:2–3', 'Menachot 9:6', 'Menachot 6:2', 'Shekalim 5:3–4', 'Zevachim 6:2–3', 'Bamidbar 15:1–16', 'Report §65.1'],
+    sources: ['Menachot 9:2–3', 'Menachot 9:6', 'Menachot 6:2', 'Shekalim 5:3–4', 'Zevachim 6:2–3', 'Bamidbar 15:1–16'],
   },
   // ---------------------------------------------------------------- the composite sets seen at the courts
   nazir: {
@@ -542,7 +547,7 @@ export const OFFERING_RULES = {
   },
   order: ['A chatat precedes the olah brought with it — even a bird chatat an animal olah (Zevachim 89a–90a; Mishnah Zevachim 10:2, 10:4)', 'Blood, then flaying, then the eimurim (Rambam MK 5:18)', 'Waving before the eimurim go up; the kohanim\'s portions only after (Rambam MK 9:11, 9:16)'],
   salt: 'Every offering is salted — limbs on the ramp, the kometz, the bird\'s head and body (Vayikra 2:13; Rambam MK 6:4; Zevachim 6:5); salt from Lishkat HaMelach (Middot 5:3).',
-  nesachim: { table: NESACHIM, which: 'every olah and shelamim, and the metzora\'s chatat and asham; not bechor, ma\'aser, Pesach, chatat, asham (Menachot 9:6)', where: 'wine into the silver cup at the SW horn; the flour-and-oil burned whole (Zevachim 6:2; Menachot 6:2)', sources: ['Menachot 9:3', 'Menachot 9:6', 'Bamidbar 15:4–10', 'Report §65.1'] },
+  nesachim: { table: NESACHIM, which: 'every olah and shelamim, and the metzora\'s chatat and asham; not bechor, ma\'aser, Pesach, chatat, asham (Menachot 9:6)', where: 'wine into the silver cup at the SW horn; the flour-and-oil burned whole (Zevachim 6:2; Menachot 6:2)', sources: ['Menachot 9:3', 'Menachot 9:6', 'Bamidbar 15:4–10'] },
   hides: 'Hides of the most-holy go to the kohanim; salted in the Parvah; shared out to the beit av in the evening — later every Friday among both watches; the braita adds that at last the owners consecrated them (Pesachim 57a; Middot 5:3).',
   attire: ATTIRE,
   seasons: {

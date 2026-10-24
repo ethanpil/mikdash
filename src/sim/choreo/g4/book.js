@@ -37,7 +37,8 @@ export class Slots {
   }
   _fix(i) { for (let k = Math.max(0, i); k < this.a.length; k++) this.m[k] = Math.max(k ? this.m[k - 1] : -Infinity, this.b[k]); }
   remove(h) {
-    for (let i = 0; i < this.a.length; i++) if (this.a[i] === h.a && this.b[i] === h.b && this.who[i] === h.who) {
+    // (sorted by start: from the first booking starting at h.a)
+    for (let i = this._hi(h.a); i < this.a.length && this.a[i] === h.a; i++) if (this.b[i] === h.b && this.who[i] === h.who) {
       this.a.splice(i, 1); this.b.splice(i, 1); this.who.splice(i, 1); this.m.splice(i, 1); this._fix(i); return;
     }
   }
@@ -51,7 +52,9 @@ export class Slots {
 /**
  * One walking lane of the circuit (all walkers in it at the same speed, counter-clockwise): a walker's stretch along
  * it is the line pos(t) = c + 60·v·t (mod L). Two stretches overlapping in time conflict when their lines lie closer
- * than GAP metres — one would walk inside the other. Indexed by 2-minute bins for speed.
+ * than GAP metres — one would walk inside the other. Indexed by 2-minute bins for speed. A block is someone standing
+ * in it — the stretch [s0, s1] taken from t0 to t1 (one waiting where a gate's passage begins, or at the head of a
+ * spur's way down): a line that passes within GAP of it meanwhile conflicts.
  */
 const BIN = 2;
 export class LaneBook {
@@ -65,6 +68,13 @@ export class LaneBook {
       for (let i = 0; i < list.length; i++) {
         const e = list[i];
         if (!(t0 < e.t1 && t1 > e.t0)) continue;
+        if (e.block) {
+          // where the line is when both are there, how far it goes meanwhile, and whether that meets the stretch
+          const ta = Math.max(t0, e.t0), pa = s + 60 * this.v * (ta - t0), len = 60 * this.v * (Math.min(t1, e.t1) - ta);
+          const r0 = e.s0 - g, rl = e.s1 - e.s0 + 2 * g;
+          if ((((r0 - pa) % L) + L) % L <= len || (((pa - r0) % L) + L) % L <= rl) return true;
+          continue;
+        }
         let d = Math.abs(c - e.c); if (d > L / 2) d = L - d;
         if (d < g) return true;
       }
@@ -73,6 +83,13 @@ export class LaneBook {
   }
   add(s, t0, t1, who, c = null) {
     const e = { c: c ?? this._c(s, t0), t0, t1, who };
+    const keys = [];
+    for (let k = Math.floor(t0 / BIN); k <= Math.floor(t1 / BIN); k++) { let l = this.bins.get(k); if (!l) this.bins.set(k, (l = [])); l.push(e); keys.push(k); }
+    return { lane: this, e, keys };
+  }
+  /** someone standing in the lane: [s0, s1] (m) taken from t0 to t1 */
+  block(s0, s1, t0, t1, who) {
+    const e = { block: true, s0, s1, t0, t1, who };
     const keys = [];
     for (let k = Math.floor(t0 / BIN); k <= Math.floor(t1 / BIN); k++) { let l = this.bins.get(k); if (!l) this.bins.set(k, (l = [])); l.push(e); keys.push(k); }
     return { lane: this, e, keys };

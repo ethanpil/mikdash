@@ -9,6 +9,8 @@
 //                   floorsAt(x,z), rebuild(), stats, lastQueryMs }
 //   ctx.player  = { position (feet), eye, heading, pitch (deg), mode 'walk'|'fly'|'auto', goTo(target, speed)
 //                   -> Promise<boolean>, cancel(), teleport(target), setMode, setLook, setInputEnabled, ... }
+//                 goTo targets may carry `look` (site [X,Y,Z?]): the arrival pitches toward it and keeps figures out
+//                 of the way (goto.js ARRIVAL); findPath crosses climbs (nav/climbs.js: the cedar posts, Middot 4:5).
 // URL: ?pos=X,Y,Z (eye, site amot; X,Y alone = at) · ?at=X,Y[,Z] (Z picks the floor on any level) ·
 //      ?look=heading,pitch · ?fly=1 · default anchor 'start'.
 import { createPhysics } from './physics.js';
@@ -78,8 +80,8 @@ export async function init(ctx) {
     get locked() { return input.state.locked; },
     speeds: { ...SPEEDS, instant: Infinity },
     body: BODY,
-    /** the path (world feet points, read-only) the current goTo walk follows, or null (no walk / not planned yet) */
-    get path() { return auto.job?.path?.pts ?? null; },
+    /** the path (world feet points, read-only; a climb's via included) the current goTo follows, or null (no walk / not planned yet) */
+    get path() { return auto.job?.full ?? auto.job?.path?.pts ?? null; },
     /** walk (or glide/teleport) to a target; resolves true on arrival, false if cancelled/superseded */
     goTo: (target, speed = 'walk') => auto.goTo(target, speed),
     cancel: () => auto.cancel(),

@@ -12,6 +12,8 @@ every decision.** Read this whole file before touching code.
 | `../sources/*.txt` — Hebrew primary texts (Middot, Tamid, Shekalim, Parah, Rambam Beit HaBechirah, Yoma, Zevachim, Ezra) for checking any claim | `../diagrams/*` (sample drawings, incl. sheet 10 ritual-clock design) |
 | | `../video/VIDEO_NARRATION.md` (sample script) |
 
+The `../` paths are siblings of this repository in the author's workspace; they are not part of the published repository.
+
 Rules: (1) Geometry comes from `src/data/site.js`, which is derived from the report's dimension chains and
 locks — never copy coordinates from the manifest or diagrams. (2) Anything the sources do not fix (exact
 clock minutes, footprints marked unsourced, decorative detail, faces, city massing) is **reconstruction**:

@@ -14,19 +14,22 @@
 //   --eval "JS"      evaluate JS in the page after ready (result printed; a Promise is awaited), e.g. "__mikdash.renderer.info.render"
 //   --prod           measure the PRODUCTION bundle: vite build into a temp dir, served by vite preview
 //                    (slower to start, but timings match what visitors get)
+//   --browser-arg A  extra browser command-line switch (repeatable), e.g. --browser-arg=--disable-3d-apis (no WebGL)
 //
-// Prints: saved paths, console errors/warnings, GPU string, draw calls/triangles, build times.
+// Browser: CHROME_PATH, else Edge, else Chrome, else Playwright's Chromium (tools/browser.mjs).
+// Prints: browser, saved paths, console errors/warnings, GPU string, draw calls/triangles, build times.
 // Then Read the PNGs to look at them.
 import { createServer, build as viteBuild, preview as vitePreview } from 'vite';
 import { chromium } from 'playwright-core';
-import { mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { launchBrowser, GPU_ARGS } from './browser.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const args = process.argv.slice(2);
-const opt = { out: 'shots', q: 'medium', w: 1280, h: 720, timeout: 120, keepUi: false, evals: [], prod: false };
+const opt = { out: 'shots', q: 'medium', w: 1280, h: 720, timeout: 120, keepUi: false, evals: [], prod: false, browserArgs: [] };
 const queries = [];
 for (let i = 0; i < args.length; i++) {
   const a = args[i];
@@ -39,6 +42,8 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--keep-ui') opt.keepUi = true;
   else if (a === '--eval') opt.evals.push(args[++i]);
   else if (a === '--prod') opt.prod = true;
+  else if (a === '--browser-arg') opt.browserArgs.push(args[++i]);
+  else if (a.startsWith('--browser-arg=')) opt.browserArgs.push(a.slice('--browser-arg='.length));
   else if (a === '--batch') {
     const list = JSON.parse(readFileSync(args[++i], 'utf8'));
     for (const it of list) queries.push({ name: it.name, query: it.query });
@@ -46,14 +51,15 @@ for (let i = 0; i < args.length; i++) {
 }
 if (!queries.length) queries.push({ name: 'default', query: '' });
 
-const EDGE = [
-  'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
-  'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-].find((p) => existsSync(p));
-
 function slug(s) {
   return (s || 'default').replace(/[^a-z0-9.,=-]+/gi, '_').replace(/[=,]/g, '-').slice(0, 80) || 'default';
 }
+
+// the browser first: a machine without one fails here, before the dev server or the production build
+const { browser, label: browserLabel } = await launchBrowser(chromium, {
+  headless: true, args: [...GPU_ARGS, '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required', ...opt.browserArgs],
+}).catch((e) => { console.error(e.message); process.exit(1); });
+console.log(`browser: ${browserLabel} ${browser.version()}`);
 
 let server, prodDir = null;
 if (opt.prod) {
@@ -69,11 +75,6 @@ if (opt.prod) {
   await server.listen();
 }
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({
-  executablePath: EDGE, headless: true,
-  args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader',
-    '--autoplay-policy=no-user-gesture-required'],
-});
 mkdirSync(resolve(root, opt.out), { recursive: true });
 let failures = 0;
 try {

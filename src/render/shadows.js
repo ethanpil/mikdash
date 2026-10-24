@@ -39,6 +39,18 @@ const _dir = new Vector3();
  * CascadedSunShadow) adds a share of that cascade's texel size. Installed once, before programs compile.
  */
 let chunkPatched = false;
+/**
+ * qa-r2-fix-env-render (ENV-R2-7): the casters' faces drawn with a slope-scaled depth offset (glPolygonOffset factor, in
+ * units of each face's own depth slope across a shadow texel). With front faces in the map, a PCF tap a texel or two
+ * below a lit receiver in light space lands on the adjacent surface in front of it — the tread at a riser's foot, seen
+ * from a low sun — and that surface is nearer the light by up to tap reach × cot(sun altitude) (≈ 20 cm at 20°): a false
+ * shadow band along every concave edge, stepped by the texel grid (the sawtooth on the 15 steps' risers at d2). The
+ * offset pushes a face back by about one texel's depth change across it, so only faces grazing the light move: the
+ * treads by ≈ 9 cm at a 20° sun, a riser facing it by ≈ 1.5 cm. Factor 1 removes the sawtooth; the 8 cm proud lintels'
+ * shadows and the sovev slab's contact edge are unchanged (2.5 began to thin the lintel shadows). Casters only: the
+ * receivers' slope term is below.
+ */
+const CASTER_SLOPE_OFFSET = 1;
 const SLOPE = '( 1.0 + min( sqrt( max( 1.0 - mkSc * mkSc, 0.0 ) ) / mkSc, 3.0 ) )'; // 1 + tan θ, ≤ 4 (mkSc = cos θ)
 export function installCascadeBiasChunk() {
   if (chunkPatched) return true;
@@ -68,10 +80,17 @@ export function installCascadeBiasChunk() {
 			}`);
   chunkPatched = true;
   // front faces into the sun / moon shadow maps (orthographic shadow cameras only; not the people's own depth material,
-  // nor a depth-only shadow proxy — frontFaces below)
+  // nor a depth-only shadow proxy — frontFaces below), drawn with a slope-scaled depth offset (qa-r2-fix-env-render)
   const proto = Object3D.prototype, prev = proto.onBeforeShadow;
   proto.onBeforeShadow = function (renderer, object, camera, shadowCamera, geometry, depthMaterial, group) {
-    if (shadowCamera?.isOrthographicCamera && depthMaterial?.side === BackSide && !object.customDepthMaterial && frontFaces(object, group)) depthMaterial.side = DoubleSide;
+    if (shadowCamera?.isOrthographicCamera && depthMaterial && !object.customDepthMaterial) {
+      const dbl = depthMaterial.side === BackSide && frontFaces(object, group);
+      if (dbl) depthMaterial.side = DoubleSide;
+      // three never resets a cached depth material's offset: set it on every draw
+      depthMaterial.polygonOffset = dbl;
+      depthMaterial.polygonOffsetFactor = dbl ? CASTER_SLOPE_OFFSET : 0;
+      depthMaterial.polygonOffsetUnits = 0;
+    }
     return prev.call(this, renderer, object, camera, shadowCamera, geometry, depthMaterial, group);
   };
   return true;

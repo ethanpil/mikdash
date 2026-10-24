@@ -225,6 +225,9 @@ function build(ctx, sim) {
     s.act(0.12, { pose: 'bow', phase: [0, 0.42], face: k < 2 ? onTable(gt, k) : bowlOn(gt, k), props });
     tPlaceOld[k] = s.now();
     s.act(0.12, { pose: 'bow', phase: [0.7, 1], face: onTable(gt, k % 2) });
+    // their service is done: they wait for the division without the sha'atnez avnet (Rambam KhM 8:11; qa-r2 SIM-R2-1),
+    // as shabbat-mishmar's Scripts continue them from D0
+    s.avnet(false);
   }
   // the four who took the bread out stay by it (bread-warm: participants); one lays his hand on the loaves ⚙
   const tTouch = warm[0] + 0.6;
@@ -334,6 +337,7 @@ function build(ctx, sim) {
   // ---- I2, I3 come back from Lishkat HaKelim to the north group (their swap Scripts end at their spots at D0)
   for (let j = 0; j < 2; j++) {
     const s = I[2 + j], sp = spotsN[1 + j];          // slot i of the division stands at spots[i − 1]
+    s.avnet(false);                                   // the bazichin burned: their part is done (SIM-R2-1)
     s.walk([K.door, K.out, [245.2, 386, K.ZY], [243.0, 385.2, 15], [241.4, 384.4, Z], [239.6, 352 + j, Z], sp], { speed: SPEED.walk });
     s.until(D0, { pose: 'stand', face: lead.N, sway: 8, seed: SEED_IN + 70 + j });
     if (s.now() > D0 + 0.01) warn.push(`I${2 + j} late for the division`);
@@ -476,7 +480,7 @@ function build(ctx, sim) {
     T, warm, baz, div, swapI: I, swapO: O, divI, divO, items, kg,
     t: {
       bringLeave: tLeaveI, newOnMarble: Math.min(...tPlaceNew), takeNew: tTakeNew, lift: tLift, slide: tSlide, bowlsOn: tBowlsOn, out: tOut,
-      oldOnGold: Math.min(...tPlaceOld), touch: tTouch, takeBaz: tTakeBaz, pour: tPour, takeOld: tTakeOld, startN, startS, endN, endS,
+      oldOnGold: Math.min(...tPlaceOld), oldOnGoldEnd: Math.max(...tPlaceOld) + 0.12, touch: tTouch, takeBaz: tTakeBaz, pour: tPour, takeOld: tTakeOld, startN, startS, endN, endS,
       // the Shulchan's bread movables (shabbat-showbread.js): the old bowls off the table from bowlsOff, the new set on
       // from bowlsSet; the sets swapped back (identical) at swapBack, when all is settled
       bowlsOff: Math.min(...tBowlsOff), bowlsSet: Math.max(...tBowlsSet), swapBack: Math.max(...tBowlsSet) + 0.4,

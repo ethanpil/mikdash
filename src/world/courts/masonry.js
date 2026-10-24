@@ -4,6 +4,7 @@
 // docs/decisions/build-courts.md.
 import { gridSolid, B, EB, isect, inside, sweep } from './lib/geo.js';
 import { courseRuns } from '../materials/courses.js';
+import { nitzotzBays } from './azarah.js';
 
 /** the Herodian wall keys on the materials' course table (1.00–1.20 m courses; world-4): outer faces and the dressed
  *  inner faces. The modelled set-out courses follow ctx.mats.courseAt (materials/courses.js courseRuns). */
@@ -140,7 +141,9 @@ export function buildMasonry(C) {
     // so the courses run on over the flush outer faces of the chambers built in the wall
     const grow = (b, g = 0.2) => (b.room ? b : { ...b, min: [b.min[0] - g, b.min[1] - g, b.min[2]], max: [b.max[0] + g, b.max[1] + g, b.max[2]] });
     const etzDoor = el('azarah.chamber.etz').params.door;
-    const fr = gridSolid(fringe, subs.map((b) => grow(b)).concat([
+    // the open bays of Beit HaNitzotz on the chel face (azarah.js nitzotzBays)
+    const nzBays = nitzotzBays(el).bays.filter((b) => b.face > 0).map((b) => grow(B(b.x0, walls.azN.max[1] - 1, b.z0, b.x1, walls.azN.max[1] + 1, b.z1)));
+    const fr = gridSolid(fringe, subs.map((b) => grow(b)).concat(nzBays, [
       B(etzDoor.x[0], walls.azN.max[1] - 1, Z_AZ, etzDoor.x[1], walls.azN.max[1] + 1, Z_AZ + 20),
       grow(EB(el('azarah.gate.mayim'))),
       // keep the set-out courses off the flights' cheeks and the projecting buildings

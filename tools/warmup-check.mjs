@@ -9,18 +9,20 @@
 // Exit code 1 on any failure. One production build; each tier × mode is one cold browser (fresh profile: no GPU program
 // cache). Also reported (play): the worst frame and the synchronous GL calls over 50 ms in the 5 s after the view
 // (before any input). Fails on any shader info-log read after 'ready' (the production bundle must not check shaders:
-// core/engine.js) and on console errors / warnings.
+// core/engine.js) and on console errors / warnings. Browser: CHROME_PATH, else Edge, else Chrome, else Playwright's Chromium
+// (tools/browser.mjs); the limits below are for Edge on the HD 4600.
 //
 // Gap limits ('compiled' → first frame): low / medium 1 s; high / ultra 2 s — their first frame also draws the
 // cascades' and fires' shadow passes, whose depth programs three creates inside WebGLShadowMap (keyed by the previous
 // light setup, not warmed: perf-fix-1.md): 0.5–1.1 s on the HD 4600 in the perf-fix-1 review's runs, 1.9 s
 // with other processes holding ≈ 85 % of it (these links run on this thread and the GPU process's, CPU-bound).
 import { createRequire } from 'node:module';
-import { existsSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { build as viteBuild, preview as vitePreview } from 'vite';
+import { launchBrowser, GPU_ARGS } from './browser.mjs';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const { chromium } = createRequire(join(root, 'package.json'))('playwright-core');
@@ -34,8 +36,13 @@ for (let i = 0; i < args.length; i++) {
   else query = args[i];
 }
 const GAP_MS = { low: 1000, medium: 1000, high: 2000, ultra: 2000 };
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe',
-  '/usr/bin/microsoft-edge', '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'].find((p) => existsSync(p));
+const launch = () => launchBrowser(chromium, { headless: true, args: GPU_ARGS });
+// the browser first: a machine without one fails here, before the production build
+{
+  const { browser, label } = await launch().catch((e) => { console.error(e.message); process.exit(1); });
+  console.log(`browser: ${label} ${browser.version()}`);
+  await browser.close();
+}
 
 const dir = join(tmpdir(), `mikdash-warmup-${process.pid}`);
 await viteBuild({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), build: { outDir: dir, emptyOutDir: true } });
@@ -45,7 +52,7 @@ const base = server.resolvedUrls.local[0];
 let failed = false;
 for (const q of tiers) {
   for (const mode of modes) {
-    const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] });
+    const { browser } = await launch();
     const logs = [];
     let res = null;
     try {

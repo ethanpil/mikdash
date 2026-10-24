@@ -5,7 +5,7 @@
 //
 //   const job = compileScene(renderer, scene, camera)      // issue every program the scene's meshes need
 //   await whenReady(renderer, job, (done, total) => …)    // resolves when all are linked (or at once without the ext)
-import { WebGLRenderTarget, HalfFloatType, InstancedBufferAttribute, BufferGeometry, Float32BufferAttribute, Mesh } from 'three';
+import { WebGLRenderTarget, HalfFloatType, InstancedBufferAttribute, BufferGeometry, Float32BufferAttribute, Mesh, MeshStandardMaterial } from 'three';
 
 let _target = null;
 let _frameLights = null;
@@ -147,4 +147,67 @@ export function whenReady(renderer, materials, onProgress = null, interval = 40)
     };
     poll();
   });
+}
+
+/** shown: the object and all its ancestors visible */
+function isShown(o) {
+  for (let p = o; p; p = p.parent) if (!p.visible) return false;
+  return true;
+}
+
+/**
+ * qa-r1-fix-env-render (ENV-5): after the first view, warm in idle slices what the boot's warm-up could not see —
+ *  - the meshes that exist but are hidden (three's compile walks visible objects only): a pyre shown on its day, a
+ *    curtain or prop switched on by the sim; each is compiled as it is, made visible for that call only;
+ *  - stand-ins for programs that lazily created meshes will need: a plain MeshStandardMaterial on a plain mesh is the
+ *    program of the people's lead ropes (people/system.js RopeSet, made at the first led animal — at the gates' opening
+ *    before sunrise its first frame compiled it synchronously: 1.5–1.9 s on the HD 4600 at low).
+ * One object per slice (a synchronous program query waits for the GPU's queued work; issuing during the boot's warm-up
+ * competes with the first view — hence after 'firstFrame'); each linked program's first use (uniform reads) happens
+ * here too, not in the frame that first draws it.
+ */
+export function warmHidden(ctx, { delay = 400 } = {}) {
+  const r = ctx.renderer;
+  const queue = [];
+  const plain = new Mesh(new BufferGeometry()
+    .setAttribute('position', new Float32BufferAttribute(new Float32Array(9), 3))
+    .setAttribute('normal', new Float32BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3)), new MeshStandardMaterial());
+  plain.name = 'warmup:plain-standard';
+  plain.frustumCulled = false;
+  queue.push(plain);
+  const seen = new Set();
+  const own = ctx.people?.root || null; // the figures warm their own pools and LODs (people/index.js)
+  ctx.scene.traverse((o) => {
+    if (!(o.isMesh || o.isLine || o.isPoints) || isShown(o)) return;
+    for (let p = o; p; p = p.parent) if (p === own) return;
+    const ms = (Array.isArray(o.material) ? o.material : [o.material]).filter(Boolean);
+    if (!ms.length || ms.every((m) => seen.has(m))) return;
+    for (const m of ms) seen.add(m);
+    queue.push(o);
+  });
+  const stats = { queued: queue.length, issued: 0, programs: 0 };
+  const idle = (fn) => (globalThis.requestIdleCallback ? requestIdleCallback(fn, { timeout: 1000 }) : setTimeout(fn, 50));
+  const step = () => {
+    const o = queue.shift();
+    // (the stand-in is kept: disposing its material would release the program it warmed, and three deletes a program
+    // nothing uses — the ropes' first frame then rebuilt it, 130 ms even from the driver's shader cache)
+    if (!o) return;
+    // the scene may have changed meanwhile: an object shown or removed since is the frame's business
+    if (o !== plain && (!o.parent || isShown(o))) { idle(step); return; }
+    const v = o.visible;
+    o.visible = true;
+    let set = null;
+    try { set = compileScene(r, o, ctx.camera, ctx.scene, rendersOffscreen(ctx)); } finally { o.visible = v; }
+    stats.issued++;
+    whenReady(r, set).then(() => {
+      stats.programs = r.info.programs?.length ?? 0;
+      // env's uniform binders query each new program (a synchronous call that waits for the GPU's queued work): here,
+      // with nothing else issued, not in a later frame while the next compile is queued (warmup-check: a 435 ms
+      // getUniformBlockIndex on low)
+      try { ctx.env?.bindPrograms?.(); } catch { /* the frame binds it */ }
+      idle(step);
+    });
+  };
+  setTimeout(() => idle(step), delay);
+  return stats;
 }

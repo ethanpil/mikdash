@@ -7,10 +7,13 @@
 // Long routes: a coarse graph (local components of blocks of cells, all layers) is searched with Dijkstra from the
 // goal at query time; its distances steer the fine A* along the right corridor (gates, stairs) instead of flooding
 // the open Mount.
+// Climbs (nav/climbs.js): where no walk joins two levels but a climb does (the cedar posts to the aliyah roof),
+// findPath returns walk + climb + walk, marked path.climb = { i0, i1, id, heading }.
 import { Vector3, BufferGeometry, Float32BufferAttribute, Points, PointsMaterial, Line, LineBasicMaterial } from 'three';
 import { NAV_DEFAULTS, FLAG_NEAR_EDGE, DIRS, OPP } from './grid-build.js';
 import { buildNav, FLAG_STITCH } from './multi.js';
 import { createDoors } from './doors.js';
+import { createClimbs, reaches } from './climbs.js';
 import { AMAH, m2w } from '../../core/units.js';
 import { BODY } from '../controller.js';
 
@@ -48,6 +51,7 @@ export function createNav(ctx, physics) {
   // door leaves in their shut pose, measured now: the builders' amounts, before the sim drives any door
   const doors = createDoors(ctx);
   { const t0 = performance.now(); doors.measureAll(); (ctx.buildTimes ||= {})['player.doors'] = Math.round(performance.now() - t0); }
+  const climbs = createClimbs(ctx, physics);
 
   const nav = {
     ready: null,
@@ -80,7 +84,10 @@ export function createNav(ctx, physics) {
         nav.lastBlocked = w.keys;
         nav.lastCut = w.cut;
       }
-      const p = grid.findPath(from, to, w && w.boxes.length ? w.boxes : null, w?.sig ?? null);
+      const boxes = w && w.boxes.length ? w.boxes : null, sig = w?.sig ?? null;
+      let p = grid.findPath(from, to, boxes, sig);
+      // no walk reaches the goal: through a climb (the cedar posts to the aliyah roof, Middot 4:5) if one joins them
+      if (!reaches(p, to)) p = climbs.route(from, to, (s0, g) => grid.findPath(s0, g, boxes, sig)) || p;
       nav.lastQueryMs = performance.now() - t0;
       nav.lastExpanded = grid.lastExpanded;
       if (p && debugOn) drawPath(p);

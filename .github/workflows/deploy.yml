@@ -10,9 +10,10 @@ permissions:
   pages: write
   id-token: write
 
+# one deployment at a time; a newer push waits rather than cancelling one already deploying (as GitHub's Pages starter)
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -24,8 +25,15 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run build
-      - uses: actions/configure-pages@v6
+      - name: Validate the schedule
+        run: node tools/validate-schedule.mjs
+      - id: pages
+        uses: actions/configure-pages@v6
+      - name: Build
+        run: npm run build
+        env:
+          # the site's absolute URL for the share cards (vite.config.js siteUrl)
+          MIKDASH_SITE_URL: ${{ steps.pages.outputs.base_url }}
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist

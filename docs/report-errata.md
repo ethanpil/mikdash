@@ -1,6 +1,7 @@
 # Errata found in the research report while building
 
-The build agents cross-checked the report (`../report/parts/*.md`) against the Hebrew primary texts.
+The build agents cross-checked the report (`../report/parts/*.md`, in the author's workspace beside this repository and
+not published with it) against the Hebrew primary texts.
 These are places where the report contradicts itself or its citation. The model follows the resolution given.
 
 | # | Report location | Problem | Resolution used in Mikdash |

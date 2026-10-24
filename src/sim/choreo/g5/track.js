@@ -155,6 +155,9 @@ export function sampleSeg(s, t, out, tmp) {
     const sd = s.side ? sideAt(s.side, Math.max(0, d), s.path.length) : 0;
     const q = sd ? s.path.offset(Math.max(0, d), sd, 0, tmp) : s.path.sample(Math.max(0, d), tmp);
     out.X = q.X; out.Y = q.Y; out.Z = Number.isFinite(q.Z) ? q.Z : 16;
+    // a follower behind the start of its leader's walk (extrap: it came in on its rope): on back along that walk's
+    // first direction, not heaped on the leader
+    if (s.extrap && d < 0) { const h = (q.heading * Math.PI) / 180; out.X -= (Math.sin(h) * -d) / AM; out.Y -= (Math.cos(h) * -d) / AM; }
     out.near = !!(s.nearPts && (s.nearPts[q.seg] || s.nearPts[q.seg + 1]));
     out.h = s.back ? (q.heading + 180) % 360 : q.heading;
     out.d = Math.max(0, d);

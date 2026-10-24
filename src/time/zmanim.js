@@ -10,9 +10,31 @@ export const ZMAN_ANGLES = {
   tzeit: -8.5,      // three medium stars
 };
 
+/**
+ * UTC ms of 00:00 UTC on a civil date (proleptic Gregorian). Date.UTC maps years 0–99 to 1900–1999, so the year is
+ * set with setUTCFullYear (qa-r1-fix-env-render ENV-7). Day/month overflow rolls over as with Date.UTC.
+ */
+export function utcDayMs(y, m, d, h = 0) {
+  const t = new Date(0);
+  t.setUTCFullYear(y, m - 1, d);
+  t.setUTCHours(h, 0, 0, 0);
+  return t.getTime();
+}
+
+/** { y, m, d } of the civil date `days` after the given one (any year). */
+export function addDays({ y, m, d }, days) {
+  const t = new Date(utcDayMs(y, m, d + days));
+  return { y: t.getUTCFullYear(), m: t.getUTCMonth() + 1, d: t.getUTCDate() };
+}
+
+/** 'YYYY-MM-DD' with a 4-digit year */
+export function formatDate({ y, m, d }) {
+  return `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
 /** Local-midnight (IST) epoch in UTC ms for a civil date. */
 export function localMidnightUTC({ y, m, d }, tz = SITE_GEO.tzMinutes) {
-  return Date.UTC(y, m - 1, d) - tz * 60000;
+  return utcDayMs(y, m, d) - tz * 60000;
 }
 
 /**
@@ -21,7 +43,7 @@ export function localMidnightUTC({ y, m, d }, tz = SITE_GEO.tzMinutes) {
  * (1440 − day length) so evening and pre-dawn hours join seamlessly across midnight (error < 1 min).
  */
 export function computeZmanim(date, geo = SITE_GEO) {
-  const dayUTC = Date.UTC(date.y, date.m - 1, date.d);
+  const dayUTC = utcDayMs(date.y, date.m, date.d);
   const tz = geo.tzMinutes;
   const ev = (alt, rising) => sunEventUTC(dayUTC, alt, rising, geo.lat, geo.lon) + tz;
   const sunrise = ev(ZMAN_ANGLES.sunrise, true);
@@ -77,7 +99,7 @@ export function hebrewDate({ y, m, d }) {
   try {
     fmtEn ||= new Intl.DateTimeFormat('en-u-ca-hebrew', { timeZone: 'UTC', day: 'numeric', month: 'long', year: 'numeric' });
     fmtHe ||= new Intl.DateTimeFormat('he-u-ca-hebrew', { timeZone: 'UTC', month: 'long' });
-    const at = new Date(Date.UTC(y, m - 1, d, 12));
+    const at = new Date(utcDayMs(y, m, d, 12));
     const parts = Object.fromEntries(fmtEn.formatToParts(at).filter((p) => p.type !== 'literal').map((p) => [p.type, p.value]));
     const day = parseInt(parts.day, 10);
     const year = parseInt(parts.year, 10);

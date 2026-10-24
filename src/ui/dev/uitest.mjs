@@ -53,6 +53,23 @@ try {
     await ev(() => document.querySelector('.mk-loc').getAttribute('aria-label')));
   await ev(() => document.activeElement?.blur?.());
 
+  // the compass strip follows the heading (qa-r1 UI-1: a NaN comparison froze it at ≈ 244°)
+  const comp = [];
+  for (const hd of [0, 90, 180]) {
+    await page.evaluate((h) => __mikdash.player.setLook(h, 0), hd);
+    await page.waitForTimeout(150);
+    comp.push(await ev(() => ({ h: __mikdash.player.heading, x: parseFloat((document.querySelector('.mk-compass__strip').style.transform.match(/-?[\d.]+/) || ['NaN'])[0]) })));
+  }
+  check('compass strip turns with the heading (centre = heading)', comp.every((c) => Math.abs(c.x - (140 - (c.h + 180) * 2.2)) < 1) && new Set(comp.map((c) => c.x)).size === 3, JSON.stringify(comp));
+
+  // floating tags at the dawn start never overlap (qa-r1 UI-3: three tags within 18 px)
+  await ev(() => __mikdash.player.setLook(270, 10));
+  await page.waitForTimeout(700);
+  const tagRects = () => page.evaluate(() => [...document.querySelectorAll('.mk-tag')].filter((t) => +getComputedStyle(t).opacity > 0.2).map((t) => { const b = t.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; }));
+  const overlapping = (rs) => rs.some((a, i) => rs.some((b, j) => j > i && a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]));
+  const tr0 = await tagRects();
+  check('floating tags do not overlap at the start', tr0.length >= 2 && !overlapping(tr0), JSON.stringify(tr0.map((r) => r.map(Math.round))));
+
   // shortcuts
   await page.keyboard.press('t'); await page.waitForTimeout(350);
   check('T opens time panel', await ev(() => __mikdash.ui.panel === 'time'));
@@ -96,6 +113,39 @@ try {
   const inSet2 = await ev(() => !!document.activeElement?.closest('[data-panel=settings]'));
   check('settings traps Tab (both directions)', inSet && inSet2);
   check('settings groups are named by their labels', await ev(() => [...document.querySelectorAll('[data-panel=settings] .mk-seg')].every((g) => /^[A-Z]/.test(g.getAttribute('aria-label')))));
+  // Settings → Controls → "Show all" opens About at its controls (qa-r1 UI-4)
+  await page.click('[data-panel=settings] .mk-set button:has-text("Show all")');
+  await page.waitForTimeout(700);
+  check('Settings "Show all" opens About at the controls', await ev(() => {
+    const p = document.querySelector('[data-panel=about]'), s = document.getElementById('mk-about-controls');
+    if (__mikdash.ui.panel !== 'about' || !s) return false;
+    const b = p.querySelector('.mk-panel__body').getBoundingClientRect(), r = s.getBoundingClientRect();
+    return r.top >= b.top - 2 && r.top < b.bottom - 40;
+  }));
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(250);
+  // About: the ? key, the HUD button; method, badges, choices, amah, controls (Space/E/Q/C, Esc, /), credits
+  await page.keyboard.press('Shift+Slash');
+  await page.waitForTimeout(500);
+  const ab = await ev(() => {
+    const p = document.querySelector('[data-panel=about]');
+    const txt = p?.textContent || '';
+    return {
+      open: __mikdash.ui.panel === 'about',
+      sections: ['method', 'badges', 'choices', 'amah', 'controls', 'credits'].every((id) => document.getElementById(`mk-about-${id}`)),
+      keys: ['Space', 'E', 'Q', 'C', 'Esc', '/', 'G'].every((k) => [...p.querySelectorAll('.mk-keys .mk-kbd')].some((x) => x.textContent === k)),
+      credits: ['three.js', 'three-mesh-bvh', 'postprocessing', 'N8AO', 'Open Font License'].every((k) => txt.includes(k)),
+      choices: p.querySelectorAll('.mk-choice').length,
+      unlinked: [...p.querySelectorAll('span.mk-src')].map((x) => x.textContent),
+    };
+  });
+  check('? opens About with every section, the full controls and the credits', ab.open && ab.sections && ab.keys && ab.credits && ab.choices >= 8 && !ab.unlinked.length, JSON.stringify(ab));
+  await page.keyboard.press('Shift+Slash');
+  await page.waitForTimeout(300);
+  check('? again closes About', await ev(() => __mikdash.ui.panel === null));
+  await page.click('.mk-tools [data-tool=about]');
+  await page.waitForTimeout(400);
+  check('the HUD About button opens it', await ev(() => __mikdash.ui.panel === 'about'));
   await page.keyboard.press('Escape');
   await page.waitForTimeout(250);
 
@@ -151,6 +201,17 @@ try {
   const d1 = await ev(() => ({ he: document.querySelector('[data-panel=time] .mk-daterow__he').textContent, ds: __mikdash.time.dateString, input: document.querySelector('[data-panel=time] input[type=date]').value }));
   check('next day updates date + Hebrew date', d1.ds === '2026-11-03' && d1.input === d1.ds && d1.he !== d0, `${d0} → ${d1.he}`);
   await ev(() => __mikdash.time.setDate('2026-11-02'));
+
+  // grouped offerings: a speed choice each, headers named after their stage (qa-r1 UI-9)
+  await ev(() => __mikdash.time.set(__mikdash.time.fromZmani('day', 3)));
+  await page.waitForTimeout(600);
+  const dg = await ev(() => {
+    document.querySelectorAll('[data-panel=time] .mk-dyn:not(.is-open) .mk-mev__hit').forEach((b) => b.click());
+    const t = [...document.querySelectorAll('[data-panel=time] .mk-dyn .mk-mev__title')].map((e) => e.textContent);
+    return { n: t.length, distinct: new Set(t).size, selects: document.querySelectorAll('[data-panel=time] .mk-dyn select').length, t };
+  });
+  check('offering groups: a speed choice each, headers named by their stage', dg.n > 0 && dg.selects === dg.n && dg.distinct === dg.n, JSON.stringify(dg));
+  await page.screenshot({ path: resolve(root, out, 'test-time-dyn.png') });
 
   // jump to an event start, then lists show it active
   await ev(() => __mikdash.time.set(__mikdash.time.fromZmani('day', 8.6)));
@@ -219,7 +280,41 @@ try {
   check('entering Ezrat Kohanim announces its access rule (and tints the card)', ek && /semichah/.test(note) && /Kelim 1:8/.test(note), note);
   await ev(() => { __mikdash.bus.emit('zone:change', { zone: 'har-habayit' }); __mikdash.bus.emit('zone:change', { zone: 'ezrat-kohanim' }); });
   await page.waitForTimeout(300);
-  check('the notice does not repeat on re-entry', await ev(() => [...document.querySelectorAll('.mk-toast')].filter((t) => /Ezrat Kohanim/.test(t.textContent)).length === 1));
+  // stepping down to Har HaBayit took the notice away; coming straight back (boundary flapping) does not bring it again
+  check('the notice does not repeat on re-entry', await ev(() => [...document.querySelectorAll('.mk-toast.in')].filter((t) => /Ezrat Kohanim/.test(t.textContent)).length === 0));
+  // the notice quotes the place's own rule whole, citation and all, and adds no second citation (qa-r1 UI-7: "— 8). (Kelim 1:8)")
+  await ev(() => { __mikdash.bus.emit('zone:change', { zone: 'har-habayit' }); __mikdash.bus.emit('zone:change', { zone: 'kevesh' }); });
+  await page.waitForTimeout(300);
+  const kv = await ev(() => ({ access: __mikdash.zones.content.kevesh.access, toasts: [...document.querySelectorAll('.mk-toast')].map((t) => t.textContent) }));
+  const kt = kv.toasts.find((t) => /Kevesh/.test(t)) || '';
+  check('the Kevesh notice starts its rule from the beginning, with one citation', kt.includes(kv.access.slice(0, 24)) && !/\)\.\s*\(/.test(kt), kt);
+  check('stepping down out of the place takes its notice away', await ev(async () => {
+    __mikdash.bus.emit('zone:change', { zone: 'ezrat-yisrael' });
+    await new Promise((r) => setTimeout(r, 600));
+    return ![...document.querySelectorAll('.mk-toast')].some((t) => /Kevesh/.test(t.textContent));
+  }));
+  // a Go takes the access notice away too
+  await ev(() => { __mikdash.bus.emit('zone:change', { zone: 'har-habayit' }); __mikdash.bus.emit('zone:change', { zone: 'heichal' }); });
+  await page.waitForTimeout(300);
+  const hadHeichal = await ev(() => [...document.querySelectorAll('.mk-toast')].some((t) => /observer/.test(t.textContent)));
+  await ev(() => __mikdash.ui.open('time'));
+  await page.waitForTimeout(500);
+  await page.selectOption('[data-panel=time] .mk-ev.is-active .mk-select', 'walk');
+  await page.click('[data-panel=time] .mk-ev.is-active .mk-btn--primary');
+  await page.waitForTimeout(700);
+  check('a Go takes the access notice away', hadHeichal && await ev(() => ![...document.querySelectorAll('.mk-toast')].some((t) => /observer/.test(t.textContent))));
+  await ev(() => __mikdash.player.cancel());
+  await ev(() => __mikdash.settings.set('travelSpeed', 'walk'));
+
+  // Shabbat night is not "night on Friday"; Saturday night is motza'ei Shabbat (qa-r1 UI-8)
+  const days = await ev(async () => {
+    const f = await import('/src/ui/format.js');
+    const z = { alot: 290, sunrise: 370, sunset: 1000, tzeit: 1025 };
+    return [[5, 'friday', 1200], [5, 'friday', 1010], [6, 'shabbat', 1200], [1, 'weekday', 1200], [6, 'shabbat', 100]]
+      .map(([weekday, dayType, t]) => `${f.dayPhrase({ zmanim: z, weekday, dayType }, t, 'night')} | ${f.dayBadge({ zmanim: z, weekday, dayType }, t)}`);
+  });
+  check('day boundaries named by the halachic day', days[0] === 'Shabbat night (Friday evening) | Shabbat night' && /^dusk as Shabbat begins/.test(days[1])
+    && days[2] === "motza'ei Shabbat (Saturday night) | Motza'ei Shabbat" && days[3] === 'Monday evening, the night of Tuesday | Weekday' && days[4] === 'night on Shabbat | Shabbat', days.join(' / '));
 
   // the time panel survives a missing clock (synchronous: no frame runs while ctx.time is gone)
   const nc = await ev(() => {
@@ -264,6 +359,9 @@ try {
   await ph.waitForFunction(() => globalThis.__mikdashReady === true, null, { timeout: 150000, polling: 250 });
   await ph.evaluate(() => __mikdash.ui.enter());
   await ph.waitForTimeout(900);
+  // touch: ghost controls where the thumbs go, for the first seconds (qa-r1 UI-4: phones got no hint at all)
+  check('phone: ghost walk / look controls after Enter', await ph.evaluate(() => { const g = document.querySelector('.mk-touchhint'); return !!g && !g.hidden && getComputedStyle(g).display !== 'none' && !document.querySelector('.mk-hints'); }));
+  await ph.screenshot({ path: resolve(root, out, 'test-phone-start.png') });
   const rect = (sel) => ph.evaluate((s) => { const b = document.querySelector(s).getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; }, sel);
   const hits = (a, b) => a.r > b.l && a.l < b.r && a.b > b.t && a.t < b.b;
   await ph.evaluate(() => __mikdash.ui.toast('Clock set to ≈ 05:58 · The great gate is opened'));
@@ -273,6 +371,9 @@ try {
   await ph.evaluate(() => __mikdash.ui.open('time'));
   await ph.waitForTimeout(500);
   check('phone: an open sheet hides the tool column, the chip stays', await ph.evaluate(() => document.querySelector('.mk-tools').classList.contains('mk-covered') && !document.querySelector('.mk-chip').classList.contains('mk-covered')));
+  // qa-r2 UI-R2-4: the ghost joystick / look pill are still in their first seconds here, but not through the panel
+  const hintOp = await ph.evaluate(() => { const g = document.querySelector('.mk-touchhint'); return g && !g.hidden ? +getComputedStyle(g).opacity : null; });
+  check('phone: the first-run touch hints do not show through an open panel', hintOp !== null && hintOp < 0.02, `opacity ${hintOp}`);
   const listTop = await ph.evaluate(() => document.querySelector('[data-panel=time] .mk-evs .mk-ev')?.getBoundingClientRect().top ?? 9999);
   check('phone: the first event row starts above the fold', listTop < 844 - 60, `top ${Math.round(listTop)}`);
   await ph.screenshot({ path: resolve(root, out, 'test-phone-time.png') });
@@ -294,6 +395,58 @@ try {
   await ph.mouse.up();
   await ph.waitForTimeout(400);
   check('phone: a short drag springs back', await ph.evaluate(() => __mikdash.ui.panel === 'info' && getComputedStyle(document.querySelector('[data-panel=info]')).transform === 'none'));
+
+  // touch on the floating tags (qa-r1 UI-3): inside the view, apart; a drag that starts on one looks; a tap opens the hour
+  const cdp = await ph.context().newCDPSession(ph);
+  const touchPath = async (pts) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pts[0][0], y: pts[0][1], id: 1 }] });
+    for (const [x, y] of pts.slice(1)) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y, id: 1 }] }); await ph.waitForTimeout(16); }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  await ph.evaluate(() => { __mikdash.ui.close(); __mikdash.time.set(__mikdash.time.zmanim.alot - 6); __mikdash.player.setLook(270, 10); });
+  await ph.waitForTimeout(1200);
+  const pt = await ph.evaluate(() => [...document.querySelectorAll('.mk-tag')].filter((t) => +getComputedStyle(t).opacity > 0.2).map((t) => { const b = t.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom]; }));
+  const ptOverlap = pt.some((a, i) => pt.some((b, j) => j > i && a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]));
+  check('phone: tags apart and inside the view', pt.length > 0 && !ptOverlap && pt.every((r) => r[0] >= 0 && r[2] <= 390), JSON.stringify(pt.map((r) => r.map(Math.round))));
+  if (pt.length) {
+    // on the tag, in the right half if it reaches there (the player's left 45 % is the walk joystick)
+    const [x, y] = [Math.min(pt[0][2] - 12, Math.max(pt[0][0] + 24, 200)), (pt[0][1] + pt[0][3]) / 2];
+    const p0 = await ph.evaluate(() => ({ h: __mikdash.player.heading, x: __mikdash.player.position.x, z: __mikdash.player.position.z }));
+    await touchPath(Array.from({ length: 11 }, (_, i) => [x + i * 12, y + i * 2]));
+    await ph.waitForTimeout(300);
+    const p1 = await ph.evaluate(() => ({ h: __mikdash.player.heading, x: __mikdash.player.position.x, z: __mikdash.player.position.z, panel: __mikdash.ui.panel }));
+    const turn = Math.abs(((p1.h - p0.h + 540) % 360) - 180), moved = Math.hypot(p1.x - p0.x, p1.z - p0.z);
+    check('phone: a drag that starts on a tag reaches the view (look, or the walk joystick on the left)', (x >= 200 ? turn > 5 : moved > 0.2) && p1.panel === null,
+      `at x ${Math.round(x)}: turned ${turn.toFixed(1)}°, moved ${moved.toFixed(2)} m`);
+    await ph.evaluate(() => __mikdash.player.setLook(270, 10));
+    await ph.waitForTimeout(600);
+    const tg = await ph.evaluate(() => { const t = [...document.querySelectorAll('.mk-tag')].find((e) => +getComputedStyle(e).opacity > 0.2); if (!t) return null; const b = t.getBoundingClientRect(); return [b.left + 20, (b.top + b.bottom) / 2]; });
+    if (tg) await touchPath([tg]);
+    await ph.waitForTimeout(500);
+    check('phone: a tap on a tag opens the hour at its event', !!tg && await ph.evaluate(() => __mikdash.ui.panel === 'time'));
+  }
+  // a pinch on a panel does not zoom the page (qa-r1 UI-6: it stuck at 5×); the map's own pinch still zooms the plan
+  await ph.evaluate(() => __mikdash.ui.open('info'));
+  await ph.waitForTimeout(600);
+  const pinch = async (cx, cy) => {
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: cx - 20, y: cy, id: 1 }, { x: cx + 20, y: cy, id: 2 }] });
+    for (let i = 1; i <= 14; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: cx - 20 - i * 9, y: cy - i * 4, id: 1 }, { x: cx + 20 + i * 9, y: cy + i * 4, id: 2 }] }); await ph.waitForTimeout(16); }
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await ph.waitForTimeout(400);
+  };
+  const ib = await rect('[data-panel=info] .mk-panel__body');
+  await pinch((ib.l + ib.r) / 2, (ib.t + ib.b) / 2);
+  const s1 = await ph.evaluate(() => visualViewport.scale);
+  const lb = await rect('.mk-chip');
+  await pinch((lb.l + lb.r) / 2, lb.b + 4);
+  const s2 = await ph.evaluate(() => visualViewport.scale);
+  await ph.evaluate(() => __mikdash.ui.open('map'));
+  await ph.waitForTimeout(900);
+  const k0 = await ph.evaluate(() => __mikdash.ui.map?.view()?.k);
+  await pinch(195, 450);
+  const k1 = await ph.evaluate(() => __mikdash.ui.map?.view()?.k);
+  const s3 = await ph.evaluate(() => visualViewport.scale);
+  check('phone: pinches on a panel and the HUD leave the page at 1×; the map still zooms', s1 === 1 && s2 === 1 && s3 === 1 && k1 > k0 * 1.5, JSON.stringify({ s1, s2, s3, k0, k1 }));
   await ph.close();
 } catch (e) {
   console.error(e);

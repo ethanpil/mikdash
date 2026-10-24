@@ -2,7 +2,9 @@
 import { EVENTS, DAY_TYPES, eventsFor } from '../src/data/schedule.js';
 import { SITE, zoneAtSite } from '../src/data/site.js';
 import { computeZmanim } from '../src/time/zmanim.js';
-import { OFFERING_TYPES, OFFERING_RULES, STATIONS } from '../src/data/offerings.js';
+import { OFFERING_TYPES, OFFERING_RULES, STATIONS, NESACHIM } from '../src/data/offerings.js';
+import { ZONE_CONTENT, SANCTITY_SCALE } from '../src/data/zones-content.js';
+import { GLOSSARY } from '../src/data/glossary.js';
 
 const errors = [], warns = [];
 const err = (m) => errors.push(m), warn = (m) => warns.push(m);
@@ -203,24 +205,54 @@ function solidBoxes(e) {
 const inBox = (q, b, eps = 0) => q[0] > b.min[0] + eps && q[0] < b.max[0] - eps && q[1] > b.min[1] + eps && q[1] < b.max[1] - eps && q[2] > b.min[2] && q[2] < b.max[2];
 const SKIP_EL = new Set(['mount.soreg', 'mount.soreg.breaches', 'azarah.amah-channel', 'altar.rings', 'altar.chut-hasikra', 'altar.shitin', 'altar.libation-cups', 'mount.watch-posts',
   'azarah.stations', 'azarah.achsadra-route', 'heichal.even-shetiyah', 'heichal.lul-west', 'altar.maarachah-area', 'altar.walkway', 'heichal.ulam.chains', 'heichal.ulam.vine', 'heichal.ulam.nivreshet']);
+// the solid elements (walls minus their openings/voids/cutouts, fixtures, slabs) with their holes, built once
+const SOLIDS = Object.values(E)
+  .filter((e) => e.box && !SKIP_EL.has(e.id) && !e.id.startsWith('context.') && !['zone', 'floor', 'opening', 'gate', 'curtain', 'stair', 'ramp', 'chamber'].includes(e.kind))
+  .map((e) => ({
+    id: e.id, boxes: solidBoxes(e),
+    holes: ['openings', 'voids', 'replacedBy', 'alsoPierces'].flatMap((k) => [].concat(e.params?.[k] ?? [])).map((id) => E[id]?.box).filter(Boolean)
+      .concat((e.params?.cutouts || []).map((c) => c.box)),
+  }));
+const solidAt = (p) => SOLIDS.find((s) => s.boxes.some((b) => inBox(p, b, 0.01)) && !s.holes.some((h) => inBox(p, { min: h.min, max: h.max }, -0.01)))?.id || null;
 function hits(q) {
-  // body column: feet + 0.3 … head (≈ +3.3 amot) — any solid element (walls minus their openings/voids/cutouts, fixtures, slabs)
+  // body column: feet + 0.3 … head (≈ +3.3 amot) — any solid element
   const out = [];
-  for (const e of Object.values(E)) {
-    if (!e.box || SKIP_EL.has(e.id) || e.id.startsWith('context.') || ['zone', 'floor', 'opening', 'gate', 'curtain', 'stair', 'ramp', 'chamber'].includes(e.kind)) continue;
-    const holes = ['openings', 'voids', 'replacedBy', 'alsoPierces'].flatMap((k) => [].concat(e.params?.[k] ?? [])).map((id) => E[id]?.box).filter(Boolean)
-      .concat((e.params?.cutouts || []).map((c) => c.box));
-    for (const b of solidBoxes(e)) for (const dz of [0.3, 1.5, 3.2]) {
-      const p = [q[0], q[1], q[2] + dz];
-      if (inBox(p, b, 0.01) && !holes.some((h) => inBox(p, { min: h.min, max: h.max }, -0.01))) { out.push(e.id); break; }
-    }
-  }
+  for (const dz of [0.3, 1.5, 3.2]) { const id = solidAt([q[0], q[1], q[2] + dz]); if (id) out.push(id); }
   return [...new Set(out)];
 }
 const chambersAt = (q) => Object.values(E).filter((e) => e.kind === 'chamber' && e.box && inBox([q[0], q[1], q[2] + 1], e.box)).map((e) => e.id);
 function expectedFloor(X, Y, zone) {
   if (zone === 'kevesh') return 16 + Math.max(0, Math.min(32, Y - 275.5)) * 9 / 32;
+  if (zone === 'fifteen-steps') {
+    // the semicircular flight (site.js en.steps15): the tread under a plan point, by its radius from the gate
+    const p = E['en.steps15']?.params;
+    if (p?.stepRadii) {
+      const r = Math.hypot(X - p.center[0], Y - p.center[1]);
+      if (r <= p.landingRadius) return p.stepRadii[p.stepRadii.length - 1].topZ;
+      const s = [...p.stepRadii].reverse().find((st) => r <= st.rOuter);
+      return s ? s.topZ : p.center[2];
+    }
+  }
   return SITE.zones[zone]?.floorZ;
+}
+// The eye ray (qa-r1 DATA-2): from the eye (≈ 1.6 m over the stand) along the view's heading, pitched down as the
+// player arrives (ARRIVAL.pitch −4°), solid fabric within SIGHT_MIN amot (≈ 4 m) means the view faces a wall (warning).
+// Chambers are hollow in site.js: entering one from outside counts as meeting its wall, unless it is the event's own
+// place, the room holding the event (a view into it through its door). Door leaves are not in site.js (a shut gate or wicket reads as open
+// here) — the Go-instant shots are the check for those.
+const EYE = 3.3, SIGHT_MIN = 8, SIGHT_PITCH = -4;
+function sightHit(v, heading, at) {
+  const h = (heading * Math.PI) / 180, dz = Math.tan((SIGHT_PITCH * Math.PI) / 180);
+  const eye = [v[0], v[1], v[2] + EYE];
+  const inside = new Set(Object.values(E).filter((e) => e.kind === 'chamber' && e.box && inBox(eye, e.box)).map((e) => e.id));
+  for (let d = 0.5; d <= SIGHT_MIN; d += 0.25) {
+    const p = [eye[0] + Math.sin(h) * d, eye[1] + Math.cos(h) * d, eye[2] + dz * d];
+    const s = solidAt(p);
+    if (s) return { d, id: s };
+    const ch = Object.values(E).find((e) => e.kind === 'chamber' && e.box && !inside.has(e.id) && inBox(p, e.box) && !inBox([at[0], at[1], at[2] + 0.5], e.box));
+    if (ch) return { d, id: ch.id };
+  }
+  return null;
 }
 const viewRows = [];
 for (const e of EVENTS) {
@@ -238,8 +270,19 @@ for (const e of EVENTS) {
   const ROOMS = { 'beit-hamoked': 'azarah.moked.hall', gazit: 'azarah.chamber.gazit', 'beit-avtinas': 'azarah.beit-avtinas',
     'beit-hatevilah': 'azarah.underground.beit-hatevilah', 'en-chamber-wood': 'en.chamber.wood', 'en-chamber-nazirites': 'en.chamber.nazirites' };
   const ch = chambersAt(v).filter((c) => c !== ROOMS[vz]); if (ch.length) warn(`${e.id}: view inside chamber ${ch}`);
+  // not when the fabric met is the event's own element (the muchni seen at the kiyor)
+  const sh = sightHit(v, e.view.heading, p);
+  if (sh && !(e.pos?.el && sh.id.startsWith(e.pos.el))) warn(`${e.id}: view faces ${sh.id} ${(sh.d * 0.48).toFixed(1)} m ahead (heading ${e.view.heading}) — check it with a shot`);
   const dist = Math.hypot(p[0] - v[0], p[1] - v[1]);
   viewRows.push(`${e.id.padEnd(26)} pos ${pz.padEnd(22)} view ${String(vz).padEnd(22)} d=${dist.toFixed(1)}`);
+}
+// zone stands (zones-content.js header): inside their own zone; a standHeading only with a stand, and the eye ray lint
+for (const [id, z] of Object.entries(ZONE_CONTENT)) {
+  if (Array.isArray(z.stand) && zoneAtSite(z.stand[0], z.stand[1], z.stand[2] + 0.4) !== id) err(`zone ${id}: stand ${z.stand} is in zone ${zoneAtSite(z.stand[0], z.stand[1], z.stand[2] + 0.4)}`);
+  if (z.standHeading === undefined) continue;
+  if (!Array.isArray(z.stand)) err(`zone ${id}: standHeading without a stand`);
+  else if (!(Number.isFinite(z.standHeading) && z.standHeading >= 0 && z.standHeading < 360)) err(`zone ${id}: standHeading ${z.standHeading} is not a compass heading`);
+  else { const sh = sightHit(z.stand, z.standHeading, z.stand); if (sh) warn(`zone ${id}: stand faces ${sh.id} ${(sh.d * 0.48).toFixed(1)} m ahead (heading ${z.standHeading})`); }
 }
 
 // ---------------------------------------------------------------- offering stations (src/data/offerings.js)
@@ -260,6 +303,24 @@ for (const t of Object.values(OFFERING_TYPES)) for (const s of t.steps || []) fo
   }
   for (const [id, [lo, hi]] of Object.entries(F.alone)) if (!(lo >= 0 && hi >= lo)) err(`frequency: ${id} alone [${lo}, ${hi}] — the sets bring more than the type's total`);
 }
+
+// ---------------------------------------------------------------- what the public reads cites what it can open
+// The research report is not published with the site: a "Report §58" or "lock #7" in a description or a sources list
+// is a dead reference (qa-r1 DATA-1). Cite the primary source or commentator the claim rests on, or say
+// 'Reconstruction (model)'. Internal references belong in code comments only.
+const DEAD_REF = /\breport\b[^.;)\]]*§|\blocks?\s*[#§]\s*\d|§\s*\d|\breport\s+(?:lock|register)\b|\bthe report(?:'s)?\b/i;
+function scanText(tag, v, depth = 0) {
+  if (depth > 6 || v == null) return;
+  if (typeof v === 'string') { if (DEAD_REF.test(v)) err(`${tag}: internal report reference in public text: "${v.match(DEAD_REF)[0]}"`); return; }
+  if (Array.isArray(v)) { v.forEach((x, i) => scanText(`${tag}[${i}]`, x, depth + 1)); return; }
+  if (typeof v === 'object') for (const [k, x] of Object.entries(v)) scanText(`${tag}.${k}`, x, depth + 1);
+}
+for (const e of EVENTS) scanText(`event ${e.id}`, e);
+for (const [id, z] of Object.entries(ZONE_CONTENT)) scanText(`zone ${id}`, z);
+scanText('SANCTITY_SCALE', SANCTITY_SCALE);
+for (const [id, t] of Object.entries(OFFERING_TYPES)) scanText(`offering ${id}`, t);
+scanText('STATIONS', STATIONS); scanText('NESACHIM', NESACHIM);
+for (const [id, g] of Object.entries(GLOSSARY)) scanText(`glossary ${id}`, g);
 
 // ---------------------------------------------------------------- report
 const T0 = times(DEFAULT);

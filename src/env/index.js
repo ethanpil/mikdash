@@ -13,7 +13,7 @@ import { PRIORITY } from '../core/engine.js';
 import { ATMO, mieCoefficients, transmittanceCPU, zenithOpticalDepth, luminance, nightFloorShape } from './atmosphere.js';
 import { AtmosphereLUTs, LUT_SCALE } from './luts.js';
 import { createSkyUniforms, createSkyMaterial, setSkyFeatures } from './sky.js';
-import { createStarfield, EQ_TO_GAL } from './stars.js';
+import { createStarfield, EQ_TO_GAL, precessionFromJ2000 } from './stars.js';
 import { installFogChunks, FogUniforms } from './fog.js';
 import { createInteriors } from './interiors.js';
 import { setInteriorProbes } from './interiors-glsl.js';
@@ -348,12 +348,16 @@ export async function init(ctx) {
     horizon: null, // Float32Array [H, D] per 2° azimuth
     shadowsManaged: true,
     fourier: [[0, 0, 0], [0, 0, 0], [0, 0, 0]], zenith: [0, 0, 0], horizonMean: [0, 0, 0],
+    // the horizon band's radiance at 0, 45, 90, 135, 180° from the reference azimuth (physical, night floor included):
+    // what the aerial perspective interpolates (fog.js mkFogA0..A4; qa-r2-fix-env-render)
+    horizon5: [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]],
     refDir: new Vector3(0, 1, 0),
     skyline: [1, 1, 1, 1, 1, 1, 1],
     snapFrames: 0,
     lutGi: 0, relut: false, refine: false, checkGround: false, lastStats: null,
   };
   const celestial = new Matrix3();
+  const _prec = new Matrix3();
   const worldToGal = new Matrix3();
   const ncp = new Vector3();
   const tmp = new Vector3();
@@ -626,6 +630,7 @@ export async function init(ctx) {
         st.fourier[0][c] += nf * nightFloor.horizon;
         st.horizonMean[c] += nf * nightFloor.horizon;
         st.zenith[c] += nf * nightFloor.zenith;
+        [s0, s45, s90, s135, s180].forEach((sv, k) => { st.horizon5[k][c] = sv[c] + nf * nightFloor.horizon; });
       }
       // render-env-2-fix: the skyline profile — the dome's luminance at SKYLINE_ELS (azimuth-averaged, alpha of the stats)
       // over the horizon band's, floor included: what the far haze converges to (fog.js)
@@ -802,6 +807,8 @@ export async function init(ctx) {
 
     // celestial sphere orientation (local sidereal time)
     field.setCelestial(time.lst, time.geo.lat, celestial);
+    // the J2000 catalogue precessed to the date (qa-r1-fix-env-render): world ← equator of date ← J2000
+    if (Number.isFinite(time.ms)) celestial.multiply(precessionFromJ2000((time.ms / 86400000 + 2440587.5 - 2451545) / 36525, _prec));
     field.uniforms.uCelestial.value.copy(celestial);
     worldToGal.copy(celestial).transpose().premultiply(EQ_TO_GAL);
     skyU.uWorldToGal.value.copy(worldToGal);
@@ -858,9 +865,11 @@ export async function init(ctx) {
 
     // --- aerial perspective
     const F = st.fourier;
-    fogU.set('mkFogA0', F[0].map((v) => v * P));
-    fogU.set('mkFogA1', F[1].map((v) => v * P));
-    fogU.set('mkFogA2', F[2].map((v) => v * P));
+    // qa-r2-fix-env-render (ENV-R2-3): the five measured horizon samples themselves, not their 3-term Fourier synthesis
+    // (fog.js): with the Sun just up, the sunward sample is many times the others, and the truncated series rang below
+    // zero ≈ 100–120° from it — in red first: the far south-western ridges from Har HaMishchah hazed to violet under a
+    // pure-blue crest while the sky above them was warm grey
+    st.horizon5.forEach((v, k) => fogU.set(`mkFogA${k}`, v.map((x) => x * P)));
     fogU.set('mkFogRefDir', st.refDir.toArray());
     const rho = Math.exp(-ATMO.observerAltitude / ATMO.rayleighHeight);
     fogU.set('mkFogExtR', ATMO.rayleighScattering.map((v) => v * rho / 1000));
@@ -952,8 +961,8 @@ export async function init(ctx) {
     /** aerosol multiplier on the fog extinction (1 = the modelled Jerusalem autumn haze) */
     haze: 1,
     /**
-     * Aerial perspective for custom shaders. `values` is live (FogUniforms): mkFogA0/A1/A2 horizon in-scatter
-     * Fourier terms around mkFogRefDir (scene units), mkFogExtR Rayleigh extinction rgb (1/m), mkFogParams
+     * Aerial perspective for custom shaders. `values` is live (FogUniforms): mkFogA0…A4 the horizon in-scatter at 0, 45,
+     * 90, 135, 180° from mkFogRefDir's azimuth (scene units; fog.js interpolates them geometrically), mkFogExtR Rayleigh extinction rgb (1/m), mkFogParams
      * [aerosol extinction at y=0 (1/m), 1/aerosol scale height (1/m), zenith/horizon in-scatter ratio, 1].
      * Easiest use: material `fog: true` + the standard fog chunks; the env chunk then provides
      * mkFogTransmittance() and mkApplyFog(col), and the uniforms are uploaded automatically. Additive emitters:
@@ -999,12 +1008,13 @@ export async function init(ctx) {
     },
     /** sky radiance toward a world direction in SCENE units (cd/m² × preExposure), from the measured stats */
     skyColorAt(dir, target = new Color()) {
-      const F = st.fourier;
+      const H = st.horizon5;
       const h = Math.hypot(dir.x, dir.z), r = Math.hypot(st.refDir.x, st.refDir.z);
       const c = h > 1e-6 && r > 1e-6 ? (dir.x * st.refDir.x + dir.z * st.refDir.z) / (h * r) : 0;
-      const c2 = 2 * c * c - 1;
+      // as fog.js: geometric interpolation between the samples at 45° steps from the reference azimuth
+      const u = Math.min(Math.acos(MathUtils.clamp(c, -1, 1)) / (Math.PI / 4), 3.9999), k = Math.floor(u), f = u - k;
       const w = Math.pow(MathUtils.clamp(dir.y, 0, 1), 0.6);
-      const ch = (i) => (Math.max(F[0][i] + F[1][i] * c + F[2][i] * c2, 0) * (1 - w) + st.zenith[i] * w) * st.P;
+      const ch = (i) => (Math.exp(MathUtils.lerp(Math.log(Math.max(H[k][i], 1e-12)), Math.log(Math.max(H[k + 1][i], 1e-12)), f)) * (1 - w) + st.zenith[i] * w) * st.P;
       return target.setRGB(ch(0), ch(1), ch(2));
     },
     /** interior light: volumes, sky visibility, light occlusion (interiors.js); null if unavailable */

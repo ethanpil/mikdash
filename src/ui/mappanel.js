@@ -93,6 +93,7 @@ export function createMapPanel(app) {
     model = warm || createModel(ctx, data); // anchors are memoised: a part-warmed model just finishes on demand
     view = createView({
       el: stage,
+      root: vp,
       size: () => ({ W, H }),
       insets,
       extent: padRect(model.extent(), 40),

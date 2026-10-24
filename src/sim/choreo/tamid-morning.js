@@ -58,6 +58,10 @@ export default {
     };
     // the per-date plan now, behind the loader (it is rebuilt on a new date)
     try { plan(ctx, sim, state); } catch (e) { console.warn(`[sim] ${sim.id} plan at init failed`, e); }
+    // the vessels' listed window is what is staged: from the first bearer out of Lishkat HaKelim to the last vessel set
+    // on its table (qa-r2 SIM-R2-6: the data's 12 minutes ran 4 past the bearers). Offsets from the data's start, so the
+    // next date's row (schedule.upcoming) gets the same staging ⚙
+    try { sim.schedule?.retime?.('vessels', (t0, t1) => (state.vesSpan ? [t0 + state.vesSpan[0], t0 + state.vesSpan[1]] : [t0, t1])); } catch (e) { console.warn('[sim] vessels retime failed', e); }
     return state;
   },
 
@@ -109,6 +113,7 @@ function plan(ctx, sim, state) {
   // and hands them out from the shelves by the door.
   const V = [];
   const placed = [];       // { name, table, slot, t, at, h }
+  const firstOut = [];     // when each bearer first comes out of Lishkat HaKelim with vessels
   {
     const [v0] = Wall.m.fetch;     // 'vessels' shares lamb-brought's window
     const K = P.kelim;
@@ -138,6 +143,7 @@ function plan(ctx, sim, state) {
       loads.forEach((ld, j) => {
         if (j > 0) s.walk(intoKelim, { speed: SPEED.slow, zExact: false });
         takeIn(s, k, j, ld.props);
+        if (j === 0) firstOut.push(s.now());
         s.walk(outKelim, { speed: SPEED.slow, props: ld.props, zExact: false });
         if (ld.to === 'silver') {
           s.walk(toSilver, { speed: SPEED.carry, props: ld.props });
@@ -263,13 +269,24 @@ function plan(ctx, sim, state) {
   };
   const lambIdle = [idle(LS.morning, M.lamb.t0, 'lamb-m', 31), idle(LS.afternoon, A.lamb.t0, 'lamb-a', 37)];
 
+  // the vessels' staged window as offsets from the data's start (retime above); a new date's plan re-resolves it
+  const vEv = sim.event('vessels');
+  const vBase = vEv ? (vEv.tPlan ? vEv.tPlan[0] : vEv.t0) : NaN;
+  const vOut = Math.min(...firstOut), vSet = Math.max(...placed.map((x) => x.t)) + 0.3;
+  const off = (x) => ((x - vBase + 2160) % 1440) - 720;
+  const span = Number.isFinite(vBase) && Number.isFinite(vOut) && Number.isFinite(vSet) ? [off(vOut), off(vSet)] : null;
+  if (span && (!state.vesSpan || Math.abs(span[0] - state.vesSpan[0]) > 1e-6 || Math.abs(span[1] - state.vesSpan[1]) > 1e-6)) {
+    state.vesSpan = span;
+    if (vEv) ctx.schedule?.resolveEvent?.(vEv);
+  }
+
   const T = M.t;
   const P2 = {
     M, A, V, U, ret, lambIdle, LS, sunset, sunrise, KG,
     wicket: [[Wall.m.fetch[0] + 0.6, T.atWater + 0.4]].map((w) => [wrap(w[0]), wrap(w[1])]),
     leads: M.leads.map(([a, b, who]) => [wrap(a), wrap(b), who]),
     cue: {
-      bleat: wrap(T.ledFrom + 0.1), drink: wrap(T.drink[0] + 0.1), vessels: wrap(Wall.m.fetch[0] + 0.55), struggle: wrap(Math.max(T.struggle, Wall.m.slaughter[0] + 0.5)),
+      bleat: wrap(T.ledFrom + 0.1), drink: wrap(T.drink[0] + 0.1), vessels: wrap((Number.isFinite(vOut) ? vOut : Wall.m.fetch[0]) + 0.55), struggle: wrap(Math.max(T.struggle, Wall.m.slaughter[0] + 0.5)),
       cut: wrap(T.tCut + 0.05), throw1: wrap(T.throw1), throw2: wrap(T.throw2), pour: wrap(T.pour), hang: wrap(Math.max(T.cuts.hang, Wall.m.flay[0] + 0.5)),
       row: wrap(T.cuts.row), laid: wrap(Math.max(T.laid[0], Wall.m.carry[0] + 0.5)), salted: wrap(T.salted), toss: wrap(Math.max(KG ? up.tossAt[6] ?? up.tossAt[0] : up.tossAt[0], u0 + 0.55)),
     },

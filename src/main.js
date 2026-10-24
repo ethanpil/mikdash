@@ -64,14 +64,57 @@ function setLoading(label, frac) {
   if (tx && label) tx.textContent = label;
 }
 
+/**
+ * qa-r1 CORE-3: the boot failed — say what to do in plain words, offer a retry, and fold the engine's text into a
+ * detail (it is what a bug report needs, not what a visitor can act on). `graphics`: no WebGL 2 context.
+ */
+function showBootError(e, graphics, reason = '') {
+  console.error('[boot] fatal', e);
+  globalThis.__mikdashReady = true;
+  globalThis.__mikdashError = String(e?.stack || e);
+  const host = document.getElementById('boot-label')?.parentElement;
+  if (!host) return;
+  const tag = (name, text, cls) => {
+    const el = document.createElement(name);
+    if (text) el.textContent = text;
+    if (cls) el.className = cls;
+    return el;
+  };
+  const box = tag('div', '', 'boot-msg');
+  box.setAttribute('role', 'alert');
+  if (graphics) {
+    box.append(tag('p', 'Mikdash needs WebGL 2, and this browser could not start it.', 'lead'),
+      tag('p', 'Turn on hardware (graphics) acceleration in the browser’s settings, update the browser or the graphics '
+        + 'drivers, or open the page in a current Chrome, Edge, Firefox or Safari.', 'hint'));
+  } else {
+    box.append(tag('p', 'Mikdash could not start.', 'lead'),
+      tag('p', 'Try again. If it keeps failing, update the browser or the graphics drivers.', 'hint'));
+  }
+  const retry = tag('button', 'Retry');
+  retry.type = 'button';
+  retry.addEventListener('click', () => location.reload());
+  const details = tag('details');
+  details.append(tag('summary', 'Technical details'),
+    tag('pre', [e?.message || String(e), reason && `Reason: ${reason}`, `Browser: ${navigator.userAgent}`].filter(Boolean).join('\n')));
+  box.append(retry, details);
+  host.append(box);
+  document.body.classList.add('boot-failed');
+  retry.focus();
+}
+
 async function boot() {
   installShaderLogFilter(); // benign ANGLE/D3D X4122 warnings, before any shader compiles
+  const canvas = document.getElementById('scene');
+  // qa-r1 CORE-3: the renderer's own context is the WebGL 2 check (three throws when it cannot get one), made before
+  // anything else starts — no chunk preloads, no bake worker on a browser that cannot run the page
+  let reason = '';
+  canvas.addEventListener('webglcontextcreationerror', (ev) => { reason = ev.statusMessage || reason; });
+  let engine;
+  try { engine = new Engine(canvas, params); } catch (e) { showBootError(e, true, reason.trim()); return; }
   // perf-1: the systems' chunks load (no evaluation) and the people's animation clips bake in a Worker while this
   // thread builds the world
   preloadBootChunks();
   startPrebake();
-  const canvas = document.getElementById('scene');
-  const engine = new Engine(canvas, params);
   const quality = resolveTier(params.q, engine.renderer);
   engine.configure(quality);
   const ctx = createContext(engine, params, quality);
@@ -196,10 +239,4 @@ async function boot() {
   }
 }
 
-boot().catch((e) => {
-  console.error('[boot] fatal', e);
-  const tx = document.getElementById('boot-label');
-  if (tx) tx.textContent = `Failed to start: ${e.message}`;
-  globalThis.__mikdashReady = true;
-  globalThis.__mikdashError = String(e?.stack || e);
-});
+boot().catch((e) => showBootError(e, false));

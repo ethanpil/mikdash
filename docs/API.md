@@ -339,6 +339,14 @@ Internal additions:
 - Pattern 24 (fleece shells) is gone from the shader; the `PAT.FLEECE_SHELL` constant remains but is unused.
 - New dev tools: `src/people/dev/skin-probe.mjs` (CPU skinning probe) and `src/people/dev/joints.mjs` (joint positions for a clip frame).
 
+people — qa-r1 (docs/decisions/qa-r1-people.md; additive, nothing renamed or removed):
+- `Actor.setGarb(name, flags)` / `setGarb(flags)` / `Crowd.setGarb(name, flags)`; flags `{ avnet: false }` takes the hedyot's sha'atnez avnet off (a kohen outside the avodah: meals, showbread division and eating, waiting — Rambam KhM 8:11), `{ avnet: true }` restores it (default). `setGarb(flags)` leaves the colours as they are (`flags.color` may name them); `setGarb()` still resets the colours. Also `spawn({ garb: { avnet: false } })`, `crowd({ garb: { avnet: false } })`. Readable `actor.avnet`. The Kohen Gadol's YK linen avnet has no flag (not kilayim); his golden one is under the me'il. The sim decides which states are not avodah.
+- Pose variants: `stand` and `raise_hands` have baked variants (`'stand~1'` …), chosen per figure (an actor by its seed, a crowd member by its offset). `actor.poseName` and `ctx.people.poses` give the base names.
+- Fades are temporal: the far-cap fade and the flowing crowds' edge fade move over 0.25 s of real time and snap on `time:jump`, on pause/resume and in shot mode; the dither is interleaved gradient noise. A crowd member is out within 0.35 m of the edge it crosses.
+- Contact shadows (contact.js): one instanced draw call of soft ellipses under every person and animal on low and medium (not under birds), from the pose's low joints, fading out by 60 m (low) / 75 m (medium). `ctx.people.system.contact`.
+- Crowd grids (region crowds): the grid is chosen for the cell aspect and the least room a person needs, and a crowd of 6+ in a region with room for it stands at least two ranks and two files deep (no single file along a long, narrow region).
+- Material program cache key v8.
+
 ## audio
 
 ctx.audio = {

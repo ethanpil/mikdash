@@ -2,7 +2,7 @@
 // Slots are compacted on free (swap-with-last), so instanceCount stays tight; owners hold slot objects
 // whose index is kept current.
 import {
-  InstancedBufferGeometry, InstancedBufferAttribute, Float32BufferAttribute, Mesh, DynamicDrawUsage,
+  InstancedBufferGeometry, InstancedBufferAttribute, Float32BufferAttribute, Mesh, DynamicDrawUsage, BoxGeometry,
 } from 'three';
 
 export class InstanceBatch {
@@ -10,14 +10,22 @@ export class InstanceBatch {
    * @param {string} name
    * @param {Record<string, number>} layout attribute name -> itemSize
    * @param {number} capacity max instances
-   * @param {{ x0:number, x1:number, y0:number, y1:number }} quad local quad extents (shader interprets them)
+   * @param {{ x0:number, x1:number, y0:number, y1:number } | 'box'} quad local quad extents (shader interprets them),
+   *   or 'box': a cube [-1, 1]³ with outward faces (the coal-bed decal)
    */
   constructor(name, layout, capacity, quad = { x0: -0.5, x1: 0.5, y0: 0, y1: 1 }) {
     const g = new InstancedBufferGeometry();
-    const { x0, x1, y0, y1 } = quad;
-    g.setAttribute('position', new Float32BufferAttribute([x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0], 3));
-    g.setAttribute('uv', new Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
-    g.setIndex([0, 1, 2, 0, 2, 3]);
+    if (quad === 'box') {
+      const b = new BoxGeometry(2, 2, 2);
+      g.setAttribute('position', b.getAttribute('position'));
+      g.setIndex(b.getIndex());
+      b.dispose();
+    } else {
+      const { x0, x1, y0, y1 } = quad;
+      g.setAttribute('position', new Float32BufferAttribute([x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0], 3));
+      g.setAttribute('uv', new Float32BufferAttribute([0, 0, 1, 0, 1, 1, 0, 1], 2));
+      g.setIndex([0, 1, 2, 0, 2, 3]);
+    }
     this.arrays = {};
     for (const [k, size] of Object.entries(layout)) {
       const arr = new Float32Array(capacity * size);

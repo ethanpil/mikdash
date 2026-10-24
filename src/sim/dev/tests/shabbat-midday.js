@@ -21,6 +21,11 @@ time.setDate('2026-11-07'); await frames(4);
 const z = time.zmanim;
 const ev = (id) => ctx.schedule.byId(id);
 const eaten = ev('showbread-eaten'), day = ev('shabbat-altar-day'), div = ev('showbread-divided');
+// the modules build their per-date plans lazily, in an update while one of their events is near: set a time inside
+// showbread-eaten and wait for both plans (qa-r2 SIM-R2-11: right after setDate shabbat-mishmar's plan was still null)
+time.set(eaten.t0 + 1);
+for (let k = 0; k < 120 && !(E['shabbat-mishmar'].state?.plan && E['altar-night'].state?.plan); k++) await frames(1);
+if (!E['shabbat-mishmar'].state?.plan) return { ...res, error: 'shabbat-mishmar built no plan for 2026-11-07' };
 res.windows = { divided: [div?.t0, div?.t1].map((t) => time.format(t)), eaten: [eaten?.t0, eaten?.t1].map((t) => time.format(t)), altarDay: [day?.t0, day?.t1].map((t) => time.format(t)) };
 const B = E['shabbat-mishmar'].state.plan, A = E['altar-night'].state.plan?.altar?.day;
 res.plan = { kg: !!B?.kg, visitsKg: B?.kg?.t.visits.length, half: time.format(B?.kg?.t.half), sharesN: [B?.t.startN, B?.t.endN].map((t) => time.format(t)), sharesS: [B?.t.startS, B?.t.endS].map((t) => time.format(t)), take: time.format(B?.kg?.t.take), share: time.format(B?.kg?.t.share), end: time.format(B?.kg?.t.end), altarVisits: A?.visits.length, altarVisitTimes: A?.visits.slice(0, 8).map((v) => `${time.format(v.t0)}+${(v.t1 - v.t0).toFixed(1)} ${v.who.join('/')}`), warn: B?.warn?.slice(0, 6) };

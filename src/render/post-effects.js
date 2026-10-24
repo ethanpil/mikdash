@@ -6,8 +6,9 @@
 //                    env's analytic aureole already carries the sky glare around the sun.
 //  SunShaftsEffect — screen-space crepuscular rays: a light mask built from the SKY (depth == far) near the sun,
 //                    radially blurred toward the sun and ADDED (scene-linear HDR light).
+//  HeatHazeEffect  — the shimmer over large fires (a UV transform merged into the grade pass; render/fx picks the plumes).
 // Both read the composer's stable scene-depth texture (setDepthTexture).
-import { ShaderMaterial, NoBlending, Uniform, Vector2, Vector3, WebGLRenderTarget, HalfFloatType } from 'three';
+import { ShaderMaterial, NoBlending, Uniform, Vector2, Vector3, Vector4, WebGLRenderTarget, HalfFloatType } from 'three';
 import { BloomEffect, Effect, EffectAttribute, BlendFunction, ShaderPass, Resolution } from 'postprocessing';
 
 const FULLSCREEN_VS = /* glsl */`
@@ -31,6 +32,7 @@ uniform float threshold;  // scene-linear
 uniform float knee;       // soft-knee half width (scene-linear)
 uniform float maxLum;     // clamp of the bloom source luminance (scene-linear) for broad bright areas
 uniform float sparkLum;   // … and for an isolated spark (render-env-2)
+uniform float surfLum;    // … and for a lit surface (not an emitter, not the sky): lower at night (qa-r2-fix-env-render)
 uniform vec2 texel;       // 1 / input size
 uniform vec3 disc;        // key-light disc: uv.xy, z = 1 when in front of the camera
 uniform float discR;      // disc radius, uv-height units
@@ -38,12 +40,16 @@ uniform float aspect;
 varying vec2 vUv;
 ${SKY_TEST}
 void main() {
-  vec3 c = texture2D(inputBuffer, vUv).rgb;
+  vec4 c4 = texture2D(inputBuffer, vUv);
+  vec3 c = c4.rgb;
   float l = luminance(c);
   // sky contributes only inside the key light's own disc (a sun / moon glint), never the bright sky around it
   vec2 dv = (vUv - disc.xy) * vec2(aspect, 1.0);
   float inDisc = disc.z * (1.0 - smoothstep(0.55 * discR, discR, length(dv)));
-  float m = mix(1.0, inDisc, isSky(texture2D(depthBuffer, vUv).r));
+  float sky = isSky(texture2D(depthBuffer, vUv).r);
+  float m = mix(1.0, inDisc, sky);
+  // the buffer's alpha is the emitter mask (render/fx-pass.js): 1 on surfaces, lower under flames, embers and glows
+  float surf = (1.0 - sky) * (1.0 - smoothstep(0.02, 0.3, 1.0 - c4.a));
   // energy above threshold with a quadratic soft knee: continuous from zero, no contour at the threshold
   float s = clamp(l - threshold + knee, 0.0, 2.0 * knee);
   s = s * s / (4.0 * knee + 1e-6);
@@ -58,6 +64,7 @@ void main() {
     + step(threshold, luminance(texture2D(inputBuffer, vUv + texel * vec2(2.0, -2.0)).rgb))
     + step(threshold, luminance(texture2D(inputBuffer, vUv + texel * vec2(-2.0, -2.0)).rgb)));
   float cap = mix(sparkLum, maxLum, cover);
+  if (surfLum >= 0.0) cap = mix(cap, surfLum, surf);
   gl_FragColor = vec4(c * w * min(1.0, cap / max(lo, 1e-6)), 1.0);
 }`;
 
@@ -72,6 +79,7 @@ class SkyMaskedLuminanceMaterial extends ShaderMaterial {
         knee: new Uniform(0.5),
         maxLum: new Uniform(4),
         sparkLum: new Uniform(4),
+        surfLum: new Uniform(4),
         texel: new Uniform(new Vector2(1 / 1280, 1 / 720)),
         disc: new Uniform(new Vector3(0.5, 0.5, 0)),
         discR: new Uniform(0.01),
@@ -115,13 +123,16 @@ export class SkyMaskedBloom extends BloomEffect {
    * @param {number} discR uv-height radius
    * @param {number} aspect
    * @param {number} [sparkLum] scene-linear clamp for isolated sub-3-px highlights (default maxLum)
+   * @param {number} [surfLum] scene-linear clamp for lit surfaces, emitters and the sky excepted (default: as the others)
    */
-  setPrefilter(threshold, knee, maxLum, disc, discR, aspect, sparkLum = maxLum) {
+  setPrefilter(threshold, knee, maxLum, disc, discR, aspect, sparkLum = maxLum, surfLum = null) {
     const u = this.prefilter.uniforms;
     u.threshold.value = threshold;
     u.knee.value = Math.max(knee, 1e-6);
     u.maxLum.value = maxLum;
     u.sparkLum.value = Math.max(sparkLum, maxLum);
+    // (a negative value: as for the other pixels — the cap there is a mix of the two above)
+    u.surfLum.value = surfLum ?? -1;
     u.disc.value.copy(disc);
     u.discR.value = discR;
     u.aspect.value = aspect;
@@ -278,5 +289,76 @@ export class SunShaftsEffect extends Effect {
     const type = frameBufferType ?? HalfFloatType;
     this.rtMask.texture.type = type;
     this.rtRays.texture.type = type;
+  }
+}
+
+// ------------------------------------------------------------------ heat shimmer (qa-r1-fix-env-render)
+// The hot plume over a large fire bends the light behind it: a small, fast, upward-scrolling refraction of what lies
+// BEHIND the plume (the scene depth there is farther than the plume), above the flames' middle. Up to four plumes,
+// chosen and projected by render/fx (fx.haze); merged into the grade pass as a UV transform (no extra full-screen pass).
+// Amplitude: hot air (≈ 600 K over a 300 K surround, Δn ≈ 1.5e-4) deflects a ray crossing a 1–2 m plume by ≈ 1e-3 rad;
+// fx scales it with the plume's size and clamps it to a few pixels.
+const HAZE_FS = /* glsl */`
+uniform highp sampler2D hzDepth;
+uniform sampler2D hzNoise;
+uniform vec4 hzA[4];   // xy the plume's centre (uv), zw its half extents (uv)
+uniform vec4 hzB[4];   // x its view z (negative), y amplitude (uv), z seed
+uniform vec3 hzC;      // x time, y plumes in use, z 1 / aspect
+uniform vec2 hzNF;     // camera near, far
+float hzViewZ(const in vec2 uv) {
+  float d = texture2D(hzDepth, uv).x;
+  return (hzNF.x * hzNF.y) / ((hzNF.y - hzNF.x) * d - hzNF.y);
+}
+void mainUv(inout vec2 uv) {
+  if (hzC.y < 0.5) return;
+  vec2 off = vec2(0.0);
+  float zs = 0.0, zf = 0.0, wmax = 0.0;
+  bool zread = false;
+  for (int i = 0; i < 4; i++) {
+    if (float(i) >= hzC.y) break;
+    vec4 A = hzA[i], B = hzB[i];
+    vec2 q = (uv - A.xy) / A.zw;
+    float e = 1.0 - dot(q * vec2(1.0, 0.8), q * vec2(1.0, 0.8));
+    if (e <= 0.0) continue;
+    // the scene depth only where a plume is (most of the screen reads nothing extra)
+    if (!zread) { zs = hzViewZ(uv); zread = true; }
+    // from the flames' upper half (the tips at q.y ≈ −0.3: render/fx puts the plume's centre 1.4 and its half height 1.25
+    // flame heights up), strongest just over them; only over what lies behind the plume. qa-r2-fix-env-render: it began
+    // lower, and the flames themselves (drawn into the same buffer, with no depth of their own) were bent with what lay
+    // behind them — a smeared, horizontally streaked flame; the emitter mask below keeps their pixels out of it
+    float m = e * e * smoothstep(-0.62, -0.2, q.y) * smoothstep(-0.6, 1.0, B.x - zs);
+    vec2 n = texture2D(hzNoise, q * vec2(0.45, 0.28) + vec2(B.z, -hzC.x * 0.9)).rg
+      + texture2D(hzNoise, q * vec2(0.9, 0.55) + vec2(B.z * 1.7, -hzC.x * 1.6)).ba - 1.0;
+    off += n * (B.y * m) * vec2(hzC.z, 1.0);
+    if (m > wmax) { wmax = m; zf = B.x; }
+  }
+  // never pull a nearer surface (a person in front of the fire) into the shimmer — nor bend a flame's own pixels or pull
+  // them out over the background (qa-r2-fix-env-render: the buffer's alpha is the emitter mask, render/fx-pass.js)
+  if (wmax > 0.0) {
+    float em = max(1.0 - texture2D(inputBuffer, uv).a, 1.0 - texture2D(inputBuffer, uv + off).a);
+    uv += off * smoothstep(-0.6, 0.4, zf - hzViewZ(uv + off)) * (1.0 - smoothstep(0.02, 0.25, em));
+  }
+}`;
+
+export class HeatHazeEffect extends Effect {
+  constructor(noise) {
+    super('HeatHazeEffect', HAZE_FS, {
+      uniforms: new Map([
+        ['hzDepth', new Uniform(null)], ['hzNoise', new Uniform(noise)],
+        ['hzA', new Uniform([0, 1, 2, 3].map(() => new Vector4()))], ['hzB', new Uniform([0, 1, 2, 3].map(() => new Vector4()))],
+        ['hzC', new Uniform(new Vector3())], ['hzNF', new Uniform(new Vector2(0.1, 1000))],
+      ]),
+    });
+  }
+
+  setDepthTexture(depthTexture) { this.uniforms.get('hzDepth').value = depthTexture; }
+
+  /** haze: render/fx's { n, a: Float32Array(16), b: Float32Array(16) }; camera: near / far / aspect */
+  setSources(haze, time, camera) {
+    const A = this.uniforms.get('hzA').value, B = this.uniforms.get('hzB').value;
+    const n = haze?.n || 0;
+    for (let i = 0; i < n; i++) { A[i].fromArray(haze.a, i * 4); B[i].fromArray(haze.b, i * 4); }
+    this.uniforms.get('hzC').value.set(time, n, 1 / (camera.aspect || 1));
+    this.uniforms.get('hzNF').value.set(camera.near, camera.far);
   }
 }

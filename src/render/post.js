@@ -1,8 +1,8 @@
 // Post-processing chain for the medium/high/ultra tiers. Loaded on demand (dynamic import) so the low tier
 // never downloads postprocessing + n8ao.
-//   medium : RenderPass -> FX -> [bloom + grade] -> SMAA
-//   high   : RenderPass -> N8AO (half-res) -> FX -> [bloom + grade] -> SMAA
-//   ultra  : RenderPass -> N8AO (full-res) -> FX -> sun shafts -> [bloom + grade + vignette] -> SMAA
+//   medium : RenderPass -> FX -> [heat shimmer + bloom + grade] -> SMAA
+//   high   : RenderPass -> N8AO (half-res) -> FX -> [heat shimmer + bloom + grade] -> SMAA
+//   ultra  : RenderPass -> N8AO (full-res) -> FX -> sun shafts -> [heat shimmer + bloom + grade + vignette] -> SMAA
 import { HalfFloatType, Vector2, Vector3, Color, MathUtils, Uniform } from 'three';
 import {
   EffectComposer, RenderPass, EffectPass, ToneMappingEffect, ToneMappingMode, SMAAEffect,
@@ -10,7 +10,8 @@ import {
 } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
 import { FXPass } from './fx-pass.js';
-import { SkyMaskedBloom, SunShaftsEffect } from './post-effects.js';
+import { SkyMaskedBloom, SunShaftsEffect, HeatHazeEffect } from './post-effects.js';
+import { getNoiseTexture } from './fx/noise.js';
 import { sunDir, sunAltitude, envDirLights } from './env-link.js';
 
 // Thresholds are DISPLAY-relative (divided by the tone-mapping exposure each frame); the prefilter keeps only
@@ -22,6 +23,18 @@ const BLOOM = {
   ultra: { intensity: 0.85, radius: 0.75, levels: 8, threshold: 1.3, knee: 0.6, clamp: 4, spark: 120 },
 };
 const DISC_DEG = 0.6;    // key-light glint radius fed to bloom (the solar disc is 0.27°)
+// qa-r1-fix-env-render: inside a roofed room (env interiors), a doorway or the Ulam's opening onto the sunlit court is
+// 50–100× the room's adaptation: the broad-area clamp and the intensity are lowered there by these shares, so the
+// opening's glare stays a rim instead of washing the gold walls and the floor white (sparks and flames keep theirs)
+const BLOOM_INDOOR = { clamp: 0.65, intensity: 0.4 };
+// qa-r2-fix-env-render (ENV-R2-4b): at night the bloom source of a LIT SURFACE (not a flame, ember or glow — the emitter
+// mask in the buffer's alpha, render/fx-pass.js — nor the sky) is clamped at this × threshold, against the broad clamp
+// (4×) and the spark clamp (120×) that emitters keep. The Nikanor gateway's upper courses, lit by the altar's fire past the
+// altar's corner while the viewer stands in its shadow, are far above the dark-adapted exposure: with the emitters' clamp
+// their glow drew the courses' edges as orange neon tubes (the eye's own glare round a 25 cd/m² wall is ~1 % of it at
+// 1°). By day lit surfaces keep it: sun glints on gold and bronze are what the spark clamp is for. Faded in as the Sun
+// sets from +2° to −4°.
+const BLOOM_SURFACE_NIGHT = 1.0;
 // sun shafts: added in-scatter at the sun direction (display-relative, × key-light colour), two phase lobes
 const SHAFT_PEAK = 0.9;     // at the sun, fully open path, low sun
 const SHAFT_NARROW = 4;     // narrow forward-scattering lobe, degrees
@@ -38,6 +51,7 @@ const _sunView = new Vector3();
 const _upView = new Vector3();
 const _col = new Vector3();
 const _white = new Vector3();
+const _ins = { V: 1, vol: null, s: 0 };
 const _shaft = { color: _col, narrow: SHAFT_NARROW * Math.PI / 180, broad: SHAFT_BROAD * Math.PI / 180, broadWeight: SHAFT_BROAD_W, sunView: _sunView, upView: _upView, camera: null };
 
 /**
@@ -75,7 +89,7 @@ export function buildPost(ctx, fx, quality, toneMapper, prepass = null) {
   }
   composer.addPass(scenePass);
   const db = r.getDrawingBufferSize(new Vector2());
-  const out = { composer, ao: null, bloom: null, shafts: null, shaftPass: null };
+  const out = { composer, ao: null, bloom: null, shafts: null, shaftPass: null, haze: null };
 
   if (quality.ao) {
     const ao = new N8AOPostPass(scene, camera, db.x, db.y);
@@ -106,6 +120,10 @@ export function buildPost(ctx, fx, quality, toneMapper, prepass = null) {
   }
 
   const effects = [];
+  // qa-r1-fix-env-render: the heat shimmer over the large fires (a UV transform: merged into this pass, no extra one)
+  out.haze = new HeatHazeEffect(getNoiseTexture());
+  out.haze.setDepthTexture(depth);
+  effects.push(out.haze);
   const bp = BLOOM[quality.key] || BLOOM.medium;
   if (quality.bloom) {
     out.bloom = new SkyMaskedBloom({ mipmapBlur: true, intensity: bp.intensity, radius: bp.radius, levels: bp.levels });
@@ -127,6 +145,7 @@ export function buildPost(ctx, fx, quality, toneMapper, prepass = null) {
   // effects added after the FX pass also received the depth texture from the composer; make sure ours did
   out.bloom?.setDepthTexture(depth);
   out.shafts?.setDepthTexture(depth);
+  out.haze?.setDepthTexture(depth);
 
   return {
     ...out,
@@ -140,9 +159,15 @@ export function buildPost(ctx, fx, quality, toneMapper, prepass = null) {
         if (env.keyDir?.isVector3) _sun.copy(env.keyDir); else sunDir(ctx, _sun); // sun by day, moon by night
         screenUv(camera, _sun, _disc);
         const t = bp.threshold / ex;
-        out.bloom.setPrefilter(t, bp.knee * t, bp.clamp * t, _disc, Math.tan(DISC_DEG * DEG) / (2 * tanHalf), aspect, bp.spark * t);
+        const ins = env.interiors?.at ? env.interiors.at(camera.position, _ins).s || 0 : 0;
+        const broad = bp.clamp * (1 - BLOOM_INDOOR.clamp * ins) * t;
+        const night = MathUtils.clamp((2 - sunAltitude(ctx)) / 6, 0, 1);
+        out.bloom.setPrefilter(t, bp.knee * t, broad, _disc, Math.tan(DISC_DEG * DEG) / (2 * tanHalf), aspect, bp.spark * t,
+          night > 0 ? MathUtils.lerp(broad, Math.min(broad, BLOOM_SURFACE_NIGHT * t), night) : null);
+        out.bloom.intensity = bp.intensity * (1 - BLOOM_INDOOR.intensity * ins);
       }
       if (out.shafts) updateShafts(ctx, out, ex);
+      if (out.haze) out.haze.setSources(ctx.fx?.haze, ctx.fx?.time || 0, camera);
       const wb = ctx.env?.whiteBalance;
       if (out.grade && wb?.isVector3) out.grade.uniforms.get('wb').value.copy(wb);
     },

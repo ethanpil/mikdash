@@ -161,16 +161,61 @@ function nitzotz(C) {
   // turns bring the top step back over it, opening south onto the floor of Beit HaNitzotz
   spiral(C, { c: sc, r1: sr - 0.05, z0: Z_AZ, z1: zr, perTurn: 13, a0: (255 * Math.PI) / 180, mat: 'steps_stone', topRect: [sc[0] - sr, sc[1] - sr, sc[0] + sr, sc[1] + sr] });
   C.doorCase({ axis: 'y', at: qy0 - tt, out: -1, lo: td[0], hi: td[1], z0: Z_AZ, z1: Z_AZ + 6 }, 0.45, 0.12);
-  // Beit HaNitzotz: back wall in the N wall, open bays over the court with a 2-amah parapet ⚙
-  const bays = [];
-  const nb = 4, bw = (up.max[0] - up.min[0] - 2 * t - (nb - 1) * 1.2) / nb;
-  for (let i = 0; i < nb; i++) {
-    const bx0 = up.min[0] + t + i * (bw + 1.2);
-    bays.push(B(bx0, up.min[1] - 0.01, up.min[2] + 2, bx0 + bw, up.min[1] + t + 0.01, up.max[2] - 2.5, { mat: 'marble_white' }));
-  }
+  // Beit HaNitzotz: "an upper storey built on it, the kohanim keep watch above" (Middot 1:5) — an open watch-room with
+  // open bays rather than windows (report Part VII F12): three bays toward the court and three toward the chel between
+  // square piers, over a breast wall, under a stone lintel (nitzotzBays ⚙)
+  const NB = nitzotzBays(C.el);
+  const bays = NB.bays.map((b) => {
+    const y0 = b.face < 0 ? up.min[1] - 0.01 : up.max[1] - t - 0.01, y1 = b.face < 0 ? up.min[1] + t + 0.01 : up.max[1] + 0.01;
+    return B(b.x0, y0, b.z0, b.x1, y1, b.z1, { mat: 'marble_white' });
+  });
   shell(C, B(...up.min, ...up.max), { t, floor: 'paving_azarah', room: 'plaster', top: 'roof_plaster', doors: bays, holes: [] });
+  if (C.d >= 1) watchRoomDressing(C, up, NB);
   C.anchor('courts.gate.nitzotz.exedra', [(x0 + x1) / 2 - 4, yF + 4, Z_AZ], 0, 'The Nitzotz exedra');
   C.anchor('courts.beit-hanitzotz', [(up.min[0] + up.max[0]) / 2 - 3, up.min[1] + 3, up.min[2]], 180, 'Beit HaNitzotz (upper storey)');
+}
+
+/**
+ * The open bays of Beit HaNitzotz (report Part VII F12 "open colonnaded upper watch-room — open bays rather than
+ * windows"; Middot 1:5) ⚙ count and sizes: per face (−1 the court face, +1 the chel face) three bays between 1.5-amah
+ * piers, the breast wall 2¼ amot over the floor (its top clear of the gate's door-case below on the chel face, which
+ * rises to +37.9) and 2¼ amot of lintel and roof slab over them. Shared with masonry.js, which keeps the walls' set-out
+ * courses off the chel-face bays. Returns { bays: [{ face, x0, x1, z0, z1 }], pier, sill, head }.
+ */
+export function nitzotzBays(el) {
+  const up = el('azarah.beit-hanitzotz').box, t = 1, n = 3, pier = 1.5;
+  const sill = up.min[2] + 2.25, head = up.max[2] - 2.25;
+  const w = (up.max[0] - up.min[0] - 2 * t - (n - 1) * pier) / n;
+  const bays = [];
+  for (const face of [-1, 1]) for (let i = 0; i < n; i++) { const x0 = up.min[0] + t + i * (w + pier); bays.push({ face, x0, x1: x0 + w, z0: sill, z1: head }); }
+  return { bays, pier, sill, head, t };
+}
+
+/** detail ≥ 1: the watch-room's stonework on both faces — a two-fascia lintel over the bays, impost blocks on the piers,
+ *  a sill course on the breast wall and plain bases at the piers' feet (marble, as the gate's own frames) ⚙ */
+function watchRoomDressing(C, up, { bays, sill, head }) {
+  const m = C.kit.m('marble_white', false, true);
+  for (const face of [-1, 1]) {
+    const at = face < 0 ? up.min[1] : up.max[1], out = face;
+    const P = (x0, x1, z0, z1, pr) => m.box([x0, Math.min(at, at + out * pr), z0], [x1, Math.max(at, at + out * pr), z1], out > 0 ? 'xXYzZ' : 'xXyzZ');
+    const row = bays.filter((b) => b.face === face);
+    const x0 = up.min[0] + 0.05, x1 = up.max[0] - 0.05;
+    // the lintel: a lower fascia over the openings and a broader upper one, a plain cap over it
+    P(x0, x1, head, head + 0.55, 0.12);
+    P(x0, x1, head + 0.55, head + 1.15, 0.2);
+    P(x0 - 0.05, x1 + 0.05, head + 1.15, head + 1.35, 0.28);
+    // the sill course over the breast wall, and the piers' impost blocks and bases (the end piers are the side walls)
+    P(x0, x1, sill - 0.3, sill, 0.16);
+    const piers = [[up.min[0], row[0].x0]];
+    for (let i = 0; i + 1 < row.length; i++) piers.push([row[i].x1, row[i + 1].x0]);
+    piers.push([row[row.length - 1].x1, up.max[0]]);
+    for (const [a, b] of piers) {
+      const e = 0.12;
+      const pa = Math.max(up.min[0], a - e), pb = Math.min(up.max[0], b + e);
+      P(pa, pb, head - 0.4, head, 0.18);                 // impost
+      P(pa, pb, sill, sill + 0.3, 0.1);                  // base
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------------------- Lishkat HaKelim

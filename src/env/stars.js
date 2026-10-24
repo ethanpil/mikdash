@@ -113,6 +113,24 @@ function bvToRGB(bv) {
   return c.map((v) => 1 + (v / L - 1) * 0.55);
 }
 
+/**
+ * Precession of the equator from J2000 to the date (IAU 1976, Lieske 1979): r_date = P · r_J2000. T = Julian centuries
+ * from J2000. The catalogue is J2000 while the sidereal time (and the Sun, Moon and planets) are of the date: negligible
+ * today (0.36° in 2026), but 27° by 70 CE — qa-r1-fix-env-render (ENV-7: dates of any year are accepted now).
+ */
+export function precessionFromJ2000(T, target = new Matrix3()) {
+  const AS = Math.PI / (180 * 3600);
+  const zeta = (2306.2181 * T + 0.30188 * T * T + 0.017998 * T * T * T) * AS;
+  const z = (2306.2181 * T + 1.09468 * T * T + 0.018203 * T * T * T) * AS;
+  const th = (2004.3109 * T - 0.42665 * T * T - 0.041833 * T * T * T) * AS;
+  const cz = Math.cos(zeta), sz = Math.sin(zeta), cZ = Math.cos(z), sZ = Math.sin(z), ct = Math.cos(th), st = Math.sin(th);
+  return target.set(
+    cz * ct * cZ - sz * sZ, -sz * ct * cZ - cz * sZ, -st * cZ,
+    cz * ct * sZ + sz * cZ, -sz * ct * sZ + cz * cZ, -st * sZ,
+    cz * st, -sz * st, ct,
+  );
+}
+
 // equatorial (J2000) -> galactic rotation
 export const EQ_TO_GAL = new Matrix3().set(
   -0.0548755604, -0.8734370902, -0.4838350155,
