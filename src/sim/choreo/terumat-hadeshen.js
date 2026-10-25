@@ -13,7 +13,9 @@
 //   tapuach           the ashes are raked up onto the tapuach in the middle of the altar (Tamid 2:2).
 //   great-pile        logs are carried up; the winner builds the great pile on the east, its face east (Tamid 2:3–4; Yoma 22a).
 //   second-pile       fig wood for the incense pile opposite the SW horn; the leftover limbs pushed back into the fire; the
-//                     two logs (Yoma 22a, 33a); both piles lit; all go down to Lishkat HaGazit (Tamid 2:5).
+//                     two logs (Yoma 22a, 33a); both piles lit; all go down to Lishkat HaGazit (Tamid 2:5). On Shabbat the
+//                     leftover limb is Friday's: it stays at the side of the altar until Shabbat ends - the end of a weekday's
+//                     tamid does not override Shabbat (Rambam TuM 1:7; Kesef Mishneh there in the name of the Ritva).
 // The module is `always`: it owns the kiyor's state all day — sunk in its well from the locking of the court ⚙ until the
 // muchni raises it — the two logs on the great pile (morning and afternoon, Yoma 2:5, 22a), the wood stack by the ramp
 // and the shovels and forks kept with the service vessels west of the ramp. Every pose is a pure function of (t, date):
@@ -24,6 +26,7 @@ import { places, rampUp, rampDown, circuit } from './g2/places.js';
 import { pmLogs } from './g2/tamid.js';
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
 import { rand } from '../lib/core.js';
+import { followView, bearingTo } from '../lib/watch.js';
 
 const SEED = 0x7468;
 const NB = 8;                      // "his brothers" (Tamid 2:1) — the number is not given ⚙
@@ -35,6 +38,7 @@ const LIFT = 1.7;                  // minutes the muchni takes to raise or sink 
 const TWO_LOGS_BURN = 90;          // minutes the two thin gizrin stay visible on the great pile ⚙
 const COALS_GLOW = 40;             // minutes the heaped coals glow at Beit HaDeshen ⚙
 const LIMBS_BURN = 60;             // minutes the evening's leftover limbs stay visible once back in the fire ⚙
+const SHABBAT_LIMB_END = 40;       // Shabbat: Friday's limb lies at the side until nightfall, sunset + this ⚙ (then burned, unstaged)
 const WOOD_BURN = 420;             // minutes the morning's new wood shows on the piles, until the afternoon's two logs ⚙
 const COALS_PEAK = 0.2;            // the heaped coals: a low red glow, small flickers (fx has no 'embers' kind yet) ⚙
 const SHABBAT_INCENSE = 0.85;      // Shabbat: eight se'ah of coals in the incense pile, not five (Tamid 2:5) ⚙ level
@@ -59,7 +63,9 @@ const TAPUACH_LOW = 0.94;
 // the evening's limb not consumed by dawn (Tamid 2:1): charred (altar-night's charred(); spelled out here, since
 // altar-night imports this module — a top-level call through the cycle runs before it is defined)
 const LIMB = 'limb_gerah_charred';
-const BRANCH = 'gizrin_branch', BUNDLE = 'branch_bundle';   // the pile's wood (Tamid 2:3): fig, walnut, oil-wood
+const BRANCH = 'gizrin_branch', BUNDLE = 'branch_bundle';
+// the side "Go" watches the winner from: the head of the ramp (site amot) ⚙
+const KEVESH_SIDE = [217, 296];   // the pile's wood (Tamid 2:3): fig, walnut, oil-wood
 
 export default {
   id: 'terumat-hadeshen',
@@ -84,6 +90,9 @@ export default {
     };
     // the per-date plan now, behind the loader (it is rebuilt on a new date)
     try { plan(ctx, sim, state); } catch (e) { console.warn(`[sim] ${sim.id} plan at init failed`, e); }
+    // "Go" follows the lone winner — at the kiyor, up the ramp, on the altar top, down to the ash place — watched from the
+    // ramp's side (gate-sim-data: the data's stand saw him as a speck on the altar top)
+    try { state.offView = sim.schedule?.liveView?.('terumat-hadeshen', followView(ctx, () => state.winner.slot(0), { from: (F) => bearingTo(F, KEVESH_SIDE) })); } catch (e) { console.warn('[sim] terumat live view failed', e); }
     return state;
   },
 
@@ -391,7 +400,9 @@ function plan(ctx, sim, state) {
       // the tenders: the evening's limbs pushed back into the fire with the forks (Tamid 2:5)
       const n = TENDERS.indexOf(i);
       s.until(SP[0] + 0.3 + n * 0.6, { pose: 'stoke', face: tap, props: TOOL });
-      for (let j = n; j < limbs.length; j += TENDERS.length) {
+      // not on Shabbat: the limb is Friday's, and the end of a weekday's tamid does not override Shabbat - it stays at the
+      // side of the altar until Shabbat is out (Rambam TuM 1:7; Kesef Mishneh in the name of the Ritva)
+      for (let j = n; !shabbat && j < limbs.length; j += TENDERS.length) {
         const l = limbs[j];
         s.walk([...pathOnTop(A, s.cur, l.behind), l.behind], { speed: SPEED.walk, props: TOOL });
         s.act(0.12, { pose: 'stoke', face: [l.edge.X, l.edge.Y], props: TOOL });
@@ -495,9 +506,10 @@ function plan(ctx, sim, state) {
     const rest = tool.drop ?? SP[1] + 2;
     items.push({ name: tool.name, show: [wrap(rest), wrap(tool.pick ?? MU[0])], keys: [{ t: wrap(rest), X: tool.at[0], Y: tool.at[1], Z: tool.at[2], h: tool.h }] });
   }
+  const limbEnd = shabbat ? (ctx.time?.zmanim?.sunset ?? 1020) + SHABBAT_LIMB_END : null;
   limbs.forEach((l, j) => {
     const keys = limbKeys[j].slice().sort((x, y) => x.t - y.t).map((k) => ({ ...k, t: wrap(k.t) }));
-    items.push({ name: l.name, show: [wrap(MU[0] - 2.5), wrap(limbBurn[j] + LIMBS_BURN)], keys });
+    items.push({ name: l.name, show: [wrap(MU[0] - 2.5), limbEnd != null ? wrap(limbEnd) : wrap(limbBurn[j] + LIMBS_BURN)], keys });
   });
   // the new wood as each load is thrown on (Tamid 2:3–5): the great pile is the altar builder's movable, built again
   // load by load (pileAt below, its inner ends touching the tapuach, Tamid 2:4); the fig wood on the incense pile shows
@@ -523,7 +535,7 @@ function plan(ctx, sim, state) {
   // the tapuach: settling through the night from sunset, the morning's ash raked onto it through the tapuach event ⚙
   const tap2 = { settle0: ctx.time?.zmanim?.sunset ?? 1020, heap: [TP[0], TP[1]] };
   const out = {
-    W: w, B, L: lo, MU, TH, CL, TP, GP, SP, pile, tap: tap2, base: b,
+    W: w, B, L: lo, MU, TH, CL, TP, GP, SP, pile, tap: tap2, base: b, shabbat,
     tWheel: wrap(tWheel), tLower: wrap(L0), tPour: wrap(tPour), tRun: wrap(tRun), tLight: wrap(tLight), tGo: wrap(tGo),
     panOut: [wrap(tPanUp), wrap(tPanBack)],
     wicket: wicketPass.map(([a, b]) => [wrap(a), wrap(b)]),
@@ -762,5 +774,9 @@ function cues(ctx, S, P, sim) {
       if (playerNear(ctx, A.tap.center, 70)) sim.caption({ en: 'Seeing him come down, his brothers run: they hurry to sanctify at the kiyor, take the shovels and the forks and go up to the top of the altar (Tamid 2:1)', he: 'רָאוּהוּ אֶחָיו שֶׁיָּרַד, וְהֵם רָצוּ וּבָאוּ' }, { id: 'clearing-altar', duration: 7 });
     });
   }
-  say(P.keys.light, P.tLight, { en: 'Both piles are lit; the evening\'s limbs are back in the fire — then they go down to Lishkat HaGazit (Tamid 2:5)', he: 'הִצִּיתוּ שְׁתֵּי הַמַּעֲרָכוֹת בָּאֵשׁ' }, A.tap.center, 70, 'second-pile');
+  // on Shabbat the leftover limb is Friday's and stays at the side (Rambam TuM 1:7 — plan above)
+  say(P.keys.light, P.tLight, P.shabbat
+    ? { en: 'Both piles are lit, with eight se\'ah of coals in the incense pile for the two bowls of frankincense (Tamid 2:5). Friday\'s leftover limb stays at the side of the altar: the end of a weekday\'s tamid does not override Shabbat (Rambam TuM 1:7)', he: 'הִצִּיתוּ שְׁתֵּי הַמַּעֲרָכוֹת בָּאֵשׁ' }
+    : { en: 'Both piles are lit; the evening\'s limbs are back in the fire — then they go down to Lishkat HaGazit (Tamid 2:5)', he: 'הִצִּיתוּ שְׁתֵּי הַמַּעֲרָכוֹת בָּאֵשׁ' },
+  A.tap.center, 70, 'second-pile', P.shabbat ? 8 : 6);
 }

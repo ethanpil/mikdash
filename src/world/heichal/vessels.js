@@ -511,8 +511,11 @@ function breadMovable(H, group, id, D, init) {
 export function buildGoldenAltar(H) {
   const { kit, el, d } = H;
   const b = el('heichal.mizbach-hazahav').box;
-  // gold over acacia (Shemot 30:3; "the altars … because they are plated", Chagigah 27a): the plated sheet
-  const m = kit.m('gold_plate', true, true);
+  // gold over acacia (Shemot 30:3; "the altars … because they are plated", Chagigah 27a). gate-world-materials-r2: the
+  // plating is PURE gold ("וצפית אתו זהב טהור", Shemot 30:3), a vessel's burnished finish — the vessels' key, not the walls'
+  // beaten natural-gold sheets (gold_plate's hammered 0.25–0.4 lobes made its east face, on low, a flat pale mirror of
+  // the court beyond the gate: "a beige box")
+  const m = kit.m('gold_vessel', true, true);
   const v = kit.m('gold_vessel', false, true);
   const [x0, y0, z0] = b.min, [x1, y1, z1] = b.max;
   const hornH = TF, top = z1 - hornH;

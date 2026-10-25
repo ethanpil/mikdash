@@ -43,7 +43,9 @@
 // exports planRank (a number) plans its day in the boot's plan job instead (lib/planjob.js — qa-r2 SIM-R2-12): steps in
 // planRank order, in slices between frames from 'firstFrame' on (all at once then on a screenshot boot); its plan()
 // asks sim.planNow() before building (false until the job is done: no figures meanwhile). planSteps(ctx, state, sim),
-// when exported, is the plan as an iterator (yielding every few arrivals).
+// when exported, is the plan as an iterator (yielding every few arrivals). A new date in normal play (the clock through
+// midnight, the date picker) runs the job again (remap → PlanJob.restart; gate-sim-data): never a whole day's plan in
+// one frame; a screenshot boot plans on demand as before.
 import { Box3, Vector3 } from 'three';
 import { PRIORITY } from '../core/engine.js';
 import { m2w } from '../core/units.js';
@@ -259,6 +261,17 @@ export async function createRuntime(ctx, schedule) {
     };
   }
 
+  // the modules that plan their day in the plan job (planRank), in order — set once every module is initialised
+  let ranked = null;
+  const planStepsList = () => ranked.filter((e) => !e.failed).map((e) => ({
+    id: e.id,
+    fn: () => {
+      if (typeof e.mod.planSteps === 'function') return e.mod.planSteps(ctx, e.state, e.sim);
+      e.mod.plan(ctx, e.state, e.sim);
+      return undefined;
+    },
+  }));
+
   function remap() {
     runtime.generation++;
     for (const e of entries) e.events.length = 0;
@@ -274,6 +287,11 @@ export async function createRuntime(ctx, schedule) {
       e.importance = e.mod.importance ?? (imp || 1);
       e.jumped = true;
     }
+    // a new date in play (the clock through midnight, the date picker): the ranked modules plan it in the plan job's
+    // slices between frames, as at boot, and show nothing until their plan is in (gate-sim-data — it was one frame of
+    // 0.6–0.75 s on low). A screenshot boot keeps planning on demand, in the frame that needs it (shots and tests see
+    // the whole day planned at once). ?planjob=0 too.
+    if (ranked && plans.ready && !ctx.params?.shot && ctx.params?.raw?.get?.('planjob') !== '0') plans.restart(planStepsList());
   }
 
   /** a choreo's per-date plan through its module's exported plan() (initialised first if it was not yet) */
@@ -301,7 +319,7 @@ export async function createRuntime(ctx, schedule) {
   });
 
   // ---- the frame
-  let warmPending = false, plansSeen = false;
+  let warmPending = false, plansSeen = false, plansRun = 0;
   function update() {
     const t0 = performance.now();
     const time = ctx.time;
@@ -312,7 +330,9 @@ export async function createRuntime(ctx, schedule) {
     const t = time.t, fd = time.frameDelta || 0;
     // the boot's plan job just finished (often inside the first drawn frame's updates): re-pose everything once more,
     // the fires snapping to the planned levels rather than easing in
-    if (!plansSeen && plans.done) { plansSeen = true; jumpPending = true; }
+    if (!plansSeen && plans.done) { plansSeen = true; plansRun = plans.runs || 0; jumpPending = true; }
+    // a new date's plan job just finished: its modules re-pose everything once (not only the slots near the observer)
+    else if (plans.done && (plans.runs || 0) !== plansRun) { plansRun = plans.runs; for (const e of ranked) e.jumped = true; }
     const jump = jumpPending || fd < 0;
     if (jump) {
       jumpPending = false;
@@ -331,6 +351,10 @@ export async function createRuntime(ctx, schedule) {
         for (let k = 0; k < e.events.length; k++) {
           const ev = e.events[k];
           if (Number.isFinite(ev.t0) && near(t, ev.t0, ev.t1, lead, lag)) { rel = true; break; }
+          // a retimed event (schedule.retime: the listed window is the staged one) keeps its module relevant through the
+          // data's window too: the staging reads that one (gate-sim-data — its men walking off must not vanish)
+          const w = ev.tPlan;
+          if (w && near(t, w[0], w[1], lead, lag)) { rel = true; break; }
         }
       }
       if (!rel) {
@@ -492,15 +516,9 @@ export async function createRuntime(ctx, schedule) {
   // initialise every choreo now (pools spawned hidden) and warm their figures on the first frame
   for (const e of entries) if (!e.failed && !e.inited) init(e);
   // the heavy per-date plans: steps of the boot's plan job, in the order they read one another's (planRank)
-  const ranked = entries.filter((e) => e.inited && !e.failed && Number.isFinite(e.mod.planRank) && typeof e.mod.plan === 'function')
+  ranked = entries.filter((e) => e.inited && !e.failed && Number.isFinite(e.mod.planRank) && typeof e.mod.plan === 'function')
     .sort((a, b) => a.mod.planRank - b.mod.planRank);
-  for (const e of ranked) {
-    plans.add(e.id, () => {
-      if (typeof e.mod.planSteps === 'function') return e.mod.planSteps(ctx, e.state, e.sim);
-      e.mod.plan(ctx, e.state, e.sim);
-      return undefined;
-    });
-  }
+  for (const s of planStepsList()) plans.add(s.id, s.fn);
   plans.seal();
   // ?planjob=0: plan the day here, in init, as before the job (an A/B switch for boot measurements)
   if (ctx.params?.raw?.get?.('planjob') === '0') { plans.ready = true; plans.flush(); }

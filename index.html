@@ -43,6 +43,9 @@
       padding: 8px 10px; background: #17130d; border-radius: 4px; font: 11px/1.45 ui-monospace, Consolas, monospace; }
     body.boot-failed #boot { display: grid; opacity: 1; pointer-events: auto; }
     body.boot-failed #boot .bar, body.boot-failed #boot-label { display: none; }
+    /* a lost graphics context (main.js): the notice covers the view and the HUD until the page reloads */
+    body.gfx-reset #boot { display: grid; opacity: 1; pointer-events: auto; z-index: 1000; transition: opacity .25s; }
+    body.gfx-reset #boot .bar { display: none; }
   </style>
   <noscript><style>#boot .bar, #boot-label { display: none; }</style></noscript>
   <script>

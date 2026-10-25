@@ -93,7 +93,9 @@ export async function build(ctx) {
     // at its edges (it was a separate pale strip with hard edges); the material's noisy layer edges wear it ragged
     if (Math.abs(Y - pp.pts[0][1]) < pp.half + 4 && X > pp.pts[0][0] - 2 && X < pp.pts[1][0] + 6) {
       const dp = distToPolyline(pp.pts, X, Y).d;
-      rock = Math.max(rock, (0.4 + 0.2 * fine) * (1 - smooth(pp.half * 0.3, pp.half * 1.1, dp)));
+      // gate-world-materials: trodden soil with the limestone showing through in patches (0.22–0.32 rock, was 0.4–0.6): the
+      // rock layer down the whole path read as a pale, sky-blue ribbon of wet stone in the dawn views
+      rock = Math.max(rock, (0.22 + 0.1 * fine) * (1 - smooth(pp.half * 0.3, pp.half * 1.1, dp)));
     }
     if (mode === 'blend') {
       col.set([rock, (1 - rock) * (1 - green), (1 - rock) * green], v * 3);
@@ -153,7 +155,7 @@ export async function build(ctx) {
   const feat = buildFeatures(ctx, T, kit, group, detail);
   const city = buildCity(ctx, T, kit, detail);
   group.add(kit.build());
-  const trees = buildTrees(ctx, T, detail, feat);
+  const trees = buildTrees(ctx, T, detail, { ...feat, courts: city.courtTrees });
   if (trees) group.add(trees);
   // grass, garrigue and stones round the camera, on the rendered ground (qa-r1-fix-world)
   const cover = buildCover(ctx, T, detail, gridSampler(xs, ys, grid), feat);

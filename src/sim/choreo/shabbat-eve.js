@@ -9,7 +9,8 @@
 // cross the court, climb the newel stair in the gatehouse's east room and step out onto the walk; after the first three
 // they go down and back in, and come up again for the last three. Every pose is a pure function of (t, date): one
 // Script per trumpeter, rebuilt per date. The blasts are cues (the 'trumpet-set' cue), once each in continuous play.
-import { Script, runScripts, win, SPEED } from './g2/lib.js';
+import { Script, runScripts, win, SPEED, evalScript } from './g2/lib.js';
+import { lastNear, stagedRetime, siteOf } from '../lib/watch.js';
 import { spiralUp } from './g2/places.js';
 import { CUE_LEAD } from '../lib/cue.js';
 import { g6places, say, Z } from './g6/common.js';
@@ -43,6 +44,8 @@ export default {
       plan: null, planGen: -1, out: {}, fns: [],
       fmt: (m) => ctx.time?.format?.(m) ?? '--',
     };
+    // the first set's row listed while the trumpeters are up on the roof walk (plan(): state.ends) — gate-sim-data
+    state.rt = stagedRetime(sim, ['friday-blasts-work'], () => (state.ends?.key === `${ctx.time?.dateString}|${sim.generation}` ? state.ends.v : null));
     try { plan(ctx, sim, state); } catch (e) { console.warn(`[sim] ${sim.id} plan at init failed`, e); }
     return state;
   },
@@ -111,5 +114,13 @@ function plan(ctx, sim, state) {
   });
   const roof = [(spots[0][0] + spots[1][0]) / 2, spots[0][1], spots[0][2]];
   state.plan = { scripts, blasts, roof, horn: [roof[0], roof[1], roof[2] + 3] };
+  // the first set's row is listed while the trumpeters are still up on the roof walk (they climb down after it), not
+  // the data's window (gate-sim-data); the staging reads the data's window (win: tPlan)
+  const ends = {};
+  const evW = sim.event('friday-blasts-work');
+  const at = evW && sim.schedule?.positionOf?.(evW);
+  if (at && w1) ends['friday-blasts-work'] = lastNear((S, t, o) => evalScript(S, t, o, null), scripts, w1[0], w1[1], siteOf(at), 12, 0.1, 3);
+  state.ends = { v: ends, key: `${ctx.time?.dateString}|${sim.generation}` };
+  state.rt?.apply();
   return state.plan;
 }

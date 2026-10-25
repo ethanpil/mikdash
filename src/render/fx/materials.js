@@ -59,6 +59,12 @@ uniform float uTime;
 varying float vFxFog;
 `;
 
+// gate-env-render: the smoke the firelight crosses to reach a height of the column, in column widths (SMOKE_FS)
+const SMOKE_GLOW_PATH = 2.5;
+// gate-env-render: the low tier's hot flame core, capped apart from the body (FLAME_FS)
+const LOW_CORE_CAP = 1.2;
+const LOW_CORE_GAIN = 0.55; // …and its share of the core emission (the rest of it saturated to a white blob by day)
+
 const OUTPUT = /* glsl */`
 #include <tonemapping_fragment>
 #include <colorspace_fragment>
@@ -88,7 +94,7 @@ function setBlend(m, kind, low) {
   // and at night the bloom keeps its glare for the emitters, not for the surfaces they light (post-effects.js)
   m.blendEquationAlpha = AddEquation;
   m.blendSrcAlpha = ZeroFactor;
-  m.blendDstAlpha = kind === 'smoke' || kind === 'bed' ? OneFactor : OneMinusSrcAlphaFactor;
+  m.blendDstAlpha = kind === 'smoke' || kind === 'bed' || kind === 'spill' ? OneFactor : OneMinusSrcAlphaFactor;
   // the bed is a box: a decal drawn by its far faces on the post tiers (the camera may stand inside it), flattened into
   // a disc seen from above on low
   if (kind === 'bed') m.side = low ? FrontSide : BackSide;
@@ -108,7 +114,9 @@ attribute vec2 iSize;     // width, height (m)
 attribute vec4 iParams;   // seed, fuel intensity 0..1, turbulence, speed
 attribute vec4 iLean;     // tip lean (x, z) per metre of height; overlap emission scale; luminance cd/m²
 attribute float iCore;    // the hot core's added emission at its peak (× luminance)
+attribute vec2 iLayer;    // gate-env-render: the card's layer — x temperature boost, y its soot opacity (× emissivity)
 varying vec2 vUv;
+varying vec2 vLayer;
 varying vec4 vParams;
 varying float vEmit;
 varying float vViewZ;
@@ -122,6 +130,7 @@ void main() {
   vParams = iParams;
   vEmit = iLean.z * iLean.w;
   vCore = iCore;
+  vLayer = iLayer;
   float seed = iParams.x;
   float inten = clamp(iParams.y, 0.0, 1.5);
   float t = uTime * iParams.w;
@@ -131,8 +140,9 @@ void main() {
   float w = iSize.x * (0.55 + 0.45 * min(inten, 1.0));
   vSize = vec2(w, h);
   // soot emissivity of a flame this thick (Beer–Lambert, κ ≈ 1.1 m⁻¹ for luminous wood flames): a 1 m pyre card ≈ 0.6,
-  // a torch ≈ 0.2, an oil-lamp flame ≈ 0.04
-  vSoot = 1.0 - exp(-1.1 * w);
+  // a torch ≈ 0.2, an oil-lamp flame ≈ 0.04. gate-env-render: κ 0.8 — a pile's flame zone is tongues with gaps, not a solid
+  // sheet (its time-averaged emissivity ≈ 0.4 at 2 m): by day the great pile's body read as an opaque orange card
+  vSoot = 1.0 - exp(-0.8 * w);
   vec3 toCamH = cameraPosition - iPos; toCamH.y = 0.0;
   float lh = length(toCamH);
   vec3 dirC = lh > 1e-4 ? toCamH / lh : vec3(0.0, 0.0, 1.0);
@@ -166,6 +176,7 @@ varying float vSoot;
 varying vec2 vSize;
 varying float vCore;
 varying float vGraze;
+varying vec2 vLayer;
 ${COMMON}
 // deep red -> orange -> yellow-orange body -> pale yellow (wood-fire soot, ≈ 1100–1650 K, partly white-balanced)
 vec3 fireRamp(float T) {
@@ -199,13 +210,10 @@ void main() {
   // qa-r2-fix-env-render: the tongues ≈ 6 noise cells per flame height (a wide pile breaks into a few tongues, not into
   // a dozen fragments: at 17 cells per height the great pile read as a shredded orange sheet), the 17-cell layer only
   // frays their edges, faded by its cells' pixel size
+  // gate-env-render: on low too (it took the coarse layer alone, and its few soft tongues read as an orange cotton ball)
   float e1 = texture2D(uNoise, vec2(ex * 0.72 + seed * 2.1, y * 0.78 - t * 1.05)).g;
-#ifdef LOW_Q
-  float er = e1;
-#else
   float e2 = texture2D(uNoise, vec2(ex * 1.05 - seed, y * 1.15 - t * 1.55)).b;
   float er = mix(e1, e2, 0.34 * smoothstep(2.0, 6.0, hPx / 17.0));
-#endif
   float d = body * 1.15 - (er - 0.32) * (0.3 + 1.1 * y) * turb - 0.4 * y * y;
   d *= smoothstep(0.0, 0.1, y);
   if (d <= 0.0) discard;
@@ -216,19 +224,31 @@ void main() {
   // temperature: hottest low on the axis, cooling outward and upward — and, in the intermittent upper flame, still
   // yellow inside each tongue (its soot glows; only the tongue's skin is orange-red): the old ramp left the whole upper
   // half orange, so from below the altar's edge, where only that half shows, the fire had no hot centre at all
-  float T = clamp(d * (1.15 - 0.65 * y) + 0.3 * y * smoothstep(0.35, 0.9, d) * thick, 0.0, 1.0);
+  float T = clamp(d * (1.15 - 0.65 * y) + 0.3 * y * smoothstep(0.35, 0.9, d) * thick + vLayer.x * smoothstep(0.15, 0.6, d), 0.0, 1.0);
   float vis = dens * mix(0.4, 1.0, thick);
   vec3 col = fireRamp(T) * (0.35 + 0.8 * T) * vis;
   // the hot core: an additive layer that does not hide anything (brighter than sunlit stone at noon), pale yellow-white
-  col += vec3(1.0, 0.88, 0.64) * (smoothstep(0.6, 1.0, T) * dens * vCore);
-  col = capEmission(col * inten * vEmit * uP * uFireGain);
+  vec3 hot = vec3(1.0, 0.88, 0.64) * (smoothstep(0.6, 1.0, T) * dens * vCore);
+  float kE = inten * vEmit * uP * uFireGain;
+#ifdef LOW_Q
+  // gate-env-render: on low the core is its own additive layer, tone-mapped apart from the body below: within the body's
+  // low cap (kept for its colour) a flame could not be brighter than the sunlit stone behind it, and by day read as a faint
+  // orange haze. Its own cap is LOW_CORE_CAP × the body's
+  col = capEmission(col * kE);
+  vec3 hotC = capEmission(hot * kE * ${(LOW_CORE_GAIN / LOW_CORE_CAP).toFixed(4)}) * ${LOW_CORE_CAP.toFixed(2)};
+#else
+  col = capEmission((col + hot) * kE);
+#endif
   float softness = clamp(0.18 * vSize.x, 0.06, 0.45);
   float fade = softFade(vViewZ, softness) * (1.0 - fogAmount()) * vGraze;
   col *= fade;
   // premultiplied: the sooty body also hides part of what is behind it (its emissivity), so overlapping cards converge
   // to the flame colour instead of summing to white, and the sky cannot tint the flame pink
   // the cool, thin margins (T → 0) hold little soot: they barely hide the background (no dark rim on a sunlit wall)
-  float occ = vSoot * vis * mix(0.5, 1.0, thick) * (0.3 + 0.7 * smoothstep(0.0, 0.35, T));
+  float occ = vSoot * vis * mix(0.5, 1.0, thick) * (0.3 + 0.7 * smoothstep(0.0, 0.35, T)) * vLayer.y;
+  // gate-env-render: the hottest zone is pale yellow-white and translucent — what the eye takes for the flame's body is its
+  // thin luminous skin over a clear core, so by day the stone behind shows through it
+  occ *= 1.0 - 0.7 * smoothstep(0.55, 0.95, T);
   float aOut = occ * fade * min(inten, 1.0);
 #ifndef LOW_Q
   // qa-r2-fix-env-render: the alpha is also the emitter mask (setBlend). A lamp's or a torch's thin flame holds almost no
@@ -242,7 +262,10 @@ void main() {
   float cov = max(aOut, 0.15);
   gl_FragColor = vec4(col / cov, 1.0);
   ${OUTPUT}
-  gl_FragColor = vec4(gl_FragColor.rgb * cov, aOut);
+  vec3 bodyOut = gl_FragColor.rgb * cov;
+  gl_FragColor = vec4(hotC * fade, 1.0);
+  ${OUTPUT}
+  gl_FragColor = vec4(bodyOut + gl_FragColor.rgb, aOut);
 #else
   gl_FragColor = vec4(col, aOut);
   ${OUTPUT}
@@ -532,6 +555,98 @@ void main() {
 }
 `;
 
+// ---------------------------------------------------------------- gate spill (gate-env-render)
+// The light a court's open gate throws out onto the steps and the pavement before it at night: the opening is a
+// rectangular area light of the radiance it shows (the firelit court beyond, measured by fx), its passage's depth narrowing
+// what each point outside sees of it (the inner face's rectangle shifted over the outer's: a trapezoid on the ground).
+// Drawn on horizontal patches laid on the treads and the paving (site-derived, fx/index.js), each pixel's irradiance by
+// Lambert's polygon formula, as light on stone of the steps' albedo (additive; occluded by the scene's depth).
+const SPILL_VS = /* glsl */`
+attribute vec4 iRect;     // x0, z0, x1, z1 (world m)
+attribute float iY;       // the surface's height (world y)
+varying vec3 vWorld;
+varying float vViewZ;
+${VCOMMON}
+void main() {
+  vec2 p = position.xy;   // x −0.5 … 0.5, y 0 … 1
+  // +x along x, then toward −z: the quad faces up (front side)
+  vec3 wp = vec3(mix(iRect.x, iRect.z, p.x + 0.5), iY + 0.02, mix(iRect.w, iRect.y, p.y));
+  vWorld = wp;
+  vec4 mv = viewMatrix * vec4(wp, 1.0);
+  vViewZ = mv.z;
+  vFxFog = -mv.z;
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+const SPILL_FS = /* glsl */`
+uniform vec4 uGateC;      // xyz the outer face's centre at the threshold's height, w half width (m)
+uniform vec4 uGateU;      // xyz along the opening's width (unit, horizontal), w the passage's depth (m)
+uniform vec4 uGateN;      // xyz outward normal (unit, horizontal), w the opening's height (m)
+uniform vec4 uSpillT0;    // the luminance the opening shows (physical cd/m²) along rays of slope uSpillS.x + k × uSpillS.y
+uniform vec4 uSpillT1;    // (k = 0 … 7, rising inward): what lies beyond the gate at that angle — the firelit facade low,
+uniform vec2 uSpillS;     // the sky high above it
+uniform vec3 uSpillCol;   // the light's colour (luminance 1)
+uniform float uSpillCap;  // the patch's local adaptation: its luminance soft-capped at this (scene units)
+uniform float uSpillRef;  // env's adaptation level (scene units): the stone's own level, for the low tier
+uniform vec3 uSpillAlb;   // the stone's albedo
+varying vec3 vWorld;
+varying float vViewZ;
+${COMMON}
+float spillLum(float sl) {
+  float x = clamp((sl - uSpillS.x) / uSpillS.y, 0.0, 7.0);
+  float k = floor(x), f = x - k;
+  float a = k < 0.5 ? uSpillT0.x : k < 1.5 ? uSpillT0.y : k < 2.5 ? uSpillT0.z : k < 3.5 ? uSpillT0.w : k < 4.5 ? uSpillT1.x : k < 5.5 ? uSpillT1.y : k < 6.5 ? uSpillT1.z : uSpillT1.w;
+  float b = k < 0.5 ? uSpillT0.y : k < 1.5 ? uSpillT0.z : k < 2.5 ? uSpillT0.w : k < 3.5 ? uSpillT1.x : k < 4.5 ? uSpillT1.y : k < 5.5 ? uSpillT1.z : uSpillT1.w;
+  return mix(a, b, f);
+}
+float mkEdge(vec3 a, vec3 b) {
+  vec3 c = cross(a, b);
+  return acos(clamp(dot(a, b), -0.9999, 0.9999)) * c.y / max(length(c), 1e-6);
+}
+void main() {
+  vec3 P = vWorld;
+  vec3 C = uGateC.xyz, U = uGateU.xyz, N = uGateN.xyz;
+  float hw = uGateC.w, H = uGateN.w, D = uGateU.w;
+  vec3 dc = C + vec3(0.0, 0.5 * H, 0.0) - P;
+  float dn = dot(dc, -N);
+  if (dn <= 0.05) discard; // beside or behind the opening's plane
+  vec3 v0 = normalize(C - U * hw - P), v1 = normalize(C + U * hw - P);
+  vec3 v2 = normalize(C + U * hw + vec3(0.0, H, 0.0) - P), v3 = normalize(C - U * hw + vec3(0.0, H, 0.0) - P);
+  // Lambert: E = L / 2 × Σ θ_edge (n · γ_edge), n up
+  float F = abs(mkEdge(v0, v1) + mkEdge(v1, v2) + mkEdge(v2, v3) + mkEdge(v3, v0)) * 0.5;
+  // the passage: what of the opening the inner face lets through from here
+  float ov = clamp(1.0 - D * abs(dot(dc, U)) / (dn * 2.0 * hw), 0.0, 1.0) * clamp(1.0 - D * abs(dc.y) / (dn * H), 0.0, 1.0);
+  // what the opening shows from here: the table at the slopes of four rows across it
+  float Lo = 0.25 * (spillLum((C.y + 0.125 * H - P.y) / dn) + spillLum((C.y + 0.375 * H - P.y) / dn)
+    + spillLum((C.y + 0.625 * H - P.y) / dn) + spillLum((C.y + 0.875 * H - P.y) / dn));
+  vec3 col = uSpillAlb * uSpillCol * (Lo * F * ov * 0.3183099 * uP);
+  float yl = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col *= uSpillCap / (uSpillCap + yl);
+#ifdef SOFT_DEPTH
+  // under whatever stands on the stone (a figure, the soreg): its depth is nearer than the patch's
+  float d = texture2D(uDepth, gl_FragCoord.xy / uResolution).x;
+  float sceneZ = perspectiveDepthToViewZ(d, uNearFar.x, uNearFar.y);
+  if (sceneZ > vViewZ + 0.05 + 0.004 * abs(vViewZ)) discard;
+#endif
+  col *= 1.0 - fogAmount();
+#ifdef LOW_Q
+  // low draws into the tone-mapped canvas: the light added to stone at the scene's own level (uSpillRef), as
+  // the tone curve renders that difference — tone-mapping the added light alone lifted it through the curve's toe (pink)
+  vec3 base = vec3(uSpillRef);
+  gl_FragColor = vec4(base + col, 1.0);
+  ${OUTPUT}
+  vec3 lit = gl_FragColor.rgb;
+  gl_FragColor = vec4(base, 1.0);
+  ${OUTPUT}
+  gl_FragColor = vec4(max(lit - gl_FragColor.rgb, vec3(0.0)), 0.0);
+#else
+  gl_FragColor = vec4(col, 0.0);
+  ${OUTPUT}
+#endif
+}
+`;
+
 // ---------------------------------------------------------------- smoke (columns rising straight up)
 // qa-r1-fix-env-render: the column starts thin and faint at the flame tips (a smoke base: hot gas, little soot yet) and
 // widens and thickens as it rises and cools; inside, the puffs' surfaces roll (domain-warped noise with its own
@@ -664,7 +779,10 @@ void main() {
   // the fire below lights the column from underneath: inverse square from the flames (physical cd × uP), through the
   // column's own smoke beneath this height — so only its foot glows
   float hb = vH + vW;
-  float tau = 0.6 * vCol2.y * max(vH - vCol2.x, 0.0) / max(vW, 0.1);
+  // gate-env-render: the light climbs the column's flanks, not up its axis: it crosses at most a few widths of smoke on
+  // its way (SMOKE_GLOW_PATH), so the altar's all-night column glows orange well above the flames — it went dark within
+  // a few metres of them (τ grew with the whole height below)
+  float tau = 0.6 * vCol2.y * min(max(vH - vCol2.x, 0.0), ${SMOKE_GLOW_PATH.toFixed(1)} * vW) / max(vW, 0.1);
   vec3 glowE = vGlow * uP * exp(-tau) / (hb * hb);
   vec3 glow = glowE * 0.318 * (0.35 + 0.65 * clamp(0.3 - nrm.y, 0.0, 1.0));
   vec3 col = albedo * (direct + amb + glow);
@@ -707,18 +825,23 @@ export function createFxMaterials({ soft, low, noise }) {
   const ember = make('fx.ember', 'ember', EMBER_VS, EMBER_FS);
   const bed = make('fx.bed', 'bed', BED_VS, BED_FS);
   const glint = make('fx.glint', 'glint', GLINT_VS, GLINT_FS, { uGlint: { value: new Vector4(4, 0.7, 1, 1) }, uGlint2: { value: new Vector4(0, 0.1, 0, 0) } });
+  const spill = make('fx.spill', 'spill', SPILL_VS, SPILL_FS, {
+    uGateC: { value: new Vector4() }, uGateU: { value: new Vector4() }, uGateN: { value: new Vector4() },
+    uSpillT0: { value: new Vector4() }, uSpillT1: { value: new Vector4() }, uSpillS: { value: new Vector2(-0.1, 0.15) },
+    uSpillCol: { value: new Vector3(1, 1, 1) }, uSpillCap: { value: 1 }, uSpillRef: { value: 0 }, uSpillAlb: { value: new Vector3(0.5, 0.45, 0.36) },
+  });
   const smoke = make('fx.smoke', 'smoke', SMOKE_VS, SMOKE_FS, {
     uSunDir: { value: new Vector3(0, 1, 0) },
     uSunColor: { value: new Color(0, 0, 0) },
     uSky: { value: new Color(0.1, 0.12, 0.15) },
     uGround: { value: new Color(0.04, 0.04, 0.04) },
   });
-  return { shared, flame, halo, ember, smoke, bed, glint };
+  return { shared, flame, halo, ember, smoke, bed, glint, spill };
 }
 
 /** Switch soft-depth / quality defines (tier change) and recompile. */
 export function setFxMaterialMode(mats, { soft, low }) {
-  for (const m of [mats.flame, mats.halo, mats.ember, mats.smoke, mats.bed, mats.glint]) {
+  for (const m of [mats.flame, mats.halo, mats.ember, mats.smoke, mats.bed, mats.glint, mats.spill]) {
     m.defines = defines(soft, low);
     m.depthTest = !soft;
     setBlend(m, m.userData.fxKind, low);

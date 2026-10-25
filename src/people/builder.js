@@ -222,7 +222,9 @@ export class MeshBuilder {
       const p = R.c.clone().addScaledVector(ax, Math.cos(thp) * R.rx * m).addScaledVector(az, Math.sin(thp) * R.rz * m);
       if (opts.lift) p.y += opts.lift(th, j, R);
       const ravg = (R.rx + R.rz) / 2;
-      const u = opts.uvMode === 'x' ? (thp === th ? p.x : R.c.x + (ax.x * Math.cos(th) * R.rx + az.x * Math.sin(th) * R.rz) * m) : th * ravg;
+      // (uPhase: the angle where u = 0 — gate-people: a girded garment measures u from its front, so the gather folds drawn
+      // along constant u hang plumb there although the rings' radii change toward the belt)
+      const u = opts.uvMode === 'x' ? (thp === th ? p.x : R.c.x + (ax.x * Math.cos(th) * R.rx + az.x * Math.sin(th) * R.rz) * m) : (th - (opts.uPhase || 0)) * ravg;
       return {
         p, u, v: -vs[j] + (opts.v0 || 0),
         w: opts.weights ? (q) => opts.weights(q, j, th) : opts.bone ?? 0,

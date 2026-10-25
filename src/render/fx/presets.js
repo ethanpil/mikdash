@@ -6,6 +6,10 @@
 //   cards   per tier; card 0 stands over the fuel's centre and is the widest and tallest, the others on a ring of
 //           ringR × size round it. cardW / cardH: [outer, central] width / height ÷ size.
 //   core    the hot core's added emission (× L at its peak): an additive layer over the alpha-blended flame body.
+//   layers  (gate-env-render; pyres) the cards as layers: card 0 the ENVELOPE over the fuel's centre (wide, cooler, slower),
+//           the last the hot CORE (narrow, hotter, faster, translucent: pale yellow-white by day), the rest BODY tongues on
+//           the ring — w / h × the card's size, speed / turb × its scroll and turbulence, t its temperature boost, occ its
+//           soot opacity, core × its added hot-core emission. Without it (other kinds) card 0 stands at the centre as before.
 //
 // PHOTOMETRY (physical; multiplied by env.preExposure like every env light — see src/env/index.js):
 //   L       flame luminance scale, cd/m² (body ≈ 0.3–0.6 L, a card's hot core up to ≈ 1 L + core × 0.88 L, tips less).
@@ -38,7 +42,12 @@
 export const KINDS = {
   pyre: {
     refSize: 2.0,
-    cards: [3, 4, 4, 4],
+    cards: [3, 4, 5, 5],
+    layers: {
+      envelope: { w: 1.08, h: 1.08, speed: 0.75, turb: 1.1, t: -0.1, occ: 0.8, core: 0.6 },
+      body: { w: 1, h: 1, speed: 1, turb: 1, t: 0, occ: 1, core: 1 },
+      core: { w: 0.5, h: 0.78, speed: 1.4, turb: 0.8, t: 0.28, occ: 0.35, core: 1.3 },
+    },
     spread: 0.42,            // footprint radius / size
     bed: 1.35,               // coal-bed radius / footprint radius
     bedH: 0.42,              // coal-bed decal's height (the logs it chars and lights) / size
@@ -52,7 +61,9 @@ export const KINDS = {
     emberRise: 2.4, emberRate: [0.35, 0.7], emberSize: 0.012,
     halo: { radius: 0.6, frac: 0.03 },
     light: { candela: 1.5e4, distance: 70, color: 0xff9d55, flicker: 0.12, height: 0.6 },
-    smoke: { height: 46, width: 0.75, density: 0.38, rise: 2.4, spread: 4.2, kind: 0 },
+    // gate-env-render: height 46 → 80 m — the column rises over the 40-amah court walls: seen from the Mount (the opening
+    // frame) it stood below their top; the pillar "rose straight" and the winds never scattered it (Yoma 21a, Avot 5:5)
+    smoke: { height: 80, width: 0.75, density: 0.38, rise: 2.4, spread: 4.2, kind: 0 },
   },
   hearth: {
     refSize: 0.8,

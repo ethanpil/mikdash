@@ -27,6 +27,7 @@ import { buildTamid, planAfternoon, limbsUp, kohenGadol, pileItems, tamidWindows
   silverSlot, VESSEL_LOADS, RETURN_TRIPS, CREW, CREW_N, SEEDS } from './g2/tamid.js';
 import { cueAt, crossed } from '../lib/cue.js';
 import { window4, rand } from '../lib/core.js';
+import { followView, lastNear, stagedRetime, siteOf } from '../lib/watch.js';
 
 const NEAR = 45;            // m — captions for what can be seen and heard close by
 const WICKET = 'azarah.gate.moked.pishpash';
@@ -62,6 +63,13 @@ export default {
     // on its table (qa-r2 SIM-R2-6: the data's 12 minutes ran 4 past the bearers). Offsets from the data's start, so the
     // next date's row (schedule.upcoming) gets the same staging ⚙
     try { sim.schedule?.retime?.('vessels', (t0, t1) => (state.vesSpan ? [t0 + state.vesSpan[0], t0 + state.vesSpan[1]] : [t0, t1])); } catch (e) { console.warn('[sim] vessels retime failed', e); }
+    // "Go" for the vessels follows a bearer from Lishkat HaKelim to the slaughterhouse's tables (gate-sim-data)
+    try { sim.schedule?.liveView?.('vessels', followView(ctx, () => state.bearers.slots.find((s) => s.want) || null)); } catch (e) { console.warn('[sim] vessels live view failed', e); }
+    // the carrying to the ramp and up onto the altar are listed while their men are still at the ramp and the altar: the
+    // staged end (lib/watch.js lastNear over their scripts), not the data's window (gate-sim-data)
+    state.ends = { v: null, key: '' };
+    state.rt = stagedRetime(sim, Object.keys(STAGED), () => (state.ends.key === `${ctx.time?.dateString}|${sim.generation}` ? state.ends.v : null));
+    stagedEnds(ctx, sim, state);
     return state;
   },
 
@@ -294,7 +302,27 @@ function plan(ctx, sim, state) {
   };
   state.plan = P2;
   state.planGen = sim.generation;
+  stagedEnds(ctx, sim, state);
   return P2;
+}
+
+// the rows retimed to their staged end: event → its scripts in the plan
+const STAGED = { 'limbs-to-ramp': (P) => P.M.crew, 'limbs-up': (P) => [...P.U, ...(P.KG ? [P.KG.kg, P.KG.segan] : [])] };
+function stagedEnds(ctx, sim, state) {
+  const P = state.plan;
+  if (!P || !state.ends) return;
+  const evalAt = (S, t, o) => evalScript(S, t, o, null);
+  const v = {};
+  for (const [id, of] of Object.entries(STAGED)) {
+    const ev = sim.event(id);
+    const at = ev && sim.schedule?.positionOf?.(ev);
+    if (!at || !Number.isFinite(ev.t0)) continue;
+    const w = ev.tPlan || [ev.t0, ev.t1];
+    v[id] = lastNear(evalAt, of(P).filter(Boolean), w[0], w[1], siteOf(at));
+  }
+  state.ends.v = v;
+  state.ends.key = `${ctx.time?.dateString}|${sim.generation}`;
+  state.rt.apply();
 }
 
 /** the lambs of the chamber: the day's two tamid lambs and the six kept with them (Arachin 2:5) */
@@ -343,7 +371,10 @@ function cues(ctx, S, P, sim) {
   };
   say('bleat', c.bleat, n.chamber, { en: '"Go out and bring a lamb from the lamb chamber" — one is chosen from the inspected lambs and led out (Tamid 3:3; Arachin 2:5)', he: 'צְאוּ וְהָבִיאוּ טָלֶה מִלִּשְׁכַּת הַטְּלָאִים' }, 'lamb-brought', 6, ['sheep', null, { kind: 'lamb' }]);
   say('vessels', c.vessels, n.kelim, { en: 'They go into Lishkat HaKelim and bring out ninety-three vessels of silver and of gold (Tamid 3:4)', he: 'וְהוֹצִיאוּ מִשָּׁם תִּשְׁעִים וּשְׁלֹשָׁה כְּלֵי כֶסֶף וּכְלֵי זָהָב' }, 'vessels');
-  say('drink', c.drink, n.water, { en: 'They give the tamid water to drink from a cup of gold, and inspect it again by the light of torches (Tamid 3:4)', he: 'הִשְׁקוּ אֶת הַתָּמִיד בְּכוֹס שֶׁל זָהָב' }, 'lamb-watered', 6, ['sheep', null, { kind: 'lamb' }]);
+  // on Shabbat no light in hand (g2/tamid.js torches: the night's search by the lamps lit before Shabbat, Rambam BhB 8:12)
+  say('drink', c.drink, n.water, ctx.time?.dayType === 'shabbat'
+    ? { en: 'They give the tamid water to drink from a cup of gold and inspect it again — on Shabbat with no torch in hand, by the lamps lit before Shabbat (Tamid 3:4; Rambam BhB 8:12, by analogy)', he: 'הִשְׁקוּ אֶת הַתָּמִיד בְּכוֹס שֶׁל זָהָב' }
+    : { en: 'They give the tamid water to drink from a cup of gold, and inspect it again by the light of torches (Tamid 3:4)', he: 'הִשְׁקוּ אֶת הַתָּמִיד בְּכוֹס שֶׁל זָהָב' }, 'lamb-watered', 6, ['sheep', null, { kind: 'lamb' }]);
   say('struggle', c.struggle, n.ring, null, 'tamid-bound', 4, ['sheep', null, { kind: 'lamb' }]);
   say('cut', c.cut, n.ring, { en: 'Bound, head to the south and face to the west, at the second ring: the slaughterer slaughters and the receiver receives the blood (Tamid 4:1)', he: 'שָׁחַט הַשּׁוֹחֵט וְקִבֵּל הַמְקַבֵּל' }, 'tamid-slaughter', 7);
   say('throw1', c.throw1, n.altar, { en: 'At the north-east corner he gives the blood toward the east and the north (Tamid 4:1)', he: 'נוֹתֵן מִזְרָחָה צָפוֹנָה' }, 'tamid-blood-ne');

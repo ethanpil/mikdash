@@ -620,7 +620,7 @@ export const ZONE_CONTENT = {
     sanctityNote: 'The altar stands in the court and has its rung; its own laws are stricter: only kohanim serve on it, and no one goes up by steps (Bamidbar 18:7; Rambam BhB 1:17).',
     access: 'Kohanim only, for the service, and only by the ramp — going up to it by steps is forbidden (Shemot 20:23; Rambam BhB 1:17). The kohanim go up on the east side of the ramp, round the top to the right, and down on the west; on Yom Kippur the Kohen Gadol goes up and down the middle (Yoma 4:5; Yoma 15b).',
     services: [
-      "Through the night the fats and limbs of the day's offerings burn on the pile; their time runs until first light (Berachot 1:1), and what has not been consumed is put back on the fire in the morning (Tamid 2:5)",
+      "Through the night the fats and limbs of the day's offerings burn on the pile; their time runs until first light (Berachot 1:1), and what has not been consumed is put back on the fire in the morning (Tamid 2:5) — except Friday's on Shabbat morning, which waits at the side of the altar until Shabbat is over (Rambam TuM 1:7)",
       'Terumat hadeshen at cockcrow or close to it — on Yom Kippur from midnight, on the festivals from the first watch: a pan of the inner, burnt-out coals is taken down and laid east of the ramp (Yoma 1:8; Tamid 1:4)',
       'The ash is heaped on the tapuach in the middle of the altar; on the festivals it is left there as an adornment (Tamid 2:2)',
       'The great pile is laid on the east, its face to the east; the second pile, for the incense coals, four amot north of the south-western horn (Tamid 2:4–5)',

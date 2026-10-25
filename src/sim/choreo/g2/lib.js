@@ -375,7 +375,8 @@ export function playerNear(ctx, p, range) {
 /** the window [t0, t1] of a schedule event by id (null when it does not run today) */
 export function win(sim, id) {
   const e = sim.event(id);
-  return e && Number.isFinite(e.t0) ? [e.t0, e.t1] : null;
+  // (an event a module retimes keeps the data's window as tPlan: the staging reads that — gate-sim-data)
+  return e && Number.isFinite(e.t0) ? (e.tPlan ? [e.tPlan[0], e.tPlan[1]] : [e.t0, e.t1]) : null;
 }
 
 /** minutes a walk takes over points from `from` */

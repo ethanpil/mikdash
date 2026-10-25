@@ -45,12 +45,21 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   from `frequency.alone` with one seeded day quantile, never perDay plus sets.
 - People shaders: no dFdx/fwidth inside pattern branches (ANGLE/D3D11 flattens them; 10–18 s compiles); robes use
   a bake-time skirt cage + `clothSkin` flatten pass (MAX_BONES 36); people splice their own `lights_fragment_begin`.
-- Performance (perf pass, HD 4600 cold production): first view low ~14 s, medium ~27 s, high ~40 s, ultra ~48 s
-  (was 56/115/190/235). Lessons: a synchronous WebGL query (getProgramParameter, getUniformBlockIndex,
+- Performance (HD 4600, Edge, cold production, `tools/warmup-check.mjs`, play): first frame low ~13 s, medium ~22 s,
+  high ~30 s, ultra ~37 s (gate-core; 20/35/52/64 before it, 56/115/190/235 before the perf pass). What the first view
+  does not draw compiles after it: people hold every program but the far figures' and the props' LOD1 unless a figure in
+  sight needs one; world materials the boot camera cannot see (an id pass) are hidden and revealed after the first view
+  (docs/decisions/gate-core.md). Lessons: a synchronous WebGL query (getProgramParameter, getUniformBlockIndex,
   getProgramInfoLog, readPixels) waits for all queued GPU work — removing one only moves the wait; anything issued
-  during the shader warm-up competes with the first view, so start non-view work at 'firstFrame', one program per
-  idle slice; CSS animations of box-shadow/filter repaint every frame (the tag pulse cost 11 fps) — animate
-  transform/opacity only; fps here is quantized by vsync, so A/B in-page, interleaved, in normal play.
+  during the shader warm-up competes with the first view, so start non-view work after 'firstFrame'; the GPU process
+  links three programs at a time, and a program a frame compiles synchronously waits behind every queued one, so
+  background compiles (the baker's later kinds too) go through render/warmup.js `compileLater`, whose budget is
+  the renderer's UNLINKED PROGRAMS, not queued objects (≤ logical cores − 2, none for 2.5 s after Enter): a program issued
+  while all of ANGLE's (cores − 1) link workers are busy blocks the GPU process, which froze play 1–10 s after Enter
+  (gate-core-r2); a shadow pass keys its depth programs
+  with no lights but a shadow (warmup.js compileDepth); CSS animations of box-shadow/filter repaint every frame (the tag
+  pulse cost 11 fps) — animate transform/opacity only; fps here is quantized by vsync, so A/B in-page, interleaved, in
+  normal play.
 - Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
   give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.

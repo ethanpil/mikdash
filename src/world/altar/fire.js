@@ -10,7 +10,7 @@
 // altar.maarachah-area params. Second Temple: an ordinary wood fire (fx 'pyre'), smoke straight up; no heavenly glow.
 // Movables: 'altar.maarachah.great.pile' (build(f); its rows follow the tapuach's size), 'altar.tapuach' (grow(f),
 // heightAt(X, Y)), 'altar.two-logs' (.visible) — below.
-import { Group, Mesh, OctahedronGeometry, Matrix4, Quaternion, Euler, Vector3, BufferAttribute, DynamicDrawUsage } from 'three';
+import { Group, Mesh, OctahedronGeometry, Matrix4, Quaternion, Euler, Vector3, BufferAttribute, Float32BufferAttribute, DynamicDrawUsage } from 'three';
 import { heightField, polarField, logGeometry, logBetween, rng, noise2, Mesher } from './lib.js';
 import { applyWorldUV, mergeGeometries } from '../geom.js';
 
@@ -30,8 +30,12 @@ export function buildFire(A) {
   // random stream, so nothing else on the altar moves. The incense pile is "fine fig wood" (Tamid 2:5). Detail 0 (low)
   // draws every billet in walnut, as the courts do there: one bark mesh in the batch and one in the pile, not three
   // each (world-4-fix; walnut is timber_rough's set, baked on low anyway).
-  const BARKS = ['timber_bark_fig', 'timber_bark_walnut', 'timber_bark_pine'].map((k) => A.mat(k, 'timber_rough'));
-  const BARK = BARKS[1], END = A.mat('timber_pile_end', 'timber_rough');
+  // gate-world-materials: every billet in its species' BURNING key (bark + char + ash crust + glowing cracks, painted per
+  // vertex below: patch.js MK_BURN), the ends likewise; the old plain barks are the fallback
+  const BARKS0 = ['timber_bark_fig', 'timber_bark_walnut', 'timber_bark_pine'].map((k) => A.mat(k, 'timber_rough'));
+  const BARKS = ['timber_burn_fig', 'timber_burn_walnut', 'timber_burn_pine'].map((k, i) => A.mat(k, BARKS0[i]));
+  const BARK = BARKS0[1], END = A.mat('timber_burn_end', A.mat('timber_pile_end', 'timber_rough'));
+  const ASHB = A.mat('ash_burn', 'ash');
   const RS = rng(A.seed ^ 0x51ec7);
   const species = (sp) => (d === 0 ? 1 : sp ?? Math.min(2, Math.floor(RS() * 3)));
   // charred wood and charcoal: the materials task's timber_charred once it exists; meanwhile the darkest non-metal key
@@ -112,23 +116,64 @@ export function buildFire(A) {
     const skirt = Math.max(0, 1 - Math.max(0, dr - TR * 0.85) / 2.5) * 0.12;   // ash spilling off the tapuach
     return Z + fall * (0.025 + 0.03 * (nz(X * 0.45, Y * 0.45, 3) + 1) + skirt);
   };
-  B.geo(heightField(mx0, my0, mx1, my1, n, n, d === 0 ? () => Z : ashH), ASH, { collide: true, cast: true });
+  // (gate-world-materials: its own mesh in ash_burn — soot and charcoal painted round each arrangement, below; low keeps
+  // the flat floor but on a 12 × 12 grid so the soot has vertices to live on)
+  const floorGeo = heightField(mx0, my0, mx1, my1, d === 0 ? 12 : n, d === 0 ? 12 : n, d === 0 ? () => Z : ashH);
+  const ashParts = [];                                    // [geometry, x(X, Y, r01), z(X, Y, r01)] for the ash_burn mesh
 
   // ---------------------------------------------------------------- wood
-  const seg = [5, 7, 8, 10][d], rows = d === 0 ? 1 : d === 1 ? 2 : 3;
+  // gate-world-materials: more ring segments (bark ridges need them) and ridges per species: fig smooth, walnut deeply
+  // furrowed, pine in plates
+  const seg = [6, 8, 12, 14][d], rows = d === 0 ? 1 : d === 1 ? 2 : 3;
+  const RIDGE = d === 0 ? [0, 0.035, 0] : [0.012, 0.055, 0.04];
   const sides = [[], [], []], caps = [], chars = [];
+  // ---- the burn painting (patch.js MK_BURN): every billet's vertices get (x char, y ash crust, z ember glow) from how
+  // near they lie to their arrangement's heart of coals (heat sources: the great pile's bed, each crib's heap; hotter
+  // low down), the log's own state (a per-billet offset from its own stream, more for the charred billets) and which
+  // way the surface faces: the char climbs from the underside (the lower two-thirds first), the hottest parts — the
+  // ends toward the heart — crust grey-white with ash, and the undersides over the coals glow in their cracks ⚙
+  const heatSrc = [];
+  const RB = rng(A.seed ^ 0xb0b5);
+  const heatAt = (X, Y, Zs) => {
+    let h = 0;
+    for (const s of heatSrc) {
+      const q = Math.hypot((X - s.cx) / s.rx, (Y - s.cy) / s.ry);
+      if (q >= 1) continue;
+      h = Math.max(h, s.k * Math.pow(1 - q, 0.7) * (1 - 0.7 * Math.min(1, Math.max(0, (Zs - s.z0) / s.zh))));
+    }
+    return h;
+  };
+  const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  // cap: the end grain (it checks and chars before the bark, and the cut ends darken with smoke) a step further on
+  const paint = (g, rl, cap = 0) => {
+    const p = g.attributes.position, nn = g.attributes.normal, out = new Float32Array(p.count * 3);
+    for (let i = 0; i < p.count; i++) {
+      const X = p.getX(i) / A.AMAH, Y = -p.getZ(i) / A.AMAH, Zs = p.getY(i) / A.AMAH;
+      const down = 0.5 - 0.5 * nn.getY(i);
+      const H = heatAt(X, Y, Zs), h = Math.min(1.2, Math.max(0, H + rl));
+      out[i * 3] = Math.min(1, (h + cap) * (0.6 + 0.9 * down) + 0.12 * down);
+      out[i * 3 + 1] = Math.min(1, Math.max(0, (h - 0.5) * 2.0 * (0.45 + 0.55 * (1 - down))));
+      // the glow: the undersides over the heart of the coals only (the heat alone, not the billet's own state)
+      out[i * 3 + 2] = Math.min(1, Math.max(0, (H - 0.25) * 1.5)) * sm(0.5, 0.95, down);
+    }
+    g.setAttribute('mkBurn', new Float32BufferAttribute(out, 3));
+    return g;
+  };
   /** a billet from site point a to b (amot), radius r; o: { char, taper (radius factor at a), squash, roll, species };
    *  rec: a great-pile billet record that takes the geometry (the movable pile) instead of the static lists;
    *  rnd: the random stream (the pile's extension billets draw from their own, so nothing else moves) */
   const addLog = (a, b, r, o = {}, rec = null, rnd = R) => {
     const { matrix, len } = logBetween(a, b);
     const rb = r * A.AMAH * (0.92 + 0.16 * rnd());
-    const g = logGeometry(len, rb * (o.taper ?? 1), rb * (0.88 + 0.12 * rnd()), seg, rnd, d >= 2 ? 0.07 : 0.04, rows, o.squash ?? 1, o.roll ?? 0);
+    const sp = species(o.species);
+    const g = logGeometry(len, rb * (o.taper ?? 1), rb * (0.88 + 0.12 * rnd()), seg, rnd, d >= 2 ? 0.07 : 0.04, rows, o.squash ?? 1, o.roll ?? 0, o.squash ? RIDGE[sp] * 0.4 : RIDGE[sp]);
     g.side.applyMatrix4(matrix);
     g.caps.applyMatrix4(matrix);
-    const sp = species(o.species);
+    // the billet's own state: fresh (−0.05) … well alight (+0.3); the charred, shortened ones of the heart +0.45
+    const rl = o.char ? 0.45 + 0.2 * RB() : 0.05 + 0.4 * RB();
+    paint(g.side, rl); paint(g.caps, rl, 0.4);
     if (rec) { rec.char = !!o.char; rec.sp = sp; rec.side = g.side; rec.caps = g.caps; pileRecs.push(rec); return; }
-    if (o.char) chars.push(g.side, g.caps); else { sides[sp].push(g.side); caps.push(g.caps); }
+    sides[sp].push(g.side); caps.push(g.caps);
   };
   const pileRecs = [];
   const section = (rnd = R) => (rnd() < 0.35 ? { squash: 0.55 + 0.15 * rnd(), roll: rnd() * Math.PI } : {});   // split or round
@@ -138,14 +183,17 @@ export function buildFire(A) {
   const gp = piles.great.box;
   const [gx0, gy0, gz0] = gp.min, [gx1, gy1, gz1] = gp.max;
   const gcx = (gx0 + gx1) / 2, gcy = (gy0 + gy1) / 2;
-  const bcx = gx0 + 1.5, bcy = gcy, brx = 3.4, bry = (gy1 - gy0) / 2 + 0.3, bedH = 0.55;
+  // gate-world-materials: the bed 0.36 amah (≈ 17 cm) high at its heart (was 0.55, 26 cm; the QA gate: 10–20 cm)
+  const bcx = gx0 + 1.5, bcy = gcy, brx = 3.4, bry = (gy1 - gy0) / 2 + 0.3, bedH = 0.36;
+  heatSrc.push({ cx: bcx, cy: bcy, rx: brx * 1.15, ry: bry * 1.05, z0: Z, zh: Math.max(1, gz1 - Z), k: 1 });
   const bedZ = (X, Y) => {
     const q = Math.hypot((X - bcx) / brx, (Y - bcy) / bry);
     if (q >= 1) return Z - 0.02;
     return Z - 0.02 + bedH * Math.pow(1 - q * q, 0.8) * (1 + (d >= 1 ? 0.25 * nz(X * 1.1 + 2, Y * 1.1 - 6, 2) : 0));
   };
-  B.geo(polarField(bcx, bcy, [4, 6, 9, 12][d], [14, 22, 30, 40][d], (t) => 1 / Math.hypot(Math.cos(t) / brx, Math.sin(t) / bry),
-    (r01, t, X, Y) => bedZ(X, Y)), ASH, { collide: true, cast: true });
+  // coals showing through toward the heart (x), the heart glowing (z) under the burning pile
+  ashParts.push([polarField(bcx, bcy, [4, 6, 9, 12][d], [14, 22, 30, 40][d], (t) => 1 / Math.hypot(Math.cos(t) / brx, Math.sin(t) / bry),
+    (r01, t, X, Y) => bedZ(X, Y)), (X, Y, r01) => 0.3 + 0.7 * Math.pow(1 - r01, 0.6), (X, Y, r01) => 0.95 * sm(0.85, 0.2, r01)]);
   // how far a billet has burnt: 1 at the heart of the bed, 0 at the fresh outer faces
   const burnAt = (X, Y, j) => Math.max(0, 1 - Math.hypot((X - bcx) / (brx * 0.8), (Y - bcy) / (bry * 0.75))) * (1 - 0.06 * j);
 
@@ -176,7 +224,7 @@ export function buildFire(A) {
       const edgeRow = ri < 2 || ri >= ys.length - 2 || y < gy0 + m2 + sp || y > gy1 - m2 - sp;
       let x = xout, first = true;
       while (x - xin > 0.2) {
-        let L = Math.min(GL * (0.9 + 0.2 * R()), x - xin);
+        let L = Math.min(GL * (0.7 + 0.6 * R()), x - xin);   // ±30 % (gate-world-materials; was ±10 %)
         const last = x - L - xin < 0.25;
         if (last) L = x - xin;
         const xa = x - L, xm = x - L / 2;
@@ -194,8 +242,9 @@ export function buildFire(A) {
             const inner = [x - Ls, y + jitter(0.06), zz - Ls * Math.sin(slump)], outer = [x - 0.02, y + jitter(0.06), zz];
             addLog(inner, outer, lr * (0.65 + 0.4 * R()), { char: true, taper: 0.45 + 0.3 * R(), ...section() }, slot.rec = { j, ri, x: xm });
           } else {
-            const yaw = jitter(0.035), pitch = jitter(0.025);
-            addLog([xa + 0.02, y - yaw, z + jitter(0.03) - pitch], [x - 0.02, y + yaw, z + jitter(0.03) + pitch], lr * (0.75 + 0.5 * R()),
+            // a random yaw of up to ≈ ±12° and a little pitch (gate-world-materials: billets were laid ruler-straight)
+            const yaw = jitter(0.09), pitch = jitter(0.04);
+            addLog([xa + 0.02, y - yaw, z + jitter(0.03) - pitch], [x - 0.02, y + yaw, z + jitter(0.03) + pitch], lr * (0.7 + 0.6 * R()),
               { char: b > 0.22 && R() < 0.5, ...section() }, slot.rec = { j, ri, x: xm });
           }
         }
@@ -246,15 +295,15 @@ export function buildFire(A) {
     const xmin = Math.min(...reach) - 0.1, { y, z, j, ri } = row;
     let x = row.slots[row.slots.length - 1].xa - 0.03 - R2() * 0.05;
     while (x - xmin > 0.15) {
-      let L = Math.min(GL * (0.9 + 0.2 * R2()), x - xmin);
+      let L = Math.min(GL * (0.7 + 0.6 * R2()), x - xmin);
       if (x - L - xmin < 0.25) L = x - xmin;
       const xa = x - L, xm = x - L / 2;
       const slot = { xa, xb: x, ext: true, mask: 0, rec: null };
       row.slots.push(slot);
       const b = burnAt(xm, y, j);
       if (z + lr >= bedZ(xm, y) - 0.02 && !(b > 0.62 && j <= 4)) {
-        const yaw = jitter(0.035, R2), pitch = jitter(0.025, R2);
-        addLog([xa + 0.02, y - yaw, z + jitter(0.03, R2) - pitch], [x - 0.02, y + yaw, z + jitter(0.03, R2) + pitch], lr * (0.75 + 0.5 * R2()),
+        const yaw = jitter(0.09, R2), pitch = jitter(0.04, R2);
+        addLog([xa + 0.02, y - yaw, z + jitter(0.03, R2) - pitch], [x - 0.02, y + yaw, z + jitter(0.03, R2) + pitch], lr * (0.7 + 0.6 * R2()),
           { char: b > 0.4 || (b > 0.22 && R2() < 0.5), ...section(R2) }, slot.rec = { j, ri, x: xm, ext: true }, R2);
       }
       x = xa - 0.03 - R2() * 0.08;
@@ -292,11 +341,21 @@ export function buildFire(A) {
 
   // the second pile (incense coals, Tamid 2:5) and the third (keeping the fire, Yoma 45a): cribs of gizrin over a
   // heap of coals, the billets a shortened amah long, laid end to end where the crib is wider than one
+  // gate-world-materials: no longer a perfect lattice — every billet ±30 % in length and thickness, laid end to end with
+  // uneven gaps and overhangs, each turned by up to ≈ ±10° and tilted a little; now and then a slot left empty (burnt
+  // through or never laid); the coals inside a 15 cm heap glowing at its heart, a heat source for the painting
   const crib = (box, r, perLayer, layers, charredLayers, sp = null) => {
     const [x0, y0, z0] = box.min, [x1, y1] = box.max;
-    const runs = (a0, a1) => {                           // billets end to end across [a0, a1]
-      const k = Math.max(1, Math.round((a1 - a0) / (GL + 0.06))), w = (a1 - a0) / k, out = [];
-      for (let i = 0; i < k; i++) out.push([a0 + i * w + 0.03 + R() * 0.05, a0 + (i + 1) * w - 0.03 - R() * 0.05]);
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rr = Math.min(x1 - x0, y1 - y0) * 0.55;
+    heatSrc.push({ cx, cy, rx: (x1 - x0) * 0.7, ry: (y1 - y0) * 0.7, z0, zh: 0.5 + layers * 2 * r * 0.92, k: 1.05 });
+    const runs = (a0, a1) => {                           // billets end to end across [a0, a1], ±30 % of a shortened amah
+      const out = [];
+      let a = a0 + (R() - 0.35) * 0.3;
+      while (a < a1 - 0.3) {
+        const b = Math.min(a + GL * (0.7 + 0.6 * R()), a1 + 0.25 * R());
+        out.push([a, b]);
+        a = b + 0.03 + 0.12 * R();
+      }
       return out;
     };
     for (let j = 0; j < layers; j++) {
@@ -304,14 +363,20 @@ export function buildFire(A) {
       const ew = j % 2 === 0;
       for (let i = 0; i < perLayer; i++) {
         const t = (i + 0.5) / perLayer;
+        if (j > 0 && R() < 0.12) continue;               // a gap in the course
         const o = { char: j < charredLayers, ...section(), ...(sp != null ? { species: sp } : {}) };
-        if (ew) { const y = y0 + 0.15 + t * (y1 - y0 - 0.3) + jitter(0.04); for (const [a, b] of runs(x0 + 0.05, x1 - 0.05)) addLog([a, y, z], [b, y + jitter(0.05), z], r * (0.8 + 0.4 * R()), o); }
-        else { const x = x0 + 0.15 + t * (x1 - x0 - 0.3) + jitter(0.04); for (const [a, b] of runs(y0 + 0.05, y1 - 0.05)) addLog([x, a, z], [x + jitter(0.05), b, z], r * (0.8 + 0.4 * R()), o); }
+        if (ew) {
+          const y = y0 + 0.15 + t * (y1 - y0 - 0.3) + jitter(0.07);
+          for (const [a, b] of runs(x0 + 0.05, x1 - 0.05)) { const w = jitter(0.12); addLog([a, y - w, z + jitter(0.03)], [b, y + w, z + jitter(0.04)], r * (0.72 + 0.56 * R()), o); }
+        } else {
+          const x = x0 + 0.15 + t * (x1 - x0 - 0.3) + jitter(0.07);
+          for (const [a, b] of runs(y0 + 0.05, y1 - 0.05)) { const w = jitter(0.12); addLog([x - w, a, z + jitter(0.03)], [x + w, b, z + jitter(0.04)], r * (0.72 + 0.56 * R()), o); }
+        }
       }
     }
-    // the coals heaped inside
-    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, rr = Math.min(x1 - x0, y1 - y0) * 0.55;
-    B.geo(polarField(cx, cy, [3, 4, 6, 8][d], [10, 16, 22, 28][d], (t) => rr * (1 + 0.08 * Math.sin(3 * t)), (r01) => z0 - 0.02 + 0.32 * (1 - r01 * r01)), ASH, { collide: true, cast: true });
+    // the coals heaped inside (≈ 15 cm), glowing at the heart
+    ashParts.push([polarField(cx, cy, [3, 4, 6, 8][d], [10, 16, 22, 28][d], (t) => rr * (1 + 0.08 * Math.sin(3 * t)), (r01) => z0 - 0.02 + 0.32 * (1 - r01 * r01)),
+      (X, Y, r01) => 0.35 + 0.65 * Math.pow(1 - r01, 0.6), (X, Y, r01) => 0.9 * sm(0.9, 0.25, r01)]);
     return { cx, cy, rr, z0 };
   };
   const cribI = crib(piles.incense.box, 0.08, 5, 4, 2, 0);       // fine fig wood (Tamid 2:5)
@@ -375,9 +440,54 @@ export function buildFire(A) {
   }
 
   const merged = (list) => (list.length ? mergeGeometries(list, false) : null);
-  for (const [list, key] of [[sides[0], BARKS[0]], [sides[1], BARKS[1]], [sides[2], BARKS[2]], [caps, END], [chars, CHAR]]) {
-    const g = merged(list);
-    if (g) B.geo(g, key, { collide: false, cast: true });
+  // the billets and the ash carry the mkBurn attribute, which the StaticBatcher would strip: their own meshes (one per
+  // key, as the batcher would have made); the charcoal chunks stay in the batch
+  const own = (g, key, name) => {
+    if (!g) return;
+    g.computeBoundingSphere();
+    const mesh = new Mesh(g, ctx.mats.get(key));
+    mesh.name = `altar.fire:${name}`;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.matrixAutoUpdate = false;
+    A.group.add(mesh);
+  };
+  [sides[0], sides[1], sides[2]].forEach((list, sp) => own(merged(list), BARKS[sp], BARKS[sp]));
+  own(merged(caps), END, END);
+  if (chars.length) B.geo(merged(chars), CHAR, { collide: false, cast: true });
+  // the ash: the floor sooted and strewn with charcoal round each arrangement (x: ~0.8 m beyond its box, fading out with
+  // ~0.3 m wobble), the beds' coals and glowing hearts (above)
+  {
+    const RS3 = rng(A.seed ^ 0x50a7);
+    const soots = maar.params.piles.map((p) => ({ b: p.box, k: p.id === 'great' ? 0.95 : 0.85, w: (p.id === 'great' ? 1.4 : 1.0) + 0.3 * RS3(), ph: RS3() * 6.28 }));
+    const sootAt = (X, Y) => {
+      let s = 0;
+      for (const o of soots) {
+        const dx = Math.max(o.b.min[0] - X, 0, X - o.b.max[0]), dy = Math.max(o.b.min[1] - Y, 0, Y - o.b.max[1]);
+        const w = o.w * (1 + 0.25 * nz(X * 0.9 + o.ph, Y * 0.9 - o.ph, 2));
+        s = Math.max(s, o.k * Math.exp(-((dx * dx + dy * dy) / (w * w))));
+      }
+      return s;
+    };
+    const list = [[floorGeo, (X, Y) => sootAt(X, Y), () => 0], ...ashParts];
+    const geos = list.map(([g, fx, fz]) => {
+      const gi = g.index ? g.toNonIndexed() : g;
+      const p = gi.attributes.position, out = new Float32Array(p.count * 3);
+      // r01 for the beds: recovered from the geometry's own rim (the beds are polar fields about their first vertex)
+      const c0 = [p.getX(0), p.getZ(0)];
+      let rmax = 0;
+      for (let i = 0; i < p.count; i++) rmax = Math.max(rmax, Math.hypot(p.getX(i) - c0[0], p.getZ(i) - c0[1]));
+      for (let i = 0; i < p.count; i++) {
+        const X = p.getX(i) / A.AMAH, Y = -p.getZ(i) / A.AMAH;
+        const r01 = g === floorGeo ? 1 : Math.hypot(p.getX(i) - c0[0], p.getZ(i) - c0[1]) / (rmax || 1);
+        out[i * 3] = Math.max(fx(X, Y, r01), g === floorGeo ? 0 : sootAt(X, Y) * 0.6);
+        out[i * 3 + 2] = fz(X, Y, r01);
+      }
+      gi.setAttribute('mkBurn', new Float32BufferAttribute(out, 3));
+      ctx.addCollider(gi.clone(), 'altar:ash');
+      return gi;
+    });
+    own(mergeGeometries(geos, false), ASHB, ASHB);
   }
 
   // ---------------------------------------------------------------- the great pile and the tapuach as movables
@@ -401,8 +511,8 @@ export function buildFire(A) {
     const recs = order.map((i) => pileRecs[i]);
     const N = recs.length;
     const vc = (g) => (g.index ? g.index.count : g.attributes.position.count);
-    const mats = [...BARKS.map((key, sp) => [key, (r) => (r.char || r.sp !== sp ? [] : [r.side])]),
-      [END, (r) => (r.char ? [] : [r.caps])], [CHAR, (r) => (r.char ? [r.side, r.caps] : [])]];
+    // (gate-world-materials: the charred billets are their species' burning key with the char painted on, no CHAR mesh)
+    const mats = [...BARKS.map((key, sp) => [key, (r) => (r.sp !== sp ? [] : [r.side])]), [END, (r) => [r.caps]]];
     const pile = new Group();
     pile.name = 'altar.maarachah.great.pile';
     const parts = [];

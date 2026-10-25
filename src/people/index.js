@@ -61,7 +61,7 @@ import { PeopleSystem } from './system.js';
 import { ROLE_NAMES, ANIMAL_NAMES, ROLES } from './roles.js';
 import { PROP_NAMES, setPropMetals, prewarmBedding } from './props.js';
 import { whenPrebaked } from './prebake.js';
-import { compileScene, rendersOffscreen, parallelCompile } from '../render/warmup.js';
+import { compileScene, rendersOffscreen, parallelCompile, compileLater } from '../render/warmup.js';
 import { HUMAN_CLIPS, MITRE_GRASP, STAFF, WINDLASS, WINDLASS_RAISE, CRANK, WAVE_UNDER, KNEAD, EAT } from './clips.js';
 import { QUAD_CLIPS, BIRD_CLIPS } from './animal-clips.js';
 import { poseAlongPath } from './util.js';
@@ -96,22 +96,24 @@ export async function init(ctx) {
   // perf-fix-1: only with KHR_parallel_shader_compile (without it a program issued ahead links synchronously at its first
   // query, as before perf-1 a program linked at its first draw)
   if (parallelCompile(ctx.renderer)) {
+    // gate-core: every figure and prop program but the far figures' and the props' LOD1 (3–11 s each on the HD 4600) is
+    // held until the first view is up (system.js held) — main.js releases one sooner when a figure in that view draws or
+    // asks for it. The sim's boot warm frame stands every pooled figure before the camera, so without the hold all were
+    // compiled before the first image, though from the dawn start every figure is a far silhouette.
+    sys.holdDetail = ctx.params?.raw?.get?.('defer') !== '0';
     const warm = (all) => compileScene(ctx.renderer, sys.warmupObjects(all), ctx.camera, ctx.scene, rendersOffscreen(ctx));
     warm(false);
-    // the other variants one per frame (creating a program object preprocesses ~140 KB of GLSL: 0.1–0.25 s of this
-    // thread each). perf-fix-1: once most of the first view's programs are linked ('warmup:tail', main.js), while this
-    // thread idles behind the loading screen, instead of stuttering the first seconds of play; a screenshot keeps them
-    // after the view (main.js's later warm-up rounds would wait for them)
+    // the other variants after the first view, through render/warmup.js's background queue (gate-core: a few linking at a
+    // time, after the world's deferred programs; issued all at once, a program the frame needed waited behind them all)
     let started = false;
     const background = () => {
       if (started) return;
       started = true;
-      const objs = [...sys.warmupObjects(true).children];
-      const step = () => { const o = objs.shift(); if (!o) return; compileScene(ctx.renderer, o, ctx.camera, ctx.scene, rendersOffscreen(ctx)); requestAnimationFrame(step); };
-      step();
+      for (const o of [...sys.warmupObjects(true).children]) compileLater(ctx, o);
     };
-    if (!ctx.params?.shot) ctx.bus.on('warmup:tail', background);
-    ctx.bus.on('firstFrame', () => setTimeout(background, 1000));
+    // (gate-core: no longer at main.js's 'warmup:tail' — what it issued were the held programs, which then held the view)
+    ctx.bus.on('firstFrame', () => { sys.holdDetail = false; });
+    ctx.bus.on('warmup:issued', background);
   }
   // the sleepers' bedding covers are draped over the posed body (props.js): costly to build (≈ 0.2–0.7 s on the main
   // thread at a first sleeper's draw), so they are built ahead — a first slice here behind the loader, the rest in idle

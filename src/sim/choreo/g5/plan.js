@@ -212,7 +212,7 @@ export function* buildPlanSteps(ctx, G, ev) {
   const order = [...freeJobs, ...linked.filter((j) => !j.skip)].sort((x, y) => x.arr - y.arr);
   let nPlaced = 0;
   for (const job of order) {
-    if ((++nPlaced & 3) === 0) yield;
+    if ((++nPlaced & 1) === 0) yield;   // (every second: shorter plan-job slices — gate-sim-data)
     const inst = placeAnimal(ctx, P, job);
     if (inst && job.after?.inst) { inst.link = job.after.inst.id; job.after.inst.link = inst.id; }
   }
@@ -232,13 +232,13 @@ export function* buildPlanSteps(ctx, G, ev) {
   }
 
   // the other birds: three kohanim's lanes, pairs and singles in arrival order
-  for (const job of birdJobs) { if (job.linked) continue; if ((++nPlaced & 7) === 0) yield; placeSimple(ctx, P, job, 'bird'); }
+  for (const job of birdJobs) { if (job.linked) continue; if ((++nPlaced & 1) === 0) yield; placeSimple(ctx, P, job, 'bird'); }
 
   // meal-offerings
   shuffle(mealJobs, 'meal');
   const arrM = strat(mealJobs.length, P.win.meal[0] + 0.6, P.win.meal[1] - 30, 'arrM');
   mealJobs.forEach((j, k) => { j.arr = arrM[k]; });
-  for (const job of mealJobs) { if ((++nPlaced & 7) === 0) yield; placeSimple(ctx, P, job, 'meal'); }
+  for (const job of mealJobs) { if ((++nPlaced & 1) === 0) yield; placeSimple(ctx, P, job, 'meal'); }
 
   // notar, yesterday's leftovers (by day only: Rambam Pesulei HaMukdashin 19:4)
   if (P.win.notar) commit(P, scriptNotar(P, { type: 'notar' }), 0, { kind: 'notar', type: 'notar', lane: 0, n: 0 });

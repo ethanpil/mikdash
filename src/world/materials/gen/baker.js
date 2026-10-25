@@ -156,14 +156,18 @@ export class Baker {
       add(this.finishMaterial(true));
       add(this.finishMaterial('pack2'));
     }
-    const prev = this.renderer.getRenderTarget();
-    this.renderer.setRenderTarget(this.ensureScratch(16, 16));
-    let p;
-    try {
-      p = this.renderer.compileAsync(scene, this.cam);
-    } finally {
-      this.renderer.setRenderTarget(prev);
-    }
+    const issue = () => {
+      const prev = this.renderer.getRenderTarget();
+      this.renderer.setRenderTarget(this.ensureScratch(16, 16));
+      try {
+        return this.renderer.compileAsync(scene, this.cam);
+      } finally {
+        this.renderer.setRenderTarget(prev);
+      }
+    };
+    // gate-core-r2: after the first view `gate` (world/materials: render/warmup.js compileLater) issues it in turn with
+    // every other background program, so the GPU process's compiler threads are never all taken (a frozen view)
+    const p = this.gate ? this.gate(issue) : issue();
     return p.then(() => { for (const k of kinds) this.compiledKinds.add(k); });
   }
 
@@ -252,7 +256,8 @@ export class Baker {
     const rest = Object.keys(KINDS).filter((k) => !this.compiledKinds.has(k));
     if (!rest.length) return Promise.resolve();
     const t0 = performance.now();
-    return this.compileKinds(rest, false).then(() => { this.stats.restMs = performance.now() - t0; });
+    const all = this.gate ? Promise.all(rest.map((k) => this.compileKinds([k], false))) : this.compileKinds(rest, false); // (gated: one program each)
+    return all.then(() => { this.stats.restMs = performance.now() - t0; });
   }
 
   dims(set) {

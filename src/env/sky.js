@@ -129,7 +129,26 @@ float milkyWay( vec3 dir ) {
 #endif
 
 #ifdef CLOUDS
-// Thin cirrus at ~8.5 km: fibrous streaks drifting with the upper wind, lit through the atmosphere.
+// Thin cirrus at ~8.5 km, drifting with the upper wind, lit through the atmosphere.
+// gate-env-render-r2: patches of fibrous, hooked cirrus (fibratus / uncinus), not one long band: the old field (fibres
+// 50 km long along the wind, one octave across) drew a single straight streak of even width, a jet contrail over the
+// Temple. A low-frequency mask (≈ 25 km) places the patches (coverage = how much of the layer they take); in them the
+// fibres come in tufts ≈ 7 km long down the wind, each a dense head with a trailing fall-streak that curls to one side
+// (a per-tuft hook), the tufts staggered and of uneven strength, the fibres bent by a slow cross-wind warp. So no feature
+// runs straight and even for more than a few km (≈ 10° seen 40 km off); fine ridged strands run inside each tuft. The
+// fibres' finer octaves and the strands fade where they shrink below the pixel (no shimmer toward the horizon).
+float cirrusFibres( vec3 p, float fp ) {
+  float a = 0.5, s = 0.0, per = 1.0 / 2.4; // per: the first octave's period across the fibres (km)
+  for ( int i = 0; i < 6; i ++ ) {
+    if ( i >= CLOUD_OCT ) break;
+    float k = smoothstep( 1.0, 3.0, per / fp );
+    // below the pixel: this octave and the finer ones add their mean, unsampled
+    if ( k <= 0.0 ) { s += a * ( 1.0 - exp2( float( i - CLOUD_OCT ) ) ); break; }
+    s += a * mix( 0.5, vnoise( p ), k );
+    p = p * 2.03 + 17.1; a *= 0.5; per *= 1.0 / 2.03;
+  }
+  return s;
+}
 vec4 cirrus( vec3 dir ) {
   if ( dir.y < 0.015 ) return vec4( 0.0 );
   float hC = 8.5;
@@ -140,10 +159,22 @@ vec4 cirrus( vec3 dir ) {
   vec2 q = P.xz + uWind * uCloudParams.z;
   vec2 wdir = normalize( uWind + vec2( 1e-4 ) );
   vec2 qs = vec2( dot( q, wdir ), dot( q, vec2( - wdir.y, wdir.x ) ) );
-  vec3 pp = vec3( qs.x * 0.06, qs.y * 0.22, uCloudParams.z * 0.0005 );
-  float n = fbm( pp, CLOUD_OCT );
-  float streak = fbm( vec3( qs.x * 0.02, qs.y * 0.9, 3.7 ), 3 );
-  float d = smoothstep( 1.0 - uCloudParams.x, 1.0 - uCloudParams.x + 0.35, n * 0.75 + streak * 0.45 );
+  float cov = uCloudParams.x;
+  float pm = smoothstep( 0.5 - 0.3 * cov, 0.62 - 0.3 * cov, fbm( vec3( q * 0.04 + vec2( 3.1, -7.7 ), 1.3 ), 2 ) );
+  if ( pm <= 0.0 ) return vec4( 0.0 );
+  float v = qs.y + 9.0 * ( vnoise( vec3( qs * 0.07, 4.2 ) ) - 0.5 );
+  float tp = qs.x * ( 1.0 / 7.0 ) + 1.6 * vnoise( vec3( v * 0.45, qs.x * 0.02, 2.9 ) );
+  float sc = fract( tp ), cell = floor( tp );
+  v += 8.0 * ( vnoise( vec3( cell * 1.71, v * 0.3, 5.0 ) ) - 0.5 ) * ( 1.0 - sc ) * ( 1.0 - sc );
+  float tuft = smoothstep( 0.0, 0.7, sc ) * smoothstep( 1.0, 0.82, sc ) * ( 0.35 + 0.65 * vnoise( vec3( cell * 2.3, v * 0.6, 7.0 ) ) );
+  if ( tuft <= 0.0 ) return vec4( 0.0 );
+  // the pixel's footprint at the cloud: the geometric mean of its two axes (the radial one foreshortened by 1 / sin el)
+  float fp = t * 0.0008 * inversesqrt( max( dir.y, 0.03 ) );
+  float f = cirrusFibres( vec3( qs.x * 0.2, v * 2.4, uCloudParams.z * 0.0005 ), fp );
+  // hair: ridged noise across the fibres (≈ 170 m apart, 12 : 1), the fine strands inside a tuft, faded below the pixel
+  float hk = smoothstep( 1.0, 3.0, ( 1.0 / 6.0 ) / fp ), hair = 0.75;
+  if ( hk > 0.0 ) { float hr = 1.0 - abs( 2.0 * vnoise( vec3( qs.x * 0.5, v * 6.0, 3.3 ) ) - 1.0 ); hair = mix( 0.75, 0.35 + 0.9 * hr * hr, hk ); }
+  float d = min( pm * tuft * smoothstep( 0.4, 0.6, f ) * hair * 1.15, 1.0 );
   d *= smoothstep( 0.015, 0.12, dir.y );
   float alpha = d * uCloudParams.y;
   if ( alpha <= 0.0 ) return vec4( 0.0 );

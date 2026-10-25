@@ -101,7 +101,10 @@ function parochot(H) {
     const b = e.box, x = (b.min[0] + b.max[0]) / 2;
     const a = fixedAt === 'north' ? [x, b.max[1]] : [x, b.min[1]];
     const bb = fixedAt === 'north' ? [x, b.min[1]] : [x, b.max[1]];
-    const dr = new Drape(kit, { id: e.id, a, b: bb, z0: b.min[2], z1: zTop, t: T, fold: 1.6, amp: 0.085, gather: 0.16, endPortion: 0.22, mode: 'pinned', seed });
+    // key: on a world built at detail 0, the library's Kodesh parochet (the low tier's daylight compensation,
+    // gate-world-materials-r2); elsewhere the plain key, as before, so medium+ build exactly what they did (the
+    // compensation acts on low only; a run-time switch from a higher tier to low keeps the plain key)
+    const dr = new Drape(kit, { id: e.id, key: H.d < 1 ? kit.mat('parochet_kodesh', 'parochet') : 'parochet', a, b: bb, z0: b.min[2], z1: zTop, t: T, fold: 1.6, amp: 0.085, gather: 0.16, endPortion: 0.22, mode: 'pinned', seed });
     // default: drawn back about 2 amot at the pinned end (the KG's way in — Yoma 52b)
     const f = 2 / (dr.spec.endPortion * dr.W * (1 - dr.spec.gather));
     dr.register(e.id, { open: f, label: e.name.en, extra: { pinnedBack: e.params.pinnedBack, fixedEnd: fixedAt, defaultOpen: f } });

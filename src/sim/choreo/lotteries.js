@@ -23,6 +23,7 @@ import { Track, lotHand, personAt, applyLeg, ramp } from './g1/util.js';
 import { gazitPlaces, mokedPlaces, lotRadius } from './g1/places.js';
 import { rand, clamp } from '../lib/core.js';
 import { CUE_LEAD } from '../lib/cue.js';
+import { stagedRetime } from '../lib/watch.js';
 
 const WALK = 1.15, SLOW = 0.85;   // m/s ⚙
 const TEXT = {
@@ -58,7 +59,11 @@ export default {
     pools['gazit:br'] = sim.pool({ name: 'gazit:br', role: 'kohen_breeches', count: 20, seed: SEED.gazit, importance: 2 });
     // the attendants (chazzanim) of Tamid 5:3 ⚙ Levites
     pools['chazzan:levi'] = sim.pool({ name: 'chazzan:levi', role: 'levi', count: 3, seed: SEED.chazzan, importance: 2 });
-    return { pools, G: gazitPlaces(ctx), M: mokedPlaces(ctx), wicket: sim.door('azarah.gate.moked.pishpash'), gz: null, gzGen: -1, gzG2: false, plan: null, cues: [], props: new FreeProps(ctx), fmt: (m) => ctx.time?.format?.(m) ?? '--', n: 0, out: {} };
+    const state = { pools, G: gazitPlaces(ctx), M: mokedPlaces(ctx), wicket: sim.door('azarah.gate.moked.pishpash'), gz: null, gzGen: -1, gzG2: false, plan: null, cues: [], props: new FreeProps(ctx), fmt: (m) => ctx.time?.format?.(m) ?? '--', n: 0, out: {} };
+    // the afternoon's draw is listed until the officer leaves the circle, not the data's window (its last minutes showed
+    // an empty hall — gate-sim-data); the staging reads the data's window (tPlan)
+    state.rt = stagedRetime(sim, ['afternoon-lottery', 'afternoon-lottery-shabbat'], () => (state.gz && state.gzGen === sim.generation && state.gzDate === ctx.time?.dateString ? state.gz.ends : null));
+    return state;
   },
 
   update(ctx, state, t, dt, sim) {
@@ -75,7 +80,9 @@ export default {
     if (state.gzGen !== sim.generation || state.gzG2 !== !!g2) {
       state.gz = gazitScenes(ctx, sim, state, g2);
       state.gzGen = sim.generation; state.gzG2 = !!g2;
+      state.gzDate = ctx.time?.dateString;
       state.props.set(state.gz.props);
+      state.rt?.apply();
     }
     const gz = state.gz;
     state.props.update(t);
@@ -130,8 +137,9 @@ function g2Plan(sim) {
  */
 function gazitScenes(ctx, sim, state, g2) {
   const G = state.G;
-  const ev = (id) => { const e = sim.schedule.byId(id); return e && Number.isFinite(e.t0) && Number.isFinite(e.t1) ? e : null; };
-  const out = { scenes: [], people: [], cues: [], props: [], wicket: [], mitre: {} };
+  // (an event this module retimes keeps the data's window as tPlan: the staging reads that — gate-sim-data)
+  const ev = (id) => { const e = sim.schedule.byId(id); return e && Number.isFinite(e.t0) && Number.isFinite(e.t1) ? (e.tPlan ? { id: e.id, t0: e.tPlan[0], t1: e.tPlan[1] } : e) : null; };
+  const out = { scenes: [], people: [], cues: [], props: [], wicket: [], mitre: {}, ends: {} };
   const people = new Map();   // `${pool}:${idx}` -> person
   const person = (pool, idx) => {
     const k = `${pool}:${idx}`;
@@ -344,9 +352,11 @@ function gazitScenes(ctx, sim, state, g2) {
         out.mitre.pmA = bare(trs, officerDraw(tr, c, spots, drawA, 0x5a));
         out.mitre.pmB = bare(trs, officerDraw(tr, c, spots, drawB, 0x6a, spots.map((_, i) => isNew(i))));
       } else out.mitre.pmA = bare(trs, officerDraw(tr, c, spots, drawA, 0x5a, spots.map((_, i) => isNew(i))));
-      tr.until(Math.min(tGo + 0.13 * N + 0.2, E + 2.6), { pose: 'stand', h: 90 });
+      const tLeave = Math.min(tGo + 0.13 * N + 0.2, E + 2.6);
+      tr.until(tLeave, { pose: 'stand', h: 90 });
       tr.walk([doorIn, doorway], { speed: SLOW });
       p.eps.push(tr.episode());
+      out.ends[Lp.id] = tLeave + 0.4;          // the officer, last out of the circle, on his way to the door
     }
     if (shabbat) out.cues.push(...drawCues('pm-a', drawA, TEXT.callShabbat, TEXT.won2, c, out.mitre.pmA), ...drawCues('pm-b', drawB, TEXT.callPm, TEXT.wonPm, c, out.mitre.pmB));
     else out.cues.push(...drawCues('pm', drawA, TEXT.callPm, TEXT.wonPm, c, out.mitre.pmA));

@@ -42,6 +42,7 @@ export class Engine {
     this.frame = 0;
     // false while the boot warms shaders up: updaters run, nothing is drawn (perf-1, render/warmup.js)
     this.drawing = true;
+    this.lost = false; // the WebGL context was lost: the loop stays stopped (main.js reloads the page)
     this.fps = 60;
     this.running = false;
     this.pixelRatio = 1;
@@ -83,6 +84,7 @@ export class Engine {
 
   start(ctx) {
     this.ctx = ctx;
+    if (this.lost) return; // gate-core: the graphics context is gone; the page reloads (main.js)
     this.running = true;
     this.timer.reset?.();
     this.renderer.setAnimationLoop((ts) => this.tick(ts));

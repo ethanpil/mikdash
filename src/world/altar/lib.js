@@ -451,7 +451,10 @@ export function siteMatrix(p, yaw = 0, scale = 1) {
  * and end caps. Axis +X, centred at the origin. r0/r1 radii at −x/+x (m); bump = radial irregularity (fraction);
  * squash (< 1) flattens the section across local y (a split or half-round billet), turned by `roll` about the axis.
  */
-export function logGeometry(len, r0, r1, seg, R, bump = 0.06, rows = 3, squash = 1, roll = 0) {
+// ridge (gate-world-materials): bark ridges along the log — alternate ring vertices pushed out and in by ±ridge (a
+// fraction of the radius), swelling and fading along the length (walnut / pine bark: deep furrows; fig: nearly none).
+// Drawn from its own phase (no extra draws from R, so callers that pass 0 build exactly what they built before)
+export function logGeometry(len, r0, r1, seg, R, bump = 0.06, rows = 3, squash = 1, roll = 0, ridge = 0) {
   const pos = [], nor = [], uv = [], cpos = [], cnor = [], cuv = [];
   const ou = R() * 0.96, ov = R() * 0.96, bu = R() * 2.4, bv = R() * 0.96; // per-log texture offsets
   const ring = [];
@@ -462,7 +465,8 @@ export function logGeometry(len, r0, r1, seg, R, bump = 0.06, rows = 3, squash =
     const pts = [];
     for (let i = 0; i < seg; i++) {
       const a = (2 * Math.PI * i) / seg;
-      const rr = r * (1 + bump * (Math.sin(a * 3 + phase + t * 2) * 0.6 + Math.sin(a * 5 + phase2) * 0.4));
+      const rg = ridge ? ridge * (i % 2 ? 1 : -1) * (0.65 + 0.35 * Math.sin(t * 4.1 + phase * 1.7 + i)) : 0;
+      const rr = r * (1 + bump * (Math.sin(a * 3 + phase + t * 2) * 0.6 + Math.sin(a * 5 + phase2) * 0.4) + rg);
       const y0 = Math.cos(a) * rr * squash, z0 = Math.sin(a) * rr;
       // ellipse normal ∝ (cos a / squash, sin a), then rolled
       const ny0 = Math.cos(a) / squash, nz0 = Math.sin(a), nl = Math.hypot(ny0, nz0) || 1;

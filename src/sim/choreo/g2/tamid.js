@@ -70,7 +70,8 @@ export function vesselTable(P) {
 /** windows of the two tamid services for the current date (unwrapped around each service) */
 export function tamidWindows(ctx, sim) {
   const z = ctx.time?.zmanim || {};
-  const ev = (id) => { const e = sim.event(id); return e && Number.isFinite(e.t0) ? [e.t0, e.t1] : null; };
+  // (an event a module retimes keeps the data's window as tPlan: the staging reads that — gate-sim-data)
+  const ev = (id) => { const e = sim.event(id); return e && Number.isFinite(e.t0) ? (e.tPlan ? [e.tPlan[0], e.tPlan[1]] : [e.t0, e.t1]) : null; };
   const sr = z.sunrise ?? 356, alot = z.alot ?? 282, shaah = z.shaahDay ?? 54.4;
   const dh = (h) => wrap(sr + h * shaah);
   const unwrap = (w, base) => (w ? [base + ((w[0] - base + 2160) % 1440) - 720, base + ((w[0] - base + 2160) % 1440) - 720 + since(w[1], w[0])] : null);

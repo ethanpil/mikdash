@@ -55,7 +55,9 @@ export const STONES = [
 // default; Actor.setHeadgear(false) hides it) and the hair shells drawn instead when it is off; the hair and the beard
 // (on by default) and the shaven scalp and face drawn instead when they are shaved (Actor.setShaven — people-4); the
 // hedyot's avnet of wool and linen (on by default; off outside the avodah — Actor.setGarb({ avnet: false }), qa-r1)
-export const GRP = { MANTLE: 1, HEADCLOTH: 2, HEADGEAR: 4, BARE: 5, HAIR: 6, SHAVEN: 7, BEARD: 8, SHAVEN_FACE: 9, AVNET: 10 };
+// gate-people-r2: HAIR_OPEN (no mask bit of its own) — hair standing proud of the cap, drawn with the hair grown and no
+// head-cloth on (material.js VERT_BEGIN), so it never pierces the cloth
+export const GRP = { MANTLE: 1, HEADCLOTH: 2, HEADGEAR: 4, BARE: 5, HAIR: 6, SHAVEN: 7, BEARD: 8, SHAVEN_FACE: 9, AVNET: 10, HAIR_OPEN: 11 };
 
 // segment counts per LOD; LOD3 (far silhouettes beyond the figure budget) thins LOD2 further
 const L3 = (lod, a, b, c) => (lod === 0 ? a : lod === 1 ? b : lod === 2 || c <= 3 ? c : Math.max(3, Math.round(c * 0.65)));
@@ -64,6 +66,16 @@ const L3 = (lod, a, b, c) => (lod === 0 ? a : lod === 1 ? b : lod === 2 || c <= 
 function prng(seed) {
   let a = Math.floor(seed * 1e6) >>> 0 || 1;
   return () => { a = (a * 1664525 + 1013904223) >>> 0; return a / 4294967296; };
+}
+// smooth 2D value noise in [0, 1] (deterministic; gate-people-r2: the hair's lumps)
+function vhash(i, j) { const h = Math.sin(i * 127.1 + j * 311.7) * 43758.5453; return h - Math.floor(h); }
+// (periodic in x with period px cells when px is given: an azimuth that wraps)
+function vnoise2(x, y, px = 0) {
+  const i = Math.floor(x), j = Math.floor(y), fx = x - i, fy = y - j;
+  const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
+  const w = (q) => (px ? ((q % px) + px) % px : q);
+  const i0 = w(i), i1 = w(i + 1);
+  return lerp(lerp(vhash(i0, j), vhash(i1, j), ux), lerp(vhash(i0, j + 1), vhash(i1, j + 1), ux), uy);
 }
 
 // --------------------------------------------------------------------------------------------- head
@@ -340,13 +352,18 @@ function eyes(B, rig, H) {
 function ears(B, rig, lod, H) {
   const hb = rig.index.head;
   for (const sg of [-1, 1]) {
-    const m = new Matrix4().makeRotationY(sg * 0.38).multiply(new Matrix4().makeRotationZ(-sg * 0.08));
+    // (gate-people: LOD1 lies closer to the head — 0.26 rad off it, its root sunk 2 mm further in — with the hollowed concha
+    // and rolled helix of LOD0 and a thinner rim: a plain ellipsoid stood off the head as a disc, worst on low, where LOD1 is
+    // drawn from 3 m)
+    const yaw = lod ? 0.26 : 0.38;
+    const m = new Matrix4().makeRotationY(sg * yaw).multiply(new Matrix4().makeRotationZ(-sg * 0.08));
     // (qa-r2: warmer than the face — thin skin over the cartilage, blood close under it)
-    B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.55, metal: 0, color: [1.05, 0.95, 0.92], grp: 0 });
-    const er = [0.0095 * H.hs, 0.029 * H.hs, 0.017 * H.hs];
-    B.ellipsoid(H.C.clone().add(V(sg * H.r[0] * 0.97, H.f.eyeY - 0.014 * H.hs, 0.012 * H.hs)), er, {
-      nu: lod ? 7 : 11, nv: lod ? 5 : 7, bone: hb, xf: m,
-      deform: lod ? null : (l) => {
+    // (gate-people-r2: redder — [1.05, 0.95, 0.92] barely parted them from the face)
+    B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.55, metal: 0, color: [1.1, 0.92, 0.88], grp: 0 });
+    const er = [(lod ? 0.008 : 0.0095) * H.hs, 0.029 * H.hs, 0.017 * H.hs];
+    B.ellipsoid(H.C.clone().add(V(sg * H.r[0] * (lod ? 0.95 : 0.97), H.f.eyeY - 0.014 * H.hs, 0.012 * H.hs)), er, {
+      nu: lod ? 9 : 11, nv: lod ? 6 : 7, bone: hb, xf: m,
+      deform: (l) => {
         // the outer face is hollowed (concha), the rim rolled; the lobe hangs a little fuller
         const u = l.y / er[1], w = l.z / er[2];
         const rimD = Math.hypot(u, w);
@@ -365,14 +382,31 @@ export function hair(B, rig, lod, H, o = {}) {
   const shape = headShape(H);
   const hb = rig.index.head;
   B.set({ cls: CLS.HAIR, pat: PAT.HAIR, rough: 0.7, metal: 0, color: [1, 1, 1], grp: o.grp || 0 });
-  const nu = L3(lod, 32, 12, 6), nv = L3(lod, 11, 5, 3);
+  // (gate-people: LOD1 20 × 6, was 12 × 5 — the cap carries its locks in the geometry, since on low no shell is drawn there;
+  // gate-people-r2: 28 × 8 where it shows, to carry the locks' tones along the fall)
+  const nu = L3(lod, 32, o.covered ? 20 : 28, 6), nv = L3(lod, 11, o.covered ? 6 : 8, 3);
   const front = Math.acos(clamp((H.f.eyeY + (o.hairline ?? 0.05) * H.hs) / H.r[1], -1, 1));
   const side = Math.acos(clamp((H.f.eyeY + 0.014 * H.hs) / H.r[1], -1, 1));
   const back = Math.acos(clamp((o.long ? H.f.mouthY - 0.02 * H.hs : H.f.mouthY + 0.008 * H.hs) / H.r[1], -1, 1));
   const vol = 0.0065 * H.hs + (o.volume || 0);
   const wild = o.wild ?? 1;   // > 1: uncombed, unkempt locks (the metzora - Vayikra 13:45)
   // locks break the outline (qa-r1: at LOD1 too, and calm at the crown, where they drew a point)
-  const lock = lod <= 1 ? (phi, th) => 1 + (lod ? 0.25 : 0.35) * Math.min(wild, 1.3) * Math.sin(phi * 23 + th * 4) * Math.sin(phi * 7 - th * 9) * smooth(0.12, 0.5, th) : () => 1;
+  // gate-people-r2: lumps of hair, not a ruled cap — irregular clumps (value noise over azimuth and fall, seeded per head)
+  // lift the cap by up to 1.5 × its volume and sink it to half between them, calm at the crown; with the old product of two
+  // sines the outline was a smooth dome
+  const hseed = 1.7 + (o.hairline ?? 0.05) * 13 + (o.long ? 0.3 : 0);
+  const lump = (phi, th) => vnoise2(phi * 20 / (2 * Math.PI), th * 7 + hseed * 2, 20) * 0.65 + vnoise2(phi * 47 / (2 * Math.PI), th * 15 - hseed, 47) * 0.35;
+  // (at most 1.5 × the volume, ≈ 1 cm: a head-cloth lies 1.2 cm off the head, and the hair stays under it)
+  const lock = lod <= 1 ? (phi, th) => clamp(1 + 1.6 * Math.min(wild, 1.3) * (lump(phi, th) - 0.45) * smooth(0.12, 0.5, th), 0.45, 1.5) : () => 1;
+  // gate-people: the locks' light and dark in the vertex colour too, along the hair's fall, darker between the lumps: the
+  // low tier's LOD1 draws no hair pattern. gate-people-r2: from the lumps, not a regular wave (19 streaks round the head
+  // read as the ruled lines of a beanie)
+  // (and a finer noise drawn out along the fall — locks and their partings — strongest where the hair falls, calm at the
+  // whorl: on low the cap's vertex colour is all the hair there is)
+  const streak = lod <= 1 ? (phi, th) => {
+    const fall = smooth(0.08, 0.4, th);
+    return 0.8 + (0.3 * lump(phi, th) + 0.36 * (vnoise2(phi * 64 / (2 * Math.PI), th * 2.5 + hseed, 64) - 0.5)) * fall + 0.1 * (1 - fall);
+  } : () => 1;
   // the hairline (polar angle from the crown at azimuth phi): the temples recede a little; qa-r2: it wavers irregularly
   // (three incommensurate waves, the phase per head) — one regular wave read as a scalloped cap
   const jit = lod <= 1 ? prng(1.7 + (o.hairline ?? 0.05) * 13 + (o.long ? 0.3 : 0)) : null;
@@ -393,7 +427,7 @@ export function hair(B, rig, lod, H, o = {}) {
     const n = S.clone().setY(S.y * 0.4).normalize();
     const edge = j === nV ? 0.25 : 1;
     // the hairline thins out: lighter (skin shows through) over the last two rows (qa-r1)
-    const shade = j === nV ? 1.38 : j === nV - 1 ? 1.12 : 1;
+    const shade = (j === nV ? 1.38 : j === nV - 1 ? 1.12 : 1) * streak(phi, th);
     return { p: S.addScaledVector(n, off * edge * lock(phi, th)).add(H.C), u: phi * 0.09, v: -th * 0.1, th, phi, shade };
   };
   if (o.napeOnly) {
@@ -420,13 +454,18 @@ export function hair(B, rig, lod, H, o = {}) {
   // strand shells: a soft, broken outline instead of a helmet — qa-r2: three at LOD0 and one at LOD1 (their clumps now
   // hold out to ~6 m: material.js pattern 23), and a fringe over the hairline
   if (lod <= 1 && (!o.covered || o.shellsOnly) && !(lod === 1 && o.shellsOnly)) {
+    // (the LOD1 shell and fringe keep the 12 × 5 grid: they are alpha-tested strands, and the cap under them has the locks)
+    const nuS = lod === 1 ? 12 : nu, nvS = lod === 1 ? 5 : nv;
+    // (gate-people-r2: the shells of grown hair stand up to 1.3 cm off the head, through a head-cloth 1.2 cm off it — dark
+    // specks on the cloth's crown: group HAIR_OPEN, hidden under one; a bare kohen's shells stay in his BARE group)
+    const shellGrp = o.shellsOnly ? o.grp || 0 : GRP.HAIR_OPEN;
     for (const t of lod === 0 ? [0.34, 0.67, 1] : [0.6]) {
-      B.set({ cls: CLS.HAIR, pat: PAT.HAIR_SHELL, rough: 0.6, metal: t, color: [1.06 + 0.06 * t, 1.06 + 0.06 * t, 1.06 + 0.06 * t], grp: o.grp || 0 });
-      B.grid(nu, nv, (i, j) => { const q = capAt(i, j, nu, nv, vol + 0.0062 * t); return { p: q.p, u: q.u, v: q.v, w: hb }; }, { wrap: true, inside: H.C });
+      B.set({ cls: CLS.HAIR, pat: PAT.HAIR_SHELL, rough: 0.6, metal: t, color: [1.06 + 0.06 * t, 1.06 + 0.06 * t, 1.06 + 0.06 * t], grp: shellGrp });
+      B.grid(nuS, nvS, (i, j) => { const q = capAt(i, j, nuS, nvS, vol + 0.0062 * t); return { p: q.p, u: q.u, v: q.v, w: hb }; }, { wrap: true, inside: H.C });
     }
     // the fringe: from a little inside the hairline to ~6 mm past it the hair thins out strand by strand over the skin
     // (alpha-tested like a shell, sparser toward its edge, close to the skin) — the cap's edge was one hard line
-    const nF = L3(lod, 3, 2, 1), uF = Math.round(nu * 0.7);
+    const nF = L3(lod, 3, 2, 1), uF = Math.round(nuS * 0.7);
     B.grid(uF, nF, (i, j) => {
       const phi = lerp(-2.2, 2.2, i / uF);             // the forehead, temples and sides (the nape's edge is in shadow)
       const k = j / nF;
@@ -443,6 +482,58 @@ export function hair(B, rig, lod, H, o = {}) {
     for (let j = 0; j <= nF; j++) for (let i = 0; i <= uF; i++) {
       const vi = v0 + j * (uF + 1) + i;
       B.mat[vi * 4] = 0.6; B.mat[vi * 4 + 1] = lerp(0.45, 1, j / nF); B.mat[vi * 4 + 2] = PAT.HAIR_SHELL; B.mat[vi * 4 + 3] = CLS.HAIR + 8 * (o.grp || 0);
+    }
+    // gate-people: tufts — small alpha-tested patches of strands from inside the cap's edge running past the hairline and
+    // standing a little off the head, longer over the ears and at the nape (where the hair grows over), short and close on
+    // the forehead: the cap's outline breaks into locks instead of the line of a beanie. 26 at LOD0, 12 at LOD1, seeded per
+    // hairline; sparser toward their tips (metalness channel, as the fringe)
+    if (!o.shellsOnly) {
+      const nT = lod === 0 ? 26 : 12;
+      const rT = prng(4.1 + (o.hairline ?? 0.05) * 7 + (o.long ? 0.5 : 0));
+      for (let q = 0; q < nT; q++) {
+        const phi = lerp(-2.95, 2.95, (q + 0.5) / nT) + (rT() - 0.5) * 0.14;
+        const fk = smooth(0.25, 0.9, Math.cos(phi));                 // 1 on the forehead … 0 at the sides and back
+        const lb = hairEdge(phi), past = lerp(0.17, 0.045, fk) * (0.7 + 0.6 * rT()), from = lb - 0.15;
+        const dphi = lerp(0.24, 0.15, fk) * (0.8 + 0.4 * rT());
+        const t0 = B.count;
+        B.set({ cls: CLS.HAIR, pat: PAT.HAIR_SHELL, rough: 0.6, metal: 0.6, color: [1.08, 1.08, 1.08], grp: o.grp || 0 });
+        B.grid(2, 3, (i, j) => {
+          const k = j / 3;
+          const ph = phi + (i / 2 - 0.5) * dphi * (1 - 0.4 * k);
+          const th = Math.max(0.03, lerp(from, lb + past, k));
+          const y = Math.cos(th) * H.r[1];
+          const S = headSurf(H, shape, ph, y);
+          const n = S.clone().setY(S.y * 0.4).normalize();
+          const off = vol * lerp(0.95, 0.45, fk * k) + 0.0035 * H.hs * k * (1 - 0.7 * fk) + 0.0008;
+          return { p: S.addScaledVector(n, off).add(H.C), u: ph * 0.09, v: -th * 0.1, w: hb, shade: lerp(1.0, 1.15, k) };
+        }, { inside: H.C });
+        for (let vi = t0; vi < B.count; vi++) B.mat[vi * 4 + 1] = lerp(0.5, 0.95, Math.floor((vi - t0) / 3) / 3);
+      }
+      // gate-people-r2: and over the crown and temples — longer locks lying along the hair's fall from the whorl, their tips
+      // lifting off the cap (≈ 2.5–4 cm long, up to ~1.2 cm proud), so the dome's outline breaks into locks where it meets
+      // the sky (the hairline tufts alone left a smooth cap above them). 22 at LOD0, 12 at LOD1; alpha-tested (pattern 23:
+      // sparse toward the tips; none on low, where the lumped cap carries the outline)
+      const nC = lod === 0 ? 22 : 12;
+      const rC = prng(7.3 + (o.hairline ?? 0.05) * 5 + (o.long ? 0.7 : 0));
+      for (let q = 0; q < nC; q++) {
+        const phi = (q / nC) * Math.PI * 2 + (rC() - 0.5) * 0.5;
+        const lb = hairEdge(phi);
+        const th0 = lerp(0.12, Math.max(0.2, lb - 0.45), rC()), len = (0.26 + 0.14 * rC()) * (Math.cos(phi) > 0.6 ? 0.75 : 1);
+        const th1 = Math.min(th0 + len, lb - 0.04), dphi = 0.22 + 0.12 * rC(), lift = (0.004 + 0.0045 * rC()) * H.hs;
+        const t0 = B.count;
+        B.set({ cls: CLS.HAIR, pat: PAT.HAIR_SHELL, rough: 0.6, metal: 0.6, color: [1.04, 1.04, 1.04], grp: GRP.HAIR_OPEN });
+        B.grid(2, 3, (i, j) => {
+          const k = j / 3;
+          const ph = phi + (i / 2 - 0.5) * dphi * (1 - 0.35 * k) / Math.max(0.35, Math.sin(lerp(th0, th1, k)));
+          const th = lerp(th0, th1, k);
+          const y = Math.cos(th) * H.r[1];
+          const S = headSurf(H, shape, ph, y);
+          const n = S.clone().setY(S.y * 0.4).normalize();
+          const off = vol * lock(ph, th) + 0.0015 * H.hs + lift * k * k;
+          return { p: S.addScaledVector(n, off).add(H.C), u: ph * 0.09, v: -th * 0.1, w: hb, shade: lerp(0.95, 1.12, k) };
+        }, { inside: H.C });
+        for (let vi = t0; vi < B.count; vi++) B.mat[vi * 4 + 1] = lerp(0.45, 0.9, Math.floor((vi - t0) / 3) / 3);
+      }
     }
   }
   if (o.long && !o.shellsOnly) {
@@ -561,6 +652,19 @@ export function beard(B, rig, lod, H, o = {}) {
     for (const t of lod === 0 ? [0.34, 0.67, 1] : [0.6]) {
       B.set({ cls: CLS.HAIR, pat: PAT.HAIR_SHELL, rough: 0.7, metal: t, color: [1.05 + 0.05 * t, 1.05 + 0.05 * t, 1.05 + 0.05 * t], grp: o.grp || 0 });
       faceShell(B, H, shape, nu, nv, (a, b) => prof(a, b, 0.0042 * t * hs), W);
+    }
+    // gate-people: tufts along the beard's lower edge, hanging a little past it (its locks' tips), and along the cheek line
+    // growing in from it: alpha-tested like the shells, so the edge is broken into locks, not the outline of a mask
+    const rB = prng(2.3 + len * 40);
+    const nB = lod === 0 ? 18 : 10;
+    for (let q = 0; q < nB; q++) {
+      const a = lerp(-0.94, 0.94, (q + 0.5) / nB) + (rB() - 0.5) * 0.06, da = 0.07 + 0.05 * rB();
+      const cheek = q % 3 === 2 && Math.abs(a) > 0.3;               // a third of them (off the chin) at the cheek line
+      const bA = cheek ? -0.08 : 0.8, bB = cheek ? 0.16 : 1.1 + 0.12 * rB();
+      const t0 = B.count;
+      B.set({ cls: CLS.HAIR, pat: PAT.HAIR_SHELL, rough: 0.7, metal: 0.6, color: [1.08, 1.08, 1.08], grp: o.grp || 0 });
+      faceShell(B, H, shape, 2, 2, (aa, bb) => prof(a + aa * da, lerp(bA, bB, bb), (cheek ? 0.0015 : 0.0035) * hs), W);
+      for (let vi = t0; vi < B.count; vi++) B.mat[vi * 4 + 1] = cheek ? lerp(0.95, 0.6, Math.floor((vi - t0) / 3) / 2) : lerp(0.55, 0.95, Math.floor((vi - t0) / 3) / 2);
     }
     B.set({ cls: CLS.HAIR, pat: PAT.HAIR, rough: 0.75, metal: 0, color: [1, 1, 1], grp: o.grp || 0 });
   }
@@ -968,8 +1072,16 @@ function armBody(B, rig, lod, s, o) {
     }
     const nP = pts.length;
     rad[0] *= 0.94;
+    // gate-people: the elbow's crease zone in uv.v — v = 10 at the elbow, v − 10 the distance above it along the sleeve
+    // (material.js pElbowH)
+    let sEl = 0, acc = 0, best = Infinity;
+    for (let i = 0; i < nP; i++) {
+      if (i) acc += pts[i].distanceTo(pts[i - 1]);
+      const dd = pts[i].distanceTo(el);
+      if (dd < best) { best = dd; sEl = acc + (i === nP - 1 ? dd : 0); }
+    }
     B.tube(limbRings(pts, rad), {
-      seg, weights: W, capA: lod >= 2 ? 'flat' : 'dome', domeH: 0.35,
+      seg, weights: W, capA: lod >= 2 ? 'flat' : 'dome', domeH: 0.35, v0: 10 + sEl,
       radial: lod === 0 ? (th, j) => 1 + 0.05 * (Math.abs(Math.sin(th * 2.5 + j * 1.3)) - 0.6) * (j > 1 && j < nP - 1 ? 1 : 0.3) : null,
       shade: inner,
     });
@@ -989,7 +1101,8 @@ export function hand(B, rig, lod, s) {
   const hb = I[`hand_${s}`], fb = I[`fing_${s}`], f2 = I[`fing2_${s}`], ib = I[`idx_${s}`], i2b = I[`idx2_${s}`], tb = I[`thb_${s}`];
   B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.55, metal: 0, color: [1, 1, 1], grp: 0 });
   const palmL = kn.distanceTo(w);
-  if (lod >= 1) {
+  if (lod === 1) { handLod1(B, rig, s, { sg, hs, w, kn, k2, ix, i2, th, down, palmN, back, rot, hb, fb, f2, ib, i2b, tb, palmL }); return; }
+  if (lod >= 2) {
     // mitten: palm + fingers in one shape (fingers curl with fing_*), thumb separate at LOD1
     const q = L3(lod, 0, 7, 5);
     B.ellipsoid(w.clone().addScaledVector(down, palmL * 0.95), [0.0145 * hs, palmL * 1.05, 0.036 * hs], { nu: q, nv: lod === 1 ? 5 : 3, xf: rot,
@@ -1070,6 +1183,51 @@ export function hand(B, rig, lod, s) {
   B.ellipsoid(t3.clone().addScaledVector(tdir, -0.006 * hs).addScaledVector(dors, 0.0094 * hs * 0.82), [0.0058 * hs, 0.0026 * hs, 0.0066 * hs],
     { nu: 6, nv: 3, lat: [0, 0.5], bone: tb, xf: new Matrix4().makeBasis(tx, dors, tdir) });
   B.set({ cls: CLS.SKIN, pat: PAT.SKIN, rough: 0.55, metal: 0, color: [1, 1, 1], grp: 0 });
+}
+
+/**
+ * gate-people: the LOD1 hand (≈ 3–8 m on low, 5–12 m on high — the distance the 'Go' views see hands from): a palm with
+ * the knuckle ridge, four separate fingers in the relaxed cascade (each a proximal and a distal segment on its own bones,
+ * so a grip or a gesture bends them) and the thumb along the index — the silhouette of a hand, not of a mitten. The same
+ * joints and cascade as LOD0, ≈ 230 triangles (the mitten: 100).
+ */
+function handLod1(B, rig, s, q) {
+  const { hs, w, kn, k2, ix, i2, th, down, palmN, back, rot, hb, fb, f2, ib, i2b, tb, palmL } = q;
+  const I = rig.index;
+  B.ellipsoid(w.clone().addScaledVector(down, palmL * 0.5).addScaledVector(back, 0.002 * hs), [0.0152 * hs, palmL * 0.58, 0.039 * hs], {
+    nu: 8, nv: 5, xf: rot,
+    deform: (l) => { if (l.x < 0) l.x *= 1 + 0.16 * Math.exp(-((((l.y / (palmL * 0.58)) + 0.85) / 0.2) ** 2)); return l; },
+    weights: (p) => normW([[hb, 1], [I[`farm_${s}`], 0.4 * smooth(w.y - 0.02, w.y + 0.02, p.y)]]),
+  });
+  B.ellipsoid(w.clone().addScaledVector(down, palmL * 0.3).addScaledVector(back, -0.028 * hs).addScaledVector(palmN, 0.007 * hs),
+    [0.012 * hs, 0.027 * hs, 0.015 * hs], { nu: 6, nv: 4, xf: rot, weights: [[hb, 0.6], [tb, 0.4]] });
+  const fl = k2.distanceTo(kn), il = i2.distanceTo(ix);
+  const curlAxis = new Vector3().crossVectors(down, palmN).normalize();
+  const fingers = [
+    { base: ix, zo: 0.004, b1: ib, b2: i2b, p: il, d: 0.042, r: 0.0098, drop: 0.002, flex: 2 },
+    { base: kn, zo: -0.0135, b1: fb, b2: f2, p: fl, d: 0.045, r: 0.0101, drop: 0, flex: 6 },
+    { base: kn, zo: 0.0025, b1: fb, b2: f2, p: fl * 0.96, d: 0.042, r: 0.0096, drop: 0.002, flex: 12 },
+    { base: kn, zo: 0.0175, b1: fb, b2: f2, p: fl * 0.86, d: 0.034, r: 0.0087, drop: 0.006, flex: 19 },
+  ];
+  for (const g of fingers) {
+    const o = g.base.clone().addScaledVector(back, g.zo * hs).addScaledVector(down, g.drop * hs);
+    const pip = g.base.clone().addScaledVector(back, g.zo * hs).addScaledVector(down, g.p);
+    const fdir = down.clone().applyAxisAngle(curlAxis, (g.flex * Math.PI) / 180);
+    const tip = pip.clone().addScaledVector(fdir, g.d * hs);
+    const r = g.r * hs * 1.05;          // a touch fuller: at 5–10 m a finger of true girth is under a pixel wide
+    const knuckle = o.clone().addScaledVector(down, -0.006 * hs).addScaledVector(palmN, -0.0025 * hs);
+    B.tube(limbRings([knuckle, pip], [[r * 1.12, r * 1.1], [r * 0.98, r * 1.02]]), {
+      seg: 5, weights: (p) => normW([[g.b1, 1], [hb, 1.2 * (1 - smooth(0, 0.016 * hs, p.clone().sub(o).dot(down)))]]),
+    });
+    B.tube(limbRings([pip.clone().addScaledVector(down, -0.004 * hs), tip], [[r * 0.98, r * 1.02], [r * 0.82, r * 0.88]]), {
+      seg: 5, capB: 'dome', domeH: 0.9, bone: g.b2,
+    });
+  }
+  const tdir = down.clone().multiplyScalar(0.95).addScaledVector(back, 0.04).addScaledVector(palmN, 0.1).normalize();
+  const t0 = th.clone().addScaledVector(tdir, 0.012 * hs), t2 = th.clone().addScaledVector(tdir, 0.058 * hs), t3 = th.clone().addScaledVector(tdir, 0.084 * hs);
+  B.tube(limbRings([t0, t2, t3], [0.0122 * hs, 0.0102 * hs, 0.0092 * hs]), {
+    seg: 5, capB: 'dome', domeH: 0.9, weights: (p) => normW([[tb, 1], [hb, 0.9 * (1 - smooth(0, 0.03 * hs, p.distanceTo(t0)))]]),
+  });
 }
 
 /**
@@ -1308,7 +1466,7 @@ function drape(lod, o) {
   const A = (j) => amp * smooth(start - 0.6, start + span, j);
   return {
     radial: (th, j) => 1 + A(j) * F(th, j) * 2.2,
-    shade: (th, j) => 1 - (lod === 0 ? 0.32 : 0.24) * (A(j) / amp) * Math.max(0, -F(th, j)) * 2.2,
+    shade: (th, j) => 1 - (lod === 0 ? 0.32 : 0.24) * (o.ao ?? 1) * (A(j) / amp) * Math.max(0, -F(th, j)) * 2.2,
     hem: (th, j) => A(j) * F(th, j) * 0.25,
   };
 }
@@ -1343,8 +1501,23 @@ function garmentBody(B, rig, lod, hemY, o = {}) {
   // a rent (o.rent, keri'ah): the tube starts at the front centre so its seam is there, and the seam is parted along the
   // rent - the cloth's own edges, the chest behind (rentFront)
   const rent = o.rent || null;
+  // gate-people: a garment girded at o.gatherY (the avnet, a belt) carries its gather zone in uv.v: v = 20 at the belt's
+  // middle, v − 20 the distance along the cloth above it (material.js pGatherH: the radial gather folds under it)
+  let v0 = 0;
+  if (o.gatherY != null) {
+    let acc = 0;
+    for (let j = 1; j < rings.length; j++) {
+      const A = rings[j - 1].c, Bq = rings[j].c, dd = A.distanceTo(Bq);
+      if (Bq.y <= o.gatherY) { acc += dd * clamp((A.y - o.gatherY) / Math.max(1e-5, A.y - Bq.y)); break; }
+      acc += dd;
+    }
+    v0 = 20 + acc;
+  }
+  // (and u from its front centre: the tube runs from the back, its seam welded there — see MeshBuilder.tube uPhase)
+  const fromBack = o.gatherY != null && !rent && o.uvMode !== 'x';
   const g = B.tube(rings, {
-    seg, uvMode: o.uvMode, arc: rent ? [-Math.PI / 2, Math.PI * 1.5] : undefined, thMap: rent ? rentMap(rent, seg) : undefined,
+    seg, uvMode: o.uvMode, arc: rent ? [-Math.PI / 2, Math.PI * 1.5] : fromBack ? [Math.PI / 2, Math.PI * 2.5] : undefined, thMap: rent ? rentMap(rent, seg) : undefined, v0,
+    uPhase: fromBack ? Math.PI * 1.5 : 0,
     lift: (th, j, Rg) => bl(th, j, Rg) + (j === last && dr.hem ? dr.hem(th, j) : 0),
     weights: (p, j) => (j < nTop - 1 ? tw(p) : W(p)),
     radial: dr.radial, shade: dr.shade,
@@ -1353,6 +1526,7 @@ function garmentBody(B, rig, lod, hemY, o = {}) {
     for (let j = 0; j < rings.length; j++) if (!(rent.half(rings[j].c.y) > 0)) B.seams.push([g.id(0, j), g.id(seg, j)]);
     rings.rentGrid = { g, seg };
   }
+  if (fromBack) for (let j = 0; j < rings.length; j++) B.seams.push([g.id(0, j), g.id(seg, j)]);
   // the hem's inner facing: cloth thickness at the edge, dark inside (seen from low angles and when it lifts)
   if (lod <= 1 && o.inner !== false) {
     const hem = rings[last];
@@ -1372,7 +1546,7 @@ function garmentBody(B, rig, lod, hemY, o = {}) {
 export function ketonet(B, rig, lod, o = {}) {
   const hemY = R(rig, 'foot_r').y + 0.04 * rig.dims.H / 1.67;
   B.set({ cls: o.cls ?? CLS.GA, pat: PAT.LINEN_BOX, rough: 0.82, metal: 0, color: o.color || [1, 1, 1], grp: 0 });
-  if (!o.noBody) garmentBody(B, rig, lod, hemY, { folds: 0.05, nFolds: 11, flare: 0.05, thick: 0.005, foldFrom: 'ribs', seed: o.seed ?? 2.1 });
+  if (!o.noBody) garmentBody(B, rig, lod, hemY, { folds: 0.05, nFolds: 11, flare: 0.05, thick: 0.005, foldFrom: 'ribs', seed: o.seed ?? 2.1, gatherY: R(rig, 'chest').y - 0.035 * rig.dims.H / 1.67 });
   for (const s of ['l', 'r']) arm(B, rig, lod, s, { sleeveTo: 'wrist', cls: o.cls ?? CLS.GA, pat: PAT.LINEN_BOX, color: o.color });
   return hemY;
 }
@@ -1438,7 +1612,8 @@ export function tunic(B, rig, lod, o = {}) {
   const hemY = o.hemY ?? R(rig, 'shin_r').y - 0.17 * k;
   B.set({ cls: o.cls ?? CLS.GA, pat: o.pat ?? PAT.WOOL_CLAVI, rough: 0.9, metal: 0, color: [1, 1, 1], grp: 0 });
   const rent = o.rent && lod <= 2 ? rentShape(rig) : null;
-  const rings = garmentBody(B, rig, lod, hemY, { folds: o.folds ?? 0.085, nFolds: o.nFolds ?? 8, flare: o.flare ?? 0.07 * k, thick: 0.008, uvMode: o.pat === PAT.WOOL ? undefined : 'x', seed: o.seed ?? 0.7, foldFrom: 'waist', rent });
+  // (every tunic is girded: belt() at the spine's height − 1 cm — the gather zone is there)
+  const rings = garmentBody(B, rig, lod, hemY, { folds: o.folds ?? 0.085, nFolds: o.nFolds ?? 8, flare: o.flare ?? 0.07 * k, thick: 0.008, uvMode: o.pat === PAT.WOOL ? undefined : 'x', seed: o.seed ?? 0.7, foldFrom: 'waist', rent, gatherY: R(rig, 'spine').y - 0.01 * k });
   for (const s of ['l', 'r']) arm(B, rig, lod, s, { sleeveTo: o.sleeve || 'elbow', cls: o.cls ?? CLS.GA, pat: PAT.WOOL, rough: 0.9 });
   if (rent) rentFront(B, rig, lod, rings, rent, { cls: o.cls ?? CLS.GA });
   return hemY;
@@ -1535,7 +1710,9 @@ export function mantle(B, rig, lod, o = {}) {
   const ySeat = R(rig, 'thigh_r').y - 0.06 * k;
   const SW = skirtW(rig, ySeat, hemLow);
   // body section under the mantle at a height (torso rings, then the skirt below the seat), plus clearance
-  const tr = torsoRings(rig, { thick: 0.02, from: 'trap' });
+  // (gate-people-r2: from the collar ring — the top edge lies round the neck on the trapezius; from the 'trap' ring it stood
+  // ~5 cm off the neck as a wide yoke, the dark lining showing across the shoulders)
+  const tr = torsoRings(rig, { thick: 0.02, from: 'collar' });
   const sk = skirtRings(rig, hemLow, { thick: 0.03, flare: 0.05 * k, extra: 0.004, lod: 1 });
   const prof = tr.concat(sk);
   const bodyAt = (y) => {
@@ -1562,6 +1739,7 @@ export function mantle(B, rig, lod, o = {}) {
     return (1 - panel) * (1 - smooth(0, 1, u)) ** 1.15;
   };
   const yTopAt = (th) => nk.y + 0.02 * k + 0.012 * k * Math.max(0, Math.sin(th));   // over the trapezius, higher behind
+  const shY = R(rig, 'uarm_r').y + 0.004 * k;               // the top of the shoulder (torsoRings' 'shoulder' ring)
   const yHemAt = (th) => lerp(hemLow, el.y + 0.02 * k, sideMask(th));
   // over the upper arm the cloth clears it (the A-pose arm of the rest rig, which the stand pose brings in)
   const armClear = (th, y) => {
@@ -1569,7 +1747,31 @@ export function mantle(B, rig, lod, o = {}) {
     const t = clamp((sh.y - y) / Math.max(0.01, sh.y - el.y));
     return (lerp(sh.x, el.x, t) + 0.052 * k) * smooth(0.55, 0.95, Math.abs(Math.cos(th)));
   };
-  const dr = drape(lod, { amp: 0.11, n: 9, seed: o.seed ?? 3.7, start: 1, span: 5, soft: 0.55 });
+  // gate-people-r2: the drape in the geometry — heavy wool falls in a few deep folds, rounded ridges between narrow valleys
+  // (two families, ≈ 12 and 7.5 cm apart round the body — two or three across a front panel; LOD2 one, ≈ 23 cm) from
+  // where it is held: none on the trapezius, growing over the shoulder and the chest to their full depth (≈ 4.5 cm) half a
+  // metre below it, and on the front panels they fan out from the shoulder (their phase pulled toward it near the top). The cloth only stands OUT from its clearance (valleys on it, ridges proud),
+  // so nothing sinks into the tunic. The hem follows the folds (a wavy edge, ±1 cm), the front edges cascade (a slow
+  // zigzag), valleys are shaded. The old drape (13 + 22 folds round the body as radial ripples and crease shade) aliased on
+  // LOD1's 32 columns into streaks: flat panels with "fold shading" (gate round 2). LOD3 keeps a plain sheet.
+  const Am = (lod === 0 ? 0.046 : lod === 1 ? 0.042 : lod === 2 ? 0.034 : 0) * k;
+  const rf = prng(o.seed ?? 3.7);
+  const fs1 = rf() * 6.28, fs2 = rf() * 6.28, fs3 = rf() * 6.28;
+  const foldAmp = (y) => Am * smooth(sh.y + 0.03 * k, sh.y - 0.5 * k, y);
+  // fold field in [0, 1] (0 = a valley lying on the clearance) at material angle th, height y and row fraction t
+  const foldF = (th, y, t) => {
+    if (!Am) return 0.5;
+    const front = smooth(0.25, -0.5, Math.sin(th));
+    const thS = Math.cos(th) >= 0 ? 0 : Math.PI;
+    const phi = th + (thS - th) * (1 - (0.45 + 0.55 * smooth(0, 0.8, t))) * front;
+    if (lod >= 2) return (0.5 - 0.5 * Math.cos(phi * 6 + fs1)) ** 0.7;
+    const r1 = 0.5 - 0.5 * Math.cos(phi * 11 + fs1 + 0.5 * Math.sin(t * 4 + fs3));
+    const r2 = 0.5 - 0.5 * Math.cos(phi * 18 + fs2 - 0.4 * Math.sin(t * 3 + fs1));
+    return 0.6 * r1 ** 0.6 + 0.4 * r2 ** 0.7;
+  };
+  const hemWave = (th) => (Am ? (foldF(th, hemLow, 1) - 0.5) * 0.02 * k : 0);
+  // the front edges cascade: within 0.3 rad of the opening the cloth's angle zigzags slowly as it falls
+  const edgeShift = (th, y) => (Am ? 0.1 * Math.sin(y * 16 / k + fs3) * (foldAmp(y) / Am) * (1 - smooth(0, 0.3, Math.min(th - a0, a1 - th))) : 0);
   // hang: below the seat, the share of the panels' outer (side) cloth that hangs from the pelvis instead of following
   // the leg cage while the figure is upright (material.js pSkin scales it by how upright the pelvis is) — a seated man's
   // mantle falls beside him from the arms to the floor and only its inner edges lie on the thighs (all on the cage, the
@@ -1578,7 +1780,10 @@ export function mantle(B, rig, lod, o = {}) {
   // (qa-r1: LOD1 24 × 11 instead of 16 × 9 — at 3–8 m the coarser sheet showed flat facets; qa-r2: 32 × 12 — the cloth
   // is lifted over the hanging arms vertex by vertex (material.js pArmPush), and between the sparser columns the lift
   // stood out beside the arm as a board)
-  const nu = L3(lod, 44, 32, 7), nv = L3(lod, 15, 12, 4);
+  // (gate-people-r2: LOD0 56 and LOD1 40 columns, were 44 / 32 — a front panel had ~6 columns at LOD1, room for one fold;
+  // LOD2 14 × 6 with its inner face, was 7 × 4 single — low draws it from ~9 m, and there it was a flat board with a panel
+  // missing where its inside faced the camera; LOD3 5 × 3)
+  const nu = lod === 0 ? 56 : lod === 1 ? 40 : lod === 2 ? 14 : 5, nv = lod === 0 ? 15 : lod === 1 ? 12 : lod === 2 ? 6 : 3;
   const cols = [];
   const store = [[], []];     // each sheet's vertices { p, w, hang } by j·(nu+1)+i, for the rolled edges below
   B.set({ cls: CLS.GB, pat: PAT.WOOL, rough: 0.93, metal: 0, color: [1, 1, 1], grp });
@@ -1591,42 +1796,54 @@ export function mantle(B, rig, lod, o = {}) {
   };
   const sheet = (inner) => B.grid(nu, nv, (i, j) => {
     const th = lerp(a0, a1, i / nu);
-    const t = j / nv;
-    const yT = yTopAt(th), yH = yHemAt(th);
+    // (gate-people-r2: rows gathered toward the shoulders, where the cloth turns over the trapezius — with the top edge on the
+    // neck, evenly spaced rows cut a chord through the tunic's shoulders; the hanging cloth below needs fewer)
+    const t = (j / nv) ** 1.45;
+    const yT = yTopAt(th), yH = yHemAt(th) + hemWave(th);
     const y = lerp(yT, yH, t);
     const body = bodyAt(y);
-    const c = Math.cos(th), sn = Math.sin(th);
-    // fold relief grows away from the shoulders; the front edges (near the opening) hang flatter and roll
+    // the front edges (near the opening) hang a little flatter and cascade: a slow zigzag of the edge as it falls
     const edge = Math.min(th - a0, a1 - th);
-    const fr = dr.radial ? 1 + (dr.radial(th, 1 + t * 6) - 1) * (1 - 0.5 * smooth(0.6, 0.1, edge)) : 1;
-    let rx = body.rx + 0.022 * k, rz = body.rz + 0.022 * k;
+    const A = foldAmp(y), F = foldF(th, y, t), Ar = Am ? A / Am : 0;
+    const thp = th + edgeShift(th, y);
+    const c = Math.cos(thp), sn = Math.sin(thp);
+    const off = A * F * (1 - 0.25 * smooth(0.3, 0.05, edge));
+    let rx = body.rx + 0.022 * k + off, rz = body.rz + 0.022 * k + off;
     const need = armClear(th, y);
     rx = Math.max(rx, need);
+    // gate-people-r2: thick wool bridges the shoulder's corner instead of following it — a fillet of ~5 cm where the flat
+    // top of the shoulder meets the arm (it read as a square yoke: a horizontal top, then a vertical drop)
+    if (y > shY - 0.03 * k) {
+      const rf = 0.05 * k, oy = shY + 0.035 * k - rf, ox = sh.x + 0.052 * k - rf;
+      if (y > oy) rx = Math.min(rx, lerp(rx, ox + Math.sqrt(Math.max(0, rf * rf - (y - oy) ** 2)), smooth(0.35, 0.85, Math.abs(c))));
+    }
     // below the arms the cloth falls from them and narrows gently toward the hem (it is not a box)
     if (y < el.y && sideMask(th) < 1) {
       const wide = (el.x + 0.04 * k) * smooth(0.5, 0.95, Math.abs(c)) * 0.92;
       rx = Math.max(rx, lerp(wide, body.rx + 0.03 * k, smooth(el.y, el.y - 0.35 * k, y)));
     }
     // the top edge is turned over and rolls softly onto the shoulders (outer surface tucked in at row 0)
-    const r = fr - (inner ? 0.012 : 0) - (!inner && j === 0 ? 0.01 : 0);
+    const r = 1 - (inner ? 0.012 : 0) - (!inner && j === 0 ? 0.01 : 0);
     const p = V(c * rx * r, y, body.cz + sn * rz * r);
     // the shoulders: the cloth lies on the trapezius and the shoulder top
     if (t < 0.12) p.y += 0.004 * k * Math.sin(Math.PI * t / 0.12);
     // the sides follow the upper arms — but only well above the elbow: at the waist the cloth stays with the torso (qa-r1:
     // with the arms forward in semichah the band just above the elbow line was pulled off the body and the belt showed
     // through as a red patch)
-    const side = smooth(0.62, 0.95, Math.abs(c)) * smooth(el.y + 0.02 * k, el.y + 0.16 * k, y);
-    const shade = (dr.shade ? dr.shade(th, 1 + t * 6) : 1) * (1 - 0.12 * smooth(0.06, 0, edge)) * (t > 0.93 ? 0.9 : 1);
+    const side = smooth(0.62, 0.95, Math.abs(Math.cos(th))) * smooth(el.y + 0.02 * k, el.y + 0.16 * k, y);
+    // the valleys hold less light (the normals carry the folds' own shading); the lining is dark where the cloth hangs and
+    // lit where it turns over at the collar
+    const shade = (1 - 0.4 * (1 - F) ** 2 * Ar) * (1 + 0.04 * F * Ar) * (1 - 0.12 * smooth(0.06, 0, edge)) * (t > 0.93 ? 0.9 : 1);
     if (!inner) cols.push(p);
     const hang = y <= ySeat ? hangAt(th) : 0;
     hv.push(hang);
     const w = W(p, side * 0.42);
     store[inner ? 1 : 0].push({ p, w, hang, u: th * (rx + rz) / 2 });
-    return { p, u: th * (rx + rz) / 2, v: -y, w, shade: inner ? shade * 0.62 : shade };
+    return { p, u: th * (rx + rz) / 2, v: -y, w, shade: inner ? shade * lerp(0.86, 0.62, smooth(0.03, 0.2, t)) : shade };
   }, { inside: (A) => V(0, A.y, 0), invert: inner });
   const hv = [], s0 = B.count;
   sheet(false);
-  if (lod <= 1) sheet(true);
+  if (lod <= 2) sheet(true);
   // the hang share rides in the (zero) metalness channel: −0.98·hang (material.js pSkin)
   for (let i = 0; i < hv.length; i++) if (hv[i] > 0.01) B.mat[(s0 + i) * 4 + 1] = -0.98 * hv[i];
   // qa-r1: the cloth's edges — the hem and the two front edges — are rolled: a strip from the outer sheet's edge round a
@@ -1651,21 +1868,24 @@ export function mantle(B, rig, lod, o = {}) {
         if (h > 0.01) B.mat[v * 4 + 1] = -0.98 * h;
       }
     };
-    const down = V(0, -0.004, 0);
+    // (gate-people: a hemmed edge ≈ 1–1.5 cm thick — the bulge 8 mm down at the hem, 6 mm out at the front edges, was 4: a
+    // paper edge)
+    const down = V(0, -0.008, 0);
     // the hem: outward and down
-    roll(nu, (i) => [i, nv], () => down, (i) => at(0, i, nv).p.clone().setY(0).normalize().add(V(0, -1, 0)));
+    roll(nu, (i) => [i, nv], (i) => down.clone().addScaledVector(at(0, i, nv).p.clone().setY(0).normalize(), 0.003), (i) => at(0, i, nv).p.clone().setY(0).normalize().add(V(0, -1, 0)));
     // the front edges: toward the opening (the edge's own tangent away from the sheet)
     for (const e of [0, nu]) {
       const nb = e === 0 ? 1 : nu - 1;
       const dir = (j) => at(0, e, j).p.clone().sub(at(0, nb, j).p).setY(0).normalize();
-      roll(nv, (j) => [e, j], (j) => dir(j).multiplyScalar(0.004), dir);
+      roll(nv, (j) => [e, j], (j) => dir(j).multiplyScalar(0.006), dir);
     }
   }
   // qa-r2: the whole cloth (sheets and rolled edges, not the tzitzit) is kept outside the arms in the vertex shader — the
   // pattern channel carries + MANTLE_ARMS × (1 + margin step) (material.js pArmPush): the arms moved through a mantle
   // skinned to the torso below the elbow (the forearms of a man standing showed through its front, the sleeve through its
-  // side). Not the silhouettes' sheets (LOD2/3, 7 × 4: they cannot drape, and from 14 m an arm in them is a pixel or two)
-  if (lod <= 1) for (let v = s0; v < B.count; v++) B.mat[v * 4 + 2] += MANTLE_ARMS;
+  // side). Not the far silhouettes' sheet (LOD3, 5 × 3: from ~20 m an arm in it is a pixel or two; gate-people-r2: LOD2,
+  // drawn from ~9 m on low, is now 14 × 6 and kept off the arms too — its forearms showed through)
+  if (lod <= 2) for (let v = s0; v < B.count; v++) B.mat[v * 4 + 2] += MANTLE_ARMS;
   // (no separate collar tube: a rolled ring standing off the neck read as a torus — the sheet's own rolled
   // top row and the dark inner face give the edge)
   if (false) {
@@ -1688,11 +1908,13 @@ export function mantle(B, rig, lod, o = {}) {
     // the outer corners: the bottom of each front panel's outer edge
     const corners = [a0 + 0.03, a1 - 0.03, a0 + pw - 0.05, a1 - pw + 0.05];
     for (const th of corners) {
-      const y = yHemAt(th);
+      const y = yHemAt(th) + hemWave(th);
       const body = bodyAt(y);
       const need = armClear(th, y);
-      const rx = Math.max(body.rx + 0.022 * k, need);
-      const base = V(Math.cos(th) * rx * 1.02, y + 0.012, body.cz + Math.sin(th) * (body.rz + 0.022 * k) * 1.02);
+      // (gate-people-r2: on the fold at the corner, and on the cascading edge)
+      const fo = foldAmp(y) * foldF(th, y, 1), tp = th + edgeShift(th, y);
+      const rx = Math.max(body.rx + 0.022 * k + fo, need);
+      const base = V(Math.cos(tp) * rx * 1.02, y + 0.012, body.cz + Math.sin(tp) * (body.rz + 0.022 * k + fo) * 1.02);
       const tang = V(-Math.sin(th), 0, Math.cos(th));
       const out = V(Math.cos(th), 0, Math.sin(th));
       const wts = (p) => W(p, 0);

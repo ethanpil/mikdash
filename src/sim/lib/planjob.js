@@ -15,11 +15,34 @@ export class PlanJob {
     this.ready = false;       // 'ready' seen: the job may run in slices
     this.running = false;     // inside a step (a module's plan may build now)
     this.done = false;
-    this.stats = { ms: 0, slices: 0, maxSlice: 0, flushedMs: 0, startedAt: NaN, doneAt: NaN, order: [] };
+    this.stats = { ms: 0, slices: 0, maxSlice: 0, maxNext: 0, maxNextId: '', flushedMs: 0, startedAt: NaN, doneAt: NaN, order: [] };
     this._timer = null;
   }
   /** add a step (before 'ready'); fn() → undefined | iterator */
   add(id, fn) { if (!this.done) this.steps.push({ id, fn, it: null, ms: 0 }); }
+  /**
+   * Run the job again for a new date (gate-sim-data: the midnight crossing and the date picker re-planned the G4 chain
+   * synchronously, 0.6–0.75 s in one frame on low). steps: [{ id, fn }] in order; any step still pending from the
+   * previous run is dropped (its module re-plans for the new date). The slices start on the next macrotask.
+   */
+  restart(steps) {
+    if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    this.steps = steps.map(({ id, fn }) => ({ id, fn, it: null, ms: 0 }));
+    this.open = false;
+    this.done = !this.steps.length;
+    this.runs = (this.runs || 0) + 1;
+    Object.assign(this.stats, { ms: 0, slices: 0, maxSlice: 0, maxNext: 0, maxNextId: '', startedAt: performance.now(), doneAt: NaN, order: [] });
+    if (this.done) { this.stats.doneAt = performance.now(); return; }
+    this.ready = true;
+    this._timer = setTimeout(this._tick, 0);
+  }
+  /** one slice, then the next on the macrotask queue (between frames) while steps are left */
+  _tick = () => {
+    this._timer = null;
+    if (!this.pending) return;
+    this.run(this.budget ?? 8);
+    if (this.pending) this._timer = setTimeout(this._tick, 0);
+  };
   get pending() { return !this.done && (this.open || this.steps.length > 0); }
   /** no more steps: from now on the job only runs (an empty job is done at once) */
   seal() { this.open = false; if (!this.steps.length) this._finish(); }
@@ -32,13 +55,7 @@ export class PlanJob {
     this.ready = true;
     this.stats.startedAt = performance.now();
     this.budget = budget;
-    const tick = () => {
-      this._timer = null;
-      if (!this.pending) return;
-      this.run(this.budget);
-      if (this.pending) this._timer = setTimeout(tick, 0);
-    };
-    this._timer = setTimeout(tick, 0);
+    this._timer = setTimeout(this._tick, 0);
   }
   /** run steps for up to `ms` (at least one step's slice) */
   run(ms) {
@@ -56,7 +73,10 @@ export class PlanJob {
             s.it = r && typeof r.next === 'function' ? r : null;
             if (!s.it) { this._next(s, s0); continue; }
           }
-          if (s.it.next().done) this._next(s, s0); else s.ms += performance.now() - s0;
+          const r = s.it.next();
+          const d = performance.now() - s0;
+          if (ms !== Infinity && d > this.stats.maxNext) { this.stats.maxNext = d; this.stats.maxNextId = s.id; }
+          if (r.done) this._next(s, s0); else s.ms += d;
         } catch (e) {
           console.error(`[sim] plan step "${s.id}" failed`, e);
           this._next(s, s0);

@@ -70,8 +70,21 @@ for (const e of EVENTS) {
   if (![1, 2, 3].includes(e.importance)) err(`${tag}: importance`);
   if (!LAYERS.has(e.layer)) err(`${tag}: layer`);
   if (e.offerings !== undefined && !(Array.isArray(e.offerings) && e.offerings.length && e.offerings.every((o) => OFFERING_TYPES[o]))) err(`${tag}: offerings ${e.offerings} (ids of OFFERING_TYPES in src/data/offerings.js)`);
-  const extra = Object.keys(e).filter((k) => !['id', 'title', 'dayTypes', 'when', 'timing', 'zone', 'pos', 'view', 'summary', 'description', 'participants', 'sources', 'sounds', 'choreo', 'importance', 'layer', 'offerings'].includes(k));
+  const extra = Object.keys(e).filter((k) => !['id', 'title', 'dayTypes', 'when', 'timing', 'zone', 'pos', 'view', 'summary', 'description', 'participants', 'sources', 'sounds', 'choreo', 'importance', 'layer', 'offerings', 'byDay'].includes(k));
   if (extra.length) err(`${tag}: unexpected keys ${extra}`);
+  const BS2 = String.fromCharCode(10, 10);
+  // byDay: { [dayType]: { summary?, description?, sounds? } } — that day type's own text (eventsFor returns it)
+  if (e.byDay !== undefined) {
+    for (const [d, o] of Object.entries(e.byDay || {})) {
+      if (!e.dayTypes?.includes(d)) err(`${tag}: byDay.${d} is not one of its dayTypes`);
+      const bad = Object.keys(o || {}).filter((k) => !['summary', 'description', 'sounds'].includes(k));
+      if (bad.length || !Object.keys(o || {}).length) err(`${tag}: byDay.${d} keys ${bad.length ? bad : '(none)'}`);
+      if (o.summary !== undefined && (typeof o.summary !== 'string' || o.summary.length < 20)) err(`${tag}: byDay.${d}.summary`);
+      if (o.description !== undefined && (typeof o.description !== 'string' || o.description.length < 80 || o.description.split(BS2).length > 3)) err(`${tag}: byDay.${d}.description`);
+      if (o.sounds !== undefined && !(Array.isArray(o.sounds) && o.sounds.every((x) => CUES.has(x)))) err(`${tag}: byDay.${d}.sounds`);
+    }
+    for (const d of Object.keys(e.byDay || {})) { const c = eventsFor(d).find((x) => x.id === e.id); if (!c || (e.byDay[d].summary && c.summary !== e.byDay[d].summary)) err(`${tag}: eventsFor('${d}') does not give its byDay text`); }
+  }
 }
 
 // ---------------------------------------------------------------- durations on every date (wrap past midnight allowed)
@@ -268,7 +281,8 @@ for (const e of EVENTS) {
   // the soreg as built: its thin zone strips (the element box is only the envelope of its path)
   for (const [mn, mx] of SITE.zones.soreg.boxes) if (inBox([v[0], v[1], v[2] + 0.3], { min: mn, max: mx })) err(`${e.id}: view inside the soreg`);
   const ROOMS = { 'beit-hamoked': 'azarah.moked.hall', gazit: 'azarah.chamber.gazit', 'beit-avtinas': 'azarah.beit-avtinas',
-    'beit-hatevilah': 'azarah.underground.beit-hatevilah', 'en-chamber-wood': 'en.chamber.wood', 'en-chamber-nazirites': 'en.chamber.nazirites' };
+    'beit-hatevilah': 'azarah.underground.beit-hatevilah', 'en-chamber-wood': 'en.chamber.wood', 'en-chamber-nazirites': 'en.chamber.nazirites',
+    'lishkat-chavitin': 'azarah.chamber.chavitin' };
   const ch = chambersAt(v).filter((c) => c !== ROOMS[vz]); if (ch.length) warn(`${e.id}: view inside chamber ${ch}`);
   // not when the fabric met is the event's own element (the muchni seen at the kiyor)
   const sh = sightHit(v, e.view.heading, p);

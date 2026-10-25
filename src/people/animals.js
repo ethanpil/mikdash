@@ -91,7 +91,8 @@ function quad(B, rig, lod, kind, def = {}) {
   const sheep = kind === 'sheep', goat = kind === 'goat', bull = kind === 'bull';
   const ram = d.type === 'ram';
   const fleeceSet = { cls: CLS.GA, pat: PAT.FLEECE, rough: 0.95, metal: 0, color: [1, 1, 1], grp: 0 };
-  const coatSet = { cls: CLS.GA, pat: PAT.COAT, rough: goat ? 0.74 : 0.64, metal: 0, color: [1, 1, 1], grp: 0 };
+  // (gate-people: the goat's hair 0.62, was 0.74 — black hair has a sheen; on low, without the coat pattern, this is all of it)
+  const coatSet = { cls: CLS.GA, pat: PAT.COAT, rough: goat ? 0.62 : 0.64, metal: 0, color: [1, 1, 1], grp: 0 };
   const bodySet = sheep ? fleeceSet : coatSet;
   const faceSet = { cls: CLS.GB, pat: PAT.COAT, rough: 0.66, metal: 0, color: [1, 1, 1], grp: 0 };
   const W_body = (p) => envelope(rig, p, { pelvis: 1, spine: 1, chest: 1, neck: 0.4, fl_up: 0.2, fr_up: 0.2, hl_up: 0.25, hr_up: 0.25, tail: 0.15 }, 3);
@@ -165,6 +166,9 @@ function quad(B, rig, lod, kind, def = {}) {
   // qa-r2: a sheep's fleece is soiled underneath — the belly, the lower flanks and the breech yellowed with lanolin and
   // grey-brown with dust and dung (a clean white all round read as a toy); the back stays the cleanest
   if (sheep) soilFleece(B, fleece0, B.count, H, d.zr);
+  // gate-people: a short or long coat reads by its form — the hair along the topline catches the sky and lies smooth, the
+  // belly, the flank's lower edge and the hanging locks go darker (in the vertex colour: on every tier, LOD and coat colour)
+  if (!sheep) shadeCoat(B, fleece0, B.count, H);
   // ---- neck
   const ch = R(rig, 'chest'), nk = R(rig, 'neck'), n2 = R(rig, 'neck2'), hd = R(rig, 'head');
   const nr = bull ? 0.22 : sheep ? 0.075 * H / 0.66 + fleece : 0.062 * H / 0.7;
@@ -272,6 +276,14 @@ function soilFleece(B, a, b, H, zr) {
     const breech = smooth(zr - 0.12 * H, zr + 0.1 * H, z) * smooth(H * 0.8, H * 0.45, y);
     const s = Math.min(1, 0.75 * low + 0.6 * breech);
     B.col[i * 3] *= 1 - 0.16 * s; B.col[i * 3 + 1] *= 1 - 0.22 * s; B.col[i * 3 + 2] *= 1 - 0.36 * s;
+  }
+}
+
+function shadeCoat(B, a, b, H) {
+  for (let i = a; i < b; i++) {
+    const y = B.pos[i * 3 + 1];
+    const k = lerp(0.74, 1.14, smooth(H * 0.46, H * 0.95, y));
+    B.col[i * 3] *= k; B.col[i * 3 + 1] *= k; B.col[i * 3 + 2] *= k;
   }
 }
 

@@ -27,7 +27,7 @@ export function buildFeatures(ctx, T, kit, group, detail) {
   };
   const terr = buildTerraces(ctx, T, kit, detail, blocked, rand);
   const plots = buildPlots(ctx, T, kit, detail, blocked, rand);
-  const rocks = buildRocks(ctx, T, group, detail, blocked, rand, plots);
+  const rocks = buildRocks(ctx, T, group, detail, blocked, rand, plots, terr.ledges);
   return { rows: terr.rows, terraceSegs: terr.segs, plots, rocks };
 }
 
@@ -38,7 +38,7 @@ function buildTerraces(ctx, T, kit, detail, blocked, rand) {
   const tr = plan.terraces;
   const dy = m(detail >= 1 ? 4.5 : 9), dh = detail >= 1 ? 3.4 : 6.8, dxs = m(3);
   const y0 = fp.y0 - m(tr.yPad), y1 = fp.y1 + m(tr.yPad);
-  const rows = [];
+  const rows = [], ledges = [];
   let segs = 0;
   // two slopes: the west face of Har HaMishchah (rising east) and the Kidron's west side (rising west to the wall)
   const slopes = [
@@ -58,8 +58,9 @@ function buildTerraces(ctx, T, kit, detail, blocked, rand) {
     let hMin = Infinity, hMax = -Infinity;
     for (const p of prof) for (const [, h] of p) { hMin = Math.min(hMin, h); hMax = Math.max(hMax, h); }
     for (let hc = Math.ceil((hMin + 4) / dh) * dh; hc < hMax - 3; hc += dh) {
-      let line = [];
+      let line = [], lline = [];
       const flush = () => { if (line.length >= 3) rows.push({ pts: line, rising: sl.rising }); line = []; };
+      const lflush = () => { if (lline.length >= 2) ledges.push(lline); lline = []; };
       Ys.forEach((Y, r) => {
         const p = prof[r];
         let X = null;
@@ -69,20 +70,31 @@ function buildTerraces(ctx, T, kit, detail, blocked, rand) {
           const [xa, ha] = order[i], [xb, hb] = order[i + 1];
           if (ha < hc && hb >= hc) { X = xa + (xb - xa) * (hc - ha) / (hb - ha); break; }
         }
-        // terraces come in patches (qa-r1-fix-world: fewer and shorter runs — long unbroken lines read as drawn strokes)
-        const patch = T.noise.fbm(Y * A / 120 + hc * 0.07, hc * 0.13, 2) > -0.02;
+        // terraces come in patches (qa-r1-fix-world: fewer and shorter runs — long unbroken lines read as drawn strokes;
+        // gate-world-materials: a little more of the slope terraced, -0.02 → -0.15, the olive mount was farmed)
+        const patch = T.noise.fbm(Y * A / 120 + hc * 0.07, hc * 0.13, 2) > -0.15;
+        // gate-world-materials: between the terraced patches the bedrock steps out along the same contours in ledges (the
+        // nari crust's stepped outcrops) — low, long rocks end to end (buildRocks), here and there
+        if (X != null && !patch && T.noise.fbm(Y * A / 90 + hc * 0.11 + 5, hc * 0.07 + 3, 2) > 0.05 && !blocked(X, Y, 3)
+          && plan.sightTop(X, Y, T.heightZ) > T.heightZ(X, Y) + m(0.9)) {
+          if (lline.length && Math.abs(X - lline[lline.length - 1][0]) > 3 * dy) lflush();
+          lline.push([X, Y]);
+        } else lflush();
         // qa-r1-fix-world: in a view cone only where the wall stays under the sight line (was: never in the cones)
-        if (X == null || !patch || blocked(X, Y, 4) || plan.sightTop(X, Y, T.heightZ) < T.heightZ(X, Y) + m(1.3)) { flush(); return; }
+        if (X == null || !patch || blocked(X, Y, 4) || plan.sightTop(X, Y, T.heightZ) < T.heightZ(X, Y) + m(1.6)) { flush(); return; }
         if (line.length && Math.abs(X - line[line.length - 1][0]) > 3 * dy) flush();
         line.push([X, Y]);
       });
       flush();
+      lflush();
     }
   }
   // the walls: a battered face downhill, a top, a back into the bench ⚙ heights 0.6–1.2 m, the top ragged (each 4.5 m
   // piece its own height, slumped here and there); dry-stone field rubble (qa-r1-fix-world: the pale limestone key read
   // as white lines across the slope)
-  const wallH = m(0.95), thick = m(0.6), bury = m(0.5);
+  // gate-world-materials: 1.2 m (was 0.95): the Judean hill terraces' dry-stone risers stand 1–2 m; at under a metre the
+  // benches did not read as steps from the crest or the causeway
+  const wallH = m(1.2), thick = m(0.6), bury = m(0.5);
   const KEY = ctx.mats?.has?.('house_rubble') ? 'house_rubble' : 'terrain_rock';
   for (const row of rows) {
     const P = row.pts;
@@ -105,7 +117,7 @@ function buildTerraces(ctx, T, kit, detail, blocked, rand) {
       segs++;
     }
   }
-  return { rows, segs };
+  return { rows, segs, ledges };
 }
 
 // ----------------------------------------------------------------------------------------------------- garden plots
@@ -157,6 +169,8 @@ function buildPlots(ctx, T, kit, detail, blocked, rand) {
 
 // ------------------------------------------------------------------------------------------------ ledges and boulders
 const ROCKS_BY_DETAIL = [250, 700, 1300, 1600];
+// gate-world-materials: the contour ledges (buildTerraces → ledges) on top of the scattered rocks, one instance per ~3.4 m
+const LEDGES_BY_DETAIL = [160, 420, 700, 900];
 
 function rockGeometry(seed) {
   const r = rng(seed);
@@ -180,7 +194,7 @@ function rockGeometry(seed) {
   return g;
 }
 
-function buildRocks(ctx, T, group, detail, blocked, rand, plots) {
+function buildRocks(ctx, T, group, detail, blocked, rand, plots, ledgeLines = []) {
   const A = AMAH, m = (v) => v / A;
   const { fp, plan } = T;
   const n = ROCKS_BY_DETAIL[Math.max(0, Math.min(3, detail))];
@@ -201,13 +215,35 @@ function buildRocks(ctx, T, group, detail, blocked, rand, plots) {
     if (g > 0.75) continue;
     items.push({ X, Y, z, gx, gy, g });
   }
+  // the contour ledges: low, long rocks end to end along each line, a little downhill of it, turned along the contour,
+  // tilted with the slope; each run its own height ⚙
+  const nL = LEDGES_BY_DETAIL[Math.max(0, Math.min(3, detail))];
+  let nl = 0;
+  const RL = rng(((ctx.params?.seed ?? 5786) * 37 + 11) >>> 0);
+  for (const P of ledgeLines) {
+    if (nl >= nL) break;
+    const hk = 0.8 + 0.5 * RL();
+    for (let i = 0; i + 1 < P.length && nl < nL; i++) {
+      const [ax, ay] = P[i], [bx, by] = P[i + 1];
+      const L = Math.hypot(bx - ax, by - ay) || 1, n = Math.max(1, Math.round(L / m(3.4)));
+      for (let k = 0; k < n && nl < nL; k++) {
+        if (RL() < 0.18) continue;                                   // broken runs
+        const f = (k + 0.5) / n, X = ax + (bx - ax) * f, Y = ay + (by - ay) * f;
+        const z = T.heightZ(X, Y), zx = T.heightZ(X + m(2), Y), zy = T.heightZ(X, Y + m(2));
+        const gx = (zx - z) / m(2), gy = (zy - z) / m(2), g = Math.hypot(gx, gy);
+        if (g > 0.75 || g < 0.04) continue;
+        items.push({ X, Y, z, gx, gy, g, ledge: true, hk });
+        nl++;
+      }
+    }
+  }
   if (!items.length) return 0;
   const geo = rockGeometry(4242);
   const im = new InstancedMesh(geo, ctx.mats.get('terrain_rock'), items.length);
   im.name = 'terrain:rocks';
   const mtx = new Matrix4(), q = new Quaternion(), q2 = new Quaternion(), s = new Vector3(), p = new Vector3(), up = new Vector3(0, 1, 0), nrm = new Vector3();
   items.forEach((it, i) => {
-    const ledge = it.g > 0.12 && rand() < 0.62;
+    const ledge = it.ledge || (it.g > 0.12 && rand() < 0.62);
     // ledges lie along the contour (long axis across the gradient), boulders anywhere
     const yawAcross = Math.atan2(-it.gx, it.gy);              // local x along the contour
     q.setFromAxisAngle(up, ledge ? yawAcross + (rand() - 0.5) * 0.3 : rand() * Math.PI * 2);
@@ -215,7 +251,8 @@ function buildRocks(ctx, T, group, detail, blocked, rand, plots) {
     nrm.set(-it.gx, 1, it.gy).normalize().lerp(up, 0.5).normalize();
     q2.setFromUnitVectors(up, nrm);
     q.premultiply(q2);
-    if (ledge) s.set(1.6 + 2.6 * rand(), 0.35 + 0.35 * rand(), 0.7 + 0.6 * rand());
+    if (it.ledge) s.set(2.2 + 1.6 * rand(), (0.45 + 0.3 * rand()) * it.hk, 1.0 + 0.6 * rand());
+    else if (ledge) s.set(1.6 + 2.6 * rand(), 0.35 + 0.35 * rand(), 0.7 + 0.6 * rand());
     else { const k = 0.35 + 0.65 * rand() ** 2; s.set(k * (0.8 + 0.4 * rand()), k * (0.6 + 0.3 * rand()), k * (0.8 + 0.4 * rand())); }
     m2w(it.X, it.Y, it.z, p);
     p.y -= s.y * 0.25;

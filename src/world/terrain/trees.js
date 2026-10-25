@@ -8,7 +8,9 @@ import { mergeGeometries, applyWorldUV } from '../geom.js';
 import { rng, smooth } from '../mount/kit.js';
 import { distToPolyline, rectDist, inRect } from './plan.js';
 
-const MAX_BY_DETAIL = [700, 1400, 2400, 3000];
+// gate-world-materials: more trees (the QA gate: hundreds in the Mount of Olives views, ~10 seen from the crest), paid for
+// by a third, very cheap level of detail beyond MID_R
+const MAX_BY_DETAIL = [1100, 2000, 3200, 4200];
 
 /**
  * Olive forms ⚙ (qa-r1-fix-world: three instead of one, so groves are not rows of clones). Each: the bole
@@ -38,12 +40,17 @@ function trunkGeometry(seg, seed, far = false, form = FORMS[0]) {
   const r = rng(seed);
   const parts = [];
   const limb = (r0, r1, h, rx, rz, base) => {
-    const g = new CylinderGeometry(r1, r0, h, seg, far ? 1 : 2, true);
-    // a slight twist / bulge along the limb
+    const g = new CylinderGeometry(r1, r0, h, seg, far ? 1 : 3, true);
+    // gate-world-materials: gnarled — the old olive's fluted, twisting bole: lobes round the limb (3 buttress-like flutes)
+    // that spiral up it, swellings along it, the whole limb twisted (was a smooth bulge only)
     const p = g.attributes.position;
+    const ph = r() * 6.28, tw = 0.9 + 0.6 * r();
     for (let i = 0; i < p.count; i++) {
-      const y = p.getY(i), k = 1 + 0.12 * Math.sin((y / h + 0.5) * 5 + r() * 0.3);
-      p.setXYZ(i, p.getX(i) * k, y, p.getZ(i) * k);
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i), f = y / h + 0.5;
+      const a = Math.atan2(z, x) + tw * f;
+      const k = (1 + 0.12 * Math.sin(f * 5 + ph)) * (1 + (far ? 0.1 : 0.2) * Math.sin(3 * a + ph) + (far ? 0 : 0.07 * Math.sin(7 * a - 2 * ph)));
+      const rr = Math.hypot(x, z) * k;
+      p.setXYZ(i, Math.cos(a) * rr, y, Math.sin(a) * rr);
     }
     g.translate(0, h / 2, 0);
     g.applyMatrix4(new Matrix4().makeRotationFromEuler(new Euler(rx, 0, rz)));
@@ -137,7 +144,7 @@ export function buildTrees(ctx, T, detail, feat = {}) {
     let i = 0;
     for (let s = rand() * m(8); s < cum[cum.length - 1]; s += m(8.5 + 3.5 * rand())) {
       while (i + 2 < cum.length && cum[i + 1] < s) i++;
-      if (rand() < 0.22) continue;                                    // gaps in the rows
+      if (rand() < 0.15) continue;                                    // gaps in the rows
       const [ax, ay] = P[i], [bx, by] = P[i + 1];
       const L = cum[i + 1] - cum[i] || 1, f = (s - cum[i]) / L;
       let nx = (by - ay) / L, ny = -(bx - ax) / L;                    // a normal; flip it uphill
@@ -145,6 +152,11 @@ export function buildTrees(ctx, T, detail, feat = {}) {
       if (T.heightZ(X0 + nx * m(3), Y0 + ny * m(3)) < T.heightZ(X0, Y0)) { nx = -nx; ny = -ny; }
       const off = m(3.5 + 1.5 * rand());
       add(X0 + nx * off, Y0 + ny * off, 'olive');
+      // gate-world-materials: a second row further up the bench where the bench is deep (the next wall ≥ 15 m uphill), the
+      // trees set between those of the first (quincunx)
+      const off2 = off + m(8 + 2 * rand());
+      const Xb = X0 + nx * off2 + (bx - ax) / L * m(4.5), Yb = Y0 + ny * off2 + (by - ay) / L * m(4.5);
+      if (rand() < 0.8 && T.heightZ(Xb, Yb) - T.heightZ(X0, Y0) < m(2.6)) add(Xb, Yb, 'olive');
     }
   }
   const scatter = (x0, y0, x1, y1, cell, prob, kind) => {
@@ -166,6 +178,11 @@ export function buildTrees(ctx, T, detail, feat = {}) {
   for (const [x0, y0, x1, y1] of feat.plots || []) {
     for (const f of [0.3, 0.72]) for (let Y = y0 + m(3); Y < y1 - m(2); Y += m(5.5 + 2 * rand())) if (rand() < 0.8) add(x0 + (x1 - x0) * (f + (rand() - 0.5) * 0.12), Y, 'garden');
   }
+  // gate-world-materials: a tree in some of the city's courtyards (fig, pomegranate, olive — terrain/city.js courtTrees)
+  for (const [X, Y] of feat.courts || []) {
+    const { h } = slopeOk(X, Y);
+    cand.push({ X, Y, Z: h, kind: 'garden', court: true });
+  }
   // a few olives on the edges of the city and the north
   scatter(fp.x0 - m(900), fp.y1 + m(420), fp.x1, fp.y1 + m(800), m(18), (X, Y) => 0.25 * smooth(0, 0.3, T.noise.fbm(X * A / 300, Y * A / 300, 2)), 'olive');
 
@@ -174,7 +191,7 @@ export function buildTrees(ctx, T, detail, feat = {}) {
   const focusX = fp.x1 + m(620), axisY = ctx.site.axisY;
   for (const c of cand) {
     const d = Math.hypot((c.X - focusX) * A, (c.Y - axisY) * A * 0.8);
-    const w = 1 / (1 + (d / 450) ** 2) + (c.kind === 'garden' ? 0.6 : 0.08);
+    const w = c.court ? 50 : 1 / (1 + (d / 450) ** 2) + (c.kind === 'garden' ? 0.6 : 0.08);
     c.key = Math.pow(rand(), 1 / w);
   }
   cand.sort((p, q) => q.key - p.key);
@@ -187,6 +204,9 @@ export function buildTrees(ctx, T, detail, feat = {}) {
   const NF = detail === 0 ? 2 : 3;
   const NEAR_MAX = [0, 60, 140, 220][Math.max(0, Math.min(3, detail))];
   const NEAR_R = [0, 70, 110, 150][Math.max(0, Math.min(3, detail))];
+  // gate-world-materials: a third level beyond MID_R — two lumps and a single-limb trunk (≈ 46 triangles: the mid level's
+  // five lumps and two limbs are ≈ 140), so the groves can hold hundreds of trees on every tier
+  const MID_R = [280, 380, 480, 600][Math.max(0, Math.min(3, detail))];
   const mk = (geo, key, n, name) => {
     const im = new InstancedMesh(geo, ctx.mats.get(key), Math.max(1, n));
     im.name = name;
@@ -197,11 +217,12 @@ export function buildTrees(ctx, T, detail, feat = {}) {
   const trunkKey = ctx.mats.has?.('olive_bark') ? 'olive_bark' : 'timber_rough';
   const counts = new Array(NF).fill(0);
   const formOf = list.map(() => { const f = Math.min(NF - 1, Math.floor(rand() * NF)); counts[f]++; return f; });
-  const far = [], near = [];
+  const far = [], near = [], vfar = [];
   for (let f = 0; f < NF; f++) {
     const F = FORMS[f], sfx = f ? `.${f}` : '';
     // far crowns: four ring lumps and one over the centre (were three and one: a flat, three-cornered plate) — 100 triangles
     far.push({ t: mk(trunkGeometry(4, 11 + f, true, F), trunkKey, counts[f], `terrain:olive-trunks${sfx}`), c: mk(canopyGeometry(0, 4, 17 + f, F, true), foliageKey, counts[f], `terrain:olive-crowns${sfx}`) });
+    vfar.push({ t: mk(trunkGeometry(3, 11 + f, true, { ...F, leaders: [] }), trunkKey, counts[f], `terrain:olive-trunks-far${sfx}`), c: mk(canopyGeometry(0, 2, 17 + f, { ...F, crown: { ...F.crown, nTop: 0, lump: [F.crown.lump[0] * 1.35, F.crown.lump[1]] } }, true), foliageKey, counts[f], `terrain:olive-crowns-far${sfx}`) });
     if (NEAR_MAX) near.push({ t: mk(trunkGeometry(detail >= 2 ? 9 : 7, 11 + f, false, F), trunkKey, NEAR_MAX, `terrain:olive-trunks-near${sfx}`), c: mk(canopyGeometry(1, 8, 17 + f, F), foliageKey, NEAR_MAX, `terrain:olive-crowns-near${sfx}`) });
   }
   const mtx = new Matrix4(), q = new Quaternion(), s = new Vector3(), p = new Vector3(), up = new Vector3(0, 1, 0), col = new Color();
@@ -226,7 +247,7 @@ export function buildTrees(ctx, T, detail, feat = {}) {
     col.setRGB(base[0] * v + silver * base[0], base[1] * v * (0.96 + 0.08 * rand()) + silver * base[1], base[2] * v + silver * base[2] * 1.2);
     col.toArray(cols, i * 3);
   });
-  const all = [...far, ...near].flatMap((x) => [x.t, x.c]);
+  const all = [...far, ...near, ...vfar].flatMap((x) => [x.t, x.c]);
   for (const im of all) { im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; }
   for (const x of near) { x.t.castShadow = detail >= 1; x.c.castShadow = detail >= 1; }
   // assign instances: near ones (closest to the camera, within NEAR_R) to the detailed meshes, the rest to the far ones
@@ -247,18 +268,27 @@ export function buildTrees(ctx, T, detail, feat = {}) {
       close.length = Math.min(close.length, NEAR_MAX);
     }
     const isNear = new Uint8Array(list.length);
-    const nk = new Array(NF).fill(0), fk = new Array(NF).fill(0);
+    const nk = new Array(NF).fill(0), fk = new Array(NF).fill(0), vk = new Array(NF).fill(0);
     for (const [, i] of close) { isNear[i] = 1; put(near[formOf[i]], nk[formOf[i]]++, i); }
-    for (let i = 0; i < list.length; i++) if (!isNear[i]) put(far[formOf[i]], fk[formOf[i]]++, i);
+    for (let i = 0; i < list.length; i++) {
+      if (isNear[i]) continue;
+      const dx = wpos[i * 3] - cx2, dz = wpos[i * 3 + 2] - cz2;
+      if (dx * dx + dz * dz < MID_R * MID_R) put(far[formOf[i]], fk[formOf[i]]++, i);
+      else put(vfar[formOf[i]], vk[formOf[i]]++, i);
+    }
     for (let f = 0; f < NF; f++) {
+      vfar[f].t.count = vfar[f].c.count = vk[f];
+      vfar[f].t.visible = vfar[f].c.visible = vk[f] > 0;
       far[f].t.count = far[f].c.count = fk[f];
+      far[f].t.visible = far[f].c.visible = fk[f] > 0;
       if (near[f]) { near[f].t.count = near[f].c.count = nk[f]; near[f].t.visible = near[f].c.visible = nk[f] > 0; }
     }
     for (const im of all) { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
   };
   assign(1e9, 1e9);
   for (const im of all) im.computeBoundingSphere();
-  if (NEAR_MAX && ctx.engine?.onUpdate) {
+  // (every tier now: the mid / far split follows the camera on low too)
+  if (ctx.engine?.onUpdate) {
     ctx.engine.onUpdate(() => {
       const c = ctx.camera?.position;
       if (!c) return;

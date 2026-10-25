@@ -14,7 +14,7 @@
 // 'choir' loop carrying each section on, so what is seen and heard coincide. The ma'amad's prostrations (one crowd) are
 // published on ctx.__g3.prost for other groups' figures in the courts (g3/plan.js peopleProstration).
 import { places } from './g3/places.js';
-import { runScripts, FreeProps } from './g3/script.js';
+import { runScripts, FreeProps, evalScript } from './g3/script.js';
 import { POOLS, newDay } from './g3/day.js';
 import { windows, prostPhase, PROSTRATE_S, CUE_LEAD, BLESS_DOWN } from './g3/plan.js';
 import { buildMorning } from './g3/morning.js';
@@ -23,6 +23,7 @@ import { buildSongs } from './g3/song.js';
 import { crossed, cueAt } from '../lib/cue.js';
 import { within, since, wrap, clamp, smooth } from '../lib/core.js';
 import { m2w } from '../../core/units.js';
+import { followView, lastNear, stagedRetime, siteOf } from '../lib/watch.js';
 
 const SEED = 0x6730;
 const COALS = 'g3.mizbach-hazahav.coals', GLOW = 'g3.pan-coals', LEDGE = 'g3.pan-coals.ledge';
@@ -50,6 +51,15 @@ export default {
     sim.schedule?.retime?.('birkat-kohanim', (t0, t1) => [t0, since(t1, t0) > BLESS_DOWN ? wrap(t0 + BLESS_DOWN) : t1]);
     const pools = {};
     for (const [k, s] of Object.entries(POOLS)) pools[k] = sim.pool({ name: k, role: s.role, count: s.count, seed: s.seed, importance: s.importance });
+    // "Go" for the coal-pan follows the fire-pan man (gazit 4: from his niche up the ramp, at the incense pile, down to
+    // the gold pan), watched from behind him, down the ramp (gate-sim-data: the kevesh stand faced an empty altar while
+    // he was still at the ramp's foot behind it)
+    try { sim.schedule?.liveView?.('coal-pan', followView(ctx, () => pools.gazit.slot(4), { from: 180 })); } catch (e) { console.warn('[sim] coal-pan live view failed', e); }
+    // these rows are listed while their figures are still at their place: the staged end of each (its scripts sampled,
+    // lib/watch.js lastNear), not the data's window — the incense men are out of the Heichal minutes before it closes
+    // (gate-sim-data). The staging still reads the data's window (windows(): tPlan).
+    const ends = { v: null, key: '' };
+    const rt = stagedRetime(sim, STAGED, () => (ends.key === `${ctx.time?.dateString}|${sim.generation}` ? ends.v : null));
     const M = P.maamad, third = (M.y1 - M.y0) / 3;
     const band = (j, n) => sim.crowd({
       roles: { israelite: 6, elder: 1 }, count: n, region: { min: [M.x0, M.y0 + third * j], max: [M.x1, M.y0 + third * (j + 1)], z: M.Z },
@@ -67,7 +77,7 @@ export default {
       curtain: sim.door(CURTAIN),
       silverPan: ctx.movables?.get?.('altar.machtah') || null, panVis: null,
       coals: null, glow: null, ledge: null, incense: null, incenseV: 0,
-      plan: null, planGen: -1, out: {}, fns: {}, choir: null, choirKey: '', hushKey: '',
+      plan: null, planGen: -1, out: {}, fns: {}, choir: null, choirKey: '', hushKey: '', ends, rt,
       fmt: (m) => ctx.time?.format?.(m) ?? '--',
     };
   },
@@ -136,7 +146,28 @@ function plan(ctx, sim, state) {
   ctx.__g3 = { gen: sim.generation, prost: D.prost.map(wrap) };
   state.plan = D;
   state.planGen = sim.generation;
+  stagedEnds(ctx, sim, state, D);
   return D;
+}
+
+// the rows retimed to their staged end (init: stagedRetime)
+const STAGED = ['inner-clearing', 'into-heichal', 'ketoret-morning', 'ketoret-afternoon', 'menorah-lighting'];
+function stagedEnds(ctx, sim, state, D) {
+  if (!state.ends) return;
+  const scripts = Object.values(D.L).flat(2);
+  const fl = state.P.floorAt;
+  const evalAt = (S, t, o) => evalScript(S, t, o, null, fl);
+  const v = {};
+  for (const id of STAGED) {
+    const ev = sim.event(id);
+    const at = ev && sim.schedule?.positionOf?.(ev);
+    if (!at || !Number.isFinite(ev.t0)) continue;
+    const w = ev.tPlan || [ev.t0, ev.t1];
+    v[id] = lastNear(evalAt, scripts, w[0], w[1], siteOf(at));
+  }
+  state.ends.v = v;
+  state.ends.key = `${ctx.time?.dateString}|${sim.generation}`;
+  state.rt.apply();
 }
 
 // ------------------------------------------------------------------------------------------------ the world

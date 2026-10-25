@@ -32,6 +32,7 @@ import {
 } from 'three';
 import { AMAH } from '../../core/units.js';
 import { Baker } from './gen/baker.js';
+import { compileLater } from '../../render/warmup.js';
 import { SETS } from './gen/sets.js';
 import { courseStarts } from './gen/layout.js';
 import { applyPatch, envHasNoRooms } from './patch.js';
@@ -41,11 +42,27 @@ const GOLD = '#ffe39d';
 // qa-r2: the plating (walls, floors, gate leaves) as NATURAL gold — gold with ~20 % silver, as most ancient gold was
 // (reconstruction: the sources name the plating's metal, not its grade, Middot 4:1, Shekalim 4:4) — F0 ≈ linear
 // (0.965, 0.815, 0.456): less saturated than pure gold, which under the Kodesh's warm interior light and the AgX look
-// read as flat orange paint (on-screen b − r −97 → −79 at d3); the vessels keep pure gold ("zahav tahor")
-const GOLD_PLATE = '#fbe9b4';
+// read as flat orange paint (on-screen b − r −97 → −79 at d3); the vessels keep pure gold ("zahav tahor").
+// gate-world-materials: F0 linear (0.96, 0.78, 0.40) -> sRGB #fae5aa (the QA gate's value, a little warmer than qa-r2's
+// (0.965, 0.815, 0.456)): with the Kodesh now lit through its gate alone the plating needs gold's own saturation back
+const GOLD_PLATE = '#fae5aa';
 
 // the parochet's wool sheen (high/ultra, MeshPhysical): [colour (sRGB), roughness] — dark and tinted by the dyes
-const SHEEN_PAROCHET = ['#4a3444', 0.55];
+// gate-world-materials: #4a3444 → #4a3038 (the purple sheen pushed the folds toward mauve-pink)
+const SHEEN_PAROCHET = ['#4a3038', 0.55];
+// gate-world-materials: the parochet's lit albedo nudged off magenta toward the documented deep red-violet ≈ sRGB (109, 74,
+// 79) — measured in the Kodesh at d3 on high (124, 81, 90): linear (0.72, 0.77, 0.73) — green and blue +6 % / +3 % relative
+// gate-world-materials-r2: linear (1, 1.08, 1.04) — the ×0.72–0.77 was a compensation for the room's earlier, brighter
+// light; with env's gate falloff (gate-env-render-r2) the curtain read (94, 60, 65) at d3 on high, now (105, 68, 75).
+// Linear multipliers on the baked dye mix (Color.setRGB), the relative green / blue lift kept
+const COLOR_PAROCHET = [1, 1.08, 1.04];
+// gate-world-materials-r2: the Kodesh's parochot on the LOW tier by daylight (linear, eased in by the Sun's altitude; the
+// colour above at night). Low lights the Kodesh analytically, and its gilded-room gain (env interiors.js GOLD_GAIN,
+// 1 + ρ + ρ²) tints all its daylight: a grey card at the curtain reads (55, 42, 24) on low against (109, 107, 105) on high
+// (probe), so the dyes read brown-maroon (40, 15, 7). By lamplight both tiers already agree ((33, 9, 12) / (25, 9, 9)),
+// hence daylight only. A compensation for env's light, not a dye: drop it when the low path's gain stops tinting the
+// daylight on surfaces that face the gate
+const LOW_DAY_PAROCHET = [1.15, 2.1, 3.1];
 
 // the shader patch's per-stone variation of the Herodian walls: [albedo, roughness, hue] — qa-r2: hue ±1.5 % → ±0.5 %
 // (with the texture's own per-stone cast it drew a patchwork of blue-grey and beige blocks; value stays ±3.5 %)
@@ -68,7 +85,9 @@ const MAC = {
   ash: [0.12, 0.05, 4.5, 0.25, '#b9ae9f'],
   leaf: [0.09, 0.06, 7, 0.25, '#c9cba8'],
   earth: [0.1, 0.05, 9, 0.3, '#b8a68b'],
-  terrain: [0.12, 0.05, 23, 0.3, '#aaa498'],   // neutral grey-brown drift (the warm ground tint read orange on the hills)
+  // neutral grey-brown drift (the warm ground tint read orange on the hills); gate-world-materials: a little warmer with the
+  // warmer layers (#aaa498 pulled them back toward the cool grey the QA gate read as wet mud)
+  terrain: [0.12, 0.05, 23, 0.3, '#b0a491'],
   // qa-r1: the altar's hand-applied lime — thicker and thinner coats, older and fresher patches, over 3–5 m
   altar: [0.06, 0.04, 5, 0.3, '#ddd6c8'],
   none: [0, 0, 10, 0, '#ffffff'],
@@ -85,6 +104,18 @@ const DET = {
   wood: ['d_wood', 3.333, 0.45, 0.06, 0.05],
   cloth: ['d_cloth', 20, 0.25, 0.03, 0.03],
 };
+
+const PAROCHET = {
+  // qa-r2: every cord twisted of the four materials (an even heathered mix, no stripes) with a soft wool sheen on
+  // high/ultra — dark and dye-tinted, so it lifts the folds at grazing angles without washing the cloth to pastel
+  // (qa-r1's pale mauve lobe did)
+  set: 'parochet', side: DoubleSide, color: COLOR_PAROCHET, macro: MAC.cloth, detail: DET.cloth, sheen: SHEEN_PAROCHET, flat: ['#4e2840', 0.85, 0],
+  info: {
+    en: 'Parochet — a tefach thick, woven on 72 cords of 24 threads each: six each of techelet (sky-blue wool), argaman (red-purple), tola\'at shani (crimson) and shesh (linen), twisted together, so the four colours mix evenly in every cord; 2/2 twill',
+    sources: ['Shekalim 8:5', 'Yoma 71b–72b', 'Rambam Klei HaMikdash 7:16, 8:13–15', 'Part V §13.7', 'Part VII §23'],
+    confidence: 'derived', note: 'cord size (8 mm), twill, twist and dye tones: reconstruction; figures not attested and not drawn; the two faces are not differentiated (one texture both sides)',
+  },
+};
 // Herodian drafted margins (patch.js MK_COMB): [comb detail set, margin -> boss roughness step lo, hi, normal strength,
 // top/bottom margin band (m: below it the strokes run vertically, above it horizontally)]
 const COMB = ['d_comb', 0.64, 0.72, 0.7, 0.15];
@@ -93,7 +124,9 @@ const COMB = ['d_comb', 0.64, 0.72, 0.7, 0.15];
 // the Kodesh's gold clipped to white; bronze: the low tier's coarse environment drew brown / teal clouds in its doors.
 const IBL = {
   none: [0, 0, 0],
-  gold: [0.6, 0.18, 6],
+  // gate-world-materials: blend 0.18 → 0.06, cap 6 → 10 — the blend toward the mean ambient flattened the Kodesh's
+  // reflections into a uniform matte card (no sheen toward the gate); the gate's image now reaches the walls
+  gold: [0.6, 0.06, 10],
   bronze: [0.35, 0.12, 8],
   bronzeLow: [0.5, 0.45, 4],
 };
@@ -108,6 +141,11 @@ const ALTAR = [0.8, 0.65];
 // soreg's south-east corner to the chel steps on the east axis (Rambam BhB 6:1) — placed from the site model
 const WEAR = [1, 7, 0.06, 0.07];
 const ALTAR_FIRES = [['great', 3.0, 0.9], ['incense', 1.6, 0.6], ['kiyum-haesh', 2.0, 0.6]];
+// burning firewood and its ash beds (patch.js MK_BURN, gate-world-materials): the char set blended over the bark, its
+// cracks glowing where the log faces the coals; the ash beds blend in the coal bed (glow in its albedo alpha). Ember
+// colour / luminance as the `embers` key (coal ~1400 cd/m² at the brightest cracks); the crust a pale grey-white ash
+const BURN_WOOD = { set: 'char', glow: ['#ff5c16', 650], mask: 'crack', ash: 0.56 };
+const BURN_ASH = { set: 'embers', glow: ['#ff6a1f', 1400], mask: 'alpha', ash: 0.42 };
 
 // Progressive start (materials-2-fix): a cold start compiled all 30 generator programs before the world was built —
 // ≈ 8 s of compile work on the HD 4600, 1.3–3.3 s of wall time (the redrawn Kodesh relief alone 1.9 s), and
@@ -136,6 +174,10 @@ const LATER_GROUPS = [
  *   physical, sheen: [colour, roughness] (high/ultra), side, alphaTest,
  *   foot: dust band and contact AO at a wall's foot (qa-r1), altar: the altar's soot / ash masks (qa-r1),
  *   wear: the Mount's worn routes (qa-r2, patch.js mkWear),
+ *   burn: { set, glow: [emissive sRGB, luminance cd/m²], mask: 'crack' (wood) | 'alpha' (ash), ash: the wood's ash crust tone
+ *     (linear) / the ash's soot darkening } — a second
+ *     set (char / coal bed) blended in by the geometry's per-vertex `mkBurn` attribute (x char, y ash crust, z ember
+ *     glow; patch.js MK_BURN, gate-world-materials): the altar's firewood and its ash beds,
  *   ibl: metal environment-reflection treatment (IBL presets), low: { rough, ibl, block } overrides on the low tier
  *     (rough and block are multipliers),
  *   flat: [colour, roughness, metalness] used when texture generation is unavailable,
@@ -223,6 +265,18 @@ export const SPEC = {
   terrain_soil: {
     set: 'terrain_soil', outdoor: true, macro: MAC.ground, detail: DET.stone, flat: ['#8c5a3c', 1.0, 0],
     info: { en: 'Terra rossa soil between the rocks', sources: ['regional geology'], confidence: 'reconstruction' },
+  },
+  // gate-world-materials: the burning place's floor on Har HaMishchah (was terrain_rock / steps_stone slabs, which read as
+  // veined marble tiles)
+  stone_local: {
+    set: 'stone_rough', outdoor: true, macro: MAC.stone, detail: DET.stone, flat: ['#c4b293', 0.92, 0],
+    info: { en: 'Rough-dressed local limestone — hammer- and point-dressed slabs, matte, warm buff, weathered (unroofed stonework on the hills)', sources: ['regional geology', 'period building practice'], confidence: 'reconstruction' },
+  },
+  // the ground cover's dry grass and dwarf-shrub cushions: the olive leaf set made matte (olive_foliage's glossy upper
+  // sides made the tufts read as plastic); tinted per instance as before
+  grass_dry: {
+    set: 'olive_leaves', outdoor: true, rough: 1.6, macro: MAC.leaf, flat: ['#a39a7e', 0.92, 0],
+    info: { en: 'Dry grass and garrigue cushions at the end of the dry season (straw, grey-brown, a little new green)', sources: ['regional vegetation'], confidence: 'reconstruction' },
   },
   terrain_rock: {
     set: 'terrain_rock', outdoor: true, macro: MAC.ground, detail: DET.stone, flat: ['#a8977a', 0.95, 0],
@@ -312,17 +366,9 @@ export const SPEC = {
     set: 'linen', side: DoubleSide, macro: MAC.cloth, detail: DET.cloth, sheen: ['#ffffff', 0.55], flat: ['#f1ede2', 0.9, 0],
     info: { en: 'Shesh — fine six-ply white linen, plain weave', sources: ['Part VIII §34', 'Part VII §23'], confidence: 'derived', note: 'thread count reconstruction' },
   },
-  parochet: {
-    // qa-r2: every cord twisted of the four materials (an even heathered mix, no stripes) with a soft wool sheen on
-    // high/ultra — dark and dye-tinted, so it lifts the folds at grazing angles without washing the cloth to pastel
-    // (qa-r1's pale mauve lobe did)
-    set: 'parochet', side: DoubleSide, macro: MAC.cloth, detail: DET.cloth, sheen: SHEEN_PAROCHET, flat: ['#4e2840', 0.85, 0],
-    info: {
-      en: 'Parochet — a tefach thick, woven on 72 cords of 24 threads each: six each of techelet (sky-blue wool), argaman (red-purple), tola\'at shani (crimson) and shesh (linen), twisted together, so the four colours mix evenly in every cord; 2/2 twill',
-      sources: ['Shekalim 8:5', 'Yoma 71b–72b', 'Rambam Klei HaMikdash 7:16, 8:13–15', 'Part V §13.7', 'Part VII §23'],
-      confidence: 'derived', note: 'cord size (8 mm), twill, twist and dye tones: reconstruction; figures not attested and not drawn; the two faces are not differentiated (one texture both sides)',
-    },
-  },
+  parochet: PAROCHET,
+  // the Kodesh's two parochot (heichal/kodesh.js): the same cloth, with the low tier's daylight compensation
+  parochet_kodesh: { ...PAROCHET, lowDay: LOW_DAY_PAROCHET },
   curtain_linen: {
     set: 'curtain_linen', side: DoubleSide, macro: MAC.cloth, detail: DET.cloth, sheen: ['#ffffff', 0.6], flat: ['#ece6d6', 0.9, 0],
     info: { en: 'Heavy linen curtain / screening sheet', sources: ['Yoma 3:4', 'Yoma 54a'], confidence: 'derived' },
@@ -506,6 +552,30 @@ export const SPEC = {
   timber_bark_pine: {
     set: 'bark_pine', macro: MAC.wood, detail: DET.wood, flat: ['#6a5848', 0.86, 0],
     info: { en: 'Oil-tree (Aleppo pine) bark — long grey-brown plates over red-brown fissures (firewood, Tamid 2:3)', sources: ['Tamid 2:3'], confidence: 'derived', note: 'etz shemen as pine: the common reading; bark look reconstruction' },
+  },
+  // gate-world-materials: the altar's burning firewood — each species' bark with the char, ash crust and ember cracks
+  // painted per log by the builder (vertex attribute mkBurn); the log ends likewise; one program for all of them
+  timber_burn_fig: {
+    set: 'bark_fig', burn: BURN_WOOD, macro: MAC.wood, detail: DET.wood, flat: ['#5e5a52', 0.8, 0],
+    info: { en: 'Burning fig billet — bark charring from the coals up into alligator char, grey-white ash on the burnt ends, glowing cracks underneath (Tamid 2:3)', sources: ['Tamid 2:3', 'Tamid 2:4'], confidence: 'reconstruction' },
+  },
+  timber_burn_walnut: {
+    set: 'bark_walnut', burn: BURN_WOOD, macro: MAC.wood, detail: DET.wood, flat: ['#4a4038', 0.85, 0],
+    info: { en: 'Burning walnut billet — as timber_burn_fig', sources: ['Tamid 2:3'], confidence: 'reconstruction' },
+  },
+  timber_burn_pine: {
+    set: 'bark_pine', burn: BURN_WOOD, macro: MAC.wood, detail: DET.wood, flat: ['#4c4036', 0.86, 0],
+    info: { en: 'Burning oil-tree (pine) billet — as timber_burn_fig', sources: ['Tamid 2:3'], confidence: 'reconstruction' },
+  },
+  timber_burn_end: {
+    set: 'logend', burn: BURN_WOOD, macro: MAC.wood, detail: DET.wood, flat: ['#6a5c4c', 0.8, 0],
+    info: { en: 'The cut ends of the burning billets — the end grain charred and ashed toward the fire', sources: ['Tamid 2:3'], confidence: 'reconstruction' },
+  },
+  // the ash floor and the ash beds of the ma'arachot: wood ash, darkened with soot and strewn with charcoal toward each
+  // arrangement (x), the coal bed's glow at the heart of each bed (z)
+  ash_burn: {
+    set: 'ash', burn: BURN_ASH, macro: MAC.ash, flat: ['#7d7872', 1.0, 0],
+    info: { en: 'The ash of the altar top — soot-darkened and charcoal-strewn round each ma\'arachah; a bed of glowing coals under each arrangement (Tamid 2:2–5)', sources: ['Tamid 1:4, 2:2–5'], confidence: 'reconstruction', note: 'soot spread, bed depth (10–20 cm) and coal luminance: reconstruction' },
   },
   olive_bark: {
     set: 'bark_olive', outdoor: true, macro: MAC.wood, detail: DET.wood, flat: ['#77736a', 0.86, 0],
@@ -748,7 +818,8 @@ export function createMaterialLibrary(ctx) {
     if (s.side) m.side = s.side;
     if (s.alphaTest) m.alphaTest = s.alphaTest;
     if (set) {
-      m.color.set(s.color || '#ffffff');
+      setColor(m.color, s.color || '#ffffff');
+      if (s.lowDay) lowDaylight(m, s);
       m.map = set.map;
       m.normalMap = set.normal;
       m.normalScale.set(s.normal ?? 1, s.normal ?? 1);
@@ -764,9 +835,11 @@ export function createMaterialLibrary(ctx) {
       if (patchState.enabled || uvSwap) {
         const uniforms = patchUniforms(s, set);
         m.userData.mkUniforms = uniforms;
+        const bset = s.burn ? getSet(s.burn.set) : null;
+        if (bset) Object.assign(uniforms, burnUniforms(s.burn, bset));
         applyPatch(m, uniforms, patchState, {
           glow: !!s.glow, outdoor: !!s.outdoor, comb: !!s.comb, courses: !!set.layout?.courseTex, uvSwap,
-          foot: !!s.foot, altar: !!s.altar, metal: !!set.metal,
+          foot: !!s.foot, altar: !!s.altar, metal: !!set.metal, burn: !!bset,
         });
       }
       if (s.glow) glowing(m, s.glow);
@@ -798,6 +871,30 @@ export function createMaterialLibrary(ctx) {
     return m;
   }
 
+  /** SPEC colours: an sRGB string, or [r, g, b] linear multipliers (may exceed 1: they scale a dark baked albedo) */
+  function setColor(c, v) {
+    if (Array.isArray(v)) c.setRGB(v[0], v[1], v[2]);
+    else c.set(v);
+  }
+  /**
+   * SPEC.lowDay (gate-world-materials-r2): on the low tier the key's colour by daylight, eased in as the Sun rises
+   * (−1° → +3°: by day the room's light is daylight, at night and in twilight the lamps', which both tiers already render
+   * alike — from −6° the dye went violet-blue under the night white balance) — a pure function of the sim clock; the key's own
+   * colour on other tiers (checked every frame: the tier can change at run time)
+   */
+  function lowDaylight(m, s) {
+    const base = new Color(), day = new Color();
+    setColor(base, s.color || '#ffffff');
+    setColor(day, s.lowDay);
+    let wWas = -1;
+    ctx.engine?.onUpdate?.(() => {
+      const alt = ctx.time?.sun?.altitude;
+      const x = isLow() && Number.isFinite(alt) ? Math.min(Math.max((alt + 1) / 4, 0), 1) : 0;
+      const w = x * x * (3 - 2 * x);
+      if (w !== wWas) { m.color.lerpColors(base, day, w); wWas = w; }
+    }, 55);
+  }
+
   /**
    * Emission whose mask is the set's albedo alpha: emissive colour × luminance (cd/m²) × the fire emission scale —
    * env.preExposure × env.fireScale, with fx's fire gain (a reference flame core is held at 1.8 × the display cap
@@ -807,19 +904,37 @@ export function createMaterialLibrary(ctx) {
     m.emissive.set(color);
     m.emissiveIntensity = 0;
     if (!ctx.engine?.onUpdate) return;
-    ctx.engine.onUpdate(() => {
-      const env = ctx.env || {};
-      const fx = ctx.fx?.emissionScale;
-      let k;
-      if (Number.isFinite(fx)) k = fx;
-      else {
-        const P = (env.preExposure > 0 ? env.preExposure : 1) * (Number.isFinite(env.fireScale) ? env.fireScale : 1);
-        // fx: gain = min(1, 1.8 × cap / (2.5e4 cd/m² × P)), cap = display cap (post 3, low 0.75) / exposure
-        const cap = (ctx.quality?.post ? 3 : 0.75) / Math.max(env.exposure || 1, 1e-6);
-        k = P * Math.min(1, (1.8 * cap) / (2.5e4 * P));
-      }
-      m.emissiveIntensity = L * k;
-    }, 55);
+    ctx.engine.onUpdate(() => { m.emissiveIntensity = L * fireEmissionScale(); }, 55);
+  }
+  function fireEmissionScale() {
+    const env = ctx.env || {};
+    const fx = ctx.fx?.emissionScale;
+    if (Number.isFinite(fx)) return fx;
+    const P = (env.preExposure > 0 ? env.preExposure : 1) * (Number.isFinite(env.fireScale) ? env.fireScale : 1);
+    // fx: gain = min(1, 1.8 × cap / (2.5e4 cd/m² × P)), cap = display cap (post 3, low 0.75) / exposure
+    const cap = (ctx.quality?.post ? 3 : 0.75) / Math.max(env.exposure || 1, 1e-6);
+    return P * Math.min(1, (1.8 * cap) / (2.5e4 * P));
+  }
+  /** patch.js MK_BURN uniforms: the burn set's maps and tile, the glow mask source, the crust tone, the ember emission
+   *  (one per-frame update shared by every burn material of the same glow) */
+  const burnE = new Map();
+  function burnUniforms(b, bset) {
+    const [c, L] = b.glow;
+    const key = `${c}|${L}`;
+    let e = burnE.get(key);
+    if (!e) {
+      const col = new Color(c);
+      e = { value: new Vector3() };
+      burnE.set(key, e);
+      const upd = () => { const k = L * fireEmissionScale(); e.value.set(col.r * k, col.g * k, col.b * k); };
+      upd();
+      ctx.engine?.onUpdate?.(upd, 55);
+    }
+    return {
+      mkBurnMap: { value: bset.map }, mkBurnOrm: { value: bset.orm }, mkBurnNor: { value: bset.normal },
+      mkBurnK: { value: new Vector4(1 / bset.tile[0], 1 / bset.tile[1], b.mask === 'alpha' ? 1 : 0, b.ash ?? 0.55) },
+      mkBurnE: e,
+    };
   }
 
   /** terrain_blend: three layer sets (rock, soil, vegetation) mixed by vertex colour weights (patch.js). */
@@ -1035,7 +1150,14 @@ export function createMaterialLibrary(ctx) {
       // programs linked alongside the first view's (main.js warm-up), and their bakes, queued in the warm-up's idle time,
       // ran on the GPU inside the first drawn frame (0.3–0.8 s later first view on the HD 4600). The intro covers the
       // view while they bake; a screenshot still bakes everything at 'ready'
-      ctx.bus?.on?.(shotMode ? 'ready' : 'firstFrame', () => { this.loaded(); footWatch(); });
+      // gate-core-r2: from the first view on, the later groups' (and the rest's) generator programs are issued through the
+      // shared background queue (render/warmup.js compileLater), not on their own: with ≈ 8 of them pending beside the
+      // queue's, the GPU process's compiler threads were all taken and frames froze 1–8 s in the first seconds of play
+      ctx.bus?.on?.(shotMode ? 'ready' : 'firstFrame', () => {
+        if (!shotMode && baker) baker.gate = (issue) => compileLater(ctx, null, { issue, priority: 1 });
+        this.loaded();
+        footWatch();
+      });
       ctx.bus?.on?.('quality:change', () => this.rebuild(ctx.quality));
     },
     /** resolves when the wall-foot floor map (patch.js MK_FOOT) has been built from the nav grid and uploaded */
@@ -1122,6 +1244,8 @@ export function createMaterialLibrary(ctx) {
         if (u) {
           const fresh = patchUniforms(s, set);
           for (const k of Object.keys(fresh)) u[k].value = fresh[k].value;
+          const bset = s.burn && u.mkBurnMap ? baker.baked.get(s.burn.set) : null;
+          if (bset) { const b = burnUniforms(s.burn, bset); for (const k of ['mkBurnMap', 'mkBurnOrm', 'mkBurnNor', 'mkBurnK']) u[k].value = b[k].value; }
         }
         if (detailWas !== patchState.detail) m.needsUpdate = true;
       }

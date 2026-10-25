@@ -17,6 +17,7 @@ import { navRoute, straightRoute } from '../lib/path.js';
 import { doorAmount } from '../lib/world.js';
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
 import { m2w } from '../../core/units.js';
+import { stagedRetime } from '../lib/watch.js';
 
 const SEED = 0x6761;
 const MOUNT = ['mount.gate.shushan', 'mount.gate.chuldah-e', 'mount.gate.chuldah-w', 'mount.gate.kiponus', 'mount.gate.tadi'];
@@ -112,6 +113,9 @@ export default {
       tmp: {}, tmp2: {},
     };
     if (pts) buildWalk(ctx, state);
+    // the clearing men's row is listed until they are through the wicket into the ta (P.tGone), not the data's window:
+    // its last half minute showed no one (gate-sim-data). The staging reads the data's window (tPlan).
+    state.rt = stagedRetime(sim, ['dishun-men'], () => (state.plan && state.planGen === sim.generation && state.planDate === ctx.time?.dateString ? { 'dishun-men': state.plan.tGone - 0.35 } : null));
     return state;
   },
 
@@ -199,7 +203,7 @@ function plan(ctx, sim, state) {
   let great = greatEv ? wrap(greatEv.t0 + CUE_LEAD) : genAt(0.8);
   if (!Number.isFinite(great)) great = wrap(blast + 2.3);
   const greatEnd = greatEv ? greatEv.t1 : wrap(great + 3.5);
-  const dishun = dishunEv ? [dishunEv.t0, dishunEv.t1] : gen ? [gen.t0, wrap(gen.t0 + 0.6 * (span(gen.t0, gen.t1) || 1))] : [wrap(great - 10), great];
+  const dishun = dishunEv ? (dishunEv.tPlan ? [dishunEv.tPlan[0], dishunEv.tPlan[1]] : [dishunEv.t0, dishunEv.t1]) : gen ? [gen.t0, wrap(gen.t0 + 0.6 * (span(gen.t0, gen.t1) || 1))] : [wrap(great - 10), great];
   const niv = nivEv ? [wrap(nivEv.t0 + CUE_LEAD), wrap(nivEv.t1 + NIV_LAG)] : (gen && Number.isFinite(sunrise) ? [wrap(sunrise + CUE_LEAD), wrap(sunrise + 30)] : null);
   // the locking: the schedule's 'locking-up', else our 'gates-closing', else before the night watch, else at tzeit
   const lock = sim.schedule.byId('locking-up') || sim.schedule.events.find((e) => e.choreo === 'locking-up')
@@ -238,6 +242,8 @@ function plan(ctx, sim, state) {
   }
   state.plan = P;
   state.planGen = sim.generation;
+  state.planDate = ctx.time?.dateString;
+  state.rt?.apply();
   return P;
 }
 

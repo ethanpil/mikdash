@@ -10,7 +10,10 @@ import { Color } from 'three';
 export const GARB = { black: 4, white: 5 };
 const GARB_COL = ['#2a2622', '#1f1c1a', '#ece8dd', '#f2efe7'];
 const pal = (skin, hair, ga, gb, stripe) => [...skin, ...hair, ...ga, ...gb, ...stripe, ...GARB_COL].map((h) => new Color(h));
-const SKIN = ['#c89c78', '#86593a'];
+// (gate-people: a little less orange at both ends — olive to light brown; it read as one orange-tan under AgX. gate-people-r2:
+// less saturated again (≈ 27 % / 40 % HSV saturation, was 35 % / 49 %) — the colour now comes from the face's zones, the
+// flush of cheeks, nose and ears against a cooler jaw, not from one saturated tan that the warm morning sun pushed orange)
+const SKIN = ['#c0a08b', '#7b5c49'];
 // (qa-r1: the darkest hair a very dark brown, ~3 % albedo, not a 1 % black — at a distance the beards and hair read as
 // flat black masks and helmets; the period's population: dark brown to black hair)
 const HAIR = ['#2e221a', '#a69f95'];
@@ -119,14 +122,24 @@ export const ROLES = {
 // STRIPE = (birds) the neck patch. Breed colours are reconstruction (docs/decisions/people-realism.md):
 // fat-tailed sheep with white fleece and brown-to-black face and legs, black goats, red-brown cattle.
 const SHEEP_FACE = ['#6e4a30', '#4a3224', '#9a7350', '#2e2420'];
+// goats (gate-people): body coat and face/legs by coat index — 0 black, 1 black-brown, 2 red-brown, 3 pied (its black
+// ground; the white patches are drawn in the vertex shader), chosen with these weights (system.js makeTint)
+const GOAT_BODY = ['#2b2623', '#382b24', '#6a4430', '#2a2522'];
+const GOAT_FACE = ['#272220', '#33271f', '#5a3826', '#262120'];
+const GOAT_COATS = [0.4, 0.18, 0.22, 0.2];
 export const ANIMALS = {
   lamb: { rig: 'lamb', build: 'sheep', palette: pal(['#5a4a46', '#3a302e'], ['#e8dfd0', '#c9bba4'], ['#efe7d6', '#e6dcc8', '#f2ecdf', '#ddd1bb'], SHEEP_FACE, ['#2a2420', '#3a302a']) },
   ram: { rig: 'ram', build: 'sheep', horns: true, palette: pal(['#5a4a46', '#3a302e'], ['#e0d6c4', '#bfae94'], ['#e8e0cf', '#ddd3bf', '#ebe4d6', '#d6cab3'], SHEEP_FACE, ['#2a2420', '#3a302a']) },
-  goat: { rig: 'goat', build: 'goat', palette: pal(['#2e2626', '#211c1c'], ['#2a2420', '#1a1614'], ['#1c1917', '#232020', '#151312', '#2b2624'], ['#1c1917', '#2a2422', '#151312', '#4a3a2e'], ['#1a1614', '#2a2420']) },
+  // gate-people: goats' coats seeded per animal — mostly black, some black-brown and red-brown, some pied (black with white
+  // patches: material.js pPied) — the Levantine black goat (Shir HaShirim 4:1 "like a flock of goats streaming down Gilead";
+  // 1:5 "black as the tents of Kedar", tents of goat hair) with the speckled, spotted and brown animals of Bereshit 30:32–35
+  // among them; any colour is fit for an offering. Weights and shades are reconstruction. (All four were near-black at
+  // 1–1.5 % albedo: at 8–12 m the goats read as black boxes; black hair reflects 3–4 % and has a sheen.)
+  goat: { rig: 'goat', build: 'goat', coats: GOAT_COATS, pied: 3, palette: pal(['#3a302c', '#2a2220'], ['#2a2420', '#1a1614'], GOAT_BODY, GOAT_FACE, ['#1a1614', '#2a2420']) },
   // the individual's chatat (Vayikra 4:28, 4:32): a she-goat (se'irat izim) or a ewe lamb (kivsah) — female (an udder, no
   // scrotum); the ewe lamb polled (the breed's ewes are hornless, reconstruction), the she-goat's horns and beard smaller
   ewe: { rig: 'lamb', build: 'sheep', female: true, polled: true, palette: pal(['#5a4a46', '#3a302e'], ['#e8dfd0', '#c9bba4'], ['#efe7d6', '#e6dcc8', '#f2ecdf', '#ddd1bb'], SHEEP_FACE, ['#2a2420', '#3a302a']) },
-  she_goat: { rig: 'goat', build: 'goat', female: true, hornScale: 0.55, beardScale: 0.55, palette: pal(['#2e2626', '#211c1c'], ['#2a2420', '#1a1614'], ['#1c1917', '#232020', '#151312', '#2b2624'], ['#1c1917', '#2a2422', '#151312', '#4a3a2e'], ['#1a1614', '#2a2420']) },
+  she_goat: { rig: 'goat', build: 'goat', female: true, hornScale: 0.55, beardScale: 0.55, coats: GOAT_COATS, pied: 3, palette: pal(['#3a302c', '#2a2220'], ['#2a2420', '#1a1614'], GOAT_BODY, GOAT_FACE, ['#1a1614', '#2a2420']) },
   bull: { rig: 'bull', build: 'bull', palette: pal(['#3a3030', '#2a2222'], ['#7a4a2e', '#5e3722'], ['#7a4528', '#6b3b22', '#8a5534', '#5c331e'], ['#4e2c18', '#3e2414', '#5e3820', '#2e1c12'], ['#2a2420', '#3a302a']) },
   // birds: the young pigeon (ben yonah) and the turtledove (tor) — Vayikra 1:14, 5:7, 12:8
   dove: { rig: 'dove', build: 'dove', kind: 'pigeon', palette: pal(['#b0545a', '#9a4a50'], ['#6f7680', '#646b75'], ['#8f97a3', '#868e9a', '#9aa1ab', '#7f8793'], ['#9ba2ac', '#8f97a1', '#a5abb3', '#87909b'], ['#3f5e52', '#55456a']) },

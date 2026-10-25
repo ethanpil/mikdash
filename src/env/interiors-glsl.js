@@ -95,6 +95,11 @@ float mkInvW = 0.0;     // mkUnionB.w
 float mkV = 1.0;      // sky visibility at this fragment (1 outdoors)
 float mkVap = 1.0;    // … through its room's apertures only (without the closed room's floor): lights outside the room
 float mkVm = 0.0;     // … through its room's main (first) opening alone: the Kodesh's great gate (render-audio-3, the probe's irradiance)
+vec3 mkDm = vec3( 0.0, 0.0, 1.0 ); // gate-env-render: from the fragment to its room's main opening's centre (world)
+// gate-env-render-r2 (low, gilded rooms): the room's box and its main opening (half extents, frame code, weight), so a
+// reflection can be lit as the surface it meets is
+vec3 mkBoxLo = vec3( 0.0 ), mkBoxHi = vec3( 0.0 );
+vec3 mkMainAp = vec3( 0.0 );
 float mkVol = 0.0;    // its volume slot + 1 (0 outdoors)
 float mkS = 0.0;      // how far inside it
 float mkSun = 1.0;    // the key light's way out of the room (1 outdoors)
@@ -260,6 +265,7 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
   // a passage and the Ulam) the second one too when the first rejects the surface as facing out of it
   int bi = int( slot + 0.5 );
   vec4 A = mkVolA[ bi ], B = mkVolB[ bi ], C = mkVolC[ bi ];
+  vec3 bHi = B.xyz;
   // mkVolB.w = shell (m) + 4 × the faces joining another room (env/interiors.js)
   float sh = mod( B.w, 4.0 );
   int jn = int( B.w * 0.25 );
@@ -276,7 +282,7 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
     float s2 = mkInside( P, N, A2.xyz + C2.z, B2.xyz - C2.z, C2.z, mod( B2.w, 4.0 ), 0 );
     if ( s2 > best ) {
       other = mkInside( P, N, A.xyz + C.z, B.xyz - C.z, C.z, 0.0, 0 );
-      best = s2; bi = bj; A = A2; C = C2; hw = hw2; swapped = true;
+      best = s2; bi = bj; A = A2; C = C2; hw = hw2; swapped = true; bHi = B2.xyz;
     } else other = mkInside( P, N, A2.xyz + C2.z, B2.xyz - C2.z, C2.z, 0.0, 0 );
   }
   if ( ! swapped && jn != 0 && best < 0.5 ) best = max( best, mkInside( P, N, A.xyz + C.z, B.xyz - C.z, C.z, sh, jn ) );
@@ -295,6 +301,10 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
   float hit = 0.0, sun = 0.0;
   // a room with its own probe (the Kodesh, the Ulam on medium+) takes its reflections from it: no exit test
   bool ownProbe = ( hw & 0x40000000u ) != 0u;
+  // gate-env-render: a gilded room without one (the Kodesh on low) mirrors its openings as an analytic environment — the
+  // bright rectangle of each opening over the dark room (mkIBL) — whose lobe, widened by roughness × distance, keeps the
+  // opening's energy: the soft-edged test alone reached ≈ 0.86 over an area 5–6 × the gate's seen from the far end
+  bool goldRoom = ( hw & 0x3fffffffu ) != 0u;
   na = min( na, ${MK_LIMITS.ap} - a0 );
   for ( int k = 0; k < na; k ++ ) {
     uvec4 U = mkApU[ a0 + k ];
@@ -307,12 +317,19 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
     vec3 d = ac - P;
     float va = mkAperture( d, he, F, w );
     v += va;
-    if ( k == 0 ) mkVm = va;
+    if ( k == 0 ) { mkVm = va; mkDm = d; mkMainAp = vec3( he, float( U.w & 7u ) + 8.0 * w ); }
     // qa-r2-fix-env-render (ENV-R2-10, low): a rough lobe sees an opening it meets edge-on as a sliver — the exit is
     // weighted by the opening's foreshortening (dot(r, n)), which the test above, in the opening's own plane, misses: it
     // stayed near a constant as r turned parallel to the plane and then fell to 0, drawing a hard-edged bright band (the
     // Ulam's 20 × 40 opening seen down the porch from Beit HaChalifot's niche wall). Glossy lobes keep the exact test
-    if ( ! ownProbe ) hit = max( hit, mkApHit( d, Rw, 0.05, rough, he, F ) * w * mix( 1.0, smoothstep( 0.0, 0.35, dot( Rw, F.n ) ), smoothstep( 0.2, 0.6, rough ) ) );
+    if ( ! ownProbe ) {
+      float hk = mkApHit( d, Rw, 0.05, rough, he, F ) * w * mix( 1.0, smoothstep( 0.0, 0.35, dot( Rw, F.n ) ), smoothstep( 0.2, 0.6, rough ) );
+      if ( goldRoom ) {
+        float hs = 0.5 * ( 0.05 + rough * max( dot( d, F.n ), 0.0 ) / max( dot( Rw, F.n ), 1e-3 ) );
+        hk *= ( he.x * he.y ) / ( ( he.x + hs ) * ( he.y + hs ) );
+      }
+      hit = max( hit, hk );
+    }
     // the key light: through an open rectangle in proportion to its openness; through a row of splayed windows (F1) at
     // full strength, but only where a ray can pass one of them (qa-r1-fix-env-render)
     float ks = mkApHit( d, K.xyz, K.w, 0.01, he, F );
@@ -327,6 +344,7 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
   mkVol = float( bi ) + 1.0;
   mkS = best;
   mkHw = hw;
+  mkBoxLo = A.xyz; mkBoxHi = bHi;
   if ( C.w > 0.0 ) mkFill = C.w * best;
 }
 
@@ -440,14 +458,18 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
   // through an opening sees the room's own surfaces lit by it (albedo × V × Lb); one that does sees outdoors. In a
   // gilded room without a probe (the KhK) the gold walls pass that light on, bounce after bounce (the record word's gain).
   float hit = mkHit;
-  vec3 LbN = vec3( 0.0 ), inRad = vec3( 0.0 );
+  vec3 LbN = vec3( 0.0 ), inRad = vec3( 0.0 ), LbO = vec3( 0.0 );
   // a gilded room's interreflection gain (rooms without a probe of their own), from the room's record word
   vec3 gain = ( mkHw & 0x3fffffffu ) != 0u ? mix( vec3( 1.0 ), vec3( float( mkHw & 1023u ), float( ( mkHw >> 10 ) & 1023u ), float( ( mkHw >> 20 ) & 1023u ) ) * ( 1.0 / 256.0 ), mkS ) : vec3( 1.0 );
   if ( mkS > 0.0 ) {
     vec4 ie = mkIntEnv;
     LbN = ie.xyz * gain;
     inRad = ie.w * mkV * LbN; // the room's own surfaces in a reflection (per unit sky irradiance)
+    LbO = ie.xyz;
   }
+  // gate-env-render: in a gilded room without a probe a reflection leaving through an opening sees what the opening shows
+  // (the lit court through the porch: the radiance its diffuse light is made of), not the open sky's dome above it
+  bool goldRoom = ( mkHw & 0x3fffffffu ) != 0u && mkS > 0.0;
   // the probe loop is compiled only where probes exist (MK_PROBES: medium+); probes are sorted interior first, so once
   // their weight has used up the fragment nothing further is read
   #ifdef MK_PROBES
@@ -483,6 +505,16 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
       // (render-audio-3: the square root of the ratio through the great gate alone, ≤ 2.5 — the gold walls spread its
       // light; fitted to captures moved along the axis) — for the share of the probe's light that came in as skylight
       float vr = vRef > 0.0 ? mix( 1.0, min( mq > 0.5 ? sqrt( mkVm / vRef ) : mkV / vRef, 1.0 + 0.5 * ( cg - 16.0 * mq ) ), shareQ * ( 1.0 / 255.0 ) ) : 1.0;
+      // gate-env-render-r2: …but seen (not captured), a main-opening room's irradiance falls off by the gate's ratio to the
+      // power 0.85, as its gold's reflections do (below). The √ fit was taken when the gold walls, the room's main
+      // secondary source, reflected the room evenly lit; with their reflections falling off, the light they pass on does
+      // too. It matters for the gold itself: the metal treatment (materials patch.js MK_METAL) soft-caps a metal's
+      // reflection at 10 × this ambient, so with the √ law the Kodesh's gold kept the gentler falloff whatever its own
+      // reflections did (walls −0.9 → −1.1 stops near → far end, the floor −0.5 → −0.7, d3 high, linear). The parochet's
+      // end takes 0.33 of the probe's light (was 0.53): ≈ 2.9 stops under the gate's capped 2.5. The capture keeps √
+      // (the 0.85 there would compound bounce after bounce)
+      bool mainSeen = mq > 0.5 && ( mkFlags & MK_F_CAPTURE ) == 0;
+      if ( mainSeen && vRef > 0.0 ) vr = mix( 1.0, min( pow( max( mkVm, 1e-6 ) / vRef, 0.85 ), 1.0 + 0.5 * ( cg - 16.0 * mq ) ), shareQ * ( 1.0 / 255.0 ) );
       irr *= vr;
       float eR = roughness * sqrt( kr );
       vec3 rad = sc * mkTextureCubeUV( envMap, Rp, min( eR, 1.0 ), slice );
@@ -492,7 +524,19 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
       // (Beit HaChalifot, V a fifth of the probe's) the stone's diffuse light was scaled down to the wing's but its rough
       // reflections kept the bright mid-porch's: a third of the niche wall's brightness, mottled by its pecked bosses into a
       // "wet" band. The gold leaves, the vine and the nivreshet (roughness < 0.35) keep their reflections as they were.
-      rad *= mix( 1.0, vr, smoothstep( 0.35, 0.8, roughness ) );
+      // gate-env-render: in a room lit through its main opening (the Kodesh: mode 'main') the gold's reflections are all
+      // of its light (a metal has no diffuse term), and its hammered sheets (roughness 0.25–0.4) gather the gate's light
+      // over lobes far wider than the gate seen from the room's far end: they fall off along the room with it, from
+      // roughness 0.06 — the walls and floor read evenly lit end to end when only the parochet's wool did. Not in the
+      // probe's own capture (bit MK_F_CAPTURE): the capture is the room seen from its centre, and the factor applied
+      // there as well would compound bounce after bounce
+      // …and with the gate's own ratio to the power 0.85, not its square root: the irradiance fit above is the room as the
+      // probe's blurred, self-fed bounces carry it, which spreads the gate's light further than a gold room's images of the
+      // gate do (its mirror images in the side walls, floor and ceiling at R ≈ 0.85 a bounce: ≈ 3.5 stops from 3 m to 19 m
+      // from the gate); 0.85 puts the parochet's end ≈ 3 stops under the gate's (QA gate: 2.5–3 stops), the cap as above
+      bool mainRad = mainSeen;
+      float vrr = vr; // the main-opening room's law above (seen), or the irradiance's own
+      rad *= mix( 1.0, vrr, mainRad ? smoothstep( 0.06, 0.3, roughness ) : smoothstep( 0.35, 0.8, roughness ) );
       // …and past the probe's widest blur (eR > 1) the lobe's footprint is larger than any lobe the probe holds (a surface
       // far from the reflected one, which the probe sees close): such a lobe tends to the cosine-weighted radiance about
       // the normal, blended toward it by 1 − 1 / eR²
@@ -536,7 +580,22 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
     vec3 irr = mkTextureCubeUV( envMap, envMapRotation * Nw, 1.0, 0.0 );
     vec3 rad = mkTextureCubeUV( envMap, envMapRotation * Rw, roughness, 0.0 );
     mkIrr += g * mkV * PI * mix( irr, LbN, mkS );
-    mkRad += g * ( hit * rad + ( 1.0 - hit ) * mix( rad, inRad, mkS ) );
+    // gate-env-render(-r2): …and the gilded room itself is no even surround. A reflection that stays in the room sees the
+    // surface its ray meets, lit as THAT surface is: its sky visibility through the main opening where the ray leaves the
+    // room's box, plus a bounce floor, 0.4 of this fragment's ⚙ (most of a gold room's light is its interreflection, which
+    // spreads more evenly than the gate's own and also lights the gate's wall, which sees the gate edge-on). A facet turned
+    // toward the gate mirrors the bright walls by it, one turned away the dim far end; the floor looking west mirrors the
+    // far end wherever it lies, looking east the bright gate in its darker wall. Rough lobes (≥ 0.5) keep the local value. (r1 had ×0.5 … ×2 by the ray's angle to the gate: the relief's
+    // facets stayed ±5 grey levels apart and the room read as matte card.)
+    if ( goldRoom && mkVm > 0.0 ) {
+      vec3 inv = 1.0 / ( sign( Rw ) * max( abs( Rw ), vec3( 1e-5 ) ) );
+      vec3 tf = max( ( mkBoxHi - Pw ) * inv, ( mkBoxLo - Pw ) * inv );
+      float tH = max( min( tf.x, min( tf.y, tf.z ) ), 0.0 );
+      float fc = mod( mkMainAp.z, 8.0 );
+      float vH = mkAperture( mkDm - Rw * tH, mkMainAp.xy, mkApFrame( fc ), ( mkMainAp.z - fc ) * 0.125 ) + 0.4 * mkV;
+      inRad *= mix( clamp( vH / max( mkV, 1e-4 ), 0.0, 4.0 ), 1.0, smoothstep( 0.5, 1.0, roughness ) );
+    }
+    mkRad += g * ( hit * ( goldRoom ? mix( rad, LbO, mkS ) : rad ) + ( 1.0 - hit ) * mix( rad, inRad, mkS ) );
   }
 }
 #endif

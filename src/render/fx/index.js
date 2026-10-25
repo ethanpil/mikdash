@@ -53,6 +53,28 @@ const VIEW_PERIOD = 0.2; // s between samplings
 const VIEW_FAR = 600;    // m
 const VIEW_WEIGHT = 0.6; // share of the view the sampled surfaces stand for (as the camera term's 0.6)
 const SAME_ROOM_VIEW = 0.5; // how much of the excess of the own room's firelit view over env's room meter adapts the eye
+// gate-env-render: looking from the dark into a firelit court through its gate (the opening frame: the Mount before dawn,
+// the Ezrat Nashim's east gate showing the Heichal's facade lit by the altar at ≈ 50 lx, 13 stops over the moonlit wall
+// round it), the eye adapts LOCALLY to what the opening shows. The open fires whose light does not reach the viewer (the
+// court's walls hide them: camK) take an extra gain that holds the firelit surfaces seen through a court's open gate to
+// GATE_OVER × env's adaptation level — ≈ 2 stops over the wall, not clipped — while the fires that do light the viewer
+// (the Mount's watch torches) keep the eye's own adaptation. Sampled by rays from the eye through a grid on the opening
+// (GATE_GRID, fractions of its half width and of its height)
+const GATE_OVER = 5;
+const GATE_GRID = [[-0.55, 0.3], [0, 0.3], [0.55, 0.3], [-0.55, 0.6], [0, 0.6], [0.55, 0.6], [-0.55, 0.88], [0, 0.88], [0.55, 0.88]];
+const GATE_FAR = 320; // m: gates farther than this are not sampled
+// gate-env-render: the light the Ezrat Nashim's east gate throws onto the chel steps and the pavement before it (fx/materials
+// SPILL_FS): the gate, the steps whose treads receive it, how far out onto the pavement and to either side its patch runs
+// (amot), the firelit court's albedo as the measuring rays see it, and the flicker of the torches' share of its light
+const SPILL = { gate: 'en.gate.east', steps: 'mount.chel.steps', out: 45, side: 30, albedo: 0.5, far: 400, torch: 0.22, fire: 0.06 };
+// …and its own local adaptation: from the pavement 20 m out the opening shows the facade, lit at ≈ 50 lx, and lays ≈ 0.2 lx on
+// the stone (≈ 10 × the moonlight); near the steps it shows the sky above the facade and little else. The patch is soft-capped
+// at SPILL_OVER × env's adaptation level (the eye adapts to a lit patch as to the gate, GATE_OVER)
+const SPILL_OVER = 3;
+// the opening's luminance table: ray slopes SPILL_S0 + k × SPILL_DS (k 0 … 7, rising inward), rays at these heights of the
+// opening (fractions), re-measured every SPILL_PERIOD s (the court's light is static; the flicker is applied analytically)
+const SPILL_S0 = -0.1, SPILL_DS = 0.15, SPILL_ROWS = [0.3, 0.7], SPILL_PERIOD = 0.5;
+const TORCH = new Set(['torch']);
 
 const TIER_INDEX = { low: 0, medium: 1, high: 2, ultra: 3 };
 // the open fires: heat shimmer over them (post tiers; render/post-effects.js HeatHazeEffect, the plumes in view, by screen
@@ -93,11 +115,12 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   let ti = TIER_INDEX[tier] ?? 1;
   let low = ti === 0;
   const mats = createFxMaterials({ soft, low, noise });
-  const flames = new InstanceBatch('flames', { iPos: 3, iSize: 2, iParams: 4, iLean: 4, iCore: 1 }, 1024);
+  const flames = new InstanceBatch('flames', { iPos: 3, iSize: 2, iParams: 4, iLean: 4, iCore: 1, iLayer: 2 }, 1024);
   const halos = new InstanceBatch('halos', { iPos: 3, iParams: 4, iColor: 3 }, 512, { x0: -1, x1: 1, y0: -1, y1: 1 });
   const embers = new InstanceBatch('embers', { iPos: 3, iParams: 4, iParams2: 2 }, 4096);
   const beds = new InstanceBatch('beds', { iPos: 3, iParams: 4, iChar: 2 }, 512, 'box');
   const smoke = new InstanceBatch('smoke', { iPos: 3, iCol: 4, iPuff: 4, iGlow: 3, iMisc: 2 }, 4096, { x0: -1, x1: 1, y0: -1, y1: 1 });
+  const spills = new InstanceBatch('spill', { iRect: 4, iY: 1 }, 32);
   // draw order: the coal-bed decal (it chars and lights the scene's own surfaces), smoke (alpha), additive glow, flames,
   // embers on top
   scene.add(beds.makeMesh(mats.bed));
@@ -105,6 +128,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   scene.add(halos.makeMesh(mats.halo));
   scene.add(flames.makeMesh(mats.flame));
   scene.add(embers.makeMesh(mats.ember));
+  scene.add(spills.makeMesh(mats.spill));
+  spills.mesh.renderOrder = -1;
   beds.mesh.renderOrder = 0; smoke.mesh.renderOrder = 1; halos.mesh.renderOrder = 2; flames.mesh.renderOrder = 3; embers.mesh.renderOrder = 4;
   // render-env-2-fix: the nivreshet's sun glint (fx/glint.js)
   const glint = createGlint(ctx, mats.glint);
@@ -121,7 +146,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   let haloScale = low ? 0.3 : 0.15;
   let adaptOn = true;
   let logAdapt = 0;
-  let viewClock = 1e9, viewLaf = 0, viewLafSame = 0;
+  let viewClock = 1e9, viewLaf = 0, viewLafSame = 0, gateLaf = 0, logGate = 0, gateClock = 1e9;
   const _vl = { same: 0 };
   let snap = true;             // first frame / time jump: no easing
 
@@ -146,15 +171,24 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     // card over the fuel's centre is the widest and tallest, the rest stand on a small ring round it at their own phase
     const nC = P.cards[ti];
     f.tongues = [];
+    // gate-env-render: a pyre's cards are LAYERS (P.layers, presets.js): the envelope over the fuel's centre first, the body
+    // tongues on their ring, the hot core last (drawn over them); each its own size, scroll speed, temperature and opacity
+    const lay = P.layers && nC >= 3 ? P.layers : null;
     for (let i = 0; i < nC; i++) {
-      const outer = i > 0;
+      const role = !lay ? (i > 0 ? 'body' : 'centre') : i === 0 ? 'envelope' : i === nC - 1 ? 'core' : 'body';
+      const L = lay ? lay[role] || lay.body : null;
+      const outer = role === 'body';
       const a = i * 2.39996 + rnd() * 0.8;
       const r = outer ? P.ringR * size * (0.75 + 0.5 * rnd()) : 0;
       const k = outer ? 0 : 1;
-      const h = size * (P.cardH[0] + (P.cardH[1] - P.cardH[0]) * k) * (0.9 + 0.2 * rnd());
-      const w = size * (P.cardW[0] + (P.cardW[1] - P.cardW[0]) * k) * (0.9 + 0.2 * rnd());
+      const h = size * (P.cardH[0] + (P.cardH[1] - P.cardH[0]) * k) * (0.9 + 0.2 * rnd()) * (L?.h ?? 1);
+      const w = size * (P.cardW[0] + (P.cardW[1] - P.cardW[0]) * k) * (0.9 + 0.2 * rnd()) * (L?.w ?? 1);
       const slot = flames.alloc();
-      f.tongues.push({ ox: Math.cos(a) * r, oz: Math.sin(a) * r, w, h, seed: rnd() * 10, slot, speed: P.speed * (0.85 + 0.3 * rnd()), turb: P.turb * (0.85 + 0.3 * rnd()) });
+      f.tongues.push({
+        ox: Math.cos(a) * r, oz: Math.sin(a) * r, w, h, seed: rnd() * 10, slot,
+        speed: P.speed * (0.85 + 0.3 * rnd()) * (L?.speed ?? 1), turb: P.turb * (0.85 + 0.3 * rnd()) * (L?.turb ?? 1),
+        tBoost: L?.t ?? 0, occ: L?.occ ?? 1, core: (P.core ?? 1.4) * (L?.core ?? 1),
+      });
     }
     f.halo = halos.alloc();
     f.bed = P.bed ? beds.alloc() : null;
@@ -193,22 +227,24 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       flames.set(t.slot, 'iPos', f.pos.x + t.ox, f.pos.y, f.pos.z + t.oz);
       flames.set(t.slot, 'iSize', t.w, t.h);
       flames.set(t.slot, 'iParams', t.seed, inten, t.turb, t.speed);
-      flames.set(t.slot, 'iLean', L.x, L.y, bright, f.L);
-      flames.set(t.slot, 'iCore', f.preset.core ?? 1.4);
+      flames.set(t.slot, 'iLean', L.x, L.y, bright, f.L * (f.gain ?? 1));
+      flames.set(t.slot, 'iCore', t.core);
+      flames.set(t.slot, 'iLayer', t.tBoost, t.occ);
     }
     const hp = f.preset.halo;
     halos.set(f.halo, 'iPos', f.pos.x, f.pos.y + f.size * 0.45, f.pos.z);
-    halos.set(f.halo, 'iParams', hp.radius * f.size, hp.frac * f.L * f.cur * haloScale, f.seedInt % 97, 0);
+    const gk = f.gain ?? 1;
+    halos.set(f.halo, 'iParams', hp.radius * f.size, hp.frac * f.L * f.cur * haloScale * gk, f.seedInt % 97, 0);
     halos.set(f.halo, 'iColor', f.color.r, f.color.g, f.color.b);
     const P = f.preset;
     if (f.bed) {
       beds.set(f.bed, 'iPos', f.pos.x, f.pos.y, f.pos.z);
-      beds.set(f.bed, 'iParams', Math.max(0.05, P.spread * f.size * P.bed), (P.Lbed || 0) * f.cur, (f.seedInt % 89) / 13, (P.bedH ?? 0.42) * f.size);
+      beds.set(f.bed, 'iParams', Math.max(0.05, P.spread * f.size * P.bed), (P.Lbed || 0) * f.cur * gk, (f.seedInt % 89) / 13, (P.bedH ?? 0.42) * f.size);
       beds.set(f.bed, 'iChar', P.charR ?? 1, P.ash ?? 0);
     }
     for (const e of f.emberSlots) {
       embers.set(e.slot, 'iPos', f.pos.x, f.pos.y + f.size * 0.15, f.pos.z);
-      embers.set(e.slot, 'iParams', e.seed, P.spread * f.size * 0.8 + 0.02, P.emberRise * f.size, (P.Lember || 0) * f.cur);
+      embers.set(e.slot, 'iParams', e.seed, P.spread * f.size * 0.8 + 0.02, P.emberRise * f.size, (P.Lember || 0) * f.cur * gk);
       embers.set(e.slot, 'iParams2', e.rate, P.emberSize * Math.sqrt(f.size / P.refSize));
     }
   }
@@ -416,6 +452,9 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       // walls from the dark Mount, where the camera itself (behind the walls) receives no firelight at all
       viewClock += dt;
       if (snap || env.adaptSnap || viewClock > VIEW_PERIOD) { viewClock = 0; viewLaf = viewFireLuminance(_vl); viewLafSame = _vl.same; }
+      // gate-env-render: the gates' rays once a jump (not in each of env's snap frames) and every VIEW_PERIOD
+      gateClock += dt;
+      if (snap || gateClock > VIEW_PERIOD) { gateClock = 0; gateLaf = gateFireLuminance(); markHidden(); }
       Laf = Math.max(Laf, VIEW_WEIGHT * viewLaf);
       // qa-r1-fix-env-render: …and, centre-weighted, to half of what the viewer's own room's fires light in view beyond
       // env's whole-room meter (La): looking at the Moked's hearth from beside it, the floor round it was 4 stops over
@@ -423,11 +462,20 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       Laf = Math.max(Laf, SAME_ROOM_VIEW * (VIEW_WEIGHT * viewLafSame - La));
       target = ADAPT_SLOPE * Math.log(La / (La + Laf));
     }
+    // gate-env-render: the hidden fires' extra gain (GATE_OVER above), on top of the eye's adaptation
+    const gateTarget = adaptOn && gateLaf > 0 && Number.isFinite(La) && La > 0 ? Math.min(0, Math.log((GATE_OVER * La) / (gateLaf * Math.exp(target)))) : 0;
     // real time (τ ADAPT_TAU) plus sim time (τ 0.5 sim-min, as env's meter): keeps up in a 600× time-lapse
     const simDt = Math.abs(ctx.time?.frameDelta || 0);
     // snaps with env's exposure (boot, clock jumps), else eases
     const hard = snap || !!env.adaptSnap;
-    logAdapt += (target - logAdapt) * (hard ? 1 : 1 - Math.exp(-(dt / ADAPT_TAU + simDt / 0.5)));
+    const adaptK = hard ? 1 : 1 - Math.exp(-(dt / ADAPT_TAU + simDt / 0.5));
+    logAdapt += (target - logAdapt) * adaptK;
+    logGate += (gateTarget - logGate) * adaptK;
+    const gateGain = Math.exp(logGate);
+    for (const f of fires.values()) {
+      const g = f.hidden ? gateGain : 1;
+      if (Math.abs(g - (f.gain ?? 1)) > 2e-3 * Math.max(g, 1e-3)) { f.gain = g; writeFire(f); }
+    }
     const P = (Number.isFinite(env.preExposure) && env.preExposure > 0 ? env.preExposure : FALLBACK_P) * fireScale * Math.exp(logAdapt);
     sh.uP.value = P;
     sh.uFireGain.value = Math.min(1, (FIRE_CORE_HEADROOM * sh.uCap.value) / (FIRE_REF_CORE * P));
@@ -436,7 +484,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     for (const col of columns) {
       const f = col.fire;
       if (f) {
-        col.glow.copy(f.color).multiplyScalar(f.glowCandela * f.cur);
+        col.glow.copy(f.color).multiplyScalar(f.glowCandela * f.cur * (f.gain ?? 1));
         writeColumn(col);
       }
     }
@@ -453,7 +501,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const size = low ? ctx.renderer.getDrawingBufferSize(_sz) : sh.uResolution.value;
     if (size.y >= 16 && Number.isFinite(env.preExposure)) glint.update(dt, env.preExposure, low, size);
     else glint.mesh.visible = false;
-    flames.flush(); halos.flush(); embers.flush(); smoke.flush(); beds.flush();
+    updateSpill(dt);
+    flames.flush(); halos.flush(); embers.flush(); smoke.flush(); beds.flush(); spills.flush();
     updateHaze();
     snap = false;
   }
@@ -529,6 +578,181 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     }
     if (out) out.same = (ADAPT_ALBEDO * same) / Math.PI;
     return (ADAPT_ALBEDO * sum) / Math.PI;
+  }
+
+  /**
+   * gate-env-render: the firelit luminance (cd/m², physical, ADAPT_ALBEDO) a court's open gate shows the eye: rays from the
+   * camera through a grid on each gate opening in front of it (site elements en.gate.* / azarah.gate.* of kind 'gate');
+   * a ray that meets something before the opening's plane (a closed leaf, a wall) is not through it. Per gate the mean of
+   * the rays through it and their brightest, averaged; the brightest gate counts.
+   */
+  let gates = null;
+  const _gc = new Vector3(), _gd = new Vector3(), _gp = new Vector3();
+  function gateFireLuminance() {
+    const ph = ctx.physics, cam = ctx.camera;
+    if (typeof ph?.raycast !== 'function' || !fires.size) return 0;
+    if (!gates) {
+      gates = [];
+      for (const [id, e] of Object.entries(ctx.site?.elements || {})) {
+        if (e?.kind !== 'gate' || !e.box || !/^(en|azarah)\.gate\.[a-z-]+$/.test(id)) continue;
+        const { min, max } = e.box;
+        const dx = max[0] - min[0], dy = max[1] - min[1];
+        const lo = m2w(min[0], min[1], min[2]), hi = m2w(max[0], max[1], max[2]);
+        // the opening's plane is across the wall's thin dimension; u runs along the wall
+        gates.push({ id, c: lo.clone().add(hi).multiplyScalar(0.5), y0: lo.y, h: hi.y - lo.y,
+          u: dx < dy ? new Vector3(0, 0, 1) : new Vector3(1, 0, 0), hw: (dx < dy ? Math.abs(hi.z - lo.z) : Math.abs(hi.x - lo.x)) / 2 });
+      }
+    }
+    cam.getWorldDirection(_gd);
+    let best = 0;
+    for (const g of gates) {
+      _gc.copy(g.c).sub(cam.position);
+      const dist = _gc.length();
+      if (dist > GATE_FAR || dist < 1 || _gc.dot(_gd) < 0.3 * dist) continue;
+      let n = 0, sum = 0, max = 0;
+      for (const [fu, fv] of GATE_GRID) {
+        _gp.copy(g.c).addScaledVector(g.u, fu * g.hw);
+        _gp.y = g.y0 + fv * g.h;
+        _gc.copy(_gp).sub(cam.position);
+        const d = _gc.length();
+        _gc.divideScalar(d);
+        let hit = null;
+        try { hit = ph.raycast(cam.position, _gc, d + 400); } catch { hit = null; }
+        if (!hit || hit.distance < d - 0.5) continue; // the sky beyond (a miss) or a solid before the opening
+        n++;
+        _vp.copy(hit.point).addScaledVector(_gc, -0.08);
+        const L = (ADAPT_ALBEDO * illuminanceAt(_vp)) / Math.PI;
+        sum += L; if (L > max) max = L;
+      }
+      if (n) best = Math.max(best, 0.5 * (sum / n + max));
+    }
+    return best;
+  }
+
+  /**
+   * gate-env-render: which open fires are hidden from the viewer — their light does not reach the eye (the courts' walls,
+   * or another room's walls, stand between): camK, the same transport factor illuminanceAt uses
+   */
+  const _hi = { V: 1, vol: null, s: 0 };
+  function markHidden() {
+    const I = ctx.env?.interiors, at = I?.at, cam = ctx.camera.position;
+    const ins = at ? at(cam, _hi) : null;
+    for (const f of fires.values()) {
+      if (!OPEN_FIRES.has(f.kind) || f.follow || !ins) { f.hidden = false; continue; }
+      if (!f.ins || f.insAt !== f.lightPos.x + f.lightPos.y + f.lightPos.z) {
+        // as illuminanceAt fills them (it skips the fires that light nothing: light:false piles, whose smoke still glows)
+        f.ins = at(f.lightPos, f.ins || { V: 1, vol: null, s: 0 });
+        f.insAt = f.lightPos.x + f.lightPos.y + f.lightPos.z;
+        f.rec = I?.fireRecord ? I.fireRecord(f.lightPos) : -1;
+        f.recR = I?.fireRadius ? I.fireRadius(f.size) : 0.3;
+      }
+      let k = 1;
+      if (f.ins) {
+        if (f.ins.vol !== ins.vol) k = f.ins.V * (ins.Vap ?? ins.V);
+        else if (!ins.vol && f.rec >= 0) k = I.fireVisibility(f.rec, f.lightPos, cam, f.recR);
+      }
+      f.camK = k;
+      f.hidden = k < 0.1;
+    }
+  }
+
+  // ------------------------------------------------------------------ the gate's spill (gate-env-render)
+  // built once from the site: the gate's outer face (its threshold's height, centre, width, height, the passage's depth) and
+  // horizontal patches on the chel steps' treads and on the pavement before them; the radiance the opening shows is
+  // measured every VIEW_PERIOD from a point before the steps (rays through GATE_GRID), the torches' share of it flickering
+  let spillDef = null, spillClock = 1e9, spillT = 0;
+  const spillTab = new Float32Array(8), spillTorchTab = new Float32Array(8), spillColor = new Color(1, 1, 1);
+  const _sc = new Color(), _sr = new Vector3(), _sd = new Vector3(), _up = new Vector3(0, 1, 0);
+  function buildSpill() {
+    spillDef = false;
+    const g = ctx.elOpt?.(SPILL.gate)?.box, st = ctx.elOpt?.(SPILL.steps);
+    if (!g || !st?.box) return;
+    const A = ctx.units?.AMAH || 0.48;
+    const sp = st.params || {}, n = sp.steps || 0, rise = sp.rise || 0, tread = sp.tread || 0;
+    // an east-facing gate (the steps descend eastward: ascent heading 270) — the only case the opening frame needs
+    if (!(n > 0 && rise > 0 && tread > 0) || Math.abs((sp.ascentHeading ?? 270) - 270) > 1) return;
+    const xo = g.max[0], yc = (g.min[1] + g.max[1]) / 2;
+    spillDef = {
+      C: m2w(xo, yc, g.min[2]), hw: ((g.max[1] - g.min[1]) / 2) * A, H: (g.max[2] - g.min[2]) * A, D: (g.max[0] - g.min[0]) * A,
+      U: new Vector3(0, 0, -1), N: new Vector3(1, 0, 0),
+    };
+    const rect = (x0, y0, x1, y1, z) => {
+      const s = spills.alloc();
+      if (!s) return;
+      const a = m2w(x0, y0, z), b = m2w(x1, y1, z);
+      spills.set(s, 'iRect', Math.min(a.x, b.x), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.z, b.z));
+      spills.set(s, 'iY', a.y);
+    };
+    // the treads (step i's top at i × rise, from the head of the flight eastward), then the pavement at the foot
+    const head = st.box.min[0], foot = st.box.max[0];
+    for (let i = n; i >= 1; i--) rect(head + (n - i) * tread, st.box.min[1], head + (n - i + 1) * tread, st.box.max[1], st.box.min[2] + i * rise);
+    rect(foot, yc - SPILL.side, foot + SPILL.out, yc + SPILL.side, st.box.min[2]);
+    const u = mats.spill.uniforms;
+    u.uGateC.value.set(spillDef.C.x, spillDef.C.y, spillDef.C.z, spillDef.hw);
+    u.uGateU.value.set(spillDef.U.x, spillDef.U.y, spillDef.U.z, spillDef.D);
+    u.uGateN.value.set(spillDef.N.x, spillDef.N.y, spillDef.N.z, spillDef.H);
+  }
+  /**
+   * the firelit luminance (physical cd/m²) the gate's opening shows along rays of slope SPILL_S0 + k × SPILL_DS rising
+   * inward (k 0 … 7): rays from just outside its face at SPILL_ROWS heights; a miss is the sky (no firelight). Torches apart
+   */
+  function measureSpill() {
+    const ph = ctx.physics, d = spillDef;
+    spillTab.fill(0); spillTorchTab.fill(0);
+    if (typeof ph?.raycast !== 'function') return;
+    const opts = { color: _sc }, topts = { kinds: TORCH };
+    let cr = 0, cg = 0, cb = 0, cw = 0;
+    for (let k = 0; k < 8; k++) {
+      const sl = SPILL_S0 + k * SPILL_DS;
+      _sd.copy(d.N).negate().addScaledVector(_up, sl).normalize();
+      for (const fv of SPILL_ROWS) {
+        _sr.copy(d.C).addScaledVector(d.N, 0.3);
+        _sr.y += fv * d.H;
+        let hit = null;
+        try { hit = ph.raycast(_sr, _sd, 900); } catch { hit = null; }
+        if (!hit) continue;
+        _vp.copy(hit.point).addScaledVector(_sd, -0.08);
+        const kk = SPILL.albedo / Math.PI / SPILL_ROWS.length;
+        const E = illuminanceAt(_vp, opts);
+        spillTab[k] += kk * E;
+        cr += E * _sc.r; cg += E * _sc.g; cb += E * _sc.b; cw += E;
+        spillTorchTab[k] += kk * illuminanceAt(_vp, topts);
+      }
+    }
+    for (let k = 0; k < 8; k++) spillTab[k] = Math.max(0, spillTab[k] - spillTorchTab[k]);
+    if (cw > 0) spillColor.setRGB(cr / cw, cg / cw, cb / cw); else spillColor.setRGB(1, 1, 1);
+    const l = 0.2126 * spillColor.r + 0.7152 * spillColor.g + 0.0722 * spillColor.b;
+    if (l > 0) spillColor.multiplyScalar(1 / l);
+  }
+  function updateSpill(dt) {
+    if (spillDef === null) buildSpill();
+    const m = spills.mesh;
+    if (!spillDef) { m.visible = false; return; }
+    spillT += dt;
+    // by day the firelit court adds nothing the Sun has not already lit a thousand times brighter
+    const far = sunAltitude(ctx) > 2 || ctx.camera.position.distanceTo(spillDef.C) > SPILL.far;
+    spillClock += dt;
+    // after a jump: the next frame (the jump's own frame carries the sim's and the gates' work)
+    if (snap) spillClock = SPILL_PERIOD;
+    else if (!far && spillClock > SPILL_PERIOD) { spillClock = 0; measureSpill(); }
+    // the torches' flame-scale flicker, the fires' slower breathing (deterministic in fx's clock)
+    const t = spillT;
+    const ft = 1 + SPILL.torch * (0.55 * Math.sin(t * 9.1) + 0.3 * Math.sin(t * 15.7 + 1.3) + 0.15 * Math.sin(t * 23.3 + 2.1));
+    const ff = 1 + SPILL.fire * (0.6 * Math.sin(t * 3.7 + 0.4) + 0.4 * Math.sin(t * 6.3 + 2.2));
+    const u = mats.spill.uniforms;
+    const T = (k) => spillTab[k] * ff + spillTorchTab[k] * ft;
+    u.uSpillT0.value.set(T(0), T(1), T(2), T(3));
+    u.uSpillT1.value.set(T(4), T(5), T(6), T(7));
+    u.uSpillS.value.set(SPILL_S0, SPILL_DS);
+    u.uSpillCol.value.set(spillColor.r, spillColor.g, spillColor.b);
+    // the patch's own local adaptation (SPILL_OVER × env's level, scene units)
+    const La = ctx.env?.luminance, P0 = ctx.env?.preExposure;
+    u.uSpillCap.value = Number.isFinite(La) && Number.isFinite(P0) ? SPILL_OVER * La * P0 : 1e9;
+    u.uSpillRef.value = Number.isFinite(La) && Number.isFinite(P0) ? La * P0 : 0;
+    spills.flush();
+    let any = 0;
+    for (let k = 0; k < 8; k++) any += spillTab[k] + spillTorchTab[k];
+    m.visible = !far && spills.count > 0 && any > 1e-9;
   }
 
   /**
@@ -666,13 +890,14 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
         fires: fires.size, columns: columns.size, lights: lights.active ?? 0, maxLights: lights.max,
         shadowLights: lights.pools[0]?.lights.length ?? 0,
         flames: flames.count, embers: embers.count, puffs: smoke.count, P: +mats.shared.uP.value.toPrecision(3),
-        adaptation: +Math.exp(logAdapt).toPrecision(3), viewLaf: +viewLaf.toPrecision(3), viewLafSame: +viewLafSame.toPrecision(3),
+        spill: spills.mesh.visible ? [...spillTab].map((v, k) => +(v + spillTorchTab[k]).toPrecision(3)) : 0,
+        adaptation: +Math.exp(logAdapt).toPrecision(3), viewLaf: +viewLaf.toPrecision(3), viewLafSame: +viewLafSame.toPrecision(3), gateLaf: +gateLaf.toPrecision(3), gateGain: +Math.exp(logGate).toPrecision(3),
         glint: glint.mesh.visible ? { I: +glint.stats.I.toPrecision(3), sparks: glint.stats.n, vis: +glint.stats.vis.toFixed(2), L0: +glint.stats.L0.toPrecision(3) } : null,
       };
     },
     dispose() {
-      for (const b of [flames, halos, embers, smoke, beds]) b.dispose();
-      for (const m of [mats.flame, mats.halo, mats.ember, mats.smoke, mats.bed, mats.glint]) m.dispose();
+      for (const b of [flames, halos, embers, smoke, beds, spills]) b.dispose();
+      for (const m of [mats.flame, mats.halo, mats.ember, mats.smoke, mats.bed, mats.glint, mats.spill]) m.dispose();
       glint.dispose();
       lights.dispose();
     },

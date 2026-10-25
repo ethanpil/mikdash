@@ -15,7 +15,7 @@ import { buildAnimalGeometry, halterPoint } from './animals.js';
 import { gripOffset } from './clips.js';
 import { PROPS, HELD_VESSELS, buildPropGeometry, propAttach, propTip } from './props.js';
 import { createPeopleMaterial, createPeopleDepthMaterials, HUMAN_RIG_ID } from './material.js';
-import { ContactShadows, poseFootprint } from './contact.js';
+import { ContactShadows, poseFootprint, hoofPrints } from './contact.js';
 import { compileScene, rendersOffscreen } from '../render/warmup.js';
 import { CLIP_ALIASES, CLIP_VARIANTS } from './clips.js';
 import { m2w, headingToYaw, AMAH } from '../core/units.js';
@@ -25,6 +25,10 @@ const LOD0_PX = [300, 220, 170, 130];
 const LOD1_PX = [110, 90, 72, 56];
 const LOD3_PX = [30, 24, 18, 14];   // smaller than this on screen → LOD3 even within the budget
 const MAX_HERO = [8, 14, 24, 48];
+// gate-people: an animal is a hero (LOD0: head with muzzle, ears, horns and eyes, hock and pastern, the long coat) out to
+// this distance (m, at a 720-row view; scaled with the view's focal length) — a few at most in any view (2–6 at an
+// offering spot), so on high the view spots' 8–12 m see the full model (it was ≈ 5 m)
+const ANIMAL_LOD0_M = [6, 8.5, 12.5, 16];
 const FAR_MULT = 3;                 // beyond maxFigures: up to FAR_MULT × maxFigures more, as LOD3
 // qa-r1 PPL-5: every dither fade is TEMPORAL — a figure's alpha moves toward 0 or 1 over FADE_S of real frame time and
 // snaps on 'time:jump', on pause / resume and in stills — so no figure is ever left half dithered (a screen-door ghost)
@@ -34,6 +38,10 @@ const FADE_S = 0.25;
 const FAR_BAND = 0.06;              // the far allowance's last 6 % fades out (hysteresis: it fades in below 12 %)
 const WALK_SPEED = 1.25, RUN_SPEED = 3.6;
 const FLOW_EDGE_M = 0.35;           // flowing crowds fade out this close to the region edge, and in this far past it
+// gate-people-r2: a figure the camera comes close to dithers out (temporal, FADE_S, like every fade) — the near plane cut
+// a passer-by's head open and showed its inside. Gap = the camera's distance from the body (a capsule of NEAR_R about the
+// figure's up axis from 25 % of its height to the crown); out below NEAR_OUT, back in beyond NEAR_IN (hysteresis)
+const NEAR_R = 0.24, NEAR_OUT = 0.55, NEAR_IN = 0.75;
 const OFFDUTY_POSES = new Set(['sleep', 'lie']);
 const OFFDUTY_ARCH = 'israelite';   // a kohen's own clothes (Tamid 1:1): ordinary tunic + mantle, head bare
 const BATH_POSES = new Set(['bathe']);
@@ -118,7 +126,9 @@ const _e2 = new Float32Array(16);
 const PROP_BATCH_CAP = [14, 22, 34, 56];
 // contact shadows (contact.js) on the tiers without shadow maps for every figure: low (none) and medium (only LOD0/1
 // cast); strength and the distance over which they fade out (m), by detail tier
-const CONTACT = [{ k: 0.7, f0: 35, f1: 60 }, { k: 0.38, f0: 45, f1: 75 }];
+// gate-people: and on every tier a small one under each hoof of a quadruped (hoof: its strength) — the shadow maps of high
+// and ultra are too coarse at 8–12 m to close the gap under a hoof, and the animals floated (k 0: no body blob there)
+const CONTACT = [{ k: 0.7, hoof: 0.8, f0: 35, f1: 60 }, { k: 0.38, hoof: 0.75, f0: 45, f1: 75 }, { k: 0, hoof: 0.7, f0: 25, f1: 40 }, { k: 0, hoof: 0.7, f0: 30, f1: 50 }];
 
 // Material options of a figure batch at `lod` on a tier of `detail` (pattern group FIG | KG | BEAST). perf-1: options
 // that compile to the same program are made equal, so batches share programs (each costs 1.5–5 s to compile on
@@ -247,7 +257,9 @@ class Arch {
     if (!this.geos[lod]) {
       this.geos[lod] = this.isAnimal ? buildAnimalGeometry(this.def, this.rig, lod) : buildHumanGeometry(this.def.recipe, this.rig, lod);
     }
-    const mat = createPeopleMaterial({ atlas: sys.atlas, palette: this.def.palette, ...figureMatOpts(sys.detail, lod, this.isAnimal ? 'BEAST' : this.key === 'kg_gold' ? 'KG' : 'FIG') });
+    const o = figureMatOpts(sys.detail, lod, this.isAnimal ? 'BEAST' : this.key === 'kg_gold' ? 'KG' : 'FIG');
+    const mat = createPeopleMaterial({ atlas: sys.atlas, palette: this.def.palette, ...o });
+    mat.userData.warmKey = JSON.stringify(o); // gate-core (held)
     // heroes (LOD0) cast their shadows through the LOD1 proxy below: the same silhouette at an eighth of the
     // triangles, which matters because every shadow pass (two sun cascades, six faces per torch shadow) draws it
     const b = new Batch(sys, `${this.key}:${lod}`, this.geos[lod], mat, sys.depthFig, {
@@ -307,11 +319,23 @@ class PropVariant {
 }
 
 // --------------------------------------------------------------------------------------------- figures
-function makeTint(R, role, isAnimal) {
+function makeTint(R, role, isAnimal, adef = null) {
   const g = role?.grey || [0, 0.2];
   const skin = isAnimal ? R() : clamp(0.42 + (R() + R() + R() - 1.5) * 0.42, 0, 1);
   const grey = lerp(g[0], g[1], R() ** 1.4);
-  return [skin, grey, Math.floor(R() * 4) + R() * 0.99, Math.floor(R() * 4) + R() * 0.99];
+  const t = [skin, grey, Math.floor(R() * 4) + R() * 0.99, Math.floor(R() * 4) + R() * 0.99];
+  // gate-people: a seeded coat (roles.js ANIMALS coats/pied) — the body colour drawn by weight, the face and legs in the
+  // same colour family (a brown goat has a brown face); a pied coat carries its patch phase in tint.y ≥ 2 (material.js
+  // pPied: white patches in the animal's rest space; tint.y is otherwise unused by the quadrupeds)
+  if (isAnimal && adef?.coats) {
+    const w = adef.coats, u = (t[2] % 1) / 0.99;
+    let i = 0, acc = w[0];
+    while (i < w.length - 1 && u > acc) acc += w[++i];
+    t[2] = i + R() * 0.99;
+    t[3] = i + (t[3] % 1);
+    if (adef.pied === i) t[1] = 2 + R() * 0.99;
+  }
+  return t;
 }
 /** per-figure shape: [face-shape weight −1…1, fullness −0.6…1] (variety without extra draw calls) */
 function makeMorph(R, isAnimal) {
@@ -349,7 +373,7 @@ export class Actor {
     const R = rng(seed);
     const roleDef = ROLES[opts.role] || null;
     this.roleDef = roleDef;
-    this.tint = makeTint(R, roleDef, this.kind === 'animal');
+    this.tint = makeTint(R, roleDef, this.kind === 'animal', arch?.isAnimal ? arch.def : null);
     this._tint0 = this.tint.slice();
     this.garb = roleDef?.garb || null;
     if (this.garb) garbTint(this.tint, this._tint0, this.garb);
@@ -663,6 +687,9 @@ export class Crowd {
     this.farA = new Float32Array(n).fill(1);       // the far-cap fade: alpha, target and the frame it was last drawn
     this.farT = new Uint8Array(n).fill(1);
     this.farF = new Int32Array(n).fill(-9);
+    this.nearA = new Float32Array(n).fill(1);      // the near-camera fade (gate-people-r2): alpha, target, frame last drawn
+    this.nearT = new Uint8Array(n).fill(1);
+    this.nearF = new Int32Array(n).fill(-9);
     this.pointH = new Float32Array(n).fill(NaN);
     this.autoY = new Uint8Array(n); this.hintY = new Float32Array(n).fill(NaN);
     this.arch = new Array(n); this.roleDef = new Array(n); this.role = new Array(n);
@@ -684,7 +711,7 @@ export class Crowd {
       this.x[i] = this.bx[i] = w.x; this.y[i] = w.y; this.z[i] = this.bz[i] = w.z;
       const sc = def.scale || [0.96, 1.04];
       this.sc[i] = lerp(sc[0], sc[1], R());
-      const t = makeTint(R, def, animal);
+      const t = makeTint(R, def, animal, animal ? this.arch[i].def : null);
       this.tint0.set(t, i * 4);
       const [gName, gFlags] = garbArgs(opts.garb);
       if (!animal && (gName || def.garb)) garbTint(t, t.slice(), gName || def.garb);
@@ -836,6 +863,13 @@ export class PeopleSystem {
     this.archs = new Map();
     this.props = new Map();
     this.batches = [];
+    // gate-core: while the boot holds them (people/index.js, main.js) every figure and prop program but the far figures'
+    // (LOD2/3) and the props' LOD1 — keyed by their options, userData.warmKey — is neither issued nor drawn: those figures
+    // draw at a coarser LOD meanwhile, or wait (_batchFor); `wanted` = [key, x, y, z] where a figure in the frustum asked
+    // for a held one (main.js releases a key when such a figure is in sight), `released` the keys the boot let go early
+    this.holdDetail = false;
+    this.wanted = [];
+    this.released = new Set();
     this.actors = new Set();
     this.crowds = new Set();
     this.spawnCount = 0;
@@ -861,8 +895,9 @@ export class PeopleSystem {
     const ct = CONTACT[this.detail | 0];
     this.contactCfg = ct || null;
     this.contact = ct ? new ContactShadows(this.root) : null;
-    if (this.contact) this.contact.mat.uniforms.uStrength.value = ct.k;
+    if (this.contact) this.contact.mat.uniforms.uStrength.value = 1;   // strengths ride in each blob's alpha
     this._fp = new Map();   // pose footprints by baked frame (contact shadows)
+    this._hp = new Map();   // hoof soles by baked frame
   }
   /** the contact-shadow footprint of a figure in the frame pair fa (the nearer frame; scratch frames uncached) */
   _footprint(arch, fa) {
@@ -874,12 +909,42 @@ export class PeopleSystem {
     if (baked) this._fp.set(F, fp);
     return fp;
   }
+  /** a quadruped's hoof soles in the frame pair fa (hoofPrints; cached per baked frame like _footprint) */
+  _hooves(arch, fa) {
+    const F = fa[2] < 0.5 ? fa[0] : fa[1];
+    const baked = F < this.atlas.frames;
+    if (baked && this._hp.has(F)) return this._hp.get(F);
+    const hp = hoofPrints(this.atlas.master, arch.rig, F, baked ? new Float32Array(12) : (this._hpTmp ||= new Float32Array(12)));
+    if (baked) this._hp.set(F, hp);
+    return hp;
+  }
   /** prop material by pattern group ('PROP' vessels/instruments/wood/cloth, 'FLESH' carcass and limbs) and LOD */
   propMat(group, lod) {
     const key = `${group}:${lod ? 1 : 0}`;
-    if (!this.propMats.has(key)) this.propMats.set(key, createPeopleMaterial({ atlas: this.atlas, ...propMatOpts(this.detail, lod, group) }));
+    if (!this.propMats.has(key)) {
+      const o = propMatOpts(this.detail, lod, group);
+      const m = createPeopleMaterial({ atlas: this.atlas, ...o });
+      m.userData.warmKey = JSON.stringify(o); // gate-core (held)
+      this.propMats.set(key, m);
+    }
     return this.propMats.get(key);
   }
+
+  /** gate-core: the option keys never held — the far figures' (LOD2/3) and the props' LOD1 programs */
+  coarseKeys() {
+    if (this._coarseD !== this.detail) {
+      this._coarseD = this.detail;
+      this._coarse = new Set([JSON.stringify(figureMatOpts(this.detail, 2, 'FIG')), JSON.stringify(propMatOpts(this.detail, 1, 'PROP'))]);
+    }
+    return this._coarse;
+  }
+  /** gate-core: true while the boot holds material m's program (see holdDetail) */
+  held(m) {
+    const k = m?.userData?.warmKey;
+    return !!(this.holdDetail && k && !this.coarseKeys().has(k) && !this.released.has(k));
+  }
+  /** gate-core: let the boot compile these held keys now (its first view needs them) */
+  release(keys) { for (const k of keys) this.released.add(k); }
 
   /**
    * perf-1: a Group of one-instance dummy batches whose programs the first view most likely needs (all = every variant
@@ -900,6 +965,7 @@ export class PeopleSystem {
     // every pooled one before the camera at boot; issued after the others it was the last to link (low: +3 s to 'compiled')
     opts.push(figureMatOpts(d, 0, 'BEAST'));
     if (all) opts.push(propMatOpts(d, 0, 'FLESH'));
+    if (this.holdDetail && !all) for (let i = opts.length - 1; i >= 0; i--) if (!this.coarseKeys().has(JSON.stringify(opts[i]))) opts.splice(i, 1);
     if (!this._warmGeo) {
       const g = new BufferGeometry();
       g.setAttribute('position', new Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
@@ -1121,6 +1187,7 @@ export class PeopleSystem {
     if (!R?.properties) return true;
     const prog = R.properties.get(b.material).currentProgram;
     if (!prog) {
+      if (this.held(b.material)) return false;
       if (!b.issued) { b.issued = true; compileScene(R, b.mesh, this.ctx.camera, this.ctx.scene, rendersOffscreen(this.ctx)); }
       return false;
     }
@@ -1132,9 +1199,25 @@ export class PeopleSystem {
   _batchFor(arch, lod) {
     const b = arch.batch(lod);
     if (this._drawable(b)) return b;
+    if (this.held(b.material)) this._want(b.material);
     // only batches that already exist (building one is geometry work, and its program would compile too)
     for (let l = lod + 1; l <= 3; l++) { const c = arch.batches[l]; if (c && c !== b && this._drawable(c)) return c; }
+    if (this._waits(b)) return null;
     return b; // nothing coarser ready: draw it (and compile it) as before
+  }
+  /** gate-core: a held program is wanted where the figure being drawn stands (this._e) */
+  _want(m) {
+    const e = this._e;
+    if (this.wanted.length < 512) this.wanted.push([m.userData.warmKey, e[12], e[13], e[14]]);
+  }
+  /**
+   * gate-core: a batch with nothing coarser to draw it whose program is not linked yet — and is not one of the far
+   * figures' or the props' LOD1, which the boot always links — is not drawn until it links: the figure waits (held at
+   * boot, or still linking after it) rather than the frame (a synchronous link of 3–11 s on the HD 4600)
+   */
+  _waits(b) {
+    const k = b.material.userData.warmKey;
+    return !!k && !this.coarseKeys().has(k);
   }
 
   _cands(n) {
@@ -1178,6 +1261,7 @@ export class PeopleSystem {
     const focal = hPx / (2 * Math.tan((cam.fov * Math.PI / 180) / 2));
     const det = clamp(this.detail | 0, 0, 3);
     const lod0px = LOD0_PX[det], lod1px = LOD1_PX[det], lod3px = LOD3_PX[det], maxHero = MAX_HERO[det];
+    const animal0 = ANIMAL_LOD0_M[det] * focal / 599;   // 599 px/m: a 720-row view at the default fov (62°)
     const budget = Math.max(0, this.quality?.maxFigures ?? 180);
     const farCap = budget * FAR_MULT;
 
@@ -1246,7 +1330,9 @@ export class PeopleSystem {
     const propBatch = (v, lod) => {
       let b = v.batch(lod);
       // still compiling: the LOD 1 prop (small geometry, the shared non-detail material, linked at boot) meanwhile
-      if (lod === 0 && !this._drawable(b)) { const b1 = v.batch(1); if (this._drawable(b1)) b = b1; }
+      if (lod === 0 && !this._drawable(b)) { if (this.held(b.material)) this._want(b.material); const b1 = v.batch(1); if (this._drawable(b1)) b = b1; }
+      // gate-core: as _batchFor — a held or still-linking program (not the props' LOD1) waits
+      if (!this._drawable(b)) { if (this.held(b.material)) this._want(b.material); if (this._waits(b)) return null; }
       if (b.n === 0) { if (propBatches >= propCap && v.name !== 'torch') return null; propBatches++; }   // a burning torch always shows
       return b;
     };
@@ -1294,7 +1380,8 @@ export class PeopleSystem {
         if (prevClip && this._crossfade(a, arch, clip, phase, prevClip, prevPhase, fade)) { prevClip = null; fade = -1; }
       }
       alpha *= this._farFade(owner, C.idx[ci], k, cutIn, cutOut, frame, fstep);
-      if (alpha <= 0.004) { // faded out at the far cap: not drawn, its torch out
+      const near = this._nearFade(owner, C.idx[ci], e16, arch, frame, fstep, cx, cy, cz);
+      if (alpha * near <= 0.004) { // faded out at the far cap or at the camera: not drawn, its torch out
         const f = owner.flames?.length ? (owner instanceof Crowd ? owner.flames.find((q) => q.i === C.idx[ci]) : owner.flames[0]) : null;
         if (f) f.hidden = frame;
         continue;
@@ -1303,9 +1390,10 @@ export class PeopleSystem {
       const px = (arch.size * focal) / Math.max(0.1, dist);
       let lod;
       if (k >= budget || px < lod3px) lod = 3;
-      // (qa-r2: an animal is a hero from 0.6 × the figures' size on screen — a few at most, and at LOD1 a lamb is a
-      // barrel on posts — so a lamb is LOD0 to ≈ 5 m on high instead of 3)
-      else lod = px > lod0px * (arch.isAnimal ? 0.6 : 1) && heroes < maxHero && alpha > 0.999 ? 0 : px > lod1px ? 1 : 2;
+      // (gate-people: an animal is a hero within ANIMAL_LOD0_M — 12.5 m on high, 6 m on low — so the offering view
+      // spots see its head, horns, hocks and coat; it was 0.6 × the figures' size on screen, ≈ 5 m on high)
+      // (a hero fading at the camera stays LOD0 where LOD0 dithers — medium and up; on low it dithers as LOD1)
+      else lod = (arch.isAnimal ? dist < animal0 : px > lod0px) && heroes < maxHero && alpha > 0.999 && (near > 0.999 || det >= 1) ? 0 : px > lod1px ? 1 : 2;
       if (this.forceLod != null && lod < 3) lod = this.forceLod;   // dev: ctx.people.system.forceLod = 0..2 (inspection shots)
       if (lod === 0) heroes++;
       st.lod[lod]++;
@@ -1315,20 +1403,33 @@ export class PeopleSystem {
       fade = 0;
       // the contact shadow under it (not under birds), fading out with distance and with the figure
       if (ct && arch.H > 0.3 && dist < cfg.f1) {
-        const fp = this._footprint(arch, _fa);
-        if (fp) ct.push(e16, fp, alpha * (1 - smooth(cfg.f0, cfg.f1, dist)));
+        const fd = alpha * (1 - smooth(cfg.f0, cfg.f1, dist));
+        const fp = cfg.k > 0 ? this._footprint(arch, _fa) : null;
+        if (fp) ct.push(e16, fp, fd * cfg.k);
+        const hp = arch.isAnimal ? this._hooves(arch, _fa) : null;
+        if (hp) {
+          const r = arch.rig.dims.legW * 1.55, fpH = this._fpH || (this._fpH = [0, 0, 0, 0]);
+          for (let q = 0; q < 4; q++) {
+            fpH[0] = hp[q * 3]; fpH[1] = hp[q * 3 + 1]; fpH[2] = r; fpH[3] = r * 1.2;
+            ct.push(e16, fpH, fd * cfg.hoof * (1 - smooth(0.005, 0.07, hp[q * 3 + 2])));
+          }
+        }
       }
       const b = this._batchFor(arch, lod);
+      if (!b) continue; // gate-core: its program is held or still linking (_batchFor)
       // (pAnimB.x: the human rig's row in material.js ARM_TABLE — the mantle kept outside the arms, qa-r2)
       const rid = arch.rigId;
-      if (b.flat) b.push(e16, _fa[0], _fa[1], 0, alpha, rid, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
-      else b.push(e16, _fa[0], _fa[1], _fa[2], alpha, rid, mA, mB, mask, tint[0], tint[1], tint[2], tint[3]);
-      if (lod === 0 && b === arch.batches[0]) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], alpha, rid, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
+      // (a figure fading at the camera is pushed as 2 + alpha: the colour pass dithers it, its shadow stays — material.js)
+      const wA = near < 0.999 ? 2 + alpha * near : alpha;
+      if (b.flat) b.push(e16, _fa[0], _fa[1], 0, wA, rid, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
+      else b.push(e16, _fa[0], _fa[1], _fa[2], wA, rid, mA, mB, mask, tint[0], tint[1], tint[2], tint[3]);
+      if (lod === 0 && b === arch.batches[0]) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], wA, rid, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
       // props (none on LOD3 silhouettes except the big ones); a second prop (setProps) in the left hand
       const prop2 = owner instanceof Crowd ? null : owner.prop2;
       // ritual vessels in an actor's hands stay drawn at LOD 2 (crowds keep only the big props there)
       const actorV = !(owner instanceof Crowd);
-      const showP = (pr) => pr && (lod < 2 || (PROPS[pr.name]?.big && lod < 3) || (PROPS[pr.name]?.big && alpha > 0.5) || (lod === 2 && actorV && HELD_VESSELS.has(pr.name)));
+      // (props do not dither: a figure fading at the camera lets go of them first)
+      const showP = (pr) => pr && near > 0.5 && (lod < 2 || (PROPS[pr.name]?.big && lod < 3) || (PROPS[pr.name]?.big && alpha > 0.5) || (lod === 2 && actorV && HELD_VESSELS.has(pr.name)));
       if (showP(prop) || showP(prop2)) {
         const grip = clip.grip || 'fist';
         const list = [];
@@ -1392,6 +1493,30 @@ export class PeopleSystem {
     if (k >= cutOut) t = 0; else if (k < cutIn) t = 1;
     a = seen ? a + clamp(t - a, -fstep, fstep) : t;
     if (crowd) { owner.farA[i] = a; owner.farT[i] = t; owner.farF[i] = frame; } else { owner._farA = a; owner._farT = t; owner._farF = frame; }
+    return a;
+  }
+
+  /**
+   * The near-camera fade of one figure (gate-people-r2): its alpha moves toward 0 while the camera is within NEAR_OUT of
+   * its body and back toward 1 beyond NEAR_IN, by fstep; a figure not drawn last frame starts at its target. The body is a
+   * capsule about the figure's own up axis (e16, the instance matrix with its scale); an animal's, a ball about its middle.
+   */
+  _nearFade(owner, i, e16, arch, frame, fstep, cx, cy, cz) {
+    const crowd = i >= 0;
+    const sy = Math.hypot(e16[4], e16[5], e16[6]) || 1;
+    const ux = e16[4] / sy, uy = e16[5] / sy, uz = e16[6] / sy;
+    const H = (arch.H || 1) * sy;
+    const dx = cx - e16[12], dy = cy - e16[13], dz = cz - e16[14];
+    const animal = !!arch.isAnimal;
+    const t = clamp(dx * ux + dy * uy + dz * uz, animal ? 0.55 * H : 0.25 * H, animal ? 0.55 * H : H - 0.1 * sy);
+    const r = animal ? (arch.radius || 0.5) * sy * 0.6 : NEAR_R * sy;
+    const gap = Math.hypot(dx - ux * t, dy - uy * t, dz - uz * t) - r;
+    let a = crowd ? owner.nearA[i] : owner._nearA ?? 1;
+    let tg = crowd ? owner.nearT[i] : owner._nearT ?? 1;
+    const seen = (crowd ? owner.nearF[i] : owner._nearF) === frame - 1;
+    if (gap < NEAR_OUT) tg = 0; else if (gap > NEAR_IN) tg = 1;
+    a = seen ? a + clamp(tg - a, -fstep, fstep) : tg;
+    if (crowd) { owner.nearA[i] = a; owner.nearT[i] = tg; owner.nearF[i] = frame; } else { owner._nearA = a; owner._nearT = tg; owner._nearF = frame; }
     return a;
   }
 

@@ -12,6 +12,7 @@ import { PRIORITY } from '../core/engine.js';
 import { createZones, trackZones } from './zones.js';
 import { createSchedule } from './schedule.js';
 import { createRuntime } from './runtime.js';
+import { createAutoView } from './lib/watch.js';
 
 const DATA = import.meta.glob(['../data/schedule.js', '../data/zones-content.js']);
 
@@ -36,6 +37,9 @@ export async function init(ctx) {
   ctx.schedule = schedule;
   const runtime = await createRuntime(ctx, schedule);
   schedule.runtime = runtime;
+  // "Go" always shows something: an event's data view while its figures are seen from it, else a stand that sees them
+  // (lib/watch.js; gate-sim-data)
+  schedule.setAutoView(createAutoView(ctx, runtime, schedule));
 
   // a new date can change the day type (weekday / friday / shabbat) and every zman
   ctx.bus.on('time:date', () => { schedule.select(); runtime.remap(); });

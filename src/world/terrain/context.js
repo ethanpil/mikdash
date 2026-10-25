@@ -67,7 +67,7 @@ export function buildBurningPlace(ctx, T, kit, group, detail) {
   // down to an earth bed ⚙
   const JD = 0.07 / AMAH;                                 // joint depth
   kit.faces([x0, y0, top - 1.2], [x1, y1, top - JD], { t: 'roof_earth', b: 'ashlar_plain', e: 'ashlar_plain', w: 'ashlar_plain', n: 'ashlar_plain', s: 'ashlar_plain' });
-  layFloor(kit, [x0, y0, x1, y1], top, JD, (ctx.params?.seed ?? 5786) * 17 + 5);
+  layFloor(kit, [x0, y0, x1, y1], top, JD, (ctx.params?.seed ?? 5786) * 17 + 5, ctx.mats?.has?.('stone_local') ? 'stone_local' : 'ashlar_plain');
   for (const [a0, a1, c0, c1] of [[hx0, hx1, hy0, my0], [hx0, hx1, my1, hy1], [hx0, mx0, my0, my1], [mx1, hx1, my0, my1]]) {
     kit.box([a0, c0, top - 0.6], [a1, c1, rim], 'ashlar_plain');
   }
@@ -123,7 +123,7 @@ export function buildBurningPlace(ctx, T, kit, group, detail) {
  * 1.3–2.6 amot along each, the joints staggered; each slab a frustum — its arrises worn back 1.5–5 cm (more on the
  * floor's outer edge) — with a lift of up to ±11 mm and a tilt of up to ±9 mm across. Outer edges flush with the rect.
  */
-function layFloor(kit, [x0, y0, x1, y1], top, jd, seed) {
+function layFloor(kit, [x0, y0, x1, y1], top, jd, seed, STONE) {
   const A = AMAH, r = rng(seed);
   const J = 0.012 / A;                                     // half a joint
   const xs = [x0];
@@ -142,8 +142,9 @@ function layFloor(kit, [x0, y0, x1, y1], top, jd, seed) {
       const edge = i === 0 || i + 2 === xs.length || j === 0 || j + 2 === ys.length;
       const lift = (r() - 0.5) * 0.022 / A, tx = (r() - 0.5) * 0.018 / A, ty = (r() - 0.5) * 0.018 / A;
       const ch = (0.015 + (edge ? 0.035 : 0.022) * r()) / A;
-      // most slabs weathered grey with the hilltop's lichen and pitting, a few still fresh-dressed
-      slab(kit, a0, b0, a1, b1, top + lift, tx, ty, ch, top - jd, r() < 0.7 ? 'terrain_rock' : 'steps_stone');
+      // gate-world-materials: rough-dressed local limestone (stone_local) — the terrain_rock / steps_stone slabs read as
+      // polished veined marble tiles; the weathering and the slab-to-slab tone come from the key's macro and pitting
+      slab(kit, a0, b0, a1, b1, top + lift, tx, ty, ch, top - jd, STONE);
     }
   }
 }

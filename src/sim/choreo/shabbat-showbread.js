@@ -15,7 +15,8 @@
 //                   salt the frankincense (TuM 4:10) and burn it; the empty bowls go back to Lishkat HaKelim ⚙.
 // The plan (g6/bread.js) is shared with shabbat-mishmar, which takes the eight and the bread from the division's start.
 // Every pose and prop is a pure function of (t, date); cues fire once in continuous play.
-import { runScripts, FreeProps } from './g2/lib.js';
+import { runScripts, FreeProps, evalScript } from './g2/lib.js';
+import { lastNear, stagedRetime, siteOf } from '../lib/watch.js';
 import { within, wrap, smooth, clamp, since, span } from '../lib/core.js';
 import { breadPlan, SEED_OUT, SEED_IN } from './g6/bread.js';
 import { say, aggadahOn } from './g6/common.js';
@@ -67,6 +68,11 @@ export default {
     // Ulam (Menachot 11:7); bread-warm carries the Ulam's part on (qa-r2 SIM-R2-6: the data's ten minutes left the Shulchan
     // bare for the last five). As minutes after the data's start; SWAP_SPAN until a Shabbat's plan is built ⚙
     try { sim.schedule?.retime?.('showbread-swap', (t0) => [t0, t0 + (state.swapSpan ?? SWAP_SPAN)]); } catch (e) { console.warn('[sim] showbread-swap retime failed', e); }
+    // the bazichin's row is listed while its two men are at the incense pile and on the ramp: the staged end (lib/watch.js
+    // lastNear over their scripts), not the data's window (gate-sim-data)
+    state.ends = { v: null, key: '' };
+    state.rt = stagedRetime(sim, ['bazichin'], () => (state.ends.key === `${ctx.time?.dateString}|${sim.generation}` ? state.ends.v : null));
+    stagedEnds(ctx, sim, state);
     return state;
   },
 
@@ -105,6 +111,7 @@ function plan(ctx, sim, state) {
       const ev = sim.event('showbread-swap');
       if (ev) ctx.schedule?.resolveEvent?.(ev);
     }
+    stagedEnds(ctx, sim, state);
     state.cue = {
       bring: wrap(T.bringLeave + 2.2), in: wrap(B.T + 0.55), slide: wrap(T.slide[0] + 0.1), gold: wrap(T.oldOnGold + 0.05),
       warm: wrap(Math.max(T.touch, B.warm[0] + 0.5)), baz: wrap(Math.max(T.takeBaz[0] + 0.1, B.baz[0] + 0.5)), burn: wrap(T.pour[0]),
@@ -217,4 +224,17 @@ function bowls(ctx, id, on) {
   const node = ctx.movables?.get?.(id);
   if (!node) return;
   for (const m of node.children) if (/:(bazichin|levonah)$/.test(m.name)) m.visible = on;
+}
+
+/** the bazichin's staged end (init: stagedRetime) */
+function stagedEnds(ctx, sim, state) {
+  const B = state.plan;
+  if (!B || !state.ends) return;
+  const ev = sim.event('bazichin');
+  const at = ev && sim.schedule?.positionOf?.(ev);
+  if (!at || !Number.isFinite(ev.t0)) return;
+  const w = ev.tPlan || [ev.t0, ev.t1];
+  state.ends.v = { bazichin: lastNear((S, t, o) => evalScript(S, t, o, null), [...B.swapO, ...B.swapI].filter(Boolean), w[0], w[1], siteOf(at)) };
+  state.ends.key = `${ctx.time?.dateString}|${sim.generation}`;
+  state.rt.apply();
 }

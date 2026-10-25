@@ -123,11 +123,8 @@ export default {
     };
     // the circuit's watchable rows: someone prostrating opposite a breach now, the mourner going round to the left
     try { state.offSource = ctx.schedule?.addSource?.(mountSource(ctx, () => plan(ctx, state, sim))); } catch (e) { console.warn('[sim:g4] source failed', e); }
-    // the day's plan: at boot a step of the plan job (planSteps, sliced while the GPU links the first view — qa-r2
-    // SIM-R2-12; hundreds of booked walkers: never in the frame the module wakes in), and again as soon as a new date is
-    // set (after the runtime has re-mapped the events)
-    const build = () => { try { plan(ctx, state, sim); } catch (e) { console.error('[sim:g4] courts plan failed', e); } };
-    ctx.bus.on('time:date', () => setTimeout(build, 0));
+    // the day's plan: a step of the runtime's plan job, at boot and on every new date in play (planSteps, sliced between
+    // frames — qa-r2 SIM-R2-12, gate-sim-data; hundreds of booked walkers: never in the frame the module wakes in)
     return state;
   },
 
@@ -381,8 +378,8 @@ function* circuit(state, P, seed, sim, book) {
     }
     kept++;
   };
-  // (the plan job slices it: a yield every eight arrivals — qa-r2 SIM-R2-12)
-  for (let i = 0; i < times.length; i++) { one(times[i], i); if ((i & 7) === 7) yield; }
+  // (the plan job slices it: a yield every second arrival — qa-r2 SIM-R2-12; gate-sim-data: every eighth made 70 ms slices)
+  for (let i = 0; i < times.length; i++) { one(times[i], i); if ((i & 1) === 1) yield; }
   P.nCirc = kept;
   P.dropped = dropped;
   out.push(new Troupe(state.circMen, { plan: (k) => eps.m[k], legs: (e) => e.it }));
@@ -534,7 +531,7 @@ function* courtVisitors(state, P, seed, sim, book) {
   let kept = 0;
   let nCand = 0;
   for (const c of cand) {
-    if ((++nCand & 7) === 0) yield;      // (the plan job slices it — qa-r2 SIM-R2-12)
+    if ((++nCand & 1) === 0) yield;      // (the plan job slices it — qa-r2 SIM-R2-12, gate-sim-data)
     const { t, i } = c;
     let spots, stay, talk = false, chashaim = false, inEY = false, cls = 0, shofar = null, roles;
     if (c.kind === 'w') {
@@ -714,8 +711,8 @@ function* soregWatchers(state, P, seed, sim, book) {
     siteFree[q] = D0 + 1;
     kept++;
   };
-  // (the plan job slices it: a yield every eight arrivals — qa-r2 SIM-R2-12)
-  for (let i = 0; i < times.length; i++) { one(times[i], i); if ((i & 7) === 7) yield; }
+  // (the plan job slices it: a yield every second arrival — qa-r2 SIM-R2-12; gate-sim-data: every eighth made 70 ms slices)
+  for (let i = 0; i < times.length; i++) { one(times[i], i); if ((i & 1) === 1) yield; }
   P.nWatch = kept;
   return [new Troupe(state.watchMen, { plan: (k) => eps.m[k], legs: (e) => e.it }), new Troupe(state.watchWomen, { plan: (k) => eps.w[k], legs: (e) => e.it }),
     new Troupe(state.watchKids, { plan: (k) => eps.c[k], legs: (e) => e.it })];
@@ -939,8 +936,8 @@ function* plazaWalkers(state, P, seed, sim, book) {
     for (const sq of stops) spotFree[sq] = tGone;
     kept++;
   };
-  // (the plan job slices it: a yield every eight arrivals — qa-r2 SIM-R2-12)
-  for (let i = 0; i < times.length; i++) { one(times[i], i); if ((i & 7) === 7) yield; }
+  // (the plan job slices it: a yield every second arrival — qa-r2 SIM-R2-12; gate-sim-data: every eighth made 70 ms slices)
+  for (let i = 0; i < times.length; i++) { one(times[i], i); if ((i & 1) === 1) yield; }
   P.nPlaza = kept;
   return [new Troupe(state.plazaMen, { plan: (k) => eps.m[k], legs: (e) => e.it }), new Troupe(state.plazaWomen, { plan: (k) => eps.w[k], legs: (e) => e.it }),
     new Troupe(state.plazaKids, { plan: (k) => eps.c[k], legs: (e) => e.it })];
@@ -983,7 +980,7 @@ function* g5Ways(state, P, seed, sim, book) {
   if (P5?.ok) {
     let nInst = 0;
     for (const inst of P5.insts) {
-      if ((++nInst & 7) === 0) yield;    // (the plan job slices it — qa-r2 SIM-R2-12)
+      if ((++nInst & 1) === 0) yield;    // (the plan job slices it — qa-r2 SIM-R2-12, gate-sim-data)
       const owner = inst.tracks.find((tr) => tr.role === 'O' && tr.pool === 'israelite' && tr.slot >= 0);
       if (!owner) continue;
       const w = wayEnds(P5, owner);

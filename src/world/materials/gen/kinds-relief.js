@@ -304,6 +304,10 @@ void surf(vec2 p, inout S s) {
   vec3 col = vec3(0.925 + 0.06 * raised + 0.012 * burn) * vec3(1.0, 0.988, 0.965);
   s.alb = mix(col, col * 0.45, seam);
   s.rough = mix(uP1.y, uP1.x, raised) + 0.03 * burn - 0.03 * skin * raised + uP1.w * (dv.z - 0.5) * 2.0 * (1.0 - 0.5 * raised);
+  // gate-world-materials: the crests of the forms (heads, chests, wing bones, palm trunks, rosette hearts) burnished by
+  // the fitting and by hands — the gold there smoother (−0.09), so the relief's edges and highs catch the gate's light
+  // as sharper highlights against the duller hammered ground
+  s.rough -= 0.09 * smoothstep(0.006, 0.018, h);
   s.rough = mix(s.rough, 0.6, seam);
   s.metal = mix(1.0, 0.5, seam);
 }`,

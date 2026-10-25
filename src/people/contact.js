@@ -173,3 +173,24 @@ export function poseFootprint(master, rig, F, yCut, out = [0, 0, 0, 0]) {
   out[0] = (x0 + x1) / 2; out[1] = (z0 + z1) / 2; out[2] = Math.max(0.12, (x1 - x0) / 2 + m); out[3] = Math.max(0.12, (z1 - z0) / 2 + m);
   return out;
 }
+
+const LEGS = ['fl', 'fr', 'hl', 'hr'];
+/**
+ * gate-people: the soles of a quadruped's four hooves at baked frame F, in figure space: [x, z, y] × 4 into out (y = the
+ * sole's height above the floor; a lifted hoof's blob fades) — the dark contact under each hoof that keeps an animal on the
+ * floor where the sun's shadow map is too coarse (and pushed back 2 cm: material.js SHADOW_BIAS) to close the gap.
+ * null for a rig without hooves.
+ */
+export function hoofPrints(master, rig, F, out = new Float32Array(12)) {
+  const I = rig.index;
+  if (I.fl_ft == null) return null;
+  const o0 = F * FLOATS_PER_FRAME;
+  for (let k = 0; k < 4; k++) {
+    const b = I[`${LEGS[k]}_ft`], p = rig.rest[b], o = o0 + b * 12;
+    const z0 = p.z - 0.01;              // the sole under the fetlock joint at rest (animals.js legMesh: the hoof's toe forward)
+    out[k * 3] = master[o] * p.x + master[o + 2] * z0 + master[o + 3];
+    out[k * 3 + 1] = master[o + 8] * p.x + master[o + 10] * z0 + master[o + 11];
+    out[k * 3 + 2] = master[o + 4] * p.x + master[o + 6] * z0 + master[o + 7];
+  }
+  return out;
+}

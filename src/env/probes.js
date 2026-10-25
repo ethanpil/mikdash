@@ -718,6 +718,9 @@ export function createProbes(ctx, { pmrem, cubeSize, tierKey, interiors, ready: 
     render,
     /** force a full re-capture (after a couple of frames) */
     capture() { requestSync(); },
+    /** gate-core-r2: re-capture every probe amortised (one face a frame, as when the Sun has moved): the boot's deferred
+     * surfaces once shown (render/warmup.js warmDeferred); a sync capture there froze a frame 1 s on high, 2.2 s on ultra */
+    refresh() { for (const p of probes) if (!p.mode) { p.mode = 'amortised'; p.face = 0; p.pass = 0; queue.push(p); } },
     dispose() {
       // no probe slots in the shader any more (a switch to low: scene.environment is the plain sky PMREM again)
       PH.fill(0); C.fill(0); D.fill(0); E.fill(0);

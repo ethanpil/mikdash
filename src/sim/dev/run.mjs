@@ -13,7 +13,8 @@
 // firstnight.js (first night frame after a day boot: no shader-compile stall), gc.js (per-frame garbage),
 // night.js / patrol.js / visual.js / clearing.js (state + screenshots), zones.js (zone tracking, schedule API, UI +
 // audio live; use --keep-ui), dates.js (day types, Shabbat night), helpers.js, initcost.js, navwest.js (reproduces
-// the nav coarse-graph rejection west of the Azarah).
+// the nav coarse-graph rejection west of the Azarah), views.js ("Go": every stand open, every rite of importance ≥ 2
+// seen from it — fails on any miss), midnight.js (normal play, --keep-ui: no frame over 100 ms across a date change).
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';

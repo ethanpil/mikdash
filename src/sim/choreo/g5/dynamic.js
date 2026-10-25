@@ -4,6 +4,7 @@
 import { OFFERING_TYPES } from '../../../data/offerings.js';
 import { segAt, sampleSeg } from './track.js';
 import { upperBound } from '../../lib/core.js';
+import { watchPoint } from '../../lib/watch.js';
 
 const FOCUS = {
   arrive: ['A', 'O'], semichah: ['O', 'A'], shechitah: ['A', 'O'], holachah: ['K1'], zerikah: ['K1'], matanot: ['K1'], 'matanah-achat': ['K1'],
@@ -49,6 +50,14 @@ export function createSource(ctx, getPlan, { prefix = 'offering:' } = {}) {
         timing: { confidence: 'reconstruction', note: 'Which offerings come and when is a seeded reconstruction for this date (offerings.js frequencies; one day quantile); the order and places of the steps are sourced.' },
         participants: [], sounds: [],
       };
+      // "Go": the step's own spot while from it the row's figure (ev.pos) is seen, else a stand that sees it
+      // (lib/watch.js; gate-sim-data — a step's fixed spot missed its figure on the far side of the rings or the gate)
+      const own = { v: null };
+      Object.defineProperty(ev, 'view', {
+        enumerable: true, configurable: true,
+        get() { return watchPoint(ctx, own.v, ev.pos, inst); },
+        set(v) { own.v = v; },
+      });
       inst.steps.sort((a, b) => a.t0 - b.t0);
     }
     let k = stepIndex(inst, t);

@@ -159,13 +159,20 @@ export const SETS = {
     kind: 'rock', tile: [4, 4], px: [576, 576], seed: 71, ao: [0.12, 0.03, 0.3],
     u: { uP0: [0.04, 0.35, 0.35, 0.0], uP1: [0.05, 0.06, 0.88, 0], uC0: '#d9cdb2', uC1: '#cec2a6', uC2: '#aba294', uC3: '#8a6a52' },
   },
+  // gate-world-materials: warmer (the cool grey read blue-white before dawn: the boulders and loose stones as snow), rougher
   terrain_rock: {
     kind: 'rock', tile: [8, 8], px: [576, 576], seed: 73,
-    u: { uP0: [0.08, 0.9, 0.7, 0.6], uP1: [0.55, 0.6, 0.9, 0], uC0: '#b7af9f', uC1: '#a8a090', uC2: '#7d7a72', uC3: '#7f5640' },
+    u: { uP0: [0.08, 0.9, 0.7, 0.6], uP1: [0.55, 0.6, 0.95, 0], uC0: '#b3a58d', uC1: '#a6977f', uC2: '#857c6e', uC3: '#7f5640' },
   },
   terrain_soil: {
     kind: 'soil', tile: [4, 4], px: [640, 640], seed: 79,
     u: { uP0: [0.005, 0.07, 0.4, 0.012], uP1: [0, 0, 0, 0.012], uC0: '#745f4f', uC1: '#614f41', uC2: '#bdb3a0', uC3: '#8c7b69' },
+  },
+  // gate-world-materials: rough-dressed local limestone (meleke / mizzi hilu) for unroofed stonework on the hills — the
+  // burning place's floor: hammer- and point-dressed (tooling 1.8 mm, pitting), warm buff with weathered patches, matte
+  stone_rough: {
+    kind: 'stone', tile: [3, 3], px: [448, 448], seed: 347,
+    u: { uP0: [0.0018, 0.9, 0.9, 0.06], uC0: '#c9b89b', uC1: '#bba684' },
   },
   ash: {
     kind: 'ash', tile: [2, 2], px: [512, 512], seed: 83,
@@ -238,7 +245,8 @@ export const SETS = {
   // old olive trunks: grey, twisted fissures at a slant (recon.)
   bark_olive: {
     kind: 'bark', tile: [1.2, 1.2], px: [384, 384], seed: 153, minPx: 128,
-    u: { uP0: [3, 0.006, 0.35, 0.3], uC0: '#7c786e', uC1: '#47433c', uC2: '#47433c', uC3: '#8e897e', uC4: '#9aa086' },
+    // gate-world-materials: darker (old olive trunks are dark grey-brown under the grey crust; the QA gate: darker, gnarled)
+    u: { uP0: [3, 0.006, 0.35, 0.3], uC0: '#66625a', uC1: '#3a3631', uC2: '#3a3631', uC3: '#7a756b', uC4: '#8a907a' },
   },
   // the pile's end faces: one log end per block (rows 16 cm, 16–20 cm wide), rings 3–6 mm, bark rim ~1 cm
   logend: {
@@ -295,20 +303,24 @@ export const SETS = {
   },
   // terrain_blend layers (pack 'blend': albedo+height, normal+roughness+AO), early November: r grey limestone
   // (6 m tile: 7.8 mm/texel on high; the 8 m tile at 10 mm read smeared close up)
+  // gate-world-materials: the QA gate's warm hillside (light limestone with terra-rossa pockets, ≈ sRGB 170, 140, 110 in the
+  // mean): the rock a weathered warm cream-grey (was a cool #8e8a81, which before dawn read blue-grey and, with the
+  // sky's sheen, wet), rough (0.95)
   tb_rock: {
     kind: 'rock', tile: [6, 6], px: [704, 704], seed: 211, pack: 'blend',
-    u: { uP0: [0.07, 0.9, 0.7, 0.6], uP1: [1.0, 0.6, 0.9, 0], uC0: '#8e8a81', uC1: '#837f77', uC2: '#6a6962', uC3: '#665445' },
+    u: { uP0: [0.07, 0.9, 0.7, 0.6], uP1: [1.0, 0.6, 0.95, 0], uC0: '#b2a48c', uC1: '#a69780', uC2: '#8a8173', uC3: '#7d5a42' },
   },
   // g (soil) is the open hillside — the builder's weights put vegetation only on cultivated ground — so it is stony
   // terra rossa with clumped dry grass tufts and grey dwarf-shrub cushions (batha); b (vegetation) is cultivated
   // ground: stubble rows over furrowed soil, a little new green after the first rains
   tb_soil: {
     kind: 'grass', tile: [6, 6], px: [640, 640], seed: 223, pack: 'blend',
-    u: { uP0: [0.35, 0.35, 0.12, 0.1], uP1: [0.02, 0.04, 0.5, 0], uC0: '#6d5d4e', uC1: '#b3a888', uC2: '#6e6450', uC3: '#76776a', uC4: '#a8a091', uC5: '#6f7b4b' },
+    // gate-world-materials: the terra rossa warmer and lighter (#6d5d4e read as dark wet mud under the dawn sky)
+    u: { uP0: [0.35, 0.35, 0.12, 0.1], uP1: [0.02, 0.04, 0.5, 0], uC0: '#977d66', uC1: '#bcae8c', uC2: '#8b7964', uC3: '#857f6e', uC4: '#b3a690', uC5: '#6f7b4b' },
   },
   tb_veg: {
     kind: 'grass', tile: [6, 6], px: [640, 640], seed: 227, pack: 'blend',
-    u: { uP0: [0.25, 0.12, 0.0, 0.25], uP1: [0.03, 0.02, 0.5, 0.3], uC0: '#685849', uC1: '#b8ab88', uC2: '#7f7459', uC3: '#6f6d5a', uC4: '#a69e8f', uC5: '#6c7a48' },
+    u: { uP0: [0.25, 0.12, 0.0, 0.25], uP1: [0.03, 0.02, 0.5, 0.3], uC0: '#8e735e', uC1: '#bcae8c', uC2: '#8a7a62', uC3: '#7a7461', uC4: '#b0a492', uC5: '#6c7a48' },
   },
   // olive leaves: dark grey-green and glossy above, a little paler and matte below; in sprays with dark gaps
   olive_leaves: {
@@ -324,9 +336,11 @@ export const SETS = {
     kind: 'soil', tile: [6, 6], px: [512, 512], seed: 287,
     u: { uP0: [0.001, 0.025, 0.7, 0.008], uP1: [1, 0.5, 0.3, 0.004], uC0: '#857866', uC1: '#6d6052', uC2: '#ada393', uC3: '#968a77', uC4: '#c8bfab' },
   },
+  // gate-world-materials: ~10 % darker — the terrace walls' sunlit tops read as white dashes across the olive slopes, and
+  // the city's rubble walls a value step further below the Temple's marble
   rubble: {
     kind: 'rubble', tile: [4, 4], px: [512, 512], seed: 241,
-    u: { uP0: [0.34, 0.2, 0.03, 0.045], uP1: [0.45, 0.025, 0.6, 0], uC0: '#a39d90', uC1: '#ad9f86', uC2: '#9a917f', uC3: '#8c8a76', uC4: '#857f6e' },
+    u: { uP0: [0.34, 0.2, 0.03, 0.045], uP1: [0.45, 0.025, 0.6, 0], uC0: '#958f83', uC1: '#9e917a', uC2: '#8c8474', uC3: '#807e6b', uC4: '#797364' },
   },
   terracotta: {
     kind: 'clay', tile: [0.5, 0.5], px: [512, 512], seed: 281, minPx: 256,

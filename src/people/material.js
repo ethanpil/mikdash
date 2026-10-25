@@ -161,13 +161,35 @@ vec3 pArmPush(vec3 p, vec3 o, bool left, inout vec3 n) {
 }
 #endif
 #ifndef P_DEPTH
+#if defined(P_G_BEAST) && !defined(P_PROP)
+// gate-people: a pied coat (roles.js ANIMALS pied; system.js makeTint puts its phase in tint.y ≥ 2): white patches laid in
+// the animal's rest space (metres), more of them low on the body, on the legs and the face, soft at their edges — in the
+// vertex colour, so every LOD and tier shows them (the coat pattern adds its hair on top)
+float pVH(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float pVN(vec3 x) {
+  vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(pVH(i), pVH(i + vec3(1.0, 0.0, 0.0)), f.x), mix(pVH(i + vec3(0.0, 1.0, 0.0)), pVH(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
+             mix(mix(pVH(i + vec3(0.0, 0.0, 1.0)), pVH(i + vec3(1.0, 0.0, 1.0)), f.x), mix(pVH(i + vec3(0.0, 1.0, 1.0)), pVH(i + vec3(1.0, 1.0, 1.0)), f.x), f.y), f.z);
+}
+vec3 pPied(vec3 c) {
+  float ph = fract(pTint.y) * 37.0;
+  vec3 q = position;
+  // broad patches (≈ 30–40 cm) with a ragged edge, white mostly from the belly down (legs, belly, a blaze), the back dark
+  float n = 0.62 * pVN(q * 3.2 + ph) + 0.38 * pVN(q * 9.0 - ph);
+  float m = smoothstep(0.5, 0.7, n + 0.34 * smoothstep(0.52, 0.18, q.y) - 0.22 * smoothstep(0.55, 0.75, q.y));
+  return mix(c, vec3(0.58, 0.54, 0.47), m);
+}
+#endif
 vec3 pPalette(int cls) {
   #ifndef P_PROP
   if (cls == 1) return mix(uPPal[0], uPPal[1], clamp(pTint.x, 0.0, 1.0));
   if (cls == 2) return mix(uPPal[2], uPPal[3], clamp(pTint.y, 0.0, 1.0));
   // garments A / B: the role's four colours (tint 0..3); 4 = black, 5 = white (Actor.setGarb; palette 14..17)
-  if (cls == 3) { int i = int(clamp(floor(pTint.z), 0.0, 5.0)); return (i < 4 ? uPPal[4 + i] : uPPal[14 + (i - 4) * 2]) * (0.94 + 0.12 * fract(pTint.z)); }
-  if (cls == 4) { int i = int(clamp(floor(pTint.w), 0.0, 5.0)); return (i < 4 ? uPPal[8 + i] : uPPal[15 + (i - 4) * 2]) * (0.94 + 0.12 * fract(pTint.w)); }
+  if (cls == 3 || cls == 4) {
+    float tz = cls == 3 ? pTint.z : pTint.w;
+    int i = int(clamp(floor(tz), 0.0, 5.0));
+    return (i < 4 ? uPPal[(cls == 3 ? 4 : 8) + i] : uPPal[(cls == 3 ? 14 : 15) + (i - 4) * 2]) * (0.94 + 0.12 * fract(tz));
+  }
   if (cls == 5) return pTint.z >= 4.0 ? uPPal[14 + int(clamp(floor(pTint.z) - 4.0, 0.0, 1.0)) * 2] * 0.9 : uPPal[12 + int(mod(floor(pTint.z * 7.0), 2.0))];
   #endif
   return vec3(1.0);
@@ -223,12 +245,20 @@ if (pMat.y < -0.995) {
   if (under > 0.0) { transformed.y = 0.004; transformed.xz += normalize(transformed.xz + vec2(1e-4)) * min(under, pH) * 0.85; }
 }
 {
-  int pg = int(pMat.w + 0.5) >> 3;
-  if (pg > 0 && ((int(pAnimB.w + 0.5) >> (pg - 1)) & 1) == 0) transformed = vec3(0.0);
+  int pg = int(pMat.w + 0.5) >> 3, pm = int(pAnimB.w + 0.5);
+  // (gate-people-r2: group 11, human.js GRP.HAIR_OPEN — hair proud of the cap: with the hair (bit 6) and no head-cloth (bit 2))
+  if (pg == 11) { if (((pm >> 5) & 1) == 0 || ((pm >> 1) & 1) == 1) transformed = vec3(0.0); }
+  else if (pg > 0 && ((pm >> (pg - 1)) & 1) == 0) transformed = vec3(0.0);
 }
 #endif
 #if defined(P_DEPTH) && !defined(P_PROP)
 if (pAnimA.w < 0.5) transformed = vec3(0.0); // a figure dithered more than half out casts no shadow
+#endif
+#if !defined(P_DETAIL) && !defined(P_DEPTH) && !defined(P_PROP)
+// gate-people: the hair and beard shells and the hairline fringe (pattern 23) are alpha-tested by the detail pattern code;
+// a program without it (low's LOD1, every LOD2/3) drew them solid — an outer cap 4 mm proud of the hair with a pale band at
+// the hairline: the low tier's "helmet". There the hair is its cap alone (human.js gives it the locks).
+if (abs(pMat.z - 23.0) < 0.5) transformed = vec3(0.0);
 #endif
 #ifdef USE_ALPHAHASH
 vPosition = vec3( position );
@@ -237,12 +267,21 @@ vPosition = vec3( position );
 
 const VERT_COLOR = /* glsl */`
 #if defined( USE_COLOR )
-vColor = vec4(color * pPalette(int(pMat.w + 0.5) & 7), 1.0);
+{
+  int pCls = int(pMat.w + 0.5) & 7;
+  vec3 pCl = pPalette(pCls);
+#if defined(P_G_BEAST) && !defined(P_PROP)
+  // a pied coat's patches on the body and face colours (here, not in pPalette, which is inlined again for the stripe)
+  if (pTint.y >= 2.0 && (pCls == 3 || pCls == 4)) pCl = pPied(pCl);
+#endif
+  vColor = vec4(color * pCl, 1.0);
+}
 #endif
 // (a plumb fringe's hang height is not a metalness; the mantle's arm flag is not part of its pattern id)
 vPMat = vec4(pMat.x, max(pMat.y, 0.0), pMat.z > ${MANTLE_ARMS - 0.5} ? pMat.z - ${MANTLE_ARMS.toFixed(1)} : pMat.z, pMat.w);
 vPUv = uv;
-vPFade = pAnimA.w;
+// (gate-people-r2: a figure fading at the camera comes as 2 + alpha — its shadow stays, the depth pass reads w ≥ 0.5)
+vPFade = pAnimA.w > 1.5 ? pAnimA.w - 2.0 : pAnimA.w;
 #ifndef P_PROP
 vPStripe = pPalette(5);
 // the brows' colour; < 0 = shaved off with the beard (mask bit 256: human.js GRP.SHAVEN_FACE, the metzora's seventh day)
@@ -280,13 +319,36 @@ float pNoise(vec2 p) {
   vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
   return mix(mix(pHash(i), pHash(i + vec2(1.0, 0.0)), u.x), mix(pHash(i + vec2(0.0, 1.0)), pHash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
+// gate-people: cloth fold zones (human.js garmentBody / armBody carry them in uv.v): gathered folds under a belt or the
+// avnet — tight radial folds ≈ 2.9 cm apart from its lower edge, dying out a hand below, a softer blousing above (zv: the
+// distance above the belt's middle, m; u: around, m) — and creases across a sleeve at the elbow (zv: above the elbow)
+float pGatherH(float u, float zv) {
+  float below = smoothstep(-0.012, -0.03, zv) * (1.0 - smoothstep(-0.07, -0.3, zv));
+  float above = smoothstep(0.012, 0.03, zv) * (1.0 - smoothstep(0.035, 0.09, zv));
+  // the folds hang plumb (u runs round the body from a side seam, or across it on the clavi tunics) and waver a little
+  float w = u * 216.0 + 0.9 * pNoise(vec2(u * 20.0, zv * 2.5));
+  float r = abs(sin(w)) - 0.637;
+  return (0.003 * below * (1.0 - 0.55 * smoothstep(-0.03, -0.2, zv)) + 0.002 * above) * r;
+}
+float pElbowH(float u, float zv) {
+  float env = exp(-(zv / 0.06) * (zv / 0.06));
+  float c = sin(zv * 250.0 + 2.4 * sin(u * 36.0) + 1.2 * pNoise(vec2(u * 22.0, zv * 30.0)));
+  return 0.0018 * env * (abs(c) - 0.637);
+}
+// gate-people: the surface-gradient bump (Mikkelsen 2010) with the position derivatives NOT normalised: pH is a height in
+// metres, dFdx(pH) a height change per pixel, and the tilt is that over the pixel's footprint — the slope. three's
+// perturbNormalArb normalises them (its bump maps are unitless, scaled by bumpScale); copied here as it was, every
+// pattern's metre-scaled relief (cloth folds, weaves, pores, hair ridges, fleece locks) tilted the normal by ~1e-4 and
+// shaded nothing. The slope is held under 0.9 (42°) so no normal turns away from the eye.
 vec3 pPerturb(vec3 surf_pos, vec3 surf_norm, vec2 dHdxy, float faceDir) {
-  vec3 vSigmaX = normalize(dFdx(surf_pos));
-  vec3 vSigmaY = normalize(dFdy(surf_pos));
+  vec3 vSigmaX = dFdx(surf_pos);
+  vec3 vSigmaY = dFdy(surf_pos);
   vec3 R1 = cross(vSigmaY, surf_norm);
   vec3 R2 = cross(surf_norm, vSigmaX);
   float fDet = dot(vSigmaX, R1) * faceDir;
   vec3 vGrad = sign(fDet) * (dHdxy.x * R1 + dHdxy.y * R2);
+  float g = length(vGrad), lim = 0.9 * abs(fDet);
+  if (g > lim) vGrad *= lim / g;
   return normalize(abs(fDet) * surf_norm - vGrad);
 }
 `;
@@ -357,6 +419,9 @@ vec2 pPx2 = fwidth(vPUv);
 float pPx = max(max(pPx2.x, pPx2.y), 1e-6);
 vec2 pGx = dFdx(vPUv), pGy = dFdy(vPUv);
 #define P_NY(P) (1.0 - smoothstep(0.25 * (P), 0.5 * (P), pPx))
+// (gate-people) the same for relief near the pixel scale: a normal from screen derivatives sparkles in the specular well
+// before a colour aliases, so bump terms finer than ~3 mm fade between 8 and 4 px per period
+#define P_NYB(P) (1.0 - smoothstep(0.125 * (P), 0.25 * (P), pPx))
 int pat = int(vPMat.z + 0.5);
 // specular colour override (F0) for cloth that mixes metal and dyed strands; < 0 = the material's own
 vec3 pSpec = vec3(-1.0);
@@ -389,6 +454,9 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
 #endif
 #if defined(P_G_FIG) || defined(P_G_PROP)
   if (pat == 2 || pat == 8) { // linen: meshubetzet box weave (ketonet) / plain (migba'at, avnet YK)
+#ifndef P_PROP
+    if (uv.y > 5.0) { float zv = uv.y - (uv.y > 15.0 ? 20.0 : 10.0); pH += P_NY(0.027) * (uv.y > 15.0 ? pGatherH(uv.x, zv) : pElbowH(uv.x, zv)); uv.y = zv; }
+#endif
     float cell = pat == 2 ? 0.0085 : 0.003;
     vec2 c = uv / cell;
     vec2 f = abs(fract(c) - 0.5);
@@ -397,7 +465,9 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
     float groove = smoothstep(0.3, 0.5, box);
     float fade = P_NY(cell * 0.4);
     pCol *= 1.0 - 0.07 * mix(0.38, groove, fade);   // 0.38 = the groove's mean coverage
-    pH += 0.00045 * (1.0 - groove) * (1.0 - box) * fade;
+    // (gate-people: 0.18 mm, was 0.45 — an amplitude that never shaded before pPerturb was fixed; at full height the boxes read
+    // as quilting within arm's reach)
+    pH += 0.00018 * (1.0 - groove) * (1.0 - box) * fade;
     pH += 0.0035 * fold;
     // the fine thread texture and the slight slub of hand-spun linen
     float th = pNoise(vec2(uv.x * 900.0, uv.y * 60.0));
@@ -408,6 +478,9 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
 #endif
 #if defined(P_G_FIG) || defined(P_G_KG) || defined(P_G_PROP)
   if (pat == 3 || pat == 15 || pat == 6) { // wool (tunics, mantles), clavi stripes, techelet twill
+#ifndef P_PROP
+    if (uv.y > 5.0) { float zv = uv.y - (uv.y > 15.0 ? 20.0 : 10.0); pH += 1.3 * P_NY(0.027) * (uv.y > 15.0 ? pGatherH(uv.x, zv) : pElbowH(uv.x, zv)); uv.y = zv; }
+#endif
     float fade = P_NY(0.006);
     float n = mix(0.5, pNoise(uv * 170.0), fade);
     pCol *= 0.93 + 0.12 * n + 0.06 * (pNoise(uv * 23.0) - 0.5);
@@ -415,7 +488,7 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
     // qa-r1: the hand-spun weave — a fine diagonal twill rib within reach, and a roughness that varies with the slub of
     // the yarn and the nap rubbed down on the folds' ridges (a constant roughness read as paper)
     float tw = mix(0.5, 0.5 + 0.5 * sin((uv.x + uv.y) * 2513.0), P_NY(0.0025));
-    pH += 0.0058 * fold + 0.0003 * (n - 0.5) * fade + 0.00012 * tw;
+    pH += 0.0058 * fold + 0.0003 * (n - 0.5) * fade + 0.00005 * (tw - 0.5) * P_NYB(0.0025);
     pRough = clamp(vPMat.x * (0.9 + 0.14 * n) + 0.06 * (pNoise(uv * 41.0 + 3.7) - 0.5) - 0.07 * fold, 0.55, 1.0);
     if (pat == 15) {
       // clavi: two narrow stripes woven in, about 1.1 cm wide, either side of the neck opening, running over the shoulders
@@ -425,7 +498,8 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
       float s = 1.0 - smoothstep(w - pPx, w + pPx, d);
       pCol = mix(pCol, vPStripe * (0.9 + 0.1 * n), s * 0.92);
     }
-    pSheen = 0.45;
+    // (gate-people-r2: 0.45 → 0.2 — the sheen lobe lit the mantles' turning edges as a satin rim: plastic, cardboard)
+    pSheen = 0.2;
     pTrans = pat == 6 ? 0.06 : 0.12;
     pWrap = 0.15;
   }
@@ -490,15 +564,29 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
     float fade = P_NY(0.0024);
     float n = mix(0.5, pNoise(vec2(uv.x * 420.0, uv.y * 30.0)), fade);
     float clump = pNoise(vec2(uv.x * 90.0, uv.y * 8.0));
-    // qa-r1: the locks keep their light and dark at any distance (the clump scale, not the strands, carries it) and the
-    // hair is a dull sheen, not a gloss: at 3–15 m it read as a lacquered helmet
-    pCol *= mix(0.74, 1.14, clump) * (0.86 + 0.28 * n);
-    // strands: fine ridges along the hair (v) stretch the specular lobe across them — an anisotropic sheen; lock-scale
-    // ridges (about 2 cm) carry it where the strands are below a pixel
+    // gate-people-r2: CLUMPED LOCKS instead of ruled lines (two sines across the hair, ≈ 1.9 and 0.24 cm, read from 2–4 m as
+    // a grey cap ruled with lines — a beanie). The hair is cut into locks along its fall: a lock ≈ 2.2 cm wide whose edges
+    // waver, each lock-segment (≈ 5 cm along the hair, staggered per lock) its own tone, the partings between them dark, and
+    // its rounded body in the relief; finer locks of ≈ 0.8 cm inside within reach. Fades to its mean before it aliases.
+    // (the warps reuse the clump and strand noise above, one hash per lock: each pNoise is four hashes inlined, and the
+    // figure programs' compile time on ANGLE grows with every one)
+    float lx = (uv.x + 0.012 * (clump - 0.5)) * 45.0;
+    float li = floor(lx), lf = fract(lx);
+    float lh = pHash(vec2(li, 3.1));
+    float ls = floor(uv.y * 20.0 + lh * 3.0);
+    float lt = fract(lh * 17.31 + ls * 0.618034);                       // each lock-segment its own tone
+    float le = 2.0 * lf - 1.0;
+    float lockP = 1.0 - le * le;                                         // a lock's rounded body: 0 at its edges
+    float lfar = P_NY(0.022);
+    float le2 = 2.0 * fract(lx * 2.8 + 0.8 * (n - 0.5)) - 1.0;
+    float lockQ = mix(0.6, 1.0 - le2 * le2, P_NY(0.008));
+    pCol *= mix(1.0, (0.72 + 0.5 * lt) * mix(0.62, 1.0, smoothstep(0.0, 0.45, lockP)) * (0.9 + 0.12 * lockQ), lfar);
+    pCol *= mix(0.86, 1.08, clump) * (0.88 + 0.24 * n);
+    // strands: fine ridges along the hair (v) stretch the specular lobe across them — an anisotropic sheen
     float ridge = mix(0.5, 0.5 + 0.5 * sin(uv.x * 2600.0 + clump * 6.0), P_NY(0.0012));
-    float lockR = mix(0.5, 0.5 + 0.5 * sin(uv.x * 330.0 + clump * 5.0), P_NY(0.006));
-    pRough = 0.52 + 0.16 * n + 0.1 * (1.0 - clump);
-    pH += 0.0004 * n * fade + 0.0016 * clump + 0.00012 * ridge + 0.0005 * lockR;
+    pRough = 0.52 + 0.16 * n + 0.1 * (1.0 - clump) + 0.08 * (1.0 - lockP) * lfar;
+    pH += 0.00018 * n * P_NYB(0.0024) + 0.0012 * clump + 0.00005 * (ridge - 0.5) * P_NYB(0.0012)
+      + (0.0014 * lockP + 0.0004 * lockQ) * P_NYB(0.022);
     pWrap = 0.25; pSSS = vec3(1.0, 0.8, 0.65);
   }
 #endif
@@ -516,7 +604,11 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
       if (lk < mix(0.42, 0.72, t) || far > pIGN(gl_FragCoord.xy)) discard;
     }
     pCol *= 0.8 + 0.4 * lk;
-    pRough = pat == 35 ? 0.66 : 0.56;   // a long animal coat is duller than combed human hair (qa-r1: hair a dull sheen)
+    pRough = pat == 35 ? 0.62 : 0.56;   // a long animal coat is duller than combed human hair (qa-r1: hair a dull sheen)
+    // gate-people: the long coat's sheen along the locks (a black goat's form reads by it) and lock relief that holds out
+    // (the sheen colour is pCol × pSheen: for a black coat that is nothing, yet black hair shines — so its brightness is held
+    // near a 4–5 % grey, in the coat's own hue)
+    if (pat == 35) { pSheen = clamp(0.05 / max(dot(pCol, vec3(0.3, 0.59, 0.11)), 0.02), 0.45, 2.5); pH += 0.0012 * coarse; }
     pH += 0.0002 * lk;
     pWrap = 0.3; pSSS = vec3(1.0, 0.8, 0.65);
   }
@@ -531,7 +623,7 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
     float crimp = mix(0.5, 0.5 + 0.5 * sin((uv.y + 0.3 * pNoise(uv * 60.0)) * 900.0), P_NY(0.0025));
     pCol *= 0.8 + mix(0.12, 0.28 * l2, fl) + 0.07 * (fine - 0.5) + 0.04 * (crimp - 0.5) + 0.05 * (pNoise(uv * 5.0) - 0.5);
     pCol = mix(pCol, pCol * vec3(0.9, 0.82, 0.68), (1.0 - l2) * fl * 0.6);   // lanolin and dust in the crevices
-    pH += 0.005 * l2 * fl + 0.0006 * fine;
+    pH += 0.005 * l2 * fl + 0.0002 * (fine - 0.5) * P_NYB(0.0045);
     pRough = 0.95;
     pSheen = 0.6;
     pWrap = 0.55; pSSS = vec3(1.0, 0.95, 0.85);
@@ -637,8 +729,8 @@ if (pat == 1 || pat == 19 || pat == 25 || pat == 34) {
     float pch = pNoise(uv * 6.0);
     pCol *= (0.86 + 0.24 * st) * (0.9 + 0.2 * pch);
     pRough = 0.58 + 0.2 * st;
-    pH += 0.0005 * st * f + 0.0015 * pNoise(uv * 24.0);
-    pSheen = 0.35;
+    pH += 0.0002 * (st - 0.5) * P_NYB(0.003) + 0.0015 * pNoise(uv * 24.0);
+    pSheen = clamp(0.04 / max(dot(pCol, vec3(0.3, 0.59, 0.11)), 0.02), 0.35, 2.0);   // (as the long coat: a black coat shines too)
     pWrap = 0.3; pSSS = vec3(1.0, 0.85, 0.75);
   }
 #endif
@@ -787,6 +879,11 @@ if (pat == 27) { // animal eye: a large dark-amber iris, horizontal oblong pupil
   vec3 irisC = pCol * (0.72 + 0.4 * pNoise(vec2(atan(uv.y, uv.x) * 6.0, r * 9.0)));
   irisC *= 1.0 - 0.6 * smoothstep(0.72, 0.98, r);
   pCol = mix(irisC, vec3(0.008), pup);
+  // gate-people: the catchlight — the sky in the wet cornea, up and forward on the eye (as the human eye, pattern 22): never
+  // thinner than a pixel, dimmed as it widens, so far off it is a faint spark that says "eye"
+  float gr = max(0.12, pPx * 0.8);
+  float glint = (1.0 - smoothstep(gr * 0.55, gr, length(uv - vec2(0.0, 0.06)))) * (0.12 * 0.12) / (gr * gr);
+  pCol = mix(pCol, vec3(0.9, 0.92, 0.95), clamp(glint, 0.0, 1.0) * 0.85);
   pRough = 0.05; pMetal = 0.0; pSheen = 0.0;
 }
 #endif
@@ -803,13 +900,15 @@ if (pat == 19 || pat == 25) { // face skin: brows, nostrils, lips, the flush of 
   uv.y += 20.0 * bearded;
   float n = pNoise(uv * 140.0);
   pCol *= 0.96 + 0.06 * mix(0.5, n, P_NY(0.007));
-  pRough = 0.46 + 0.12 * n;
+  // (gate-people: drier skin 0.58–0.64 off the T-zone, ≈ 0.45 on it — a faint sheen on the forehead and nose, not a plastic
+  // gloss all over; it was 0.46–0.58 everywhere)
+  pRough = 0.58 + 0.06 * n;
   pSheen = 0.12;
   if (uv.y < 5.0) {
     // qa-r1: the skin's roughness varies — the forehead and nose (the T-zone) a little oilier and glossier, the cheeks
     // drier — and the colour: the nose tip and ears warmer, under the eyes a touch darker and cooler
     float tz = 0.6 * exp(-pow(uv.x / 0.018, 2.0)) * smoothstep(-0.048, -0.025, uv.y) * smoothstep(0.012, -0.004, uv.y) + 0.7 * exp(-pow(uv.x / 0.045, 2.0)) * smoothstep(0.022, 0.04, uv.y);
-    pRough += -0.09 * clamp(tz, 0.0, 1.0) + 0.06 * exp(-pow((abs(uv.x) - 0.046) / 0.016, 2.0) - pow((uv.y + 0.026) / 0.016, 2.0));
+    pRough += -0.15 * clamp(tz, 0.0, 1.0) + 0.04 * exp(-pow((abs(uv.x) - 0.046) / 0.016, 2.0) - pow((uv.y + 0.026) / 0.016, 2.0));
     float under = exp(-pow((abs(uv.x) - 0.031) / 0.012, 2.0) - pow((uv.y + 0.0045) / 0.005, 2.0));
     pCol *= mix(vec3(1.0), vec3(0.9, 0.88, 0.92), under * 0.6);
     // qa-r2: the three zones of a face's colour (one flat tone read as a mannequin) — the forehead a little yellower; the
@@ -819,7 +918,9 @@ if (pat == 19 || pat == 25) { // face skin: brows, nostrils, lips, the flush of 
     float zL = smoothstep(-0.032, -0.064, uv.y) * mix(0.35, 1.0, bearded)
       + exp(-pow(uv.x / 0.02, 2.0) - pow((uv.y + 0.049) / 0.0075, 2.0)) * mix(0.3, 0.8, bearded);
     pCol *= mix(vec3(1.0), vec3(1.025, 1.0, 0.935), zF * 0.75);
-    pCol *= mix(vec3(1.0), vec3(0.92, 0.945, 1.0), clamp(zL, 0.0, 1.0) * 0.6);
+    // (gate-people-r2: the lower zone cooler and darker — a man's shaved-close beard shadow under the skin, blue-grey; it was
+    // too faint to break the one orange-tan value of the face)
+    pCol *= mix(vec3(1.0), vec3(0.86, 0.9, 0.98), clamp(zL, 0.0, 1.0) * 0.7);
     // the beard's shadow above its line (human.js beardTop / BEARD_PHI; the head's half-width ≈ 0.065 hs at the cheeks): hair the
     // eye cannot resolve, so the cheek line is soft at any distance and the sideburn runs into the temple's hair
     if (bearded > 0.5 && vPHair.x >= 0.0) {
@@ -833,9 +934,52 @@ if (pat == 19 || pat == 25) { // face skin: brows, nostrils, lips, the flush of 
     }
     float ff = 1.0 - smoothstep(0.0018, 0.0036, pPx);
     float aa = max(pPx * 0.7, 0.0003);
-    // blood under the skin: cheeks and nose a little warmer
-    float flush = exp(-pow((abs(uv.x) - 0.04) / 0.018, 2.0) - pow((uv.y + 0.022) / 0.016, 2.0)) + 0.8 * exp(-pow(uv.x / 0.012, 2.0) - pow((uv.y + 0.036) / 0.01, 2.0));
-    pCol *= mix(vec3(1.0), vec3(1.075, 0.925, 0.89), clamp(flush, 0.0, 1.0));
+    // gate-people: the facial planes as a height and cavity field in the face's own coordinates (units of hs, the head's
+    // scale): the orbital recess under the brow ridge, the cheekbone, the nasolabial fold with the cheek's fullness above
+    // it, the philtrum's two ridges, the vermilion border and the fuller lower lip, the mouth's line and the chin's crease.
+    // The mesh carries these at LOD0 (48 × 36); LOD1 (26 × 18) loses everything narrower than ~1.5 cm, so there it is drawn
+    // at full strength, at LOD0 at a third (fine edges only). A per-figure offset of the brow and cheekbones (vPSeed) varies
+    // them with the head's morph. Analytic, so no texture and no fetch; the bump needs P_DETAIL, the cavity shade does not.
+    {
+      float lod1 = pat == 25 ? 1.0 : 0.35;
+      float ax = abs(uv.x), sv = vPSeed - 0.5, ex = ax - 0.031, ey = uv.y - 0.008;
+      float big = P_NY(0.03);
+      float orb = exp(-(ex * ex) / (0.017 * 0.017) - (ey - 0.002) * (ey - 0.002) / (0.012 * 0.012));
+      float browR = exp(-pow((ey - 0.0195 - 0.003 * sv) / 0.0062, 2.0)) * (1.0 - smoothstep(0.045, 0.066, ax));
+      float cheekB = exp(-pow((ax - 0.047 - 0.004 * sv) / 0.014, 2.0) - pow((uv.y + 0.014) / 0.011, 2.0));
+      float un = clamp((-0.036 - uv.y) / 0.032, 0.0, 1.0);
+      float xc = mix(0.0145, 0.028, un);
+      float nlEnv = sin(3.14159 * min(1.0, un * 1.08)) * step(uv.y, -0.034) * (bearded > 0.5 ? 0.6 : 1.0);
+      float nl = exp(-pow((ax - xc) / 0.0024, 2.0)) * nlEnv;
+      float nlFull = exp(-pow((ax - xc - 0.0055) / 0.0045, 2.0)) * nlEnv;
+      float lyy = uv.y + 0.0615, lw2 = 1.0 - smoothstep(0.8, 1.0, abs(uv.x / 0.021));
+      float phil = exp(-pow((ax - 0.0046) / 0.0016, 2.0)) * smoothstep(-0.058, -0.054, uv.y) * smoothstep(-0.04, -0.045, uv.y);
+      float verm = exp(-pow((lyy - 0.0038) / 0.0011, 2.0)) * lw2;
+      float lowL = exp(-pow((lyy + 0.0038) / 0.0032, 2.0)) * lw2;
+      float mline = exp(-pow(lyy / 0.0009, 2.0)) * lw2;
+      float chinC = exp(-pow((uv.y + 0.0745) / 0.0042, 2.0) - pow(uv.x / 0.018, 2.0));
+      pH += lod1 * (big * (-0.0022 * orb + 0.0013 * browR + 0.0011 * cheekB + 0.0006 * nlFull)
+        + ff * (-0.0009 * nl + 0.00035 * phil + 0.00045 * verm + 0.0007 * lowL - 0.0005 * mline - 0.0006 * chinC));
+      // the cavities hold less light and less sheen: the inner corner of the socket, the fold, the mouth's corners, the chin
+      float cav = clamp(0.5 * orb * smoothstep(0.004, -0.01, ex) + 0.9 * nl + 0.5 * mline + 0.45 * chinC
+        + 0.6 * exp(-pow((ax - 0.0235) / 0.0035, 2.0) - pow(lyy / 0.004, 2.0)), 0.0, 1.0);
+      pCol *= 1.0 - (0.06 + 0.1 * lod1) * cav * mix(1.0, ff, 0.6);
+      pRough = mix(pRough, 0.66, cav * 0.6);
+      // gate-people-r2: the planes in the value too, as light and shade lie on a face under a sky (the mesh's own shading is
+      // too soft at 2–8 m to carry them, and none of it survives the low tier's vertex lighting): the whole orbital recess
+      // darker under a lit brow ridge, the cheekbone's top and the nose's bridge catching light, the hollow under the
+      // cheekbone and the temples a little darker — painted at full strength on LOD1, two thirds on LOD0 (whose modelled
+      // sockets add their own shade)
+      float pl = pat == 25 ? 1.0 : 0.65;
+      float bridge = exp(-pow(uv.x / 0.006, 2.0)) * smoothstep(-0.04, -0.012, uv.y) * smoothstep(0.012, 0.0, uv.y);
+      float hollow = exp(-pow((ax - 0.045) / 0.014, 2.0) - pow((uv.y + 0.036) / 0.012, 2.0)) * (bearded > 0.5 ? 0.4 : 1.0);
+      float temple = exp(-pow((ax - 0.058) / 0.01, 2.0) - pow((uv.y - 0.016) / 0.014, 2.0));
+      pCol *= (1.0 - pl * (0.17 * orb + 0.1 * hollow + 0.08 * temple)) * (1.0 + pl * (0.07 * browR + 0.06 * cheekB + 0.06 * bridge));
+    }
+    // blood under the skin: cheeks, nose and lips' surround warmer — gate-people-r2: redder and wider (with the less orange
+    // skin palette the flush is what reads as living skin, not a single tan)
+    float flush = exp(-pow((abs(uv.x) - 0.041) / 0.021, 2.0) - pow((uv.y + 0.02) / 0.019, 2.0)) + 0.9 * exp(-pow(uv.x / 0.012, 2.0) - pow((uv.y + 0.036) / 0.011, 2.0));
+    pCol *= mix(vec3(1.0), vec3(1.08, 0.92, 0.9), clamp(flush, 0.0, 1.0));
     float ex = abs(uv.x) - 0.031;
     float ey = uv.y - 0.008;
     if (pat == 25) { // LOD1: eyes drawn on the face (no modelled eyeballs)
@@ -847,10 +991,12 @@ if (pat == 19 || pat == 25) { // face skin: brows, nostrils, lips, the flush of 
       float hh = 0.0035 * (1.0 - tx * tx);
       float ec = ey + 0.0006 * tx;
       float inEye = (1.0 - smoothstep(hh - aa, hh + aa, abs(ec))) * step(abs(ex), ew) * ff;
-      vec3 sclera = pCol * vec3(1.08, 1.04, 1.0) + vec3(0.025, 0.022, 0.02);
+      // (gate-people-r2: the white of the eye at its own value — a lid-shaded off-white, not skin a shade lighter — and a
+      // dark brown iris with a darker rim, so the eye reads as an eye at 3–8 m, not a painted slit)
+      vec3 sclera = mix(pCol * vec3(1.08, 1.04, 1.0), vec3(0.46, 0.43, 0.4), 0.65);
       float ir = length(vec2(ex + 0.0006, ey + 0.0003));
       float iris = 1.0 - smoothstep(0.0045 - aa, 0.0045 + aa, ir);
-      vec3 eyeCol = mix(sclera, vec3(0.04, 0.026, 0.02), iris);
+      vec3 eyeCol = mix(sclera, vec3(0.07, 0.04, 0.022) * (1.0 - 0.5 * smoothstep(0.0025, 0.0045, ir)), iris);
       eyeCol *= 1.0 - 0.55 * smoothstep(-0.0015, hh, ec);
       // (qa-r2) the catchlight over the iris, while it spans a pixel
       eyeCol = mix(eyeCol, vec3(0.75), (1.0 - smoothstep(0.0007, 0.0007 + aa, length(vec2(ex - 0.0016, ey - 0.0012)))) * ff * 0.8);
@@ -860,7 +1006,7 @@ if (pat == 19 || pat == 25) { // face skin: brows, nostrils, lips, the flush of 
     } else {
       // around the modelled eyes: the socket a touch darker
       float sock = exp(-(ex * ex) / (0.016 * 0.016) - (ey - 0.003) * (ey - 0.003) / (0.011 * 0.011));
-      pCol *= 1.0 - 0.1 * sock;
+      pCol *= 1.0 - 0.12 * sock;
     }
     // brows: hair-coloured, thicker at the inner end, with a few strands
     float bxs = (ex + 0.002) / 0.02;

@@ -35,6 +35,9 @@ export function createSchedule(ctx, mod, zones) {
   // UI's "Go", viewOf) gets it at the moment it asks
   const liveViews = new Map();
   const viewBase = new WeakMap();      // event object -> its own (data) view
+  // setAutoView(fn): fn(ev, t, dataView) -> { at, heading } | null, asked after an event's own live view (gate-sim-data:
+  // the data's view while it shows the event's figures, else a stand that does — src/sim/lib/watch.js)
+  let autoView = null;
   let warnedFor = false;
 
   function dayOk(ev) {
@@ -57,15 +60,14 @@ export function createSchedule(ctx, mod, zones) {
       if (!ev || typeof ev !== 'object') continue;
       events.push(ev);
       if (ev.id != null && !index.has(ev.id)) index.set(ev.id, ev);
-      if (liveViews.has(ev.id)) installView(ev);
+      if (liveViews.has(ev.id) || autoView) installView(ev);
     }
     resolveTimes();
     return events;
   }
 
   function installView(ev) {
-    const fn = liveViews.get(ev.id);
-    if (!fn || viewBase.has(ev)) return;
+    if ((!liveViews.has(ev.id) && !autoView) || viewBase.has(ev)) return;
     const d = Object.getOwnPropertyDescriptor(ev, 'view');
     if (d && !('value' in d)) return;             // an accessor someone else put there
     if (d && d.configurable === false) return;
@@ -74,8 +76,10 @@ export function createSchedule(ctx, mod, zones) {
       configurable: true, enumerable: true,
       get() {
         let v = null;
+        const base = viewBase.get(ev);
         try { v = liveViews.get(ev.id)?.(time?.t) || null; } catch (e) { warnSrc(e); }
-        return v || viewBase.get(ev);
+        if (!v && autoView) { try { v = autoView(ev, time?.t, base) || null; } catch (e) { warnSrc(e); } }
+        return v || base;
       },
       set(v) { viewBase.set(ev, v); },
     });
@@ -203,8 +207,18 @@ export function createSchedule(ctx, mod, zones) {
       return () => {
         if (liveViews.get(id) !== fn) return;
         liveViews.delete(id);
-        for (const e of events) if (e.id === id) uninstallView(e);
+        if (!autoView) for (const e of events) if (e.id === id) uninstallView(e);
       };
+    },
+    /**
+     * The fallback for every event's view after its own live view (fn(ev, t, dataView) -> view | null): installs the
+     * view getter on all events, on this date and later ones.
+     */
+    /** does a choreo supply its own live view for event `id`? */
+    hasLiveView(id) { return liveViews.has(id); },
+    setAutoView(fn) {
+      autoView = typeof fn === 'function' ? fn : null;
+      if (autoView) for (const ev of events) installView(ev);
     },
     /**
      * Publish the window a choreo actually stages for event `id`: fn(t0, t1) -> [t0, t1] maps the data's resolved

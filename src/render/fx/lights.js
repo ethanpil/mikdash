@@ -289,7 +289,8 @@ export class FireLights {
       // memory load per light per fragment on Intel iGPUs); fragments in rooms undo it (interiors-glsl.js mkPtOcc)
       if (this.visibility) c.ins = this.visibility(c.pos, c.ins || { V: 1, vol: null, s: 0 }); // doors move
       const V = c.ins && this.visibility ? c.ins.V : 1;
-      l.intensity = c.I * sw * flick * gain * V;
+      // gate-env-render: × the gain of a fire hidden from the viewer, seen only through a court's gate (fx/index.js GATE_OVER)
+      l.intensity = c.I * sw * flick * gain * V * (f0.gain ?? 1);
       l.userData.mkV = V;
       // the court walls / altar top occluding the fire (fire occluder records). qa-r2-fix-env-render (ENV-R2-4a): a shadow
       // slot's too — its cube map is drawn by the casters' back faces, and where the altar's body meets its yesod the body's

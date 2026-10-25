@@ -115,8 +115,10 @@ export function buildCover(ctx, T, detail, ground, feat = {}) {
     meshes.push(im);
     return im;
   };
-  const tufts = mk(tuftGeometry(seed + 1), foliageKey, tier.tuft, 'terrain:cover-grass', true);
-  const cush = mk(lumpGeometry(1, seed + 2, 0.55, -0.25), foliageKey, tier.cush, 'terrain:cover-cushions', true);
+  // gate-world-materials: the matte dry-grass key (olive_foliage's glossy leaf tops made the tufts read as plastic)
+  const grassKey = ctx.mats.has?.('grass_dry') ? 'grass_dry' : foliageKey;
+  const tufts = mk(tuftGeometry(seed + 1), grassKey, tier.tuft, 'terrain:cover-grass', true);
+  const cush = mk(lumpGeometry(1, seed + 2, 0.55, -0.25), grassKey, tier.cush, 'terrain:cover-cushions', true);
   const stones = mk(lumpGeometry(tier.sd, seed + 3, 0.5, -0.35), 'terrain_rock', tier.stone, 'terrain:cover-stones', false);
 
   // ---------------------------------------------------------------- one chunk's instances (cached)

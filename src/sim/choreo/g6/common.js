@@ -104,8 +104,10 @@ export function say(ctx, state, sim, key, tCue, at, text, { id = 'sim', dur = 6,
 export function evWin(sim, id, base) {
   const e = sim.event(id);
   if (!e || !Number.isFinite(e.t0)) return null;
-  const t0 = Number.isFinite(base) ? base + ((e.t0 - base + 2160) % 1440) - 720 : e.t0;
-  return [t0, t0 + since(e.t1, e.t0)];
+  // (an event a module retimes keeps the data's window as tPlan: the staging reads that — gate-sim-data)
+  const w = e.tPlan || [e.t0, e.t1];
+  const t0 = Number.isFinite(base) ? base + ((w[0] - base + 2160) % 1440) - 720 : w[0];
+  return [t0, t0 + since(w[1], w[0])];
 }
 
 /** the aggadah layer is shown (settings key 'aggadah', default on) */

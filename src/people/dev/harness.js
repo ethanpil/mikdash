@@ -44,7 +44,9 @@ sun.shadow.normalBias = 0.02;
 scene.add(hemi, sun, sun.target);
 const pm = new PMREMGenerator(renderer);
 scene.environment = pm.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = night ? 0.05 : 0.45;
+// &env=<intensity>: the room's light boxes print blocky highlights through the rough mips (gate-people-r2: env=0.12 for
+// close-ups of cloth and skin, nearer the app's sky)
+scene.environmentIntensity = q.has('env') ? parseFloat(q.get('env')) : night ? 0.05 : 0.45;
 
 const ground = new Mesh(new PlaneGeometry(400, 400), new MeshStandardMaterial({ color: 0xcfc4ad, roughness: 0.85 }));
 ground.rotation.x = -Math.PI / 2;

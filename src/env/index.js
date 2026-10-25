@@ -87,6 +87,16 @@ const WB_FIRE_GOLD = 0.75; // render-env-2: in a gilded room (the eye adapts to 
 // its gold-tinted light is all the eye sees, so the Even Shetiyah's bare rock reads pale against the gold)
 const WB_ROOM = 0.45;
 const WB_CLOSED = 0.9;
+// gate-env-render: under a high Moon at astronomical night the sky term (the PMREM, env's ambient read-outs) is lowered by
+// this fraction (one stop), so the Moon's key models the stone — the soreg, the steps, the courses of the walls — instead of
+// drowning in the moonlit sky and the moonlit pavement's bounce, which carried as much light onto a wall as the Moon itself
+// (QA gate, the opening frame: "evenly lit"). Faded in with the Moon's altitude (10° → 25°) and the Sun's depression
+// (−12° → −16°): twilight and moonless nights are unchanged. Art direction, not a measured quantity (the measured sky is
+// ≈ 16 % of the moonlight at 67°, as by day)
+const NIGHT_AMBIENT_CUT = 0.5;
+// gate-env-render: the season's least cirrus cover (high / ultra): the early rains (yoreh, Cheshvan–Kislev) bring thin high
+// cloud on most days; summer skies stay clear. Index = month − 1; the per-date draw can only add to it
+const CIRRUS_FLOOR = [0.3, 0.28, 0.24, 0.16, 0.06, 0, 0, 0, 0, 0.15, 0.28, 0.3];
 const lum3 = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 
 const DEG = Math.PI / 180;
@@ -377,7 +387,8 @@ export async function init(ctx) {
   const cloudCoverage = () => {
     if (Number.isFinite(api.cirrus)) return MathUtils.clamp(api.cirrus, 0, 1);
     const h = hash01(ctx.time?.dateString || '');
-    return h < 0.45 ? 0 : (h - 0.45) / 0.55 * 0.5;
+    const floor = CIRRUS_FLOOR[((ctx.time?.date?.m ?? 1) - 1 + 12) % 12] ?? 0;
+    return Math.max(floor * (0.75 + 0.5 * hash01(`${ctx.time?.dateString || ''}#c`)), h < 0.45 ? 0 : (h - 0.45) / 0.55 * 0.5);
   };
 
   // ---------------------------------------------------------------- terrain horizon (sun behind Har HaMishchah)
@@ -861,7 +872,10 @@ export async function init(ctx) {
       refreshEnvMap(Esky);
       st.envSun.copy(sun.dir); st.envMoon.copy(moon.dir); st.envAt = st.clock; st.envDirty = false;
     }
-    scene.environmentIntensity = Esky * P;
+    const moonKey = st.keyIsMoon ? smooth(10, 25, moon.altitude) * smooth(-12, -16, sun.altitude) : 0;
+    const ambK = 1 - NIGHT_AMBIENT_CUT * moonKey;
+    api.ambientScale = ambK;
+    scene.environmentIntensity = Esky * P * ambK;
 
     // --- aerial perspective
     const F = st.fourier;
@@ -913,7 +927,7 @@ export async function init(ctx) {
     api.keyDir.copy(st.keyDir);
     const fl = st.floorIrr;
     // inside a room the ambient (smoke, custom shaders near the viewer) is what comes through its openings
-    const av = P * (ci ? ci.V : 1);
+    const av = P * (ci ? ci.V : 1) * ambK;
     api.ambient.sky.setRGB((st.skyIrrRGB[0] + fl * NIGHT_TINT[0]) * av, (st.skyIrrRGB[1] + fl * NIGHT_TINT[1]) * av, (st.skyIrrRGB[2] + fl * NIGHT_TINT[2]) * av);
     api.ambient.ground.setRGB(Eg * LOCAL_ALBEDO[0] * av, Eg * LOCAL_ALBEDO[1] * av, Eg * LOCAL_ALBEDO[2] * av);
     // sun / moon inside rooms: the shadow maps (medium+) or, without them, the rooms' sky visibility
@@ -954,6 +968,8 @@ export async function init(ctx) {
     sunTerrainVisibility: 1,
     /** irradiance in SCENE units (lx × preExposure): sky from above, bounce from the ground — for custom shaders */
     ambient: { sky: new Color(), ground: new Color() },
+    /** gate-env-render: the factor (≤ 1) already applied to the sky term (environmentIntensity, ambient) under a high Moon */
+    ambientScale: 1,
     /** neutral multiplier for FX emission (FX should move to physical values × preExposure; see decisions) */
     fireScale: 1,
     /** null = automatic; true/false forces dimming the key light by the terrain horizon at the camera */

@@ -118,7 +118,9 @@ export function buildCity(ctx, T, kit, detail) {
     const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, th = d.rot;
     const ca = Math.cos(th), sa = Math.sin(th);
     const toSite = (a, b) => [cx + a * ca - b * sa, cy + a * sa + b * ca];
-    const lane = m(4.2);
+    // gate-world-materials: lanes 3.2 m (were 4.2): the period's lanes were narrow, and the narrower gap reads as a dark
+    // cut between the blocks from the Mount and the air instead of a pale grid
+    const lane = m(3.2);
     const [bw, bh] = d.block;
     const half = Math.hypot(x1 - x0, y1 - y0) / 2;
     for (let b = -half; b < half; b += bh + lane) {
@@ -132,7 +134,9 @@ export function buildCity(ctx, T, kit, detail) {
         const P = (pa, pb) => { const u = pa - bc0, v = pb - bc1; return toSite(bc0 + u * cr - v * sr + ox, bc1 + u * sr + v * cr + oy); };
         const rect = (a0, b0, a1, b1) => [P(a0, b0), P(a1, b0), P(a1, b1), P(a0, b1)];
         // a courtyard house over the whole block: wings round a court ⚙ (more of them in the upper city)
-        if (rand() < (d.id === 'upper' ? 0.42 : 0.26)) {
+        // gate-world-materials: the courtyard house is the period's common house — most blocks (0.6 upper city, 0.42 elsewhere;
+        // were 0.42 / 0.26), so the city reads as rooms round open courts from above, not as solid boxes
+        if (rand() < (d.id === 'upper' ? 0.6 : 0.42)) {
           const e = () => m(0.15 + 1.2 * rand());
           const o0 = [a + e(), b + e()], o1 = [a + bw - e(), b + bh - e()];
           const dd = m(3.6 + 1.6 * rand());
@@ -197,7 +201,9 @@ export function buildCity(ctx, T, kit, detail) {
   for (const h of list) {
     const height = h.storeys === 3 ? 9.4 + 1.2 * h.hv : h.storeys === 2 ? 6.3 + 1.4 * h.hv : 3.6 + 0.9 * h.hv;   // m
     const z0 = h.zMin - m(0.9), zTop = h.zMax + m(height);
-    const wallTop = parapet ? zTop + m(0.55) : zTop;
+    // the ma'akeh no less than ten tefachim high (Rambam Rotze'ach uShmirat HaNefesh 11:3; Shulchan Aruch CM 427:5) —
+    // 10 tefachim = 1⅔ amot (0.8 m at the 48 cm amah); gate-world-materials: was 0.55 m, under the halachic minimum
+    const wallTop = parapet ? zTop + 10 / 6 : zTop;
     // the street front: the side whose midpoint is nearest a street (within 14 m of its edge), near the Mount
     const holes = [[], [], [], []];
     let frontSide = -1;
@@ -306,7 +312,13 @@ export function buildCity(ctx, T, kit, detail) {
   }
   const smokeState = { columns: 0, lit: 0 };
   if (smokes.length) citySmoke(ctx, smokes, smokeState);
-  return { houses: list.length, fronts, yards: Math.min(yards.length, Math.round(max * 0.25)), compounds: courts.filter((c) => kept.has(c.unit)).length, smokes: smokes.map((c) => c.c.map((v) => +v.toFixed(1))), smokeState };
+  // a tree in some of the kept courts (fig, pomegranate or olive — terrain/trees.js plants them), off-centre ⚙
+  const courtTrees = [];
+  for (const c of courts) {
+    if (!kept.has(c.unit) || rand() > 0.45) continue;
+    courtTrees.push([c.c[0] + (rand() - 0.5) * m(2.5), c.c[1] + (rand() - 0.5) * m(2.5)]);
+  }
+  return { courtTrees, houses: list.length, fronts, yards: Math.min(yards.length, Math.round(max * 0.25)), compounds: courts.filter((c) => kept.has(c.unit)).length, smokes: smokes.map((c) => c.c.map((v) => +v.toFixed(1))), smokeState };
 }
 
 /**

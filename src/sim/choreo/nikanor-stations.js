@@ -28,6 +28,8 @@ import { g4Book, planBefore } from './g4/book.js';
 import { geoOf, scriptMetzora, placeSet, bookSet, SetCast, g5PlanOf, setsSource } from './g4/sets.js';
 import { METZORA_T, VESSEL_START, PINCHAS, TO_RING, vesselKohen, vesselAt } from './g4/metzora.js';
 import { OFFERING_TYPES } from '../../data/offerings.js';
+import { followView, bearingTo } from '../lib/watch.js';
+import { AMAH } from '../../core/units.js';
 
 const SEED = 0x6e6b;
 const WHO = 'nikanor-stations';
@@ -92,6 +94,13 @@ export default {
     try { state.hung = ctx.people?.spawnProp?.('lamb_hung', { seed: SEED }) || null; state.hung?.setVisible(false); } catch { state.hung = null; }
     state.cast = new SetCast(ctx, { kohen: state.setK, lamb: state.setLamb, ewe: state.setEwe, israelite: state.agent });
     try { state.offSource = ctx.schedule?.addSource?.(setsSource(ctx, 'g4-metzora', () => plan(ctx, state, sim)?.sets)); } catch (e) { console.warn('[sim:g4] source failed', e); }
+    // "Go" follows the metzora while he is in Ezrat Nashim (the metzora'im chamber, the way up); in Nikanor's gateway
+    // the data's view from the landing at the head of the fifteen steps (gate-sim-data: the old stand below the steps
+    // saw neither)
+    try {
+      sim.schedule?.liveView?.('metzora', followView(ctx, () => { const s = state.metzora.slot(0); return s.placed && s.pos.y < 10 * AMAH ? s : null; },
+        { dists: [10, 13, 8, 16], from: (F) => bearingTo(F, [285, 345]) }));
+    } catch (e) { console.warn('[sim:g4] metzora live view failed', e); }
     return state;
   },
 
