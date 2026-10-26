@@ -11,11 +11,14 @@
 // Every concert is the audio's parts (plan.js libTimeline) spread over its song's window (plan.js spreadTimeline): the
 // first set, the walk to Ben Arza and the pour fall in the libation's window (afternoon: early in the song's), and the
 // three sections, with the second and third sets between them, fill the song's window. Between the tamid's song and the
-// musaf's on Shabbat the Levites go back to their chambers.
+// musaf's on Shabbat the Levites go back to their chambers. On Shabbat the musaf's concert sings this week's section of
+// Ha'azinu and the afternoon's the Shirah of the week (Rosh HaShanah 31a), each timed by the audio's clock for that song
+// (songTimeline).
 import { Script } from './script.js';
 import { add, cue, SRV } from './day.js';
-import { spreadTimeline, psalmOfDay, CUE_LEAD, MAX_WALK_S, D_SET } from './plan.js';
+import { spreadTimeline, psalmOfDay, CUE_LEAD, MAX_WALK_S, D_SET, GAP_S } from './plan.js';
 import { musafConcert } from '../g6/musaf.js';
+import { concertClock } from '../g6/common.js';
 import { rand } from '../../lib/core.js';
 
 const SEED = 0x6735;
@@ -44,29 +47,67 @@ export const TEXT = {
     en: `On the duchan the Levites sing the song of the day, Psalm ${psalm}, to kinnorot and nevalim, the Levite boys' voices below; at each section a teki'ah, and the people fall on their faces (Tamid 7:3–4; Arachin 2:3–6)`,
     he: 'שִׁיר שֶׁל יוֹם — הַלְוִיִּם עַל הַדּוּכָן',
   }),
+  // T: the afternoon's songTimeline (its title and verses are the audio's: what is sung)
+  shirah: (T) => ({
+    en: `At the afternoon tamid of Shabbat the Levites sing ${T.title.en} (${T.range}): one each Shabbat in turn — "Az yashir", "Mi chamocha", "Az yashir Yisrael" (Rosh HaShanah 31a)`,
+    he: `שִׁירָה בְּשַׁבָּת בַּמִּנְחָה — ${T.title.he}`,
+  }),
 };
 /**
  * Shabbat afternoon (Rosh HaShanah 31a): the Song at the Sea in two parts, "Az yashir" and "Mi chamocha", and the Song of
  * the Well, one each Shabbat in a three-week cycle (the cycle's start is not given ⚙: counted from Shabbat 2026-01-03,
- * as shabbat-musaf counts Ha'azinu's six). The audio has no text for them yet (requested): the melody is Psalm 92's,
- * with its own caption off, and these captions name what is sung.
+ * as shabbat-musaf counts Ha'azinu's six) — the week passed to the audio, which sings that song (src/audio/songs.js
+ * SHIRAH_CYCLE).
  */
-const SHIRAH = [
-  { en: '"Az yashir" — the Song at the Sea: "Then Moses and the children of Israel sang this song to the Lord"', he: 'אָז יָשִׁיר מֹשֶׁה וּבְנֵי יִשְׂרָאֵל אֶת הַשִּׁירָה הַזֹּאת לַה׳', src: 'Shemot 15:1' },
-  { en: '"Mi chamocha" — the Song at the Sea, its second part: "Who is like You among the mighty, O Lord?"', he: 'מִי כָמֹכָה בָּאֵלִם ה׳', src: 'Shemot 15:11' },
-  { en: '"Az yashir Yisrael" — the Song of the Well: "Then Israel sang this song: Spring up, O well!"', he: 'אָז יָשִׁיר יִשְׂרָאֵל אֶת הַשִּׁירָה הַזֹּאת עֲלִי בְאֵר', src: 'Bamidbar 21:17' },
-];
-const PARTS_HE = ['א', 'ב', 'ג'];
 export function shirahOfDate(ctx) {
   const d = ctx.time?.date;
   if (!d) return 0;
   const days = Math.round((Date.UTC(d.y, d.m - 1, d.d) - Date.UTC(2026, 0, 3)) / 86400000);
   return ((Math.floor(days / 7) % 3) + 3) % 3;
 }
-const shirahCaption = (k, s) => ({
-  en: `Shabbat afternoon: the Levites sing ${SHIRAH[k].en} (${SHIRAH[k].src}; Rosh HaShanah 31a) — part ${s + 1} of 3; the chant heard is a stand-in`,
-  he: `שִׁירָה בְּשַׁבָּת בַּמִּנְחָה — ${SHIRAH[k].he}, פֶּרֶק ${PARTS_HE[s]}`,
-});
+
+/**
+ * A Shabbat song's concert (song: { song: 'haazinu' | 'shirah', week } or { song: id }) on the audio's own clock for
+ * that song (g6/common.js concertClock = ctx.audio.libationTimeline), spread over its window as plan.js spreadTimeline
+ * spreads the psalm of the day: the first set, the walk and the pour as the audio plays them, then the three sung parts
+ * over [the pour, tEnd], the second and third sets between them, each part's 'choir' loop carrying it on (loop). The
+ * same shape as spreadTimeline's, plus song (the audio's id), title and range; psalm is the song's id too, since
+ * ketoret-morning cues the parts with { psalm: T.psalm } and the audio resolves a song named there (src/audio/index.js
+ * concert().music). null without the audio's clock.
+ */
+function songTimeline(ctx, L0, song, style, walkS, tEnd) {
+  const A = concertClock(ctx, { ...song, style, walk: walkS });
+  if (!A) return null;
+  const sg = A.style === 'sg1612';
+  const m = (s) => s / 60, at = (s) => L0 + s / 60;
+  // within a set (s from its first blast): the blowing's end, the people's prostration, the cymbal (sg1612), the part
+  const S0 = A.sets[0], S1 = A.sets[1];
+  const blowIn = S0.blasts[S0.blasts.length - 1].t1 - S0.t0, prostIn = A.prostrations[0].t0 - S0.t0;
+  const cymIn = sg ? A.cymbals[1] - S1.t0 : NaN, partIn = A.sections[1].t0 - S1.t0;
+  // each part's buffer and its last note (s from its start)
+  const D = A.sections.map((x) => x.t1 - x.t0), E = A.sections.map((x) => x.singEnd - x.t0);
+  const c0 = at(A.sections[0].t0), gap = m(GAP_S);
+  const sing = Math.max(m(Math.max(...D)), (tEnd - c0 - 2 * (gap + m(partIn))) / 3);
+  const sets = [at(S0.t0)], blow = [at(blowIn)], prost = [at(prostIn)], cym = [at(A.pour)], ch = [], loop = [];
+  let c = c0;
+  for (let s = 0; s < 3; s++) {
+    const last = c + sing - m(D[s] - E[s]);
+    ch.push([c, last, c + sing]);
+    const l0 = c + m(D[s] - 5);
+    loop.push(last - l0 > m(10) ? [l0, last] : null);
+    if (s === 2) break;
+    const st = c + sing + gap;
+    sets.push(st); blow.push(st + m(blowIn)); prost.push(st + m(prostIn));
+    if (sg) cym.push(st + m(cymIn));
+    c = st + m(partIn);
+  }
+  const v0 = A.sections[0].verses[0].ref.en, v1 = A.sections[2].verses[A.sections[2].verses.length - 1].ref.en;
+  const range = v1.split(':')[0] === v0.split(':')[0] ? `${v0}–${v1.split(':')[1]}` : `${v0}–${v1}`;
+  return {
+    L0, psalm: A.song, song: A.song, title: A.title, range, style: A.style, walkS,
+    sets, blow, cym, ch, prost, loop, end: ch[2][2], perf: ch[2][2], cym0S: A.pour, spread: true,
+  };
+}
 
 /** the trumpeters' way from the east side of the table round the ramp's foot to their place by Ben Arza ⚙ */
 function trumpWay(P, j) {
@@ -86,7 +127,7 @@ export function walkSeconds(P) {
  * One session on the duchan: the Levites and the boys come (o.arriveLevites; o.run at the magrefah), bow with the
  * people's prostrations, play and sing each concert's sections, and go back to their chambers at o.leave. Each concert
  * c: { key, T (libTimeline shape), trumpeters: [{ from } | { pool, i, t0 }], wine: same + { at?, pourAt? }, segan:
- * { handover } | { t0 }, pickJug, kg: { t } | null, audio: { psalm?, caption? }, captions: { pour: bool } }.
+ * { handover } | { t0 }, pickJug, kg: { t } | null, audio: { song?, caption? }, captions: { pour: bool } }.
  */
 export function buildSession(ctx, P, W, D, o) {
   const d = P.duchan, ax = P.heichal.axisY;
@@ -275,21 +316,20 @@ function concertKohanim(ctx, P, W, D, c) {
   cue(D, `${c.key}-set0`, T.sets[0] + 0.004, { caption: TEXT.set0, at: [205.5, 286, 17.5], range: 70, id: 'libation-trumpets' });
   if (c.captions?.pour !== false) cue(D, `${c.key}-pour`, cym0, { caption: TEXT.pour, at: A.pourAt, range: 140, id: 'libation-pour' });
   for (let s = 1; s < 3; s++) cue(D, `${c.key}-sect${s}`, T.sets[s] + 0.004, { caption: TEXT.section, at: [d.X, ax, d.Z1], range: 140, id: 'song-section' });
-  if (Number.isInteger(c.shirah)) {
-    for (let s = 0; s < 3; s++) cue(D, `${c.key}-shirah${s}`, T.ch[s][0] + 0.004, { caption: shirahCaption(c.shirah, s), at: [d.X, ax, d.Z1], range: 140, id: 'song-shirah' });
-  }
 }
 
 /**
- * The musaf's concert as shabbat-musaf publishes it (g6/musaf.js: its first set, walk and pour are libTimeline's with
- * Psalm 92's lengths), spread to a minute before the musaf's window closes; null when not Shabbat.
+ * The musaf's concert as shabbat-musaf publishes it (g6/musaf.js: its first set, walk and pour on the audio's clock for
+ * this Shabbat's section of Ha'azinu, mc.song), spread to a minute before the musaf's window closes; null when not
+ * Shabbat.
  */
 function musafTimeline(ctx, sim) {
   let mc = null;
   try { mc = musafConcert(ctx, sim); } catch (e) { console.warn('[sim:g3] musaf concert unavailable', e); }
-  if (!mc || !Number.isFinite(mc.L0)) return null;
+  if (!mc || !Number.isFinite(mc.L0) || !mc.song) return null;
   const t1 = Number.isFinite(mc.t1) && mc.t1 > mc.L0 + 4 ? mc.t1 : mc.L0 + 8;
-  return { mc, T: spreadTimeline(mc.L0, mc.psalmStandIn, 'mishnah', mc.walkS, Math.min(t1 - 1.0, mc.L0 + 14)) };
+  const T = songTimeline(ctx, mc.L0, { song: mc.song }, 'mishnah', mc.walkS, Math.min(t1 - 1.0, mc.L0 + 14));
+  return T ? { mc, T } : null;
 }
 
 /** the morning's (with Shabbat's musaf) and the afternoon's sessions (W windows; m = the morning build's hand-overs) */
@@ -328,7 +368,8 @@ export function buildSongs(ctx, P, W, D, m, sim) {
         segan: { t0: mc.wine.pick - 2.8 },
         pickJug: mc.wine.pick,
         kg: null,
-        audio: { psalm: mc.psalmStandIn, caption: false },
+        // what is sung: this Shabbat's section of Ha'azinu, its verses captioned by the audio as it sings them
+        audio: { song: musaf.T.song },
         at: { table: mc.table, benArza: mc.benArza, duchan: mc.benArza },
         captions: { pour: false },     // shabbat-musaf captions the pour with the Ha'azinu section
       };
@@ -339,8 +380,10 @@ export function buildSongs(ctx, P, W, D, m, sim) {
   }
   for (const o of sessions) buildSession(ctx, P, W, D, o);
   // afternoon: the first set 0.9 min into the event, the sections to its end; the Levites walk to the duchan during the
-  // limbs ⚙. Shabbat: the Song at the Sea / of the Well (Rosh HaShanah 31a), Psalm 92's melody as its stand-in
-  const pmT = spreadTimeline(W.AS[0] + 0.9, psalm, style, walkS, W.AS[1] - 0.8);
+  // limbs ⚙. Shabbat: the Song at the Sea / of the Well of the week (Rosh HaShanah 31a), on the audio's clock for it
+  const pmT = (sab && songTimeline(ctx, W.AS[0] + 0.9, { song: 'shirah', week: shirahOfDate(ctx) }, style, walkS, W.AS[1] - 0.8))
+    || spreadTimeline(W.AS[0] + 0.9, psalm, style, walkS, W.AS[1] - 0.8);
+  if (pmT.song) cue(D, 'song-shirah', W.AS[0] + CUE_LEAD, { caption: TEXT.shirah(pmT), at: [du.X, ax, du.Z1], range: 140, id: 'song-shirah' });
   buildSession(ctx, P, W, D, {
     key: 'pm', arriveLevites: W.AS[0] - 7.5, run: false, leave: W.AS[1],
     concerts: [{
@@ -350,7 +393,7 @@ export function buildSongs(ctx, P, W, D, m, sim) {
       segan: { t0: W.AS[0] - 3.6 },
       pickJug: W.AS[0] + CUE_LEAD,
       kg: null,
-      ...(sab ? { audio: { caption: false }, shirah: shirahOfDate(ctx) } : {}),
+      ...(pmT.song ? { audio: { song: pmT.song } } : {}),
     }],
   });
   return { am: amT, pm: pmT, musaf: musaf?.T || null, amLeave: sessions[0].leave };

@@ -19,7 +19,7 @@
 // with the Psalm 92 melody standing in for Ha'azinu (requested from audio) and its own caption naming the section.
 import { runScripts, FreeProps, setLead, phaseFn, evalScript, within, wrap } from './g2/lib.js';
 import { SEEDS } from './g2/tamid.js';
-import { musafPlan, MC_N, UP_N, POURER_SEED, PSALM_STAND_IN } from './g6/musaf.js';
+import { musafPlan, MC_N, UP_N, POURER_SEED } from './g6/musaf.js';
 import { g6places, say, HAAZINU } from './g6/common.js';
 import { crossed, cueAt } from '../lib/cue.js';
 
@@ -91,7 +91,7 @@ export default {
       runScripts(ctx, S.trumpeters, song.trumpeters, t, out, S.fns.tr);
       if (crossed(S, song.L0)) {
         cueAt(S, `musaf-concert:${Math.round(song.L0 * 10)}`, song.L0, () => {
-          try { ctx.audio?.libation?.({ psalm: PSALM_STAND_IN, caption: false, trumpets: song.table, benArza: song.benArza, walk: song.walkS }); } catch (e) { console.warn('[sim] musaf libation audio failed', e); }
+          try { ctx.audio?.libation?.({ song: song.song, style: song.style, caption: false, trumpets: song.table, benArza: song.benArza, walk: song.walkS }); } catch (e) { console.warn('[sim] musaf libation audio failed', e); }
         });
       }
     }
@@ -145,7 +145,11 @@ function cues(ctx, S, sim, P) {
   // the pour's caption names this Shabbat's section (libation-song leaves it to this module: captions.pour = false)
   {
     const h = HAAZINU[P.song.section];
-    say(ctx, S, sim, 'mu-song', c.song, at.sw, {
+    // when libation-song stages the concert, the audio's own heading names the section — say only the pour and blasts
+    say(ctx, S, sim, 'mu-song', c.song, at.sw, P.claimed ? {
+      en: 'The musaf wine is poured; nine more blasts for the musaf (Sukkah 5:5)',
+      he: 'נִסּוּךְ הַיַּיִן שֶׁל מוּסָף',
+    } : {
       en: `The musaf wine is poured; nine more blasts for the musaf (Sukkah 5:5), and the Levites sing this Shabbat's section of Ha'azinu — ${h.en}, section ${P.song.section + 1} of six (Rosh HaShanah 31a)`,
       he: `שִׁירַת הַאֲזִינוּ — ${h.he}`,
     }, { id: 'musaf-song', dur: 10, range: 120 });

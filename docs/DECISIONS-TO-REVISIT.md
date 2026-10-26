@@ -255,8 +255,8 @@ of a public history (K2), and fonts loaded from Google Fonts (K3).
 - **B20. The thirteen shofarot stand in a ring in Ezrat Nashim, in the Mishnah's order.** The kinnin chest must be
   where a yoledet can reach it (Eruvin 32a; Kelim 1:8 bars her from Ezrat Yisrael); Shekalim 7:1–2 puts certain chests
   side by side, which a ring gives and a row does not. The site model and the zone texts had first left the chests out
-  (the "treasury in the Court of the Women" comes from Josephus and the New Testament); world-4 added them. The Ezrat
-  Nashim info text does not mention them. *Alt:* none (A1); a row; in the Azarah (out of the yoledet's reach).
+  (the "treasury in the Court of the Women" comes from Josephus and the New Testament); world-4 added them, and the
+  Ezrat Nashim info text now names them (Shekalim 6:1, 6:5–6; the ring's placement is the model's). *Alt:* none (A1); a row; in the Azarah (out of the yoledet's reach).
   *reconstruction.* *Change:* `src/world/courts/en.js` `shofarot`, `zones-content.js`.
 - **B21. The Mizbeach.** The yesod full on the north and west with a 1-amah stub beyond each corner on the south and
   east, none at the SE (Middot 3:1, Rav); the top at 9 whole amot (+25), not the Rambam's 58 tefachim; the kevesh
@@ -595,10 +595,10 @@ of a public history (K2), and fonts loaded from Google Fonts (K3).
 - **G4. Every verse is sung, in three sections; captions show each verse in English and Hebrew.** *engineering.*
 - **G5. Shabbat songs: Ha'azinu in six parts, one per Shabbat (Rosh HaShanah 31a, divided as Rambam Tefillah 13:5), and
   in the afternoon the Song at the Sea or the Song of the Well; the cycle is counted in whole weeks from Shabbat
-  2026-01-03 (the phase is not recorded).** The choreography still sings Psalm 92's chant as a stand-in under those
-  captions, although the audio can now sing Ha'azinu and the Shirah themselves. *reconstruction.* *Change:*
-  `src/sim/choreo/g6/musaf.js` `PSALM_STAND_IN` and `src/sim/choreo/g3/song.js` (`audio: { psalm: … }` →
-  `{ song: 'haazinu' | 'shirah' }`).
+  2026-01-03 (the phase is not recorded).** The musaf concert sings that Shabbat's section of Ha'azinu and the
+  afternoon concert that week's Shirah, timed from the audio's own clock for the song (docs/decisions/shabbat-songs*.md).
+  The melodies themselves are reconstruction (K1). *reconstruction* (the cycle's phase). *Change:* the start week in
+  `src/audio/songs.js` (`shabbatWeek`), `src/sim/choreo/g6/common.js` (`haazinuSection`), `g3/song.js` (`shirahOfDate`).
 - **G6. Every tier renders the attested minimum on the duchan (12 men, 9 kinnorot, 2 nevalim; ultra 14 men); boy
   Levites 2 to 6 by tier** (their number is not attested). *sourced reading* (minimum). *Change:* `src/audio/`.
 - **G7. The nine blasts of the tamid are three teki'ah-teru'ah-teki'ah sets, each opening a section of the song, with a
@@ -723,7 +723,7 @@ Inconsistencies and pending requests found while building, each small, none fixe
   outside;** the sim kneels its kneaders with a bowl in the chol half instead. *Change:* a table in the chol half
   (`src/world/courts/moked.js`), then `knead` in `src/sim/choreo/chambers-daily.js`.
 - **L3. Whether the avnet stays on for preparation work** (incense, hides, baking) is undecided (E2).
-- **L4. Ha'azinu and the Shirah are captioned but sung to Psalm 92's chant,** although the audio can sing them (G5).
+- **L4. Resolved:** Ha'azinu and the Shirah are now sung, not Psalm 92's chant (G5).
 - **L5. From the ramp's top at night the ramp itself stays unlit by the great pile,** because fx puts the pile's merged
   light 0.6 × its size over its base, just below the ramp's plane; logged open, with the fix (a light at the flames'
   height, ≥ +30 amot), in world-3-fix.md. *Change:* `src/render/fx/presets.js` (pyre `light.height`).

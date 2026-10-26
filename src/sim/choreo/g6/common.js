@@ -135,4 +135,18 @@ export function haazinuSection(ctx) {
   return ((Math.floor(days / 7) % 6) + 6) % 6;
 }
 
+// the audio's pure concert clock, read through an eager glob so the sim builds either way (as g3/plan.js reads it)
+const AUDIO_TIMELINE = Object.values(import.meta.glob('../../../audio/timeline.js', { eager: true }))[0] || null;
+
+/**
+ * The libation concert's clock in seconds from its first blast, as ctx.audio.libationTimeline(opts) gives it (src/audio/
+ * timeline.js): the sets and their blasts, the people's prostrations, the cymbal at the pour, each sung section and its
+ * verses, for opts { song (+ week) | psalm, style, walk }. Before the audio is up (the sim initialises first) the same
+ * pure export answers: with every musical option given, the two agree. null without either.
+ */
+export function concertClock(ctx, opts) {
+  if (ctx.audio?.libationTimeline) return ctx.audio.libationTimeline(opts);
+  return AUDIO_TIMELINE?.libationTimeline ? AUDIO_TIMELINE.libationTimeline(opts) : null;
+}
+
 export { wrap, since };

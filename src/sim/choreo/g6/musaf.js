@@ -25,9 +25,8 @@
 import { Script, SPEED, jit, walkMin, seedFrom } from '../g2/lib.js';
 import { rampDown, circuit } from '../g2/places.js';
 import { CARRIERS_FALLBACK } from '../g2/tamid.js';
-import { g6places, evWin, Z, wrap, HAAZINU, haazinuSection } from './common.js';
+import { g6places, evWin, Z, wrap, HAAZINU, haazinuSection, concertClock } from './common.js';
 import { clamp } from '../../lib/core.js';
-import { PSALM_DUR as G3_PSALM_DUR } from '../g3/plan.js';
 import { AMAH } from '../../../core/units.js';
 
 /** crew slots = G2's tamid crew slots (same seed: the same men as the morning's winners) */
@@ -502,16 +501,11 @@ export function buildMusaf(ctx, sim, opts = {}) {
   };
 }
 
-// the concert's lengths in seconds as ctx.audio.libation plays them (src/audio/index.js; the same numbers as
-// g3/plan.js libTimeline — the trumpet set's pattern, the Psalm 92 sections' melody + 3.5 s, from g3's PSALM_DUR)
-const D_SET = 0.03 + 3.1 + 0.55 + (9 * 0.27 + 0.12) + 0.55 + 3.1 + 0.5;
-export const PSALM_STAND_IN = 92;
-const PSALM_DUR = G3_PSALM_DUR[PSALM_STAND_IN];
-
 /**
- * The concert in sim minutes, in step with ctx.audio.libation (as g3/plan.js libTimeline): the first set on the table
- * of the fats, the walk to Ben Arza, the cymbal at the pour, three sections each after a set. L0 is placed so the
- * cymbal falls on the pour. The fallback trumpeters' Scripts follow it.
+ * The concert in sim minutes, in step with ctx.audio.libation singing this Shabbat's section of Ha'azinu (Rosh
+ * HaShanah 31a): the audio's own clock for that song (g6/common.js concertClock — ctx.audio.libationTimeline): the
+ * first set on the table of the fats, the walk to Ben Arza, the cymbal at the pour, three sung parts each after a set.
+ * L0 is placed so the cymbal falls on the pour. The fallback trumpeters' Scripts follow it.
  */
 function concert(ctx, M) {
   const G = g6places(ctx), P = G.P, fats = G.fats;
@@ -525,18 +519,17 @@ function concert(ctx, M) {
   let len = 0, prev = onTable[0];
   for (const p of way(0)) { len += Math.hypot(p[0] - prev[0], p[1] - prev[1]) * AMAH; prev = p; }
   const walkS = clamp(len / 1.7, 4, 25);
-  const sets = [], blow = [], cym = [], ch = [], prost = [];
-  let x = 0;
-  for (let s = 0; s < 3; s++) {
-    sets.push(x); blow.push(x + D_SET - 0.48); prost.push(x + D_SET - 2.2);
-    x += D_SET - 0.2;
-    if (s === 0) { x += walkS; cym.push(x); x += 0.9; }
-    ch.push([x, x + PSALM_DUR[s] - 3.5, x + PSALM_DUR[s]]);
-    x += PSALM_DUR[s] - 2.6;
-  }
-  const L0 = M.t.pour - cym[0] / 60;
+  // this Shabbat's section (G6's count, the one the captions name) as the audio resolves it: 'haazinu-1'…'haazinu-6'
+  const section = haazinuSection(ctx);
+  const A = concertClock(ctx, { song: 'haazinu', week: section, style: 'mishnah', walk: walkS });
+  const L0 = M.t.pour - A.pour / 60;
   const mm = (s) => L0 + s / 60;
-  const tl = { sets: sets.map(mm), blow: blow.map(mm), cym: cym.map(mm), ch: ch.map((c) => c.map(mm)), prost: prost.map(mm), end: mm(ch[2][2]) };
+  // each set's start and the end of its blowing, the people's prostrations, the cymbal, each part's [start, last note,
+  // ring-out end]
+  const tl = {
+    sets: A.sets.map((x) => mm(x.t0)), blow: A.sets.map((x) => mm(x.blasts[x.blasts.length - 1].t1)), cym: A.cymbals.map(mm),
+    ch: A.sections.map((x) => [mm(x.t0), mm(x.singEnd), mm(x.t1)]), prost: A.prostrations.map((p) => mm(p.t0)), end: mm(A.end),
+  };
   // the two trumpeters (fallback only): out of the Gazit to the table of the fats, up onto it; blow; to Ben Arza at
   // his right and left; blow before each later section; back in when the song is done ⚙ ways
   const gz = P.gazit;
@@ -559,7 +552,7 @@ function concert(ctx, M) {
     s.walk([[240.4, 322 + 0.6 * k, Z], [236.6 + 0.4 * k, 300, Z], [231.2, 273.2, Z], [206.3, 274.3, Z], [202.6, 296, Z], [199.7, 309.4, Z], [P.apronX, 321, Z], ...[...P.way.gazitToNW].reverse(), gz.door, gz.inside], { speed: SPEED.walk, props: T });
     return s;
   });
-  return { L0, tl, table, benArza, walkS, trumpeters, section: haazinuSection(ctx) };
+  return { L0, tl, table, benArza, walkS, trumpeters, section, song: A.song, style: A.style, title: A.title };
 }
 
 
@@ -585,7 +578,7 @@ export function musafPlan(ctx, sim, pourBySong = false) {
         L0: S.L0, tPour: T.pour, sets: S.tl.sets, blow: S.tl.blow, cym: S.tl.cym, ch: S.tl.ch, prost: S.tl.prost, end: S.tl.end, t1: M.M1,
         walkS: S.walkS, table: S.table, benArza: S.benArza, pourAt: M.at.sw,
         wine: { at: T.wineOnRamp, laid: T.fwLaid[1], pick: T.pickW },
-        haazinu: { section: S.section, ...HAAZINU[S.section] }, psalmStandIn: PSALM_STAND_IN,
+        haazinu: { section: S.section, ...HAAZINU[S.section] }, song: S.song,
       };
     }
   } catch (e) { console.warn('[sim] g6 musaf plan failed', e); M = null; }
@@ -596,9 +589,10 @@ export function musafPlan(ctx, sim, pourBySong = false) {
 /**
  * For libation-song (G3): the musaf's concert as libation-song would stage it — absolute minutes unwrapped near
  * sunrise: L0 (first teki'ah-teru'ah-teki'ah, on the table of the fats), tPour (the pour = the cymbal), sets / blow /
- * cym / ch / prost / end (the ctx.audio.libation timeline, as g3 libTimeline with walkS), t1 (the event's end), wine
+ * cym / ch / prost / end (ctx.audio.libationTimeline for the song, back to back, with walkS), t1 (the event's end), wine
  * { at (site [X,Y,Z] on the ramp), laid, pick (when the pourer takes it) }, pourAt (the SW corner of the top),
- * haazinu { section 0..5, he, en }. null when not Shabbat.
+ * haazinu { section 0..5, he, en }, song (the audio's id of that section, 'haazinu-1'…'haazinu-6': what is sung).
+ * null when not Shabbat.
  * The pourer is the man who took the morning tamid's wine up from the ramp (TuM 4:9 — each task by the morning's man):
  * libation-song's brother 12 (on Shabbat morning he hands it to the Kohen Gadol, Tamid 7:3); the jug on the ramp was
  * laid by the second lottery's wine man (MC.WN), as at the tamid.
