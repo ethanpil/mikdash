@@ -26,8 +26,9 @@
 import { Vector3, ShaderChunk, Box3, Frustum, Matrix4, DataUtils } from 'three';
 import { m2w } from '../core/units.js';
 import { UniformBlock } from './uniforms.js';
-import { MK_LIMITS, MK_BLOCK, MK_FLAGS, OCC_EDGE, installInteriorChunks, setInteriorDebug } from './interiors-glsl.js';
+import { MK_LIMITS, MK_BLOCK, MK_FLAGS, OCC_EDGE, installInteriorChunks, setInteriorDebug, setInteriorVolume } from './interiors-glsl.js';
 import { defineVolumes, defineFireOccluders } from './volumes.js';
+import { createVisibility } from './visibility.js';
 
 const TWO_PI = 2 * Math.PI;
 const _p = new Vector3();
@@ -128,7 +129,11 @@ function inside(p, v) {
 }
 const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
-/** opts.probes: compile the probe loop (tiers with scene probes; env switches it on a tier change) */
+/**
+ * opts.probes: compile the probe loop (tiers with scene probes; env switches it on a tier change). opts.volume / opts.ao
+ * (lowend-visuals: quality.interiors / quality.ao 'volume'): the rooms' openings and the precinct AO from the visibility
+ * volume (env/visibility.js)
+ */
 export function createInteriors(ctx, opts = {}) {
   const { renderer, camera } = ctx;
   const AMAH = ctx.units.AMAH;
@@ -156,7 +161,16 @@ export function createInteriors(ctx, opts = {}) {
   for (const e of encW) {
     for (const plate of [null, ...plateW.filter((p) => within(e.rect, (p.rect[0] + p.rect[2]) / 2, (p.rect[1] + p.rect[3]) / 2))]) records.push({ enc: e, plate });
   }
-  if (ctx.params?.raw?.get?.('intshader') !== '0' && !installInteriorChunks(ShaderChunk, { probes: opts.probes !== false, origin: [origin.x, origin.y, origin.z], records, debug: !!Number(ctx.params?.raw?.get?.('intdebug')) })) return null; // ?intshader=0: logic without the shader patch (profiling)
+  // lowend-visuals: the visibility volume, before any lit program compiles (its samplers join three's ShaderLib uniforms)
+  let vis = null;
+  const visFlags = { volume: !!opts.volume, ao: !!opts.ao };
+  if (visFlags.volume || visFlags.ao) {
+    try { vis = createVisibility(ctx, volumes, { rooms: visFlags.volume, ao: visFlags.ao }); } catch (e) {
+      console.warn('[env] visibility volume unavailable — exact interiors', e);
+      visFlags.volume = visFlags.ao = false;
+    }
+  }
+  if (ctx.params?.raw?.get?.('intshader') !== '0' && !installInteriorChunks(ShaderChunk, { probes: opts.probes !== false, origin: [origin.x, origin.y, origin.z], records, debug: !!Number(ctx.params?.raw?.get?.('intdebug')), ...visFlags })) return null; // ?intshader=0: logic without the shader patch (profiling)
   const K = MK_LIMITS.vol;
   const NA = MK_LIMITS.ap;
   const uni = new UniformBlock(renderer, 'MkInteriors', MK_BLOCK);
@@ -164,6 +178,7 @@ export function createInteriors(ctx, opts = {}) {
     volA: new Float32Array(K * 4), volB: new Float32Array(K * 4), volC: new Float32Array(K * 4), volD: new Float32Array(K * 4),
     apU: new Uint32Array(NA * 4), volH: new Uint32Array(K * 4), intP: new Float32Array(4), pt: new Uint32Array(MK_LIMITS.lights),
     grid: new Uint32Array(MK_LIMITS.grid * 4), key: new Float32Array([0, 1, 0, 0.3]), occ: new Float32Array(MK_LIMITS.occ * 4),
+    volE: new Float32Array(K * 4), volF: new Float32Array(K * 4), volW: new Uint32Array(K * 4), vis: new Float32Array(8),
   };
   uni.set('mkKey', buf.key);
   let selected = [];
@@ -252,6 +267,7 @@ export function createInteriors(ctx, opts = {}) {
 
   function pack() {
     buf.volA.fill(0); buf.volB.fill(0); buf.volC.fill(0); buf.volD.fill(0); buf.apU.fill(0); buf.volH.fill(0);
+    buf.volE.fill(0); buf.volF.fill(0); buf.volW.fill(0);
     let na = 0;
     selected.forEach((v, i) => {
       v.slot = i;
@@ -271,6 +287,15 @@ export function createInteriors(ctx, opts = {}) {
       }
       buf.volC.set([a0, na - a0, v.margin, v.fill || 0], i * 4);
       buf.volD.set(v.fillAt ? [v.fillAt.x, v.fillAt.y, v.fillAt.z, v.fillR2 || 1] : [0, 0, 0, 1], i * 4);
+      // lowend-visuals: the room's brick in the visibility volume and its openings' weights (as the exact path packs them)
+      const br = vis?.brick(v);
+      if (br) {
+        buf.volE.set([br.S[0], br.S[1], br.S[2], br.O[0]], i * 4);
+        buf.volF.set([br.O[1], br.O[2], 0, 0], i * 4);
+        const w = [0, 1, 2, 3].map((q) => { const a = v.apertures[q]; return a && a.index >= a0 && a.index < na ? (u8(a.openness) / 255) * (u8(a.beyond) / 255) : 0; });
+        buf.volW[i * 4] = (half(w[0]) | (half(w[1]) << 16)) >>> 0;
+        buf.volW[i * 4 + 1] = (half(w[2]) | (half(w[3]) << 16)) >>> 0;
+      }
     });
     // union of the grown boxes (the shader's first test); w = active probes (kept from setProbes)
     const ua = [1e9, 1e9, 1e9], ub = [-1e9, -1e9, -1e9];
@@ -288,6 +313,7 @@ export function createInteriors(ctx, opts = {}) {
     uni.set('mkVolD', buf.volD);
     uni.setU32('mkApU', buf.apU);
     uni.setU32('mkVolH', buf.volH);
+    if (vis) { uni.set('mkVolE', buf.volE); uni.set('mkVolF', buf.volF); uni.setU32('mkVolW', buf.volW); }
     writeIntP();
   }
 
@@ -624,6 +650,7 @@ export function createInteriors(ctx, opts = {}) {
     }
     lastProbeFor = probeFor;
     updateFill(probeFor);
+    writeVis();
     at(_p, cam);
     const slot = cam.vol && cam.vol.slot >= 0 && cam.s > 0.5 ? cam.vol.slot + 1 : 0;
     if (slot !== camVolSlot) { camVolSlot = slot; writeIntP(); }
@@ -633,6 +660,18 @@ export function createInteriors(ctx, opts = {}) {
   function beforeRender(lights) {
     writeLights(lights);
     uni.apply();
+  }
+
+  /** lowend-visuals: the precinct AO grid's place and strength (it fades in when it lands) */
+  let visT = performance.now();
+  function writeVis() {
+    if (!vis) return;
+    const now = performance.now();
+    vis.update((now - visT) / 1000);
+    visT = now;
+    const p = vis.aoParams(buf.vis);
+    uni.set('mkVis', p.subarray(0, 4));
+    uni.set('mkVisN', p.subarray(4, 8));
   }
 
   /**
@@ -690,6 +729,17 @@ export function createInteriors(ctx, opts = {}) {
 
   return {
     volumes,
+    /** lowend-visuals: the visibility volume (env/visibility.js) on the tiers that use it, else null */
+    get visibility() { return vis; },
+    /** compile the volume's room path / AO in or out (a tier switch); true when lit materials must recompile */
+    setVolumeFlags(flags) {
+      if ((flags.volume || flags.ao) && !vis) {
+        try { vis = createVisibility(ctx, volumes, { rooms: !!flags.volume, ao: !!flags.ao }); } catch (e) { console.warn('[env] visibility volume unavailable', e); return false; }
+      }
+      const changed = setInteriorVolume(ShaderChunk, { volume: !!flags.volume && !!vis?.roomTexture, ao: !!flags.ao && !!vis?.aoTexture });
+      if (changed) { camera.getWorldPosition(_p); select(_p, cameraFrustum()); }
+      return changed;
+    },
     at,
     mainVisibility,
     occlusion,

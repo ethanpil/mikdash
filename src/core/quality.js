@@ -1,5 +1,14 @@
 // Quality tiers. ctx.quality is one of these objects (a copy), chosen by URL ?q=, saved setting, or auto-detect.
 // Subsystems READ these knobs; they never hard-code device assumptions.
+//
+// Capability flags (lowend-visuals; docs/decisions/lowend-visuals.md):
+//   shadows    false | 'static' (the key light's map holds the static world only, re-rendered when the light's framing, a
+//              caster or a door changes; figures keep their contact shadows) | 'cached' (static world cached, figures
+//              drawn every frame: render/shadow-cache.js) | 'cascaded' (two view-fitted sun cascades: render/shadows.js)
+//   shadowFilter 'pcf1' (one hardware 2 × 2 compare per lookup) | 'pcf5' (three's 5-tap Vogel disk): render/shadows.js
+//   aa         'none' | 'fxaa' (one pass over the finished frame: render/fxaa.js) | 'smaa' (post pipeline)
+//   ao         false | 'volume' (env's load-time visibility volume: env/visibility.js) | 'n8ao' (screen space, post)
+//   interiors  'volume' (room sky visibility from the visibility volume) | 'exact' (per-pixel room and aperture loop)
 import { detectTier } from '../render/detect.js';
 // The render/ owner may refine autoDetect() and add knobs; keep existing keys stable.
 
@@ -7,38 +16,43 @@ export const TIERS = {
   low: {
     key: 'low', label: 'Low — phones & integrated graphics',
     pixelRatioCap: 1.0, renderScale: 0.8,
-    shadows: false, shadowMapSize: 1024, cascades: 1,
-    post: false, ao: false, bloom: false, aa: 'none', godrays: false,
+    shadows: 'static', shadowFilter: 'pcf1', shadowMapSize: 2048, cascades: 1,
+    post: false, ao: 'volume', interiors: 'volume', bloom: false, aa: 'fxaa', godrays: false,
     textureSize: 512, anisotropy: 2, detail: 0,
     maxFigures: 60, maxFireLights: 2, terrainSegments: 96, drawDistance: 2500,
   },
   medium: {
     key: 'medium', label: 'Medium — balanced',
     pixelRatioCap: 1.25, renderScale: 1.0,
-    shadows: true, shadowMapSize: 2048, cascades: 1,
-    post: true, ao: false, bloom: true, aa: 'smaa', godrays: false,
+    shadows: 'cached', shadowFilter: 'pcf5', shadowMapSize: 2048, cascades: 1,
+    post: true, ao: 'volume', interiors: 'volume', bloom: true, aa: 'smaa', godrays: false,
     textureSize: 1024, anisotropy: 4, detail: 1,
     maxFigures: 180, maxFireLights: 4, terrainSegments: 192, drawDistance: 4000,
   },
   high: {
     key: 'high', label: 'High — discrete GPU',
     pixelRatioCap: 1.5, renderScale: 1.0,
-    shadows: true, shadowMapSize: 4096, cascades: 2,
-    post: true, ao: true, bloom: true, aa: 'smaa', godrays: false,
+    shadows: 'cascaded', shadowFilter: 'pcf5', shadowMapSize: 4096, cascades: 2,
+    post: true, ao: 'n8ao', interiors: 'exact', bloom: true, aa: 'smaa', godrays: false,
     textureSize: 2048, anisotropy: 8, detail: 2,
     maxFigures: 450, maxFireLights: 8, terrainSegments: 320, drawDistance: 6000,
   },
   ultra: {
     key: 'ultra', label: 'Ultra — maximum realism',
     pixelRatioCap: 2.0, renderScale: 1.0,
-    shadows: true, shadowMapSize: 4096, cascades: 2,
-    post: true, ao: true, bloom: true, aa: 'smaa', godrays: true,
+    shadows: 'cascaded', shadowFilter: 'pcf5', shadowMapSize: 4096, cascades: 2,
+    post: true, ao: 'n8ao', interiors: 'exact', bloom: true, aa: 'smaa', godrays: true,
     textureSize: 2048, anisotropy: 16, detail: 3,
     maxFigures: 1200, maxFireLights: 12, terrainSegments: 512, drawDistance: 8000,
   },
 };
 
 export const TIER_ORDER = ['low', 'medium', 'high', 'ultra'];
+
+/** do figures (people, animals, their props) cast into the key light's shadow map? Not with 'static' maps */
+export const figuresCastShadows = (q) => q?.shadows === 'cached' || q?.shadows === 'cascaded';
+/** does the tier use env's visibility volume (room sky visibility and / or volume AO)? */
+export const usesVisibilityVolume = (q) => q?.interiors === 'volume' || q?.ao === 'volume';
 
 /** GPU/device classification — delegated to render/detect.js (GPU string + cached micro-benchmark). */
 export function autoDetect(renderer) {

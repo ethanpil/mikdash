@@ -33,6 +33,9 @@ export const MK_BLOCK = [
   ['mkPrH', MK_LIMITS.probe], ['mkPrC', MK_LIMITS.probe], ['mkPrD', MK_LIMITS.probe], ['mkPrE', MK_LIMITS.probe],
   ['mkIntP', 1], ['mkIntQ', 1], ['mkUnionA', 1], ['mkUnionB', 1], ['mkPtU', MK_LIMITS.lights / 4],
   ['mkIntEnv', 1], ['mkFillCol', 1], ['mkVolH', MK_LIMITS.vol], ['mkKey', 1], ['mkOcc', MK_LIMITS.occ], ['mkGrid', MK_LIMITS.grid],
+  // lowend-visuals: the visibility volume (env/visibility.js) — per room slot its brick's texture map and its openings'
+  // weights; the precinct AO grid
+  ['mkVolE', MK_LIMITS.vol], ['mkVolF', MK_LIMITS.vol], ['mkVolW', MK_LIMITS.vol], ['mkVis', 1], ['mkVisN', 1],
 ];
 
 /** flag bits in mkUnionA.w (a float: exact to 2^24): occluded fire lights at occShift (1 bit; which ones: mkOcc[0].w) */
@@ -80,7 +83,18 @@ layout( std140 ) uniform MkInteriors {
   vec4 mkKey;                       // xyz world direction toward the key light (sun / moon), w the sun mask's slack (m)
   vec4 mkOcc[ ${MK_LIMITS.occ} ];   // the occluded fire lights: xyz their centroid (world), w record + 4 × their light mask + radius / 4
   uvec4 mkGrid[ ${MK_LIMITS.grid} ]; // plan grid over the union box (${MK_LIMITS.gridX} × ${MK_LIMITS.gridZ} cells of 16 bits): up to 4 room slots + 1
+  vec4 mkVolE[ ${MK_LIMITS.vol} ];  // the room's brick in mkVisRoom: texture coordinates = world × xyz + ( w, mkVolF.xy )
+  vec4 mkVolF[ ${MK_LIMITS.vol} ];  // xy see mkVolE
+  uvec4 mkVolW[ ${MK_LIMITS.vol} ]; // x, y: its openings' weights (openness × brightness beyond) as half2 ( 0, 1 ), ( 2, 3 )
+  vec4 mkVis;                       // the precinct AO grid: xyz its origin (world), w the cell (m)
+  vec4 mkVisN;                      // xyz its cells, w the strength it is applied with (0: none yet)
 };
+#ifdef MK_VOLUME
+uniform highp sampler3D mkVisRoom; // per room: the share of the hemisphere each of its (≤ 4) openings fills (RGBA)
+#endif
+#ifdef MK_VIS_AO
+uniform highp sampler3D mkVisAO;   // precinct ambient obscurance, SH L1: r = a, gba = b × 0.5 + 0.5 (a + b·n)
+#endif
 const vec3 MK_ORIGIN = vec3( ${f(origin[0])}, ${f(origin[1])}, ${f(origin[2])} );
 ${recordFn}
 
@@ -114,6 +128,21 @@ vec3 mkDbgPath = vec3( 0.0 ); // debug view 3: r inside the union, g the cell li
 // render-env-2-fix: only the values above stay live from mkSetup through three's light loop to the IBL (the world
 // position and normal, the room's gain and fill centre are recomputed or read where they are used): fewer registers
 // held across the unrolled light loop
+
+#ifdef MK_VIS_AO
+// lowend-visuals (quality.ao 'volume'): the precinct's ambient obscurance at P for a surface facing N — the SH L1 cell
+// value a + b·N, read half a cell out along the normal (the cell holding the surface would see into it); 1 outside the
+// grid and before the volume has landed (mkVisN.w, its strength, fades in)
+float mkVisOcclusion( vec3 P, vec3 N ) {
+  vec4 G = mkVis, D = mkVisN;
+  if ( D.w <= 0.0 ) return 1.0;
+  vec3 q = ( P + N * ( 0.5 * G.w ) - G.xyz ) / G.w;
+  if ( any( lessThan( q, vec3( 0.5 ) ) ) || any( greaterThan( q, D.xyz - 0.5 ) ) ) return 1.0;
+  vec4 c = texture( mkVisAO, q / D.xyz );
+  float a = clamp( c.r + dot( c.gba * 2.0 - 1.0, N ), 0.0, 1.0 );
+  return mix( 1.0, a, D.w );
+}
+#endif
 
 // how far inside a box: 1 inside, fading to 0 at margin outside; outward-facing surfaces in the shell -> 0 —
 // except on the box's floor face: a floor is solid ground, never an opening to the sky — and on the faces in joins
@@ -293,11 +322,9 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
   #endif
   float v = A.w;
   int a0 = int( C.x + 0.5 ), na = int( C.y + 0.5 );
-  // one pass over the apertures: the sky visibility, the reflection's exit and the key light's
   vec3 Rv = reflect( normalize( viewPos ), n );
   Rv = normalize( mix( Rv, n, pow4( rough ) ) );
   vec3 Rw = ( vec4( Rv, 0.0 ) * viewMatrix ).xyz;
-  vec4 K = mkKey;
   float hit = 0.0, sun = 0.0;
   // a room with its own probe (the Kodesh, the Ulam on medium+) takes its reflections from it: no exit test
   bool ownProbe = ( hw & 0x40000000u ) != 0u;
@@ -306,6 +333,38 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
   // opening's energy: the soft-edged test alone reached ≈ 0.86 over an area 5–6 × the gate's seen from the far end
   bool goldRoom = ( hw & 0x3fffffffu ) != 0u;
   na = min( na, ${MK_LIMITS.ap} - a0 );
+#ifdef MK_VOLUME
+  // lowend-visuals (quality.interiors 'volume'): the openings' shares from the room's brick of the visibility volume
+  // (env/visibility.js), times their live weights — the sum the loop below takes, without the loop. The view-dependent
+  // terms (the reflection's exit, a gilded room's analytic environment) use the main opening alone; the key light is the
+  // shadow map's (every volume tier has one).
+  vec4 VE = mkVolE[ bi ];
+  uvec4 VW = mkVolW[ bi ];
+  vec4 om = texture( mkVisRoom, P * VE.xyz + vec3( VE.w, mkVolF[ bi ].xy ) );
+  vec4 wts = vec4( unpackHalf2x16( VW.x ), unpackHalf2x16( VW.y ) );
+  float vaSum = dot( om, wts );
+  v += vaSum;
+  mkVm = om.x * wts.x;
+  sun = 1.0;
+  if ( na > 0 && ( ! ownProbe || goldRoom ) ) {
+    uvec4 U = mkApU[ a0 ];
+    vec3 ac = A.xyz + vec3( float( U.x & 0xffffu ), float( U.x >> 16 ), float( U.y & 0xffffu ) ) * 0.01;
+    float w = wts.x;
+    vec2 he = vec2( float( U.z & 0xffffu ), float( U.z >> 16 ) ) * 0.01;
+    MkApF F = mkApFrame( float( U.w & 7u ) );
+    vec3 d = ac - P;
+    mkDm = d; mkMainAp = vec3( he, float( U.w & 7u ) + 8.0 * w );
+    if ( ! ownProbe && w > 0.0 ) {
+      float hk = mkApHit( d, Rw, 0.05, rough, he, F ) * w * mix( 1.0, smoothstep( 0.0, 0.35, dot( Rw, F.n ) ), smoothstep( 0.2, 0.6, rough ) );
+      if ( goldRoom ) {
+        float hs = 0.5 * ( 0.05 + rough * max( dot( d, F.n ), 0.0 ) / max( dot( Rw, F.n ), 1e-3 ) );
+        hk *= ( he.x * he.y ) / ( ( he.x + hs ) * ( he.y + hs ) );
+      }
+      hit = hk;
+    }
+  }
+#else
+  vec4 K = mkKey;
   for ( int k = 0; k < na; k ++ ) {
     uvec4 U = mkApU[ a0 + k ];
     vec3 ac = A.xyz + vec3( float( U.x & 0xffffu ), float( U.x >> 16 ), float( U.y & 0xffffu ) ) * 0.01;
@@ -335,6 +394,7 @@ void mkRoom( vec4 UA, vec4 UB, vec3 viewPos, vec3 n, float rough, vec3 P, vec3 N
     float ks = mkApHit( d, K.xyz, K.w, 0.01, he, F );
     sun = max( sun, ks > 0.0 && ( U.w & 8u ) != 0u ? mkSlot( d, K.xyz, he, F, U.w ) * min( open * 64.0, 1.0 ) : ks * open );
   }
+#endif
   mkHit = best * hit;
   mkSun = mix( 1.0, sun, best );
   mkV = mix( 1.0, clamp( v, 0.0, 1.0 ), best );
@@ -597,6 +657,13 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
     }
     mkRad += g * ( hit * ( goldRoom ? mix( rad, LbO, mkS ) : rad ) + ( 1.0 - hit ) * mix( rad, inRad, mkS ) );
   }
+  #ifdef MK_VIS_AO
+  // lowend-visuals: the image-based light (sky, probes, the rooms' openings and fire fill) is what nearby walls,
+  // colonnades and corners hide; rough reflections gather it like the diffuse light, glossy ones keep more of it
+  float ao = mkVisOcclusion( Pw, Nw );
+  mkIrr *= ao;
+  mkRad *= mix( 1.0, ao, roughness );
+  #endif
 }
 #endif
 
@@ -625,10 +692,12 @@ let parsText = '';
  * opts.origin: world point the 16-bit centimetre coordinates count from; opts.records: fire occluder records
  * ({ enc: { rect: [x0, z0, x1, z1], tops: [x−, x+, z−, z+] } | null, plate: { rect, top } | null }, world m).
  */
-export function installInteriorChunks(ShaderChunk, { probes = true, origin = [0, 0, 0], records = [], debug = false } = {}) {
+export function installInteriorChunks(ShaderChunk, { probes = true, origin = [0, 0, 0], records = [], debug = false, volume = false, ao = false } = {}) {
   if (installed || ShaderChunk.__mkInt) return true;
   probesOn = !!probes;
   debugOn = !!debug;
+  volumeOn = !!volume;
+  aoOn = !!ao;
   const env = ShaderChunk.envmap_physical_pars_fragment;
   const begin = ShaderChunk.lights_fragment_begin;
   const maps = ShaderChunk.lights_fragment_maps;
@@ -668,9 +737,27 @@ const PATCHED = ['envmap_physical_pars_fragment', 'lights_fragment_begin', 'ligh
 const STOCK = {}, PATCH = {};
 let probesOn = true;
 let debugOn = false;
+let volumeOn = false;
+let aoOn = false;
 // stock IBL helpers (clearcoat, anisotropy) read the sky slice of the atlas
 function envChunk(env) {
-  return `${probesOn ? '#define MK_PROBES\n' : ''}${debugOn ? '#define MK_DEBUG\n' : ''}${parsText}\n${env.replaceAll('textureCubeUV( envMap,', 'mkSky( envMap,')}`;
+  const defs = `${probesOn ? '#define MK_PROBES\n' : ''}${debugOn ? '#define MK_DEBUG\n' : ''}${volumeOn ? '#define MK_VOLUME\n' : ''}${aoOn ? '#define MK_VIS_AO\n' : ''}`;
+  return `${defs}${parsText}\n${env.replaceAll('textureCubeUV( envMap,', 'mkSky( envMap,')}`;
+}
+
+/**
+ * lowend-visuals: compile the visibility volume's room path (quality.interiors 'volume') and AO (quality.ao 'volume') in or
+ * out. Returns true when the chunk changed: every lit material must then recompile (material.needsUpdate).
+ */
+export function setInteriorVolume(ShaderChunk, { volume = false, ao = false } = {}) {
+  if (!installed || (volumeOn === !!volume && aoOn === !!ao)) return false;
+  volumeOn = !!volume;
+  aoOn = !!ao;
+  const k = 'envmap_physical_pars_fragment';
+  const active = ShaderChunk[k] === PATCH[k];
+  PATCH[k] = envChunk(STOCK[k]);
+  if (active) ShaderChunk[k] = PATCH[k];
+  return true;
 }
 
 /**

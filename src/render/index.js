@@ -6,7 +6,7 @@ import { PRIORITY } from '../core/engine.js';
 import { createFx } from './fx/index.js';
 import { installFireFalloffChunk } from './fx/lights.js';
 import { Pipeline, TONE_MAPPERS } from './pipeline.js';
-import { SunShadows, installCascadeBiasChunk } from './shadows.js';
+import { SunShadows, installCascadeBiasChunk, setShadowTaps } from './shadows.js';
 import { AdaptiveResolution } from './adaptive.js';
 import { detectDevice, isMobile } from './detect.js';
 import { installShaderLogFilter } from './log-filter.js';
@@ -51,10 +51,15 @@ export async function init(ctx) {
     shadowCache?.dispose();
     shadowCache = null;
     renderer.shadowMap.enabled = !!q.shadows;
-    if (q.shadows && (q.cascades || 1) > 1) {
+    // lowend-visuals: the PCF lookup's taps (quality.shadowFilter 'pcf1': one hardware compare); a change recompiles
+    if (setShadowTaps(q.shadowFilter === 'pcf1' ? 1 : 5)) {
+      ctx.scene.traverse((o) => { for (const m of [].concat(o.material || [])) if (m.isMeshStandardMaterial) m.needsUpdate = true; });
+    }
+    if (q.shadows === 'cascaded') {
       try { shadows = new SunShadows(ctx, q.key); } catch (e) { console.error('[render] cascaded shadows unavailable', e); }
-    } else if (q.shadows) {
-      try { shadowCache = new KeyShadowCache(ctx); } catch (e) { console.error('[render] key shadow cache unavailable', e); }
+    } else if (q.shadows === 'cached' || q.shadows === 'static') {
+      // lowend-visuals: 'static' (low) keeps only the static world in the map, re-rendered when it changes
+      try { shadowCache = new KeyShadowCache(ctx, { figures: q.shadows === 'cached' }); } catch (e) { console.error('[render] key shadow cache unavailable', e); }
     }
     fx.setMode({ tier: q.key, soft: !!q.post });
     try {
