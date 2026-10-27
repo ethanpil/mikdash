@@ -2,9 +2,12 @@
 // glides when flying (down to a connected floor first when the target is a floor), teleports (with a fade
 // when ctx.ui.fade exists) for 'instant' and for the last stretch to targets the walk cannot reach. A path through
 // a climb (nav/climbs.js) is walked in legs with the climb between; the arrival is framed (ARRIVAL).
+// Every goTo is a trip (trip.js): a pace multiplier applied by sub-stepping (player/index.js), the route's places, and
+// the bus events travel:start | progress | pace | zone | end (docs/console-design.md §6.3.1).
 import { Vector3 } from 'three';
-import { m2w, a, EYE_HEIGHT, headingToYaw } from '../core/units.js';
+import { m2w, w2m, a, EYE_HEIGHT, headingToYaw } from '../core/units.js';
 import { BODY } from './controller.js';
+import { Trip, clampPace } from './trip.js';
 
 /** m/s; 'instant' teleports */
 export const SPEEDS = { slow: 0.8, walk: 1.4, fast: 2.4, run: 4.5 };
@@ -40,6 +43,22 @@ export function speedOf(speed) {
     console.warn(`[player] unknown goTo speed ${JSON.stringify(speed)}; walking`);
   }
   return SPEEDS.walk;
+}
+
+/**
+ * goTo's second argument → { v (m/s, 0 = instant), way, pace, label }. A string or number keeps its old meaning (pace
+ * 1); an object is { way: 'instant'|'walk'|'run'|number (m/s), pace: 0.25..10, label?: string | { en } }.
+ */
+export function tripOpts(speedOrOpts) {
+  if (speedOrOpts && typeof speedOrOpts === 'object') {
+    const w = speedOrOpts.way ?? 'walk';
+    const v = speedOf(w);
+    const way = v === 0 ? 'instant' : typeof w === 'number' ? w : w === 'run' ? 'run' : 'walk';
+    const l = speedOrOpts.label;
+    return { v, way, pace: clampPace(speedOrOpts.pace ?? 1), label: l == null ? null : typeof l === 'string' ? { en: l } : l };
+  }
+  const v = speedOf(speedOrOpts);
+  return { v, way: v === 0 ? 'instant' : speedOrOpts === 'run' ? 'run' : typeof speedOrOpts === 'number' ? speedOrOpts : 'walk', pace: 1, label: null };
 }
 
 /** The standing floor at (x, z) — see physics.standFloor (datum preference unless `exact`). World y or null. */
@@ -312,11 +331,21 @@ function pointAt(P, s, out) {
   return out.lerpVectors(pts[k - 1], pts[k], (s - cum[k - 1]) / seg);
 }
 
-export function createAuto(ctx, ctrl, physics, nav) {
+/**
+ * hooks: { zoneAt(worldFeet) -> zone id | null (the route's places), lookedWithin(seconds) -> boolean (the user looked
+ * around that recently: the arrival keeps their view) }
+ */
+export function createAuto(ctx, ctrl, physics, nav, hooks = {}) {
   let job = null;
   let veilOwner = null; // the job whose teleport currently holds the fade veil
+  let tripSeq = 0;
   const tmp = new Vector3(), tmp2 = new Vector3();
   const cmd = { dirX: 0, dirZ: 0, speed: 0, fly: null }; // reused every frame
+  const zoneAt = hooks.zoneAt || (() => null);
+  const snap = (p) => (physics.bvh ? physics.nearestFloor(p.x, p.z, p.y) : null);
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const siteOf = (p) => { const m = w2m(p); return [r2(m.X), r2(m.Y), r2(m.Z)]; };
+  const emit = (name, e) => { try { ctx.bus?.emit?.(name, e); } catch (err) { console.error(`[player] ${name} listener failed`, err); } };
 
   const hold = () => {
     cmd.dirX = 0; cmd.dirZ = 0; cmd.speed = 0;
@@ -325,7 +354,74 @@ export function createAuto(ctx, ctrl, physics, nav) {
   };
   const steer = (dx, dz, v) => { cmd.dirX = dx; cmd.dirZ = dz; cmd.speed = v; cmd.fly = null; return cmd; };
 
-  function finish(ok) {
+  // ---- the trip: route, places crossed, travel:* events ----
+
+  /** route speed estimate (m per real second) for the ETA: the walk's own speed, smoothed (~2 s) */
+  const nominal = (T) => Math.max(0.05, (T.mps || 1) * (T.effectivePace || T.pace || 1));
+  const eta = (T) => T.remaining / Math.max(0.3 * nominal(T), T.vEst || nominal(T));
+
+  /** install (or re-plan) the trip's route; the first one announces the trip (travel:start) */
+  function setRoute(j, pts, opts) {
+    const T = j.trip;
+    const idx = T.setRoute(pts, opts);
+    if (!T.started) startTrip(j);
+    return idx;
+  }
+  function startTrip(j) {
+    const T = j.trip;
+    T.started = true;
+    emit('travel:start', {
+      id: T.id, label: T.label, way: T.way, pace: T.pace, mps: T.mps, distance: T.total, eta: eta(T), to: T.to,
+      zones: T.zones.map((r) => ({ zone: r.zone, s0: r2(r.s0), s1: r2(r.s1) })),
+    });
+  }
+  /** the crossings since the last call → travel:zone */
+  function cross(T, s) {
+    for (const c of T.advance(s)) {
+      T.prevOfLast = c.prev;
+      emit('travel:zone', { id: T.id, zone: c.zone, prev: c.prev, index: c.index, s: r2(c.s), at: siteOf(c.at), final: false });
+    }
+  }
+  /** end of a trip: on arrival the places not yet announced (a walk), then the arrival's place (final), then travel:end */
+  function endTrip(j, ok, reason) {
+    const T = j.trip;
+    if (!T || T.ended) return;
+    T.ended = true;
+    if (!T.started) startTrip(j);
+    if (ok) {
+      if (!j.hopped && T.route) cross(T, T.total);
+      T.s = T.total;
+      const zone = zoneAt(ctrl.feet) ?? T.lastZone;
+      const prev = zone === T.lastZone ? (T.prevOfLast ?? null) : T.lastZone;
+      emit('travel:zone', { id: T.id, zone, prev, index: Math.max(0, T.zones.length - 1), s: r2(T.total), at: siteOf(ctrl.feet), final: true });
+    }
+    emit('travel:end', { id: T.id, ok, reason });
+  }
+
+  /** the walker's distance along the trip's route (exact: from its leg, segment and progress) */
+  function tripS(j) {
+    const T = j.trip, R = T?.route;
+    if (!R || R.pts.length < 2) return T ? T.s : 0;
+    const at = (idx, f) => {
+      const i = Math.max(0, Math.min(R.pts.length - 2, idx));
+      return R.cum[i] + Math.max(0, Math.min(1, f)) * (R.cum[i + 1] - R.cum[i]);
+    };
+    if (j.phase === 'walk' && j.path && j.legBase != null) {
+      const P = j.path, k = Math.min(j.seg, P.pts.length - 2);
+      if (k < 0) return R.cum[j.legBase] ?? T.s;
+      const L = P.cum[k + 1] - P.cum[k];
+      return at(j.legBase + k, L > 1e-6 ? (j.s - P.cum[k]) / L : 1);
+    }
+    if (j.phase === 'climb' && j.climb && j.climbBase != null) {
+      const C = j.climb, i0 = j.climbBase, i1 = Math.min(R.pts.length - 1, i0 + C.via.length - 1);
+      return R.cum[i0] + (C.total > 0 ? C.s / C.total : 1) * (R.cum[i1] - R.cum[i0]);
+    }
+    if (j.phase === 'glide' && j.glideBase != null) return at(j.glideBase, j.dur > 0 ? j.t / j.dur : 1);
+    if (j.phase === 'turn' && !j.hopped) return R.total;
+    return T.s;
+  }
+
+  function finish(ok, reason) {
     const j = job;
     if (!j) return;
     job = null;
@@ -333,6 +429,7 @@ export function createAuto(ctx, ctrl, physics, nav) {
       ctrl.setMode(j.r.air ? 'fly' : 'walk');
       ctx.bus.emit('player:arrived', { target: j.target });
     }
+    endTrip(j, ok, reason || (ok ? 'arrived' : 'cancelled'));
     j.resolve(ok);
   }
 
@@ -361,6 +458,8 @@ export function createAuto(ctx, ctrl, physics, nav) {
   /** No walkable way (or not all the way): fade-teleport to the target, then turn to the requested view. */
   function hop(j) {
     j.phase = 'wait';
+    j.hopped = true;
+    if (!j.trip.route) setRoute(j, [ctrl.feet.clone(), j.r.feet.clone()], { sample: false });
     instant(j.r, j).then(() => { if (job === j) { j.phase = 'turn'; j.t = 0; } });
   }
 
@@ -415,12 +514,15 @@ export function createAuto(ctx, ctrl, physics, nav) {
     // a path through a climb (nav/climbs.js) is walked in legs: to the climb's foot, the climb, on from its top
     const c = path.climb;
     j.full = path;
-    j.climb = c ? { via: path.slice(c.i0, c.i1 + 1), rest: path.slice(c.i1), heading: c.heading } : null;
-    walkLeg(j, c ? path.slice(0, c.i0 + 1) : path);
+    // the trip's route from here on (the climb's segments are not on a floor)
+    j.fullBase = setRoute(j, path, { air: c ? path.slice(1).map((_, k) => k >= c.i0 && k < c.i1) : null });
+    j.climb = c ? { via: path.slice(c.i0, c.i1 + 1), rest: path.slice(c.i1), heading: c.heading, i0: c.i0, i1: c.i1 } : null;
+    walkLeg(j, c ? path.slice(0, c.i0 + 1) : path, j.fullBase);
   }
 
-  function walkLeg(j, pts) {
-    Object.assign(j, { path: preparePath(pts), s: 0, seg: 0, lastS: 0, stuckT: 0, v: 0, t: 0 });
+  /** walk the leg pts; base: the index of pts[0] in the trip's route */
+  function walkLeg(j, pts, base) {
+    Object.assign(j, { path: preparePath(pts), s: 0, seg: 0, lastS: 0, stuckT: 0, v: 0, t: 0, legBase: base });
     if (j.path.total < 0.15) legEnd(j); else j.phase = 'walk';
   }
 
@@ -432,6 +534,7 @@ export function createAuto(ctx, ctrl, physics, nav) {
     const via = j.climb.via, cum = [0];
     for (let k = 1; k < via.length; k++) cum.push(cum[k - 1] + via[k].distanceTo(via[k - 1]));
     Object.assign(j.climb, { cum, total: cum[cum.length - 1], s: 0, v: 0 });
+    j.climbBase = j.fullBase + j.climb.i0;
     j.phase = 'climb'; j.t = 0;
     ctrl.setMode('fly');
   }
@@ -441,6 +544,16 @@ export function createAuto(ctx, ctrl, physics, nav) {
     ctrl.setMode('fly');
     const from = ctrl.feet.clone();
     const plan = Math.hypot(to.x - from.x, to.z - from.z), dist = plan + Math.abs(to.y - from.y);
+    // the trip's route: the glide, then (landing) the walk from the landing spot as planned now (re-planned on landing)
+    const pts = [from, to.clone()], air = [true];
+    if (thenWalk && nav.isReady) {
+      const lp = nav.findPath(to, j.r.feet);
+      if (lp && lp.length > 1) {
+        const c = lp.climb;
+        for (let k = 1; k < lp.length; k++) { pts.push(lp[k]); air.push(!!c && k - 1 >= c.i0 && k - 1 < c.i1); }
+      }
+    }
+    j.glideBase = setRoute(j, pts, { air });
     Object.assign(j, {
       phase: 'glide', t: 0, from, to: to.clone(), thenWalk,
       hFrac: plan / (dist + 1e-6), // landing: share of the time spent moving over the spot before descending
@@ -454,24 +567,37 @@ export function createAuto(ctx, ctrl, physics, nav) {
     return { pts, cum, total: cum[cum.length - 1] };
   }
 
+  const PACED = new Set(['walk', 'climb', 'glide']);
   const auto = {
     get active() { return !!job; },
     get job() { return job; },
+    /** the job's phase: 'plan' | 'wait' | 'instant' | 'glide' | 'walk' | 'climb' | 'turn' | null */
+    get phase() { return job ? job.phase : null; },
+    /** does the pace multiplier apply now (a walk, a climb or a glide; never a teleport or the arrival's turn) */
+    get paced() { return !!job && PACED.has(job.phase); },
+    get pace() { return job ? job.pace : 1; },
 
-    goTo(target, speed = 'walk') {
-      auto.cancel();
+    goTo(target, speedOrOpts = 'walk') {
+      if (job) finish(false, 'superseded');
       const r = resolveTarget(ctx, physics, target, ctrl.feet.y);
       if (!r) return Promise.resolve(false);
-      const v = speedOf(speed);
+      const o = tripOpts(speedOrOpts);
+      const v = o.v;
+      const tl = target?.label;
+      const label = o.label || (typeof tl === 'string' ? { en: tl } : tl?.en ? tl : null);
       return new Promise((resolve) => {
         const j = {
-          target, r, speed: v, resolve, phase: 'plan', t: 0, v: 0, s: 0, seg: 0, lastS: 0, stuckT: 0, nudges: 0,
+          target, r, speed: v, pace: v === 0 ? 1 : o.pace, resolve, phase: 'plan', t: 0, v: 0, s: 0, seg: 0, lastS: 0, stuckT: 0, nudges: 0,
           look: lookPoint(physics, target), autoPitch: r.pitch == null, autoHeading: r.heading == null, reframed: false,
         };
+        j.trip = new Trip({ id: ++tripSeq, label, way: o.way, pace: j.pace, mps: v, to: siteOf(r.feet), zoneAt, snap });
+        j.trip.progT = 0;
         job = j;
         frame(j, r.feet);
         if (v === 0) {
           j.phase = 'instant';
+          j.hopped = true;
+          setRoute(j, [ctrl.feet.clone(), r.feet.clone()], { sample: false });
           instant(r, j).then(() => { if (job === j) finish(true); });
           return;
         }
@@ -495,9 +621,73 @@ export function createAuto(ctx, ctrl, physics, nav) {
       });
     },
 
-    cancel() {
+    cancel(reason = 'cancelled') {
       if (!job) return;
-      finish(false);
+      finish(false, reason);
+    },
+
+    /** pace multiplier for the current trip (clamped 0.25..10); emits travel:pace. Returns the pace set. */
+    setPace(p) {
+      const v = clampPace(p);
+      const j = job, T = j?.trip;
+      if (!T || T.ended || j.speed === 0 || v === j.pace) return v;
+      if (T.vEst) T.vEst *= v / j.pace;
+      j.pace = T.pace = v;
+      emit('travel:pace', { id: T.id, pace: v, way: T.way });
+      return v;
+    },
+
+    /** 'walk' ↔ 'run' mid-trip; emits travel:pace */
+    setWay(way) {
+      const j = job, T = j?.trip;
+      if (!T || T.ended || j.speed === 0 || (way !== 'walk' && way !== 'run') || T.way === way) return;
+      const v = SPEEDS[way];
+      if (T.vEst) T.vEst *= v / (T.mps || v);
+      j.speed = T.mps = v;
+      T.way = way;
+      emit('travel:pace', { id: T.id, pace: j.pace, way });
+    },
+
+    /** veiled teleport to the trip's target (travel:end reason 'skipped'); resolves true when done */
+    finishTrip() {
+      const j = job;
+      if (!j) return Promise.resolve(false);
+      if (j.skipping) return j.skipping;
+      j.hopped = true;
+      j.climb = null;
+      j.phase = 'wait';
+      j.skipping = instant(j.r, j).then(() => {
+        if (job !== j) return false;
+        finish(true, 'skipped');
+        return true;
+      });
+      return j.skipping;
+    },
+
+    /** the trip's public snapshot, or null */
+    tripInfo() {
+      const T = job?.trip;
+      return T && !T.ended ? T.info({ eta: eta(T) }) : null;
+    },
+
+    /** the pace the frame actually ran at (the sub-step cap; player/index.js) */
+    setEffectivePace(e) { if (job?.trip) job.trip.effectivePace = e; },
+
+    /** per frame after the movement (real dt): the distance along the route, places crossed, travel:progress ≤ 4 Hz */
+    tick(dt) {
+      const j = job, T = j?.trip;
+      if (!T || T.ended || !T.route) return;
+      const s0 = T.s;
+      cross(T, tripS(j));
+      if (dt > 0 && PACED.has(j.phase)) {
+        const v = (T.s - s0) / dt;
+        T.vEst = T.vEst == null ? nominal(T) : T.vEst + (v - T.vEst) * (1 - Math.exp(-dt / 2));
+      }
+      T.progT += dt;
+      if (T.progT >= 0.25) {
+        T.progT = 0;
+        emit('travel:progress', { id: T.id, s: r2(T.s), total: r2(T.total), remaining: r2(T.remaining), eta: eta(T), pace: T.pace, effectivePace: T.effectivePace });
+      }
     },
 
     teleport(target) {
@@ -558,7 +748,7 @@ export function createAuto(ctx, ctrl, physics, nav) {
           j.climb = null;
           ctrl.setMode('walk');
           ctrl.place(C.via[C.via.length - 1]);
-          walkLeg(j, C.rest);
+          walkLeg(j, C.rest, j.fullBase + C.i1);
           return hold();
         }
         cmd.fly = tmp;
@@ -647,6 +837,8 @@ export function createAuto(ctx, ctrl, physics, nav) {
       }
 
       if (j.phase === 'turn') {
+        // the user is looking around: keep their view (the arrival does not override it)
+        if (hooks.lookedWithin?.(1.0)) { finish(true); return hold(); }
         let done = true;
         if (j.r.heading != null) {
           const err = turnToward(headingToYaw(j.r.heading), dt, 2.0);

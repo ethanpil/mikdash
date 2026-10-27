@@ -39,6 +39,9 @@ export function he(text, cls = '') {
 
 export function clear(el) { while (el.firstChild) el.firstChild.remove(); return el; }
 
+/** replace an element's children (null / false / undefined are skipped, arrays flattened, as in h()) */
+export function fill(el, ...children) { clear(el); return append(el, children); }
+
 /** set textContent only when it changed (avoids layout churn in per-frame updates) */
 export function setText(el, text) {
   const s = String(text ?? '');

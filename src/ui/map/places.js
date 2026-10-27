@@ -1,8 +1,8 @@
-// Places list: a search box (combobox) over a grouped listbox of every zone. Typing filters (English, transliteration,
-// Hebrew, id; apostrophes and niqqud ignored); ↑/↓ move the selection (the map follows), Enter goes there, Esc clears.
-// Places with activity now are listed first under "Happening now", with a count badge; "soon" shows minutes.
+// Places list: a grouped browse list of every zone (the Menu header's search finds places by name). The list itself is
+// focusable: ↑/↓ move the selection (the map follows), Enter goes there. Places with activity now are listed first
+// under "Happening now", with a count badge; "soon" shows minutes.
 import { h, he, setText } from '../dom.js';
-import { GROUPS, searchKey } from './model.js';
+import { GROUPS } from './model.js';
 
 let seq = 0;
 
@@ -12,16 +12,9 @@ let seq = 0;
 export function createPlaces(opts) {
   const { model } = opts;
   const uid = `mk-pl${++seq}`;
-  const input = h('input.mk-mapl__search', {
-    type: 'search', placeholder: 'Find a place…', autocomplete: 'off', spellcheck: false, enterkeyhint: 'go',
-    role: 'combobox', 'aria-autocomplete': 'list', 'aria-expanded': 'true', 'aria-controls': `${uid}-list`,
-    'aria-label': 'Find a place. Arrow keys choose, Enter goes there.',
-  });
-  const count = h('div.mk-mapl__count.sr-only', { 'aria-live': 'polite' });
-  const list = h('div.mk-mapl__list', { id: `${uid}-list`, role: 'listbox', 'aria-label': 'Places', 'data-scroll': '' });
-  const el = h('aside.mk-mapl', { 'aria-label': 'Places' },
-    h('div.mk-mapl__head', h('label.mk-mapl__field', input, h('span.mk-kbd.mk-mapl__slash', { 'aria-hidden': 'true', title: 'Press / to search' }, '/'))),
-    list, count);
+  const list = h('div.mk-mapl__list', { id: `${uid}-list`, role: 'listbox', tabindex: '0', 'aria-label': 'Places. Arrow keys choose, Enter goes there.', 'data-scroll': '' });
+  const input = list; // the element that carries aria-activedescendant
+  const el = h('aside.mk-mapl', { 'aria-label': 'Places' }, list);
 
   let selected = null;
   let options = []; // visible option elements, in order
@@ -43,13 +36,11 @@ export function createPlaces(opts) {
   }
 
   function render() {
-    const q = searchKey(input.value);
     const act = opts.activity();
     rows.clear();
     const frag = [];
-    const match = (id) => !q || model.nameOf(model.get(id)).key.includes(q);
-    // happening now (only while not filtering: then the groups show everything once)
-    if (!q && act.byZone.size) {
+    // happening now
+    if (act.byZone.size) {
       const ids = [...act.byZone.keys()].filter((id) => model.get(id))
         .sort((a, b) => (Math.max(...act.byZone.get(b).map((e) => e.importance || 1)) - Math.max(...act.byZone.get(a).map((e) => e.importance || 1)))
           || act.byZone.get(b).length - act.byZone.get(a).length);
@@ -61,7 +52,7 @@ export function createPlaces(opts) {
       }
     }
     for (const G of GROUPS) {
-      const ids = model.list.filter((z) => z.group === G.id).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map((z) => z.id).filter(match);
+      const ids = model.list.filter((z) => z.group === G.id).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map((z) => z.id);
       if (!ids.length) continue;
       const hid = `${uid}-g-${G.id}`;
       frag.push(h('div.mk-mapl__group', { role: 'group', 'aria-labelledby': hid },
@@ -70,7 +61,6 @@ export function createPlaces(opts) {
     if (!frag.length) frag.push(h('div.mk-mapl__none', 'No place by that name.'));
     list.replaceChildren(...frag);
     options = [...list.querySelectorAll('[role=option]')];
-    setText(count, q ? `${options.length} place${options.length === 1 ? '' : 's'} found` : '');
     paintActivity(true);
     mark();
   }
@@ -81,7 +71,7 @@ export function createPlaces(opts) {
     if (!force && key === actKey) return;
     actKey = key;
     const ids = [...act.byZone.keys()].sort().join();
-    if (!force && ids !== nowIds && !input.value) { render(); return; } // the "Happening now" group changed
+    if (!force && ids !== nowIds) { render(); return; } // the "Happening now" group changed
     nowIds = ids;
     for (const r of rows.values()) {
       const evs = act.byZone.get(r.id);
@@ -132,11 +122,6 @@ export function createPlaces(opts) {
     select(options[i].dataset.id, true);
   }
 
-  input.addEventListener('input', () => {
-    render();
-    // the first match becomes the selection, so Enter goes to it
-    if (input.value && options.length && !options.some((o) => o.dataset.id === selected)) select(options[0].dataset.id, true);
-  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); move(1); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); move(-1); }
@@ -154,8 +139,6 @@ export function createPlaces(opts) {
     render,
     update() { paintActivity(false); },
     setSelected(id) { selected = id; mark(true); },
-    /** Esc in the search box clears it first */
-    clear() { if (!input.value) return false; input.value = ''; render(); return true; },
-    focus() { input.focus({ preventScroll: true }); input.select(); },
+    focus() { list.focus({ preventScroll: true }); if (!selected && options.length) select(options[0].dataset.id, true); },
   };
 }

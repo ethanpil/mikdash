@@ -24,6 +24,7 @@ import { wrap } from '../lib/core.js';
 import { CUE_LEAD } from '../lib/cue.js';
 import { breadPlan, SEED_OUT, SEED_IN, N_SIDE, SEED_KG, SEED_KGK, N_KGK } from './g6/bread.js';
 import { say } from './g6/common.js';
+import { shabbatMishmar as inspectHooks } from './describe/sanctuary.js';
 
 const TEXT = {
   divide: { en: 'The loaves are divided between the watches: the incoming take six and divide them in the north, for they are ready for the service; the outgoing take six and divide them in the south (Sukkah 5:8; Rambam TuM 4:12)', he: 'הַנִּכְנָסִין חוֹלְקִין בַּצָּפוֹן, וְהַיּוֹצְאִין בַּדָּרוֹם' },
@@ -35,6 +36,9 @@ const TEXT = {
 
 export default {
   id: 'shabbat-mishmar',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 3.6,        // the rest of each watch, and the Kohen Gadol with his two (D0 − 3.4), come out of the Gazit before the bread
   lag: 4,           // … and go back in by turns (the Kohen Gadol's party is in by showbread-eaten.t1 − 3.5)
   importance: 2,

@@ -25,6 +25,7 @@ import { makePools, stage, runCues, windowAmount, FreeProps } from './g1/stage.j
 import { EMBERS } from './terumat-hadeshen.js';
 import { within, since, clamp, smooth, upperBound, wrap, span } from '../lib/core.js';
 import { CUE_LEAD } from '../lib/cue.js';
+import { altarNight as inspectHooks } from './describe/dawn.js';
 
 const FIRES = { great: 'altar.maarachah.great', inner: 'altar.maarachah.great.inner' };
 const INNER_DEFAULT = 0.9;                         // the inner pile as the altar builder lights it (altar/fire.js)
@@ -42,6 +43,9 @@ const TEXT = {
 
 export default {
   id: 'altar-night',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 2.5,        // the evening crew come out of Beit HaMoked 2.3 min before evening-altar (g1/plan.js CREW_LEAD)
   lag: 3,
   importance: 2,

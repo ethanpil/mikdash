@@ -1,7 +1,10 @@
-// UI system (ARCHITECTURE.md §13).
-//   ctx.settings = { get(key), set(key, value), all(), defs }   persisted as localStorage 'mikdash.<key>'; bus 'settings:change'
-//   ctx.ui       = { toast(msg, ms?), fade(to, ms) | fade(ms) -> Promise, open(panel, opts?), close(), toggle(panel), panel,
-//                    hints(on), enter() }                       panels: 'time' | 'info' | 'map' | 'settings' | 'about'
+// UI system (ARCHITECTURE.md §13; the Luach console, docs/console-design.md).
+//   ctx.settings = { get(key), set(key, value), all(), defs, define(def), isSet(key) }   localStorage 'mikdash.<key>';
+//                  bus 'settings:change'
+//   ctx.ui       = { toast(msg, ms?), fade(to, ms) | fade(ms) -> Promise, open(section, opts?), close(), toggle(section),
+//                    panel, hints(on), enter(), card(ref | hit), search(q?, { scope }), banner(zone | {en, he}, { kind }),
+//                    modules, console, map }   sections: 'here' | 'happening' | 'map' | 'time' | 'learn' | 'listen' |
+//                    'settings' | 'help' (+ legacy 'info' → here, 'about' → learn)
 // fade(to 0..1, ms) moves the black veil (the player's teleport contract: fade(1, 220) … fade(0, 320));
 // fade(ms) alone dips to black, resolves when black, then lifts by itself.
 // Nothing is mounted when ctx.params.ui is false (shot=1 or ui=0); the UI code is then never loaded.
@@ -40,8 +43,10 @@ export async function init(ctx) {
   ctx.bus.on('settings:change', (e) => { if (e?.key === 'fov') applyFov(); });
 
   if (!p.ui || typeof document === 'undefined') {
+    const noModules = { register: () => () => {}, unregister() {}, has: () => false, get: () => null };
     ctx.ui = {
       toast() {}, fade: async () => {}, open: () => false, close() {}, toggle() {}, panel: null, hints() {}, enter() {}, enabled: false,
+      card: () => false, search() {}, banner() {}, modules: noModules, console: null, map: null,
     };
     return;
   }

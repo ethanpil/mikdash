@@ -29,15 +29,50 @@ import { cueAt, crossed } from '../lib/cue.js';
 import { window4, rand } from '../lib/core.js';
 import { followView, lastNear, stagedRetime, siteOf } from '../lib/watch.js';
 
+import { describeWith } from './describe/index.js';
+import { crewRole, CREW_PHRASE, crewDoing, lambDoing, lambState, LAMB_WHY } from './describe/tamid.js';
+
 const NEAR = 45;            // m — captions for what can be seen and heard close by
 const WICKET = 'azarah.gate.moked.pishpash';
 const LIMB_BURNS = 240;     // minutes a limb stays visible on the fire (= altar-night.js) ⚙
 const N_UP = 8;             // the fourth lottery's: the six limbs, the flour, the chavitin (lotteries' Gazit men 11–18)
 
+// ---- inspect hooks (console-design §6.2; describe/tamid.js): each crew slot is one of the second lottery's tasks
+const CD = crewDoing('north-western');
+const LAMB_EVENT = { bound: 'tamid-slaughter', drink: 'lamb-watered', led: 'lamb-watered' };
+const hooks = describeWith({
+  id: 'tamid-morning',
+  pools: {
+    crew: {
+      phrase: CREW_PHRASE('the morning tamid'), sub: (who) => crewRole(who.index),
+      doing: { 'lamb-watered': CD.watered, 'tamid-slaughter': CD.slaughter, 'tamid-blood': CD.blood, flaying: CD.flaying, 'limbs-to-ramp': CD.toRamp },
+    },
+    fetchers: {
+      phrase: 'one of the two sent to bring a lamb from the lamb chamber', sub: (who) => who.index,
+      doing: {
+        'lamb-brought': { 0: 'Choosing an inspected lamb in the lamb chamber of Beit HaMoked and leading it out to the court', _: 'With him at the lamb chamber' },
+        'lamb-watered': { 0: 'Holding the lamb on its rope at the watering', _: 'Going back to Lishkat HaGazit' },
+      },
+    },
+    'vessel-bearers': { phrase: 'one of the kohanim bringing out the vessels', doing: { vessels: 'Bringing the ninety-three vessels of silver and gold out of Lishkat HaKelim' } },
+    'limbs-up': { phrase: 'one of those who won the fourth lottery, to carry the parts from the ramp to the altar', doing: { 'limbs-up': 'Carrying the parts up the east side of the ramp and throwing them on the great pile' } },
+    lambs: {
+      custom: (ctx, state, who) => {
+        const pose = who.slot?.actor?.poseName || who.slot?._pose;
+        return { doing: lambDoing(pose), phrase: { en: 'a lamb for the tamid' }, why: LAMB_WHY, eventId: LAMB_EVENT[lambState(pose)], subjectKey: `tamid-morning:lambs:${who.index}` };
+      },
+    },
+    'kohen-gadol': { phrase: 'the Kohen Gadol, offering the limbs himself', doing: { 'limbs-up': 'Going up the ramp, the segan at his right; the bearers hand him the parts, and he leans on them and throws them on the fire' } },
+    segan: { phrase: 'the segan, at the Kohen Gadol\'s right hand', doing: { 'limbs-up': 'Taking the Kohen Gadol by his right arm at the middle of the ramp and bringing him up' } },
+  },
+});
+
 export default {
   id: 'tamid-morning',
   always: true,
   importance: 3,
+  describe: hooks.describe,
+  locate: hooks.locate,
 
   init(ctx, events, sim) {
     const P = places(ctx);

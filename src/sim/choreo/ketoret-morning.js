@@ -24,6 +24,7 @@ import { crossed, cueAt } from '../lib/cue.js';
 import { within, since, wrap, clamp, smooth } from '../lib/core.js';
 import { m2w } from '../../core/units.js';
 import { followView, lastNear, stagedRetime, siteOf } from '../lib/watch.js';
+import { ketoret as inspectHooks } from './describe/sanctuary.js';
 
 const SEED = 0x6730;
 const COALS = 'g3.mizbach-hazahav.coals', GLOW = 'g3.pan-coals', LEDGE = 'g3.pan-coals.ledge';
@@ -37,6 +38,9 @@ const TEXT = {
 
 export default {
   id: 'ketoret-morning',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   aliases: ['birkat-kohanim', 'menorah-lighting', 'libation-song', 'maamad'],
   always: true,
   importance: 3,

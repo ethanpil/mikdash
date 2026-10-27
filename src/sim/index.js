@@ -47,6 +47,13 @@ export async function init(ctx) {
   const zoneTick = trackZones(ctx, zones);
   ctx.engine.onUpdate((dt) => zoneTick(dt), PRIORITY.sim + 1);
 
+  // the inspect core (console-design §6.2): not in shot mode, where there is no UI (?inspect=1 forces it for tests,
+  // ?inspect=0 leaves it out — boot A/B)
+  const ip = ctx.params?.raw?.get?.('inspect');
+  if ((!ctx.params?.shot || ip === '1') && ip !== '0') {
+    try { const { createInspect } = await import('./inspect.js'); ctx.inspect = createInspect(ctx, { schedule, runtime, zones }); } catch (e) { console.error('[sim] inspect failed', e); }
+  }
+
   if (ctx.params?.debug?.has?.('sim')) {
     try { (await import('./debug.js')).installDebug(ctx, runtime); } catch (e) { console.error('[sim] debug overlay failed', e); }
   }

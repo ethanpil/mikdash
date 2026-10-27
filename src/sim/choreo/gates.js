@@ -18,6 +18,7 @@ import { doorAmount } from '../lib/world.js';
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
 import { m2w } from '../../core/units.js';
 import { stagedRetime } from '../lib/watch.js';
+import { gates as inspectHooks } from './describe/dawn.js';
 
 const SEED = 0x6761;
 const MOUNT = ['mount.gate.shushan', 'mount.gate.chuldah-e', 'mount.gate.chuldah-w', 'mount.gate.kiponus', 'mount.gate.tadi'];
@@ -70,6 +71,9 @@ export const FIXTURES = [
 
 export default {
   id: 'gates-opening',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   aliases: ['gates-closing'],
   always: true,
   importance: 2,

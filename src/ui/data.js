@@ -208,6 +208,12 @@ export function createData(ctx) {
       return { id, name: n ? { ...n } : { en: prettyId(id) }, fixture: !hasZoneContent() };
     },
 
+    /** a chamber half in kodesh and half in chol (its content says so: Lishkat HaGazit, Beit HaMoked): one rung does
+     * not describe where you stand in it */
+    split(id) {
+      return /^half in kodesh and half in chol/i.test(data.zone(id)?.sanctityNote || '');
+    },
+
     /** rung index (0..10) on LADDER for a zone, or null */
     rung(id) {
       if (id === 'kodesh-hakodashim') return 10;

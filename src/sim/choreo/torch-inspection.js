@@ -15,9 +15,13 @@
 // lottery's t0 − 4.75. Every pose is a pure function of (t, date).
 import { nightPlan } from './g1/plan.js';
 import { makePools, stage, runCues, windowAmount } from './g1/stage.js';
+import { torchInspection as inspectHooks } from './describe/dawn.js';
 
 export default {
   id: 'torch-inspection',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 1,
   lag: 38,          // the officer waits in Beit HaMoked until he goes to the second lottery (alot − 12.75)
   importance: 3,

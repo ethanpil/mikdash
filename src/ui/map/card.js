@@ -1,14 +1,12 @@
 // Selection card (side card on desktop, bottom sheet on phones): the place's names, its rung of sanctity and who may
-// enter, other storeys at the same spot, what is happening here now and next (seasonal hours; each expands to its
-// summary and sources, with its own "Watch" button), and the Go controls with a remembered speed.
-import { h, he, icon, setText } from '../dom.js';
-import { sourcesEl, SPEEDS } from '../events.js';
+// enter, other storeys at the same spot, what is happening here now and next (the single event row, with Go and Show
+// me), and the map's extras around the one Go control: "This spot" and "About" (the place card).
+import { h, he, setText } from '../dom.js';
+import { ico } from '../console/icons.js';
 import { LADDER } from '../data.js';
-import { clock, seasonal, quarters, wrap, accessLead } from '../format.js';
+import { seasonal, quarters, accessLead } from '../format.js';
 import { shortName } from './model.js';
-import { dynGroup } from '../timepanel.js';
-
-const GO_VERB = { instant: 'Go there', slow: 'Stroll there', walk: 'Walk there', fast: 'Hurry there', run: 'Run there' };
+import { eventRow, dynGroup } from '../console/eventrow.js';
 
 /** "day 2¼–2¾" — an event's span in seasonal hours (hours elapsed since sunrise / sunset) */
 export function seasonalRange(time, t0, t1) {
@@ -20,7 +18,7 @@ export function seasonalRange(time, t0, t1) {
 }
 
 /**
- * opts: { model, onClose(), onGo(id, speed), onSpot(speed), onInfo(id), onSelect(id), onWatch(ev, speed) }
+ * opts: { model, onClose(), onGo(id), onSpot(), onInfo(id), onSelect(id) }
  */
 export function createCard(app, opts) {
   const { ctx, data } = app;
@@ -29,7 +27,7 @@ export function createCard(app, opts) {
   const enEl = h('h3.mk-mapcard__en', { tabindex: '-1' });
   const trEl = h('div.mk-mapcard__tr');
   const lvlEl = h('span.mk-mapcard__lvl');
-  const close = h('button.mk-close', { type: 'button', 'aria-label': 'Clear the selection', title: 'Clear the selection', on: { click: () => opts.onClose() } }, icon('close'));
+  const close = h('button.mk-hbtn.mk-mapcard__x', { type: 'button', 'aria-label': 'Clear the selection', title: 'Clear the selection', on: { click: () => opts.onClose() } }, ico('close'), h('span.mk-mapcard__xt', 'Clear'));
   const rungs = h('span.mk-rungs', { 'aria-hidden': 'true' }, LADDER.map((_, i) => h('i', { style: { height: `${3 + i}px` } })));
   const rungText = h('span');
   const sanct = h('div.mk-mapcard__sanct', rungs, rungText);
@@ -42,27 +40,12 @@ export function createCard(app, opts) {
     h('section.mk-mapcard__sec', nowH, nowBox),
     h('section.mk-mapcard__sec', h('h4.mk-h', 'Next here'), nextBox));
 
-  // ---------------- go controls ----------------
-  let speed = app.settings?.get('travelSpeed') || 'walk';
-  const seg = h('div.mk-seg.mk-mapcard__speed', { role: 'radiogroup', 'aria-label': 'Travel speed' }, SPEEDS.map(([v, l]) => h('button', {
-    type: 'button', role: 'radio', 'data-speed': v, 'aria-checked': v === speed ? 'true' : 'false', tabindex: v === speed ? '0' : '-1',
-    on: { click: () => setSpeed(v, true) },
-  }, l)));
-  seg.addEventListener('keydown', (e) => {
-    const i = SPEEDS.findIndex(([v]) => v === speed);
-    const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
-    if (!d) return;
-    e.preventDefault();
-    setSpeed(SPEEDS[(i + d + SPEEDS.length) % SPEEDS.length][0], true);
-    seg.querySelector(`[data-speed=${speed}]`)?.focus();
-  });
-  // short landscape phones show "Go" beside the speeds and the other two as icons (styles.css), so all fit one row
-  const goText = h('span.mk-mapcard__golong');
-  const goBtn = h('button.mk-btn.mk-btn--primary.mk-mapcard__go', { type: 'button', on: { click: () => opts.onGo(cur, speed) } }, icon('walk'), goText, h('span.mk-mapcard__goshort', 'Go'));
-  const spotBtn = h('button.mk-btn', { type: 'button', title: 'Go to the exact spot you picked on the map', on: { click: () => opts.onSpot(speed) } }, icon('pin'), h('span.mk-mapcard__lbl', 'This spot'));
-  const infoBtn = h('button.mk-btn', { type: 'button', title: 'Everything about this place (opens the place panel)', 'aria-label': 'About this place', on: { click: () => opts.onInfo(cur) } }, icon('info'), h('span.mk-mapcard__lbl', 'About'));
+  // ---------------- go controls: the one Go control, plus the map's extras ----------------
+  const goBox = h('span.mk-mapcard__go');
+  const spotBtn = h('button.mk-btn', { type: 'button', title: 'Go to the exact spot you picked on the map', on: { click: () => opts.onSpot() } }, ico('pin'), h('span.mk-mapcard__lbl', 'This spot'));
+  const infoBtn = h('button.mk-btn', { type: 'button', title: 'Everything about this place', on: { click: () => opts.onInfo(cur) } }, ico('here'), h('span.mk-mapcard__lbl', 'About'));
   const noStand = h('p.mk-mapcard__nostand', 'No floor to stand on here — it is seen from the places around it.');
-  const foot = h('div.mk-mapcard__foot', seg, h('div.mk-mapcard__acts', goBtn, spotBtn, infoBtn), noStand);
+  const foot = h('div.mk-mapcard__foot', h('div.mk-mapcard__acts', goBox, spotBtn, infoBtn), noStand);
 
   const grab = h('div.mk-mapcard__grab', { 'aria-hidden': 'true' });
   const el = h('section.mk-mapcard.mk-live', { 'aria-label': 'Selected place', hidden: true },
@@ -85,58 +68,6 @@ export function createCard(app, opts) {
   };
   grab.addEventListener('pointerup', release);
   grab.addEventListener('pointercancel', release);
-
-  function setSpeed(v, user) {
-    speed = v;
-    for (const b of seg.children) {
-      const on = b.dataset.speed === v;
-      b.setAttribute('aria-checked', on ? 'true' : 'false');
-      b.tabIndex = on ? 0 : -1;
-    }
-    setText(goText, GO_VERB[v] || 'Go there');
-    spotBtn.setAttribute('aria-label', `${(GO_VERB[v] || 'Go there').replace(/ there$/, '')} to this spot`);
-    if (user) app.settings?.set('travelSpeed', v); // one remembered speed for the map, event rows and the card
-  }
-  setSpeed(speed, false);
-  ctx.bus.on('settings:change', (e) => { if (e?.key === 'travelSpeed' && e.value !== speed) setSpeed(e.value, false); });
-
-  // ---------------- event rows ----------------
-  const open = new Set(); // expanded event ids
-  function row(ev, mode) {
-    const r = data.times(ev);
-    const time = h('span.mk-mev__time.num');
-    const moreId = `mk-mev-${String(ev.id || Math.random()).replace(/[^\w-]/g, '')}-${mode}`;
-    const hit = h('button.mk-mev__hit', { type: 'button', 'aria-expanded': open.has(ev.id) ? 'true' : 'false', 'aria-controls': moreId },
-      h('span.mk-mev__title', ev.title?.en || ev.id),
-      ev.title?.he ? he(ev.title.he, 'mk-mev__he') : null,
-      time);
-    const watch = h('button.mk-btn.mk-btn--sm', { type: 'button', title: 'Go to a good spot to watch this', on: { click: () => opts.onWatch(ev, speed) } }, icon('walk'), 'Watch');
-    const more = h('div.mk-mev__more', { id: moreId },
-      ev.summary ? h('p.mk-mev__sum', ev.summary) : null,
-      ev.sources?.length ? sourcesEl(ev.sources) : null,
-      h('div.mk-mev__acts', watch, ev.layer === 'aggadah' ? h('span.mk-badge', 'Aggadah') : null));
-    const el = h(`article.mk-mev${mode === 'now' ? '.is-now' : ''}.imp-${ev.importance || 1}`, { 'data-ev': ev.id }, hit, more);
-    el.classList.toggle('is-open', open.has(ev.id));
-    hit.addEventListener('click', () => {
-      const on = !el.classList.contains('is-open');
-      el.classList.toggle('is-open', on);
-      hit.setAttribute('aria-expanded', on ? 'true' : 'false');
-      if (on) open.add(ev.id); else open.delete(ev.id);
-    });
-    const update = (t) => {
-      if (!r) { setText(time, ''); return; }
-      const range = `${seasonalRange(ctx.time, r.t0, r.t1)} · ≈ ${clock(r.t0)}–${clock(r.t1)}`;
-      const left = Math.max(1, Math.round(wrap(r.t1 - t)));
-      if (mode === 'now') setText(time, `${range} · ${left < 90 ? `${left} min` : `${Math.floor(left / 60)} h ${String(left % 60).padStart(2, '0')}`} left`);
-      else {
-        const d = wrap(r.t0 - t);
-        setText(time, `${d < 60 ? `in ${Math.max(1, Math.round(d))} min` : `in ${Math.floor(d / 60)} h ${String(Math.round(d % 60)).padStart(2, '0')}`} · ${range}`);
-      }
-      time.title = 'Seasonal hours (sha\'ot zmaniyot) since sunrise or sunset; ≈ civil time';
-    };
-    update(ctx.time?.t);
-    return { el, update };
-  }
 
   // ---------------- state ----------------
   let cur = null, spot = null, rows = [], listKey = '';
@@ -174,7 +105,7 @@ export function createCard(app, opts) {
     levels.hidden = !others.length;
     // go controls: zones with no walkable interior (stand: null in the zone content) cannot be gone to
     const standless = z.stand === null;
-    goBtn.disabled = standless;
+    goBox.replaceChildren(standless ? '' : app.travel.control(() => opts.onGo(cur), { label: 'Go there' }));
     noStand.hidden = !standless;
     spotBtn.hidden = !spot;
     listKey = '';
@@ -194,15 +125,14 @@ export function createCard(app, opts) {
       listKey = key;
       rows = [];
       setText(nowH, all.length ? `Happening here now · ${all.length}` : 'Happening here now');
-      const els = now.map((ev) => { const r = row(ev, 'now'); rows.push(r); return r.el; });
+      const els = now.map((ev) => { const r = eventRow(app, ev, { place: false }); rows.push(r); return r.el; });
       if (dyn.length) {
-        const g = dynGroup(app, dyn, { key: `card-${cur}`, title: "Individuals' offerings here", open: dynOpen, onToggle: (on) => { dynOpen = on; },
-          verb: 'Watch', speed: () => speed, indent: false, hint: 'each at its current step — expand to watch one' });
-        rows.push({ update: () => g.update() });
+        const g = dynGroup(app, dyn, { key: `card-${cur}`, title: `${dyn.length} individual offering${dyn.length === 1 ? '' : 's'} here`, open: dynOpen, onToggle: (on) => { dynOpen = on; } });
+        rows.push(g);
         els.push(g.el);
       }
       nowBox.replaceChildren(...(els.length ? els : [h('div.mk-empty', 'Nothing in the order of the day here at this hour.')]));
-      nextBox.replaceChildren(...(next.length ? next.map((ev) => { const r = row(ev, 'next'); rows.push(r); return r.el; })
+      nextBox.replaceChildren(...(next.length ? next.map((ev) => { const r = eventRow(app, ev, { place: false }); rows.push(r); return r.el; })
         : [h('div.mk-empty', 'Nothing more here today.')]));
     }
     for (const r of rows) r.update(t);
@@ -211,20 +141,17 @@ export function createCard(app, opts) {
   return {
     el,
     get id() { return cur; },
-    get speed() { return speed; },
     show(id, { spot: sp = null, expand = null } = {}) {
       const changed = id !== cur;
       cur = id;
       spot = sp;
-      if (changed) open.clear();
-      if (expand) open.add(expand);
       el.hidden = false;
       render();
       // a new place opens at its name (phones and short landscape scroll the whole sheet; desktop its middle)
       if (changed) { el.scrollTop = 0; scroll.scrollTop = 0; }
       if (expand) {
         const r = el.querySelector(`[data-ev="${CSS.escape(expand)}"]`);
-        if (r) requestAnimationFrame(() => r.scrollIntoView({ block: 'nearest' }));
+        if (r) requestAnimationFrame(() => { r.classList.add('is-focus'); r.scrollIntoView({ block: 'nearest' }); });
       }
     },
     hide() { cur = null; spot = null; el.hidden = true; },
@@ -235,7 +162,7 @@ export function createCard(app, opts) {
       const z = data.zone(cur) || {};
       const nm = z.name?.en || shortName(cur);
       const now = data.at(cur, ctx.time?.t);
-      return `${nm}${model.get(cur)?.stacked ? ` (${model.get(cur).level} level)` : ''}. ${now.length ? `${now.length} ${now.length === 1 ? 'activity' : 'activities'} now: ${now.map((e) => e.title?.en || e.id).join('; ')}.` : 'Nothing happening here now.'} Press Enter to ${(GO_VERB[speed] || 'go there').toLowerCase()}.`;
+      return `${nm}${model.get(cur)?.stacked ? ` (${model.get(cur).level} level)` : ''}. ${now.length ? `${now.length} ${now.length === 1 ? 'activity' : 'activities'} now: ${now.map((e) => e.title?.en || e.id).join('; ')}.` : 'Nothing happening here now.'} Press Enter to go there.`;
     },
   };
 }

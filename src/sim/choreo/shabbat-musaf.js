@@ -22,6 +22,7 @@ import { SEEDS } from './g2/tamid.js';
 import { musafPlan, MC_N, UP_N, POURER_SEED } from './g6/musaf.js';
 import { g6places, say, HAAZINU } from './g6/common.js';
 import { crossed, cueAt } from '../lib/cue.js';
+import { shabbatMusaf as inspectHooks } from './describe/sanctuary.js';
 
 const NEAR = 45;
 const SEED_LEV = 0x6d6c, SEED_LAMB = 0x6d6d, SEED_TR = 0x6d74;
@@ -36,6 +37,9 @@ const TEXT = {
 
 export default {
   id: 'shabbat-musaf',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 3.5,        // the Levites bring the lambs up the flight ~2¾ minutes before the window
   lag: 3,
   importance: 2,

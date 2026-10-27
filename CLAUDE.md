@@ -60,6 +60,9 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   with no lights but a shadow (warmup.js compileDepth); CSS animations of box-shadow/filter repaint every frame (the tag
   pulse cost 11 fps) — animate transform/opacity only; fps here is quantized by vsync, so A/B in-page, interleaved, in
   normal play.
+- UI is the Luach console (docs/console-design.md): one always-on Menu beacon, Esc as the only key to remember,
+  one card system for every subject, a module registry for new sections (narration mounts in Listen). Inspect is
+  CPU picking (no GPU queries); its describer and content load after firstFrame so cold boot does not regress.
 - Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
   give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.

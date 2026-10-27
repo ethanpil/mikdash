@@ -20,6 +20,7 @@ import { crossed, cueAt } from '../lib/cue.js';
 import { upperBound, clamp, smooth } from '../lib/core.js';
 import { angleDiff } from '../lib/path.js';
 import { m2w } from '../../core/units.js';
+import { describeTrack } from './describe/tracks.js';
 
 const SEED = 0x6735;
 const TURN_RATE = 240;       // degrees per real second: figures turn to a new heading, never snap (except on jumps)
@@ -28,8 +29,33 @@ const HUNG = [...new Set(Object.values(CARCASS).flatMap((c) => [c.hung, c.flayin
 const CAGES = ['bird_cage', 'bird_cage_pigeons'];
 const LANES = 6, BIRD_LANES = 3;
 
+// ---- inspect hooks (console-design §6.2): a figure is one role of one offering; its key names the offering and the
+// role, so after a jump it is found again only while that same offering is staged
+const hooks = {
+  describe(ctx, state, who, t) {
+    const P = state.plan;
+    if (!P?.ok || who.kind === 'crowd') return null;
+    const pool = String(who.poolName).replace(/^g5-/, '');
+    const tr = trackAt(P.slotTracks?.[pool]?.[who.index] || [], t);
+    if (!tr?.inst) return null;
+    return describeTrack(tr, tr.inst, t, { eventId: tr.inst.id, key: `${tr.inst.id}#${tr.role}` });
+  },
+  /** the slot of the figure with this key while its track holds t (before and after it, courts-daily's walk has him) */
+  locate(ctx, state, key, t) {
+    if (!String(key).startsWith('offering:')) return null;
+    const [id, role] = String(key).split('#');
+    const inst = state.plan?.insts?.find((x) => x.id === id);
+    const tr = inst?.tracks.find((x) => x.role === role);
+    if (!tr || tr.slot < 0 || !(t >= tr.t0 && t < tr.t1)) return null;
+    const slot = state.pools[tr.pool]?.slot(tr.slot);
+    return slot ? { slot } : null;
+  },
+};
+
 export default {
   id: 'private-offerings',
+  describe: hooks.describe,
+  locate: hooks.locate,
   planRank: 0,        // its plan is the first step of the boot's plan job (runtime.js; G4 reads it)
   lead: 2,
   lag: 8,             // owners carrying their meat out through Ezrat Nashim after the last fats are on the fire

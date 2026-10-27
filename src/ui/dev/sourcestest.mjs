@@ -8,7 +8,7 @@ import { EVENTS } from '../../data/schedule.js';
 import { ZONE_CONTENT } from '../../data/zones-content.js';
 import * as OFFERINGS from '../../data/offerings.js';
 import { LADDER_SOURCES } from '../data.js';
-import { ABOUT_SOURCES } from '../aboutpanel.js';
+import { ABOUT_SOURCES } from '../console/sections/learn.js';
 
 const S = 'https://www.sefaria.org/';
 /** kinds of citation that stay plain text, and why (keep in step with the comment at the top of sources.js) */

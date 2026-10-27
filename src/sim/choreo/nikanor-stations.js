@@ -30,6 +30,7 @@ import { METZORA_T, VESSEL_START, PINCHAS, TO_RING, vesselKohen, vesselAt } from
 import { OFFERING_TYPES } from '../../data/offerings.js';
 import { followView, bearingTo } from '../lib/watch.js';
 import { AMAH } from '../../core/units.js';
+import { nikanor as inspectHooks } from './describe/courts.js';
 
 const SEED = 0x6e6b;
 const WHO = 'nikanor-stations';
@@ -61,6 +62,9 @@ const TO_MEDICHIN = [[230.6, 382.0, 16], [235.0, 378, 16], [237.8, 345, 16], [23
 
 export default {
   id: 'nikanor-stations',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   planRank: 3,        // the boot's plan job (g4/book.js ORDER)
   lead: 70,           // the head of the ma'amad is at his place from the ma'amad's start (sunrise − 8)
   lag: 30,

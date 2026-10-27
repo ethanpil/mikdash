@@ -1,9 +1,8 @@
-// TIME panel: the seasonal-hour dial (sha'ot zmaniyot, GRA: sunrise→sunset in 12 equal hours, the night likewise),
-// play/pause and speed, the date, then "Happening now" and "Next" straight away; the zmanim and the explanation
-// of the hours come after the lists.
+// The Time control (console §3.5, section Time): the seasonal-hour dial (sha'ot zmaniyot, GRA: sunrise→sunset in 12
+// equal hours, the night likewise) with the day's events as arcs, play/pause and speed, the date, the zmanim, and "How
+// the hours are counted" (the single home of that explanation). The lists of events live in Happening; an arc click or
+// Enter opens that event's card under the dial (onArc).
 import { h, he, icon, setText, clear, append } from './dom.js';
-import { createPanel, section } from './panel.js';
-import { eventRow, SPEEDS as TRAVEL_SPEEDS } from './events.js';
 import {
   seasonal, seasonalLabelHe, fromDial, clock, ordinal, quarters, hebrewAt, civilDate, civilShort, addDays,
   dayBadge, PSALM_OF_DAY, WEEKDAYS,
@@ -57,85 +56,11 @@ export function packLanes(items, nLanes = LANES.length, gap = 0.06) {
   return items;
 }
 
-/** the stage each group of offerings is at, by its parent event (the stream's stages in src/sim/choreo/g5/plan.js) */
-const STAGES = {
-  'private-offerings': 'Offerings now at the leaning and the slaughter', 'altar-blood': 'Offerings now at the blood on the altar',
-  'private-flaying': 'Offerings now at the flaying tables', tenufah: 'Offerings now at the waving',
-  'altar-limbs': 'Offerings now going up the ramp to the altar', 'bird-offerings': 'Bird offerings now at the corners of the altar',
-  'meal-offerings': 'Meal-offerings now in progress', 'kayitz-hamizbeach': 'Kayitz hamizbeach offerings now',
-  'notar-burning': 'Leftovers being burned now', 'kodashim-meal': 'Offerings now eaten by the kohanim', 'bikkurim-late': 'First fruits now',
-  nazirites: 'Nazirites\' offerings now', metzora: 'A metzora\'s offerings now',
-  'entry-circuit': 'On the circuit of the Mount now', // not offerings: prostrations at the breaches, a mourner (g4/watch.js)
-};
-/** the group's header: "Offerings now at the blood on the altar"; an unknown stage by its event's title */
-export function stageTitle(pid, parentTitle) {
-  if (STAGES[pid]) return STAGES[pid];
-  return parentTitle ? `Now: ${parentTitle.replace(/^([A-Z])(?=[a-z])/, (c) => c.toLowerCase())}` : "Individuals' offerings in progress";
-}
-
-/**
- * A parent event's dynamic sub-events (each individual's offering in progress at that stage of the stream) as one
- * expandable entry: a header with the count, and a row per offering — what it is, its current step, where, and a
- * Go / Watch button at the chosen speed. opts: { title, he, open, onToggle(open), verb, speed() }: with speed() the rows
- * use the caller's speed control (the map card's); without it the group has its own, shared by its rows.
- * Returns { el, update(t), ev: null }.
- */
-export function dynGroup(app, items, opts = {}) {
-  const { data } = app;
-  const count = h('span.mk-badge.mk-badge--gold');
-  const moreId = `mk-dyn-${String(opts.key || opts.title || 'g').replace(/[^\w-]/g, '')}`;
-  const hit = h('button.mk-mev__hit', { type: 'button', 'aria-expanded': opts.open ? 'true' : 'false', 'aria-controls': moreId },
-    h('span.mk-mev__title', { style: { fontSize: '15px' } }, opts.title || 'Offerings in progress'),
-    opts.he ? he(opts.he, 'mk-mev__he') : null,
-    h('span.mk-mev__time', count, ' ', h('span.mk-muted', opts.hint || 'expand to watch one')));
-  const list = h('div', { style: { display: 'flex', flexDirection: 'column', gap: '7px' } });
-  // the group's own speed, as on every event row (the choice also becomes the default, as there)
-  let speedSel = null;
-  if (!opts.speed) {
-    speedSel = h('select.mk-select', { 'aria-label': 'Travel speed' }, TRAVEL_SPEEDS.map(([v, l]) => h('option', { value: v }, l)));
-    speedSel.value = app.settings?.get('travelSpeed') || 'walk';
-    speedSel.addEventListener('change', () => app.settings?.set('travelSpeed', speedSel.value));
-  }
-  const speed = () => (speedSel ? speedSel.value : opts.speed());
-  const bar = speedSel ? h('div.mk-dyn__bar', h('span.mk-muted', 'Watch one, travelling at'), speedSel) : null;
-  const more = h('div.mk-mev__more', { id: moreId }, bar, list);
-  const el = h('article.mk-mev.is-now.mk-dyn', { 'data-dyn': opts.key || '', style: { marginLeft: opts.indent === false ? '0' : '14px' } }, hit, more);
-  el.classList.toggle('is-open', !!opts.open);
-  hit.addEventListener('click', () => {
-    const on = !el.classList.contains('is-open');
-    el.classList.toggle('is-open', on);
-    hit.setAttribute('aria-expanded', on ? 'true' : 'false');
-    opts.onToggle?.(on);
-  });
-  const rows = items.map((ev) => {
-    const title = h('span', { style: { font: '600 14.5px/1.25 var(--mk-display)', color: 'var(--mk-ink)' } });
-    const step = h('span', { style: { fontSize: '13.5px', lineHeight: '1.35', color: 'var(--mk-ink-2)' } });
-    const place = h('span.mk-muted', { style: { fontSize: '12.5px' } });
-    const go = h('button.mk-btn.mk-btn--sm', { type: 'button', title: 'Go to a good spot to watch it, at its current step',
-      on: { click: () => app.goToEvent(ev, speed()) } }, icon('walk'), opts.verb || 'Go');
-    const row = h('div.mk-dyn__row', { 'data-ev': ev.id, style: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderTop: '1px solid var(--mk-line-2)' } },
-      h('div', { style: { flex: '1', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '2px' } }, title, step, place), go);
-    list.append(row);
-    return { ev, title, step, place };
-  });
-  function update() {
-    setText(count, `${items.length} now`);
-    for (const r of rows) {
-      const ev = r.ev;
-      setText(r.title, ev.typeName?.en || ev.title?.en || ev.id);
-      setText(r.step, ev.summary || '');
-      const z = data.zone(ev.zone)?.name?.en || '';
-      setText(r.place, `${ev.where ? `${ev.where} · ` : ''}${z}${Number.isFinite(ev.t1) ? ` · until ≈ ${clock(ev.t1)}` : ''}`);
-    }
-  }
-  update();
-  return { el, update, ev: null };
-}
-
-export function createTimePanel(app) {
+/** opts: { onArc(ev) } → { el, update(force), focusTarget(), stepHours(n), ring } */
+export function createTimeControl(app, opts = {}) {
   const { ctx, data } = app;
-  const panel = createPanel(app, { name: 'time', title: 'The hour', heTitle: 'השעה', side: 'right' });
-  const body = panel.body;
+  const body = h('div.mk-timectl');
+  const section = (title, ...children) => h('section.mk-sec', title ? h('h3.mk-h', title) : null, ...children);
   const T = () => (ctx.time?.zmanim ? ctx.time : null);
 
   // ---------------- dial ----------------
@@ -152,7 +77,7 @@ export function createTimePanel(app) {
   const handleDisc = svgEl('circle', { r: 10.5, stroke: '#1a140d', 'stroke-width': 2 });
   handle.append(handleGlow, handleDisc);
   ring.append(gStatic, curHour, focusRing, handle);
-  const gEvents = svgEl('g', { class: 'mk-dial__events', role: 'group', 'aria-label': 'Events of the day on the dial. Arrow keys move between them; Enter sets the clock.' });
+  const gEvents = svgEl('g', { class: 'mk-dial__events', role: 'group', 'aria-label': 'Events of the day on the dial. Arrow keys move between them; Enter opens the event.' });
   svg.append(ring, gEvents);
 
   const roHalf = h('div.mk-readout__half');
@@ -172,8 +97,8 @@ export function createTimePanel(app) {
 
   // ---------------- transport ----------------
   const playBtn = h('button.mk-play', { type: 'button', on: { click: () => { const t = T(); if (!t) return; t.pause(!t.paused); update(true); } } });
-  const stepBack = h('button.mk-step', { type: 'button', 'aria-label': 'Back one seasonal hour', title: 'Back one seasonal hour', on: { click: () => stepHours(-1) } }, icon('back'));
-  const stepFwd = h('button.mk-step', { type: 'button', 'aria-label': 'Forward one seasonal hour', title: 'Forward one seasonal hour', on: { click: () => stepHours(1) } }, icon('fwd'));
+  const stepBack = h('button.mk-step', { type: 'button', 'aria-label': 'Back one seasonal hour', title: 'Back one seasonal hour', on: { click: () => stepHours(-1) } }, icon('back'), h('span.mk-step__t', '1 h'));
+  const stepFwd = h('button.mk-step', { type: 'button', 'aria-label': 'Forward one seasonal hour', title: 'Forward one seasonal hour', on: { click: () => stepHours(1) } }, h('span.mk-step__t', '1 h'), icon('fwd'));
   const speedSeg = h('div.mk-seg', { role: 'group', 'aria-label': 'Clock speed' }, SPEEDS.map((n) => h('button', {
     type: 'button', 'data-speed': n, 'aria-pressed': 'false', title: n === 1 ? 'Real time' : `${n} times real time`,
     on: { click: () => { const t = T(); if (!t) return; t.setSpeed(n); t.pause(false); update(true); } },
@@ -182,7 +107,8 @@ export function createTimePanel(app) {
 
   // ---------------- date (one compact row: ‹ Mon 2 Nov · כ״ב בחשון › + day type / psalm) ----------------
   const shiftDay = (n) => { const t = T(); if (t) t.setDate(addDays(t.dateString, n)); };
-  const dayBtn = (n, ico, label) => h('button.mk-close', { type: 'button', 'aria-label': label, title: label, on: { click: () => shiftDay(n) } }, icon(ico));
+  // labelled (AC-5): the arrow over a short visible label; the accessible name starts with it
+  const dayBtn = (n, ico, label, vis) => h('button.mk-close.mk-daybtn', { type: 'button', 'aria-label': label, title: label, on: { click: () => shiftDay(n) } }, icon(ico), h('span.mk-daybtn__t', vis));
   const dateEn = h('span.mk-daterow__en.num');
   const dateHe = he('', 'mk-daterow__he');
   const dateInput = h('input.mk-daterow__input', { type: 'date', tabindex: '-1', 'aria-hidden': 'true' });
@@ -191,12 +117,10 @@ export function createTimePanel(app) {
   const dateMain = h('button.mk-daterow__main', { type: 'button', on: { click: openPicker } }, icon('cal'), dateEn, h('span.mk-daterow__dot', '·'), dateHe);
   const dateMeta = h('div.mk-daterow__meta');
   const dateRow = h('div.mk-daterow',
-    h('div.mk-daterow__line', dayBtn(-1, 'prev', 'Previous day'), h('div.mk-daterow__pick', dateMain, dateInput), dayBtn(1, 'next', 'Next day')),
+    h('div.mk-daterow__line', dayBtn(-1, 'prev', 'Previous day', 'Previous'), h('div.mk-daterow__pick', dateMain, dateInput), dayBtn(1, 'next', 'Next day', 'Next')),
     dateMeta);
 
-  // ---------------- events ----------------
-  const nowList = h('div.mk-evs');
-  const nextList = h('div.mk-evs');
+  const arcSlot = h('div.mk-timectl__card');
   const sample = h('p.mk-sample', 'Sample schedule — the full daily order will replace these entries.');
 
   // ---------------- zmanim + explanation (after the lists) ----------------
@@ -209,8 +133,7 @@ export function createTimePanel(app) {
   const noClock = h('div.mk-empty', { hidden: true }, 'The clock is unavailable: the time system did not start, so the hour cannot be shown or set.');
   const live = [
     section(null, dialWrap, transport, dateRow),
-    section('Happening now', nowList),
-    section('Next', nextList),
+    arcSlot,
     section('Seasonal hours', zmanimEl, teaser, explain),
   ];
   body.append(noClock, ...live, sample);
@@ -220,8 +143,7 @@ export function createTimePanel(app) {
     clockShown = ok;
     noClock.hidden = ok;
     for (const el of live) el.hidden = !ok;
-    if (!ok) sample.hidden = true; // rebuildLists() shows it again when the lists come back
-    else listKey = '';
+    sample.hidden = !ok || !data.fixtureEvents;
   }
 
   // ---------------- dial construction (per date) ----------------
@@ -318,7 +240,7 @@ export function createTimePanel(app) {
       const hit = svgEl('path', { d, fill: 'none', class: 'mk-ev-arc__hit', stroke: 'transparent', 'stroke-width': it.long ? 5 : 7, 'pointer-events': 'stroke' });
       const g = svgEl('g', {
         class: `mk-ev-arc${it.long ? ' is-long' : ''}`, role: 'button', tabindex: '-1',
-        'aria-label': `${it.ev.title?.en || it.ev.id}, about ${clock(it.r.t0)} to ${clock(it.r.t1)}. Enter sets the clock to its start.`,
+        'aria-label': `${it.ev.title?.en || it.ev.id}, about ${clock(it.r.t0)} to ${clock(it.r.t1)}. Enter opens it: watch it, go there, or set the clock to its start.`,
       });
       g.append(hit, vis);
       it.g = g; it.vis = vis;
@@ -329,7 +251,7 @@ export function createTimePanel(app) {
       g.addEventListener('blur', () => unpeek('focus'));
       g.addEventListener('click', (e) => {
         e.stopPropagation();
-        // touch: the first tap shows what the arc is, the second sets the clock
+        // touch: the first tap shows what the arc is, the second opens it
         if (lastPointer !== 'mouse' && !(peekItem === it && peekSrc === 'tap')) { peek(it, 'tap'); return; }
         jump(it);
       });
@@ -366,7 +288,7 @@ export function createTimePanel(app) {
     setText(peekWhen, `${si.half === 'day' ? 'Day' : 'Night'} · hour ${si.hour}`);
     setText(peekTitle, it.ev.title?.en || it.ev.id);
     setText(peekTime, `≈ ${clock(it.r.t0)}–${clock(it.r.t1)}`);
-    setText(peekHint, src === 'tap' ? 'Tap again to set the clock' : src === 'focus' ? 'Enter sets the clock' : 'Click to set the clock');
+    setText(peekHint, src === 'tap' ? 'Tap again for details' : src === 'focus' ? 'Enter for details' : 'Click for details');
     readout.classList.add('is-peek');
   }
   function unpeek(src) {
@@ -378,7 +300,7 @@ export function createTimePanel(app) {
   }
   function jump(it) {
     if (peekSrc !== 'focus') unpeek();
-    app.jumpToEvent(it.ev);
+    opts.onArc?.(it.ev, arcSlot);
   }
 
   function buildZmanim() {
@@ -407,7 +329,7 @@ export function createTimePanel(app) {
     clear(explainMore).append(
       h('p.mk-p', `On this date a day hour lasts ${Math.round(z.shaahDay)} minutes and a night hour ${Math.round(z.shaahNight)}. The afternoon Tamid was slaughtered at "eight and a half hours" and offered at "nine and a half" (Pesachim 5:1) — today about ${at(8.5)} and ${at(9.5)}.`),
       h('p.mk-p', `Dawn (alot hashachar) is taken when the sun is ${Math.abs(ZMAN_ANGLES.alot)}° below the horizon, and nightfall when three medium stars appear (${Math.abs(ZMAN_ANGLES.tzeit)}°). Sunrise and sunset are the visible ones at sea level. Clock times are Israel Standard Time for Jerusalem, shown with ≈ because the Mishnah counts hours, not minutes.`),
-      h('p.mk-p', 'On the dial, day runs across the top from sunrise on the left to sunset on the right, and night across the bottom. The outer arcs are the events of the day, packed into three tracks; the long watches are the faint inner line. Point at an arc (or tap it once) to see what it is; click it (or tap again) to set the clock to its start.'),
+      h('p.mk-p', 'On the dial, day runs across the top from sunrise on the left to sunset on the right, and night across the bottom. The outer arcs are the events of the day, packed into three tracks; the long watches are the faint inner line. Point at an arc (or tap it once) to see what it is; click it (or tap again) to open it: watch it, go there, or set the clock to its start.'),
     );
   }
 
@@ -468,39 +390,6 @@ export function createTimePanel(app) {
     setTime(fromDial(time, s));
   });
 
-  // ---------------- lists ----------------
-  let rows = [], listKey = '';
-  const expanded = new Set(), openGroups = new Set();
-  function rebuildLists(force) {
-    const t = T().t;
-    // the day's events, and each individual's offering in progress grouped under the event of its current stage
-    const { stat: active, groups } = data.group(data.active(t));
-    const next = data.upcoming(t, 5);
-    const key = `${active.map((e) => e.id).join(',')}|${[...groups].map(([p, l]) => `${p}:${l.map((e) => e.id).join('+')}`).join(';')}|${next.map((e) => e.id).join(',')}`;
-    if (!force && key === listKey) return false;
-    listKey = key;
-    const mk = (ev) => eventRow(app, ev, { expanded: expanded.has(ev.id), onToggle: (e, open) => (open ? expanded.add(e.id) : expanded.delete(e.id)) });
-    const grp = (pid, list, parent) => dynGroup(app, list, {
-      key: pid, open: openGroups.has(pid), onToggle: (on) => (on ? openGroups.add(pid) : openGroups.delete(pid)),
-      title: stageTitle(pid, parent?.title?.en || list[0]?.parentTitle?.en), indent: !!parent,
-    });
-    rows = [];
-    clear(nowList);
-    clear(nextList);
-    if (active.length || groups.size) {
-      for (const ev of active) {
-        const r = mk(ev); rows.push(r); nowList.append(r.el);
-        const g = groups.get(ev.id);
-        if (g) { const gr = grp(ev.id, g, ev); rows.push(gr); nowList.append(gr.el); groups.delete(ev.id); }
-      }
-      for (const [pid, g] of groups) { const gr = grp(pid, g, null); rows.push(gr); nowList.append(gr.el); }
-    } else nowList.append(h('div.mk-empty', 'Nothing in the order of the day at this hour. The fires on the altar burn on.'));
-    for (const ev of next) { const r = mk(ev); rows.push(r); nextList.append(r.el); }
-    if (!next.length) nextList.append(h('div.mk-empty', 'Nothing further scheduled for this date.'));
-    sample.hidden = !data.fixtureEvents;
-    return true;
-  }
-
   // ---------------- per-tick update ----------------
   let last = { hour: -1, half: '', date: '', speed: NaN, paused: null };
   function update(force = false) {
@@ -530,7 +419,7 @@ export function createTimePanel(app) {
     ring.setAttribute('aria-valuetext', `${ordinal(info.hour)} hour of the ${info.half} (hours of ${Math.round(info.lenMin)} minutes), about ${clock(t)}`);
 
     if (time.paused !== last.paused) {
-      clear(playBtn).append(icon(time.paused ? 'play' : 'pause'));
+      clear(playBtn).append(icon(time.paused ? 'play' : 'pause'), h('span.mk-play__t', time.paused ? 'Play' : 'Pause'));
       playBtn.setAttribute('aria-label', time.paused ? 'Play' : 'Pause');
       playBtn.title = time.paused ? 'Play' : 'Pause';
     }
@@ -560,29 +449,18 @@ export function createTimePanel(app) {
       activeKey = aKey;
       for (const a of arcs) a.vis.setAttribute('stroke-opacity', active.has(a.ev.id) ? '1' : (a.long ? '0.32' : '0.62'));
     }
-    rebuildLists(false);
-    for (const r of rows) r.update(t);
   }
 
-  ctx.bus.on('time:date', () => { built = ''; listKey = ''; });
-  ctx.bus.on('settings:change', (e) => { if (e?.key === 'aggadah') { built = ''; listKey = ''; } });
+  ctx.bus.on('time:date', () => { built = ''; });
+  ctx.bus.on('settings:change', (e) => { if (e?.key === 'aggadah') built = ''; });
 
   return {
-    ...panel,
-    onOpen(opts = {}) {
-      built = '';
-      listKey = '';
-      update(true);
-      if (opts.focusEvent && T()) {
-        expanded.add(opts.focusEvent);
-        listKey = '';
-        rebuildLists(true);
-        for (const r of rows) r.update();
-        const el = body.querySelector(`[data-ev="${CSS.escape(opts.focusEvent)}"]`);
-        if (el) requestAnimationFrame(() => el.scrollIntoView({ block: 'center', behavior: app.reducedMotion() ? 'auto' : 'smooth' }));
-      }
-    },
-    update: () => update(false),
-    focusTarget: () => (T() ? ring : panel.titleEl),
+    el: body,
+    arcSlot,
+    ring,
+    update,
+    stepHours,
+    focusTarget: () => (T() ? ring : null),
+    rebuild() { built = ''; update(true); },
   };
 }

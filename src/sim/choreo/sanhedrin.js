@@ -19,6 +19,7 @@ import { Itin, Troupe, daySeed, tierCount, win, hm, observerNear, norm, lerpH } 
 import { visit, fitAt } from './g4/mount.js';
 import { g4Book, planBefore } from './g4/book.js';
 import { headingTo } from '../lib/path.js';
+import { sanhedrin as inspectHooks } from './describe/courts.js';
 
 const SEED = 0x5a4e;
 const CAPTION_RANGE = 25;
@@ -34,6 +35,9 @@ const CANDIDATE = [48.6, 381.0, 16];
 
 export default {
   id: 'sanhedrin',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   planRank: 2,        // the boot's plan job (g4/book.js ORDER)
   lead: 40,
   lag: 20,

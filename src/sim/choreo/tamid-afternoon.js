@@ -19,13 +19,49 @@ import { places } from './g2/places.js';
 import { planAfternoon, tamidWindows, buildReturn, CREW, CREW_N, SEEDS, N_IN } from './g2/tamid.js';
 import { cueAt, crossed } from '../lib/cue.js';
 
+import { describeWith } from './describe/index.js';
+import { crewRole, CREW_PHRASE, crewDoing, lambDoing, lambState, LAMB_WHY } from './describe/tamid.js';
+
 const NEAR = 45;
+
+// ---- inspect hooks (console-design §6.2; describe/tamid.js): weekdays the morning's winners keep their tasks (Yoma 26a);
+// on Shabbat the incoming watch offers it (Sukkah 56b) — slots 13–14 of its pool are its lamb-fetchers
+const CD = crewDoing('north-eastern');
+const crewSpec = (phrase) => ({
+  phrase, sub: (who) => (who.index >= CREW_N ? 'FETCH' : crewRole(who.index)),
+  doing: {
+    'before:tamid-afternoon': { ...CD.watered, FETCH: 'Bringing a lamb from the lamb chamber of Beit HaMoked' },
+    'tamid-afternoon': {
+      ...CD.slaughter, FETCH: 'Back to Lishkat HaGazit',
+      R: 'Receiving the blood in a silver basin, then putting it on the altar at the north-east and the south-west corners; the rest on the southern yesod',
+    },
+    'afternoon-flaying': { ...CD.flaying, F: CD.toRamp.F, C: CD.toRamp.C, WN: CD.toRamp.WN },
+    'afternoon-limbs': CD.up,
+  },
+});
+const hooks = describeWith({
+  id: 'tamid-afternoon',
+  pools: {
+    crew: crewSpec({ ...CREW_PHRASE('the afternoon tamid') }),
+    'crew-incoming': crewSpec({ ...CREW_PHRASE('the afternoon tamid — of the incoming watch, who offer it on Shabbat') }),
+    fetchers: { phrase: 'one of the two sent to bring a lamb from the lamb chamber', doing: { 'before:tamid-afternoon': 'Bringing a lamb from the lamb chamber of Beit HaMoked', 'tamid-afternoon': 'Back to Lishkat HaGazit' } },
+    lambs: {
+      custom: (ctx, state, who) => {
+        const pose = who.slot?.actor?.poseName || who.slot?._pose;
+        const s = lambState(pose);
+        return { doing: lambDoing(pose), phrase: { en: 'the lamb of the afternoon tamid' }, why: LAMB_WHY, eventId: s === 'bound' || s === 'led' || s === 'drink' ? 'tamid-afternoon' : undefined, subjectKey: `tamid-afternoon:lambs:${who.index}` };
+      },
+    },
+  },
+});
 
 export default {
   id: 'tamid-afternoon',
   lead: 21,          // the knives and the lamb are fetched ~20 minutes before the slaughter
   lag: 13,           // the vessels taken back after the limbs, a pair a trip
   importance: 3,
+  describe: hooks.describe,
+  locate: hooks.locate,
 
   init(ctx, events, sim) {
     const P = places(ctx);

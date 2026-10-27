@@ -65,6 +65,7 @@ import { compileScene, rendersOffscreen, parallelCompile, compileLater } from '.
 import { HUMAN_CLIPS, MITRE_GRASP, STAFF, WINDLASS, WINDLASS_RAISE, CRANK, WAVE_UNDER, KNEAD, EAT } from './clips.js';
 import { QUAD_CLIPS, BIRD_CLIPS } from './animal-clips.js';
 import { poseAlongPath } from './util.js';
+import { pickShape } from './pick.js';
 
 function matHex(ctx, key) {
   try {
@@ -139,6 +140,7 @@ export async function init(ctx) {
     spawnProp: (name, o) => sys.spawnProp(name, o),
     crowd: (o) => sys.crowd(o),
     util: { poseAlongPath, phaseFor },
+    pickShape,
     roles: ROLE_NAMES,
     animals: ANIMAL_NAMES,
     props: PROP_NAMES,

@@ -14,6 +14,7 @@ import { lastNear, stagedRetime, siteOf } from '../lib/watch.js';
 import { spiralUp } from './g2/places.js';
 import { CUE_LEAD } from '../lib/cue.js';
 import { g6places, say, Z } from './g6/common.js';
+import { shabbatEve as inspectHooks } from './describe/sanctuary.js';
 
 const SEED = 0x6576;
 const AT = CUE_LEAD + 0.02;      // the blasts: just past the jump-to-event moment (lib/cue.js)
@@ -31,6 +32,9 @@ const TEXT = {
 
 export default {
   id: 'shabbat-eve',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 4,          // they come out of the Gazit ~2 minutes before the first blast
   lag: 4,           // … and go down and back in after the last
   importance: 2,

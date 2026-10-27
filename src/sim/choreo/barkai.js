@@ -12,6 +12,7 @@
 import { Script, runScripts, playerNear, win, SPEED, headingOf, wrap } from './g2/lib.js';
 import { places, spiralUp } from './g2/places.js';
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
+import { barkai as inspectHooks } from './describe/dawn.js';
 
 const SEED = 0x6261;
 const CALL = 2.6;                // minutes after the event's start: the call ⚙
@@ -20,6 +21,9 @@ const CAPTION_RANGE = 260;       // m — a call from the roof, heard over the c
 
 export default {
   id: 'barkai',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 2.5,
   lag: 6,
   importance: 3,

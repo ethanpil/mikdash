@@ -36,6 +36,7 @@ import { g4Book, planBefore } from './g4/book.js';
 import { geoOf, scriptNazir, scriptWaving, placeSet, bookSet, SetCast, g5PlanOf, setsSource, entryBack, NAZIR_COMBOS } from './g4/sets.js';
 import { OFFERING_TYPES } from '../../data/offerings.js';
 import { w2m, AMAH } from '../../core/units.js';
+import { chambers as inspectHooks } from './describe/courts.js';
 
 const SEED = 0x6368;
 const WHO = 'chambers-daily';
@@ -121,6 +122,9 @@ const SEALS = { door: [217.0, 405.2, 16], achiyah: { at: [213.7, 403.2, 16], fac
 
 export default {
   id: 'chambers-daily',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   planRank: 4,        // the boot's plan job (g4/book.js ORDER: last)
   always: true,
   lead: 12,

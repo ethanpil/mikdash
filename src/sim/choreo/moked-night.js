@@ -24,6 +24,7 @@
 import { nightPlan } from './g1/plan.js';
 import { makePools, stage, runCues, windowAmount, FreeProps } from './g1/stage.js';
 import { within, window4, since } from '../lib/core.js';
+import { mokedNight as inspectHooks } from './describe/dawn.js';
 
 const POOLS = ['young:off', 'young:k', 'young:bath', 'keri:off', 'keri:k', 'keri:bath', 'slab:off', 'slab:k', 'slab:bath', 'elders:elder', 'elders:eoff',
   'levite:guard', 'officer:k', 'gevini:levi'];
@@ -32,6 +33,9 @@ const SLAB_UP = 0.75;      // how far the tablet is raised by its ring (world: 1
 
 export default {
   id: 'moked-night',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   aliases: ['locking-up', 'moked-dawn'],
   lead: 45,         // before the locking: on Friday the altar's crew come in to sleep at sunset (≈ tzeit − 37)
   lag: 190,         // the residents stay until the gates open in the morning (sunrise − 6), then go out ⚙

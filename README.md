@@ -30,26 +30,33 @@ tests) and `node tools/shot.mjs "<query>"` (headless screenshots). See [ARCHITEC
 
 ## Controls
 
-Press `?` in the app for the full list for your device.
+One control is always on screen: the **Menu** button, with a live minimap and the name of the place you stand in
+(top-left with a mouse, bottom-right on touch). Everything else is in the Menu: where you are, what is happening, the
+map, the hour, the codex, sound, settings and help. Its **Help** section lists the controls for your device (mouse and
+keyboard, touch, gamepad, screen reader). The essentials: **Esc = Menu · E / click / tap = learn about anything ·
+Go ▸ = travel.**
 
 | Keyboard and mouse | |
 |---|---|
 | `W` `A` `S` `D`, or `Up`/`Down` | walk (`Left`/`Right` turn) |
 | `Shift` | hold to run |
-| Mouse | look around (click the view first; `Esc` frees the mouse) |
-| `F` | fly / walk; while flying, `Space` or `E` rises, `Q` or `C` sinks |
-| `T` | the hour: set any time, see what is happening now, go there |
-| `I` | about this place: who may enter, what is done here, sources |
-| `M` | the map: every place, its activity now, select and go (`/` searches) |
-| `G` | settings: quality, length of the amah, volume, field of view and more |
-| `?` | controls, method, sources and credits |
-| `Esc` | close the open panel |
+| Mouse | look around (click the view to capture the mouse, or drag in Settings → Look & move) |
+| `F` | fly / walk; while flying, `Space` rises, `Q` or `C` sinks |
+| `Esc` | open the Menu (frees the mouse); back one level; close |
+| `M` · `T` · `I` | the map · the hour · this place (the same key closes it) |
+| `/` or `Ctrl` `K` | search everything: places, rites, people, things, words, settings, in English, Hebrew or transliteration |
+| `?` | help: the controls for your device |
+| `P` | pause / play the clock |
+| Click, or `E` | learn about anyone or anything: its card, with Go ▸ and Show me ▸ (`E` or a click aims at the centre dot while the mouse is captured) |
+| `+` `−` | faster / slower during a trip |
 
-On a phone or tablet, drag with the left thumb to walk and with the right thumb to look; tap with two fingers to switch
-between walking and running, and tap the clock for the hour. A gamepad also works: left stick walks, right stick looks,
-LT runs, Y toggles flying.
+**Touch:** drag with the left thumb to walk and with the right thumb to look; tap with two fingers to switch between
+walking and running. Tap the Menu button for the Menu; tap empty scenery for the quick chips (the hour, Map, Search); tap
+anyone or anything to learn about it. **Gamepad:** sticks walk and look, LT runs, Y flies, Start opens the Menu, View
+the map, X learns about what you face; in the Menu the D-pad moves, A chooses, B goes back, LB/RB change section.
 
-When you choose an event or a place you pick a travel speed: instant, slow, walk, fast or run.
+Every **Go ▸** walks, runs or moves you at once, at a pace of ½× to 10×; your choice becomes the default. Looking around
+never stops a trip; moving does.
 
 ## Links to a time and place
 

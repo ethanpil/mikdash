@@ -20,6 +20,7 @@ import { lastNear, stagedRetime, siteOf } from '../lib/watch.js';
 import { within, wrap, smooth, clamp, since, span } from '../lib/core.js';
 import { breadPlan, SEED_OUT, SEED_IN } from './g6/bread.js';
 import { say, aggadahOn } from './g6/common.js';
+import { shabbatShowbread as inspectHooks } from './describe/sanctuary.js';
 
 const NEAR = 40;          // m — captions for what is seen close by
 const STEAM_MAX = 0.45;   // the warmth's intensity cap: a breath, not a kettle ⚙
@@ -45,6 +46,9 @@ const SWAP_SPAN = 4.4;
 
 export default {
   id: 'shabbat-showbread',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   // the kanim are out of the bread from Friday's pulling until after Shabbat (Menachot 11:6), so the module states the
   // Shulchan's bread every day (`always`); its figures only on Shabbat around the change
   always: true,

@@ -27,6 +27,7 @@ import { pmLogs } from './g2/tamid.js';
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
 import { rand } from '../lib/core.js';
 import { followView, bearingTo } from '../lib/watch.js';
+import { terumatHadeshen as inspectHooks } from './describe/dawn.js';
 
 const SEED = 0x7468;
 const NB = 8;                      // "his brothers" (Tamid 2:1) — the number is not given ⚙
@@ -69,6 +70,9 @@ const KEVESH_SIDE = [217, 296];   // the pile's wood (Tamid 2:3): fig, walnut, o
 
 export default {
   id: 'terumat-hadeshen',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   always: true,
   importance: 3,
 

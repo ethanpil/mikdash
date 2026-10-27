@@ -247,14 +247,25 @@ touch (left joystick + drag look), gamepad optional. Capsule collision vs a BVH 
 goTo(target, speed) -> Promise, cancel() }` where target = `{ at:[X,Y], heading? }` | anchor name | Vector3
 and speed ∈ `instant slow walk fast run` (instant = teleport; others walk the path at 0.8/1.4/2.4/4.5 m/s).
 
-## 13. UI — `src/ui/` (ui task)
+## 13. UI — the Luach console (`src/ui/**`; spec: `docs/console-design.md`)
 
-HUD: location name (he + en) + sanctity, time chip (seasonal hour), compass/minimap. **Time popup**: current
-seasonal hour (sha'ot zmaniyot, night 1–12 / day 1–12) with civil-clock equivalent, a 24-hour seasonal dial
-or slider to set any time, play/pause and speed, date; **"Happening now"** list (active + next events) — click
-→ walk there with a speed selector (instant/slow/walk/fast/run). **Info panel**: location name, what happens
-here, who may enter, what is happening now (from schedule), with **sources**. Settings: quality, amah
-standard, volume, mouse sensitivity/invert, FOV, labels, aggadah layer. Mobile-friendly. No UI in `shot=1`.
+One door on every device: the **Menu beacon** (always on; live minimap disc with a glowing dot, the area's Hebrew and
+English names, "Menu", the device's key cap — top-left with a mouse, bottom-right on touch). A mouse move, a tap on
+empty scenery or a pad press "wakes" it (labelled quick chips for 4 s). **Esc** opens/closes (the only key to remember;
+every other key is printed on its control). The Menu docks right on desktop (the world stays live) and is a bottom /
+right sheet on phones with a 4×2 tile home. Every view shares one header (minimap, area, sanctity, "About this place",
+clock with pause/speed, one search field, Fly/Walk, Sound, Close) and eight labelled sections registered through the
+**module registry** (§5 of the spec): Here, Happening, Map, Time, Learn, Listen (the mount point for narration/audio),
+Settings, Help. **One card** renders any subject (person, animal, object, place, event, offering, term, role) with the
+same actions: **Go** (Walk/Run/Instant, pace ½×–10×), **Show me** (the inspect director warps the clock to the moment
+and frames the subject; Back restores everything), Map, Learn. Click/tap anything in the world (E or a locked click
+aims the reticle; Nearby lists everything within 15 m for keyboard/screen-reader/pad users). Search takes English,
+Hebrew (niqqud-insensitive), transliteration and wrong-layout typing (`src/search/**`). An area banner names each
+place entered (on foot or travelling), with a "via …" breadcrumb at 5×/10×. No UI in `shot=1`.
+Cores behind it: `ctx.inspect` (`src/sim/inspect*.js`, choreo `describe`/`locate` hooks, `src/data/objects.js`,
+`src/data/people-info.js`), travel (`ctx.player.goTo(target, { way, pace })`, `travel:*` bus events, `src/player/trip.js`)
+and search. Tests: `src/ui/dev/consoletest.mjs`, `src/sim/dev/tests/inspect*.js`, `src/player/dev/triptest.mjs`,
+the search tests in `src/search/`.
 
 ## 14. As-built API additions (summary — full detail in `docs/API.md`)
 

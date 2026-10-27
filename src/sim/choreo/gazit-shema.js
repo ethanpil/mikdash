@@ -24,6 +24,7 @@ import { buildTamid, tamidWindows, cfgFor, CREW, CREW_N, SEEDS, N_IN, GAZIT_SEED
 import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
 import { rand } from '../lib/core.js';
 import { lotRadius } from './g1/places.js';
+import { gazitShema as inspectHooks } from './describe/sanctuary.js';
 
 const SEED = 0x6773;
 const G1 = { gazit: GAZIT_SEED, officer: 0x6743 };   // lotteries.js (g1/plan.js SEED): the same men, the same faces
@@ -33,6 +34,9 @@ const NEAR = 30;             // m — inside the chamber or at its door
 
 export default {
   id: 'gazit-shema',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 9,           // tamid-morning brings the slaughterer to the door ≈ 5–6 min before the Shema (g2/tamid.js gazitIn)
   lag: 0.8,
   importance: 2,

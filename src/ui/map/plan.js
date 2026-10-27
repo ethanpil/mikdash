@@ -7,14 +7,15 @@ const WALL = 'rgba(228,210,170,0.82)';
 const GOLD = '#d4a640';
 
 /**
- * opts: { k (css px per amah), x0, y1 (site coords of the raster's top-left), w, h (css px), dpr }
- * returns a canvas of w*dpr × h*dpr device pixels
+ * opts: { k (css px per amah), x0, y1 (site coords of the raster's top-left), w, h (css px), dpr, cpu }
+ * returns a canvas of w*dpr × h*dpr device pixels. cpu: a software canvas (willReadFrequently), for rasters only ever
+ * copied into other software canvases (the minimap discs): no GPU-process work at all
  */
-export function renderPlan(ctx, model, { k, x0, y1, w, h, dpr = 1 }) {
+export function renderPlan(ctx, model, { k, x0, y1, w, h, dpr = 1, cpu = false }) {
   const c = document.createElement('canvas');
   c.width = Math.max(1, Math.round(w * dpr));
   c.height = Math.max(1, Math.round(h * dpr));
-  const g = c.getContext('2d');
+  const g = c.getContext('2d', cpu ? { willReadFrequently: true } : undefined);
   g.scale(dpr, dpr);
   const T = { k, x: (X) => (X - x0) * k, y: (Y) => (y1 - Y) * k };
   const X1 = x0 + w / k, Y0 = y1 - h / k;

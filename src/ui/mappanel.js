@@ -1,16 +1,18 @@
-// MAP: a large overlay (near full-screen on desktop, a full-screen sheet on phones) with the plan of the Mount drawn
-// from ctx.site, a label for every place (declutters with zoom), live activity (pulsing gold for what is happening
-// now, a dashed ring for what starts within half an hour), the observer's position, and select-and-go.
+// MAP section (console §3.5): the plan of the Mount drawn from ctx.site, a label for every place (declutters with
+// zoom), live activity (pulsing gold for what is happening now, a dashed ring for what starts within half an hour), the
+// observer's position, the route of a trip, and select-and-go (a click selects, a double-click or Enter goes with the
+// travel defaults). The places list is a browse list (the header search finds places); "Key" shows the legend. The
+// Menu widens to the whole viewport for it on desktop and takes the full screen on phones.
 //
 // Layers: (1) base canvas = cached plan rasters (whole extent, the Mount, and the current view re-rastered at the exact
 // scale once the view settles) + labels — redrawn only when the view, the labels' activity or the selection change;
 // (2) dyn canvas = activity fills, selection, route, event markers, the observer — ≤ 15 fps while idle, every frame
 // while the view moves. Nothing runs while the map is closed.
-import { h, he, icon, setText } from './dom.js';
-import { createPanel } from './panel.js';
-import { w2m, m2w, AMAH } from '../core/units.js';
-import { seasonal, clock, wrap } from './format.js';
-import { createModel, shortName } from './map/model.js';
+import { h, he, setText } from './dom.js';
+import { ico } from './console/icons.js';
+import { w2m, AMAH } from '../core/units.js';
+import { wrap } from './format.js';
+import { shortName } from './map/model.js';
 import { renderPlan } from './map/plan.js';
 import { createView } from './map/view.js';
 import { layoutLabels, drawLabels, clearMeasureCache, warmLabel } from './map/labels.js';
@@ -25,20 +27,13 @@ const BIG_ZONE = 60; // amot: a click in a place at least this wide in both dire
 
 export function createMapPanel(app) {
   const { ctx, data } = app;
-  const panel = createPanel(app, { name: 'map', title: 'Map', heTitle: 'תבנית', side: 'map', modal: true });
-  const isPhone = () => { try { return matchMedia('(max-width: 640px)').matches; } catch { return false; } };
+  const isPhone = () => app.layout.isSheet;
+  const body = h('div.mk-mapbody');
+  const panel = { body, el: body };
 
-  // ---------------- header: you are here · time · places ----------------
-  const hereName = h('span.mk-here__name');
-  const hereHe = he('', 'mk-here__he');
-  const here = h('button.mk-here', { type: 'button', title: 'Centre the map on you', on: { click: () => centerOnMe() } },
-    h('span.mk-here__dot', { 'aria-hidden': 'true' }), h('span.mk-here__txt', h('span.mk-here__lbl', 'You are here'), h('span.mk-here__row', hereName, hereHe)));
-  const timeEl = h('span.mk-maptime.num', { 'aria-hidden': 'true' });
-  const placesBtn = h('button.mk-btn.mk-btn--sm.mk-placesbtn', { type: 'button', 'aria-expanded': 'false', on: { click: () => togglePlaces() } },
-    h('span.ico', { html: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M15 15l5 5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>' }), 'Places');
-  const head = panel.el.querySelector('.mk-panel__head');
-  head.insertBefore(h('div.mk-maphead', here, timeEl), head.lastChild);
-  head.insertBefore(placesBtn, head.lastChild);
+  // ---------------- toolbar chips: Places (narrow screens) and Key (the legend) ----------------
+  const placesBtn = h('button.mk-btn.mk-btn--sm.mk-placesbtn', { type: 'button', 'aria-expanded': 'false', on: { click: () => togglePlaces() } }, ico('menu'), 'Places');
+  const keyBtn = h('button.mk-btn.mk-btn--sm.mk-keybtn', { type: 'button', 'aria-expanded': 'false', on: { click: () => toggleKey() } }, ico('help'), 'Key');
 
   // ---------------- viewport ----------------
   const base = h('canvas.mk-mapv__base', { 'aria-hidden': 'true' });
@@ -48,28 +43,27 @@ export function createMapPanel(app) {
   const stage = h('div.mk-mapv__stage', {
     tabindex: '0', role: 'application', 'aria-roledescription': 'map', 'aria-label': 'Plan of Har HaBayit and the Temple', 'aria-describedby': hintId,
   }, base, dyn, tip);
-  const hint = h('p.sr-only', { id: hintId }, 'Arrow keys pan, plus and minus zoom, slash searches the places, Enter goes to the selected place, Escape closes the map.');
+  const hint = h('p.sr-only', { id: hintId }, 'Arrow keys pan, plus and minus zoom, Enter goes to the selected place, slash searches, Escape closes the map.');
   const live = h('div.sr-only', { 'aria-live': 'polite' });
-  const zoomBtn = (lbl, ico, fn, title) => h('button.mk-iconbtn.mk-mapv__btn', { type: 'button', 'aria-label': lbl, title, on: { click: fn } }, ico);
+  // labelled (AC-5): the icon over a short visible label (vis), the full name in aria-label
+  const zoomBtn = (lbl, ico, fn, title, vis = lbl) => h('button.mk-iconbtn.mk-mapv__btn', { type: 'button', 'aria-label': lbl, title, on: { click: fn } }, ico, h('span.mk-mapv__btnl', vis));
   const svgIcon = (body) => h('span.ico', { html: `<svg viewBox="0 0 24 24" aria-hidden="true">${body}</svg>` });
   const zoom = h('div.mk-mapv__zoom',
     h('div.mk-mapv__north', { 'aria-hidden': 'true', title: 'North is up' }, svgIcon('<path d="M12 3l4.5 11L12 11.6 7.5 14z" fill="currentColor"/>'), h('b', 'N')),
-    zoomBtn('Zoom in', svgIcon('<path d="M12 6v12M6 12h12" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>'), () => zoomStep(1.7), 'Zoom in (+)'),
-    zoomBtn('Zoom out', svgIcon('<path d="M6 12h12" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>'), () => zoomStep(1 / 1.7), 'Zoom out (−)'),
-    zoomBtn('Centre on me', svgIcon('<circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'), () => centerOnMe(), 'Centre on me'));
+    zoomBtn('Zoom in', svgIcon('<path d="M12 6v12M6 12h12" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>'), () => zoomStep(1.7), 'Zoom in (+)', 'In'),
+    zoomBtn('Zoom out', svgIcon('<path d="M6 12h12" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>'), () => zoomStep(1 / 1.7), 'Zoom out (−)', 'Out'),
+    zoomBtn('Centre on me', svgIcon('<circle cx="12" cy="12" r="3.2" fill="currentColor"/><circle cx="12" cy="12" r="7.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>'), () => centerOnMe(), 'Centre on me', 'Me'));
   const presetSeg = h('div.mk-seg.mk-mapv__presets', { role: 'group', 'aria-label': 'Show' });
   const scaleBar = h('i');
   const scaleTxt = h('span.num');
   const scale = h('div.mk-mapv__scale', { 'aria-hidden': 'true' }, scaleBar, scaleTxt);
-  const legend = h('div.mk-mapv__legend', { 'aria-hidden': 'true' },
+  const legend = h('div.mk-mapv__legend', { 'aria-label': 'Key', role: 'note' },
     h('span', h('i.lg-now'), 'Happening now'), h('span', h('i.lg-soon'), 'Within 30 min'),
     h('span', h('i.lg-up'), 'Upper storey'), h('span', h('i.lg-below'), 'Below ground'), h('span', h('i.lg-you'), 'You'));
-  const travelTxt = h('span');
-  const travel = h('div.mk-mapv__travel.mk-glass', { hidden: true, role: 'status' }, icon('walk'), travelTxt,
-    h('button.mk-btn.mk-btn--sm', { type: 'button', on: { click: () => { try { ctx.player?.cancel?.(); } catch { /* ignore */ } } } }, icon('stop'), 'Stop'));
-  const vp = h('div.mk-mapv', stage, presetSeg, zoom, scale, legend, travel, hint, live);
-  panel.body.classList.add('mk-mapbody');
-  panel.body.style.padding = '0';
+  // the one travel bar (console/go.js) moves in here while the map covers the world (placeTravel)
+  const travel = h('div.mk-mapv__travel', { hidden: true });
+  const tools = h('div.mk-mapv__tools', presetSeg, placesBtn, keyBtn);
+  const vp = h('div.mk-mapv', stage, tools, zoom, scale, legend, travel, hint, live);
 
   // ---------------- state ----------------
   let model = null, view = null, places = null, card = null;
@@ -90,7 +84,7 @@ export function createMapPanel(app) {
   const stats = { base: 0, dyn: 0, raster: 0, baseMs: 0, dynMs: 0, rasterMs: 0 }; // last-call timings, for tests
 
   function build() {
-    model = warm || createModel(ctx, data); // anchors are memoised: a part-warmed model just finishes on demand
+    model = app.mapModel(); // shared with the minimap; anchors are memoised: a part-warmed model just finishes on demand
     view = createView({
       el: stage,
       root: vp,
@@ -112,16 +106,15 @@ export function createMapPanel(app) {
       model,
       activity: () => activity,
       onSelect: (id, { fly }) => select(id, { fly, from: 'list' }),
-      onGo: (id) => goZone(id, card.speed),
+      onGo: (id) => goZone(id),
     });
     card = createCard(app, {
       model,
       onClose: () => deselect(true),
-      onGo: (id, speed) => goZone(id, speed),
-      onSpot: (speed) => goSpot(speed),
-      onInfo: (id) => app.open('info', { zone: id }),
+      onGo: (id) => goZone(id),
+      onSpot: () => goSpot(),
+      onInfo: (id) => app.open('here', { zone: id, pinned: true }),
       onSelect: (id) => select(id, { fly: true }),
-      onWatch: (ev, speed) => app.goToEvent(ev, speed),
     });
     vp.append(card.el);
     // controls slide aside when the card opens: measure the label no-go areas where they come to rest
@@ -147,7 +140,7 @@ export function createMapPanel(app) {
   function insets() {
     const i = { l: 0, t: 0, ...cardInsets() };
     const sr = stage.getBoundingClientRect();
-    for (const el of [presetSeg, travel]) {
+    for (const el of [tools, travel]) {
       if (el.hidden) continue;
       const r = el.getBoundingClientRect();
       if (r.width) i.t = Math.max(i.t, r.bottom - sr.top + 4);
@@ -161,7 +154,7 @@ export function createMapPanel(app) {
    */
   function placeTravel() {
     if (travel.hidden) return;
-    const sr = stage.getBoundingClientRect(), pr = presetSeg.getBoundingClientRect();
+    const sr = stage.getBoundingClientRect(), pr = tools.getBoundingClientRect();
     const right = sr.width - cardInsets().r - 10, mid = (sr.width - cardInsets().r) / 2;
     const L = pr.width ? pr.right - sr.left + 10 : 10;
     travel.style.maxWidth = `${Math.max(140, right - 10)}px`;
@@ -178,7 +171,7 @@ export function createMapPanel(app) {
     const sr = stage.getBoundingClientRect();
     blocked = [];
     controls = [];
-    for (const el of [presetSeg, zoom, scale, legend, travel, card?.el]) {
+    for (const el of [tools, zoom, scale, legend, travel, card?.el]) {
       if (!el || el.hidden) continue;
       const r = el.getBoundingClientRect();
       if (!r.width || getComputedStyle(el).display === 'none') continue;
@@ -532,42 +525,26 @@ export function createMapPanel(app) {
   }
 
   // ---------------- trips (walks started from anywhere in the UI) ----------------
+  /** the route of the trip in progress (the travel module's) and the one travel bar, hosted in here meanwhile */
   function syncTrip() {
-    const t = app.trip;
-    const walking = t && ctx.player?.mode === 'auto' && t.speed !== 'instant';
+    const t = app.travel.trip;
+    const walking = !!t && t.way !== 'instant';
     if (!walking) {
       if (trip) { trip = null; needDyn = true; }
-      if (!travel.hidden) { travel.hidden = true; measureBlockedSoon(); }
+      if (!travel.hidden) { travel.hidden = true; app.hostTravelBar(null); measureBlockedSoon(); }
       return;
     }
-    if (!trip || trip.key !== t.key) {
-      trip = { key: t.key, target: t.at, path: null };
-      // one nav query for the drawn route (cheap; the player planned its own). Falls back to a straight line.
-      try {
-        if (ctx.nav?.isReady && typeof ctx.nav.findPath === 'function') {
-          const to = m2w(t.at[0], t.at[1], Number.isFinite(t.at[2]) ? t.at[2] : 0);
-          if (!Number.isFinite(t.at[2])) { const y = ctx.player.floorAtSite?.(t.at[0], t.at[1]); if (Number.isFinite(y)) to.y = y; }
-          const path = ctx.nav.findPath(ctx.player.position, to);
-          if (path?.length > 1) trip.path = path.map((p) => { const s = w2m(p); return [s.X, s.Y]; });
-        }
-      } catch { trip.path = null; }
-      needDyn = true;
-    }
-    const s = playerSite();
-    let left = 0;
-    if (s) {
-      if (trip.path) {
-        const i = nearestOnPath(trip.path, s);
-        left = Math.hypot(trip.path[i][0] - s[0], trip.path[i][1] - s[1]);
-        for (let k = i; k < trip.path.length - 1; k++) left += Math.hypot(trip.path[k + 1][0] - trip.path[k][0], trip.path[k + 1][1] - trip.path[k][1]);
-      } else left = Math.hypot(trip.target[0] - s[0], trip.target[1] - s[1]);
-    }
+    const route = app.travel.routeSite();
+    const key = `${t.key}`;
+    if (!trip || trip.key !== key) needDyn = true;
+    trip = { key, target: t.to || route?.[route.length - 1] || null, path: route && route.length > 1 ? route : null };
+    if (!trip.target) { trip = null; return; }
     const wasHidden = travel.hidden;
     const w0 = travel.offsetWidth;
+    if (travel.firstChild !== app.travel.bar) app.hostTravelBar(travel);
     travel.hidden = false;
-    setText(travelTxt, `${t.verb || 'Walking'} to ${t.label} · ${Math.max(1, Math.round(left * AMAH))} m`);
-    if (wasHidden) measureBlockedSoon();
-    else if (Math.abs(travel.offsetWidth - w0) > 4) { placeTravel(); measureBlockedSoon(); }
+    if (wasHidden || Math.abs(travel.offsetWidth - w0) > 4) measureBlockedSoon();
+    else placeTravel(); // the card may have come or gone since
   }
   let mbRaf = 0;
   function measureBlockedSoon() { cancelAnimationFrame(mbRaf); mbRaf = requestAnimationFrame(() => { measureBlocked(); needBase = true; }); }
@@ -624,19 +601,6 @@ export function createMapPanel(app) {
     const vis = view.visible();
     return Math.min((vis.r - vis.l - 36) / (r[1][0] - r[0][0]), (vis.b - vis.t - 36) / (r[1][1] - r[0][1]));
   }
-  function updateHeader() {
-    const id = data.currentZoneId();
-    const z = id ? data.zone(id) : null;
-    const en = z?.name?.en ? shortName(z.name.en) : 'Outside the precinct';
-    setText(hereName, en);
-    setText(hereHe, z?.name?.he || '');
-    hereHe.hidden = !z?.name?.he;
-    here.setAttribute('aria-label', `You are here: ${z?.name?.en || en}. Centre the map on you.`);
-    const time = ctx.time;
-    const i = time?.zmanim ? seasonal(time, time.t) : null;
-    setText(timeEl, i ? `${i.half === 'day' ? 'Day' : 'Night'} · hour ${i.hour} · ≈ ${clock(time.t)}` : '');
-  }
-
   // ---------------- hit testing, hover, tap ----------------
   function hitAt(x, y) {
     if (offscreen && Math.hypot(x - offscreen.x, y - offscreen.y) < 18) return { kind: 'me' };
@@ -690,7 +654,7 @@ export function createMapPanel(app) {
     const hit = hitAt(x, y);
     if (hit.kind === 'me') { centerOnMe(); return; }
     if (hit.kind === 'event') {
-      if (double) { app.goToEvent(hit.ev, card.speed); return; }
+      if (double) { app.travel.goEvent(hit.ev); return; }
       if (hit.id) select(hit.id, { ev: hit.ev, from: 'tap' });
       return;
     }
@@ -702,7 +666,7 @@ export function createMapPanel(app) {
     if (double) {
       clearTimeout(revealTimer);
       if (sel?.id !== id) select(id, { spot, from: 'tap' });
-      if (spot) goSpot(card.speed, spot); else goZone(id, card.speed);
+      if (spot) goSpot(spot); else goZone(id);
       return;
     }
     select(id, { spot, from: 'tap' });
@@ -752,29 +716,24 @@ export function createMapPanel(app) {
     const p = Math.max(w, hh) * 0.9 + 6;
     view.fit([[mn[0] - p, mn[1] - p], [mx[0] + p, mx[1] + p]], { pad: 12, kHi: 9, kLo: view.kMin });
   }
-  function goZone(id, speed) {
+  function goZone(id) {
     const z = data.zone(id) || {};
-    const m = model.get(id);
-    // the card says so and its Go button is disabled; this reaches Enter and double-click (toasts hide under the map)
+    // the card says so and its Go is disabled; this reaches Enter and double-click
     if (z.stand === null) { setText(live, `${z.name?.en || shortName(id)} has no floor to stand on; it is seen from the places around it.`); return; }
-    let p = data.point(z.stand);
-    if (!p && m) p = [m.anchor[0], m.anchor[1], m.floorZ];
-    if (!p) return;
-    const target = Number.isFinite(p[2]) ? { at: [p[0], p[1], p[2]] } : { at: [p[0], p[1]] };
-    app.goTo(target, z.name?.en || shortName(id), { speed });
+    app.travel.goZone(id);
   }
-  function goSpot(speed, spot = sel?.spot) {
+  function goSpot(spot = sel?.spot) {
     if (!spot) return;
     const m = sel?.id ? model.get(sel.id) : null;
     const X = Math.round(spot[0] * 10) / 10, Y = Math.round(spot[1] * 10) / 10;
     const target = Number.isFinite(m?.floorZ) ? { at: [X, Y, m.floorZ] } : { at: [X, Y] };
-    app.goTo(target, 'the spot you picked', { speed });
+    app.travel.start(target, { label: 'the spot you picked' });
   }
-  function centerOnMe() {
+  function centerOnMe(focus = true) {
     const s = playerSite();
     if (!s) return;
     view.centerOn(s[0], s[1], Math.max(view.target.k, 2.2));
-    stage.focus({ preventScroll: true });
+    if (focus) stage.focus({ preventScroll: true });
   }
   function zoomStep(f) {
     const vis = view.visible();
@@ -782,10 +741,16 @@ export function createMapPanel(app) {
   }
 
   // ---------------- places (phones / narrow: an overlay list) ----------------
-  function togglePlaces(on = !panel.body.classList.contains('is-places')) {
+  function togglePlaces(on = !panel.body.classList.contains('is-places'), focus = true) {
     panel.body.classList.toggle('is-places', on);
     placesBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    if (!focus) return;
     if (on) places.focus(); else stage.focus({ preventScroll: true });
+  }
+  function toggleKey(on = !vp.classList.contains('is-key')) {
+    vp.classList.toggle('is-key', on);
+    keyBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+    measureBlockedSoon();
   }
 
   // ---------------- keyboard ----------------
@@ -799,15 +764,9 @@ export function createMapPanel(app) {
     else if (k === 'ArrowDown') view.panBy(0, -step);
     else if (k === '+' || k === '=') zoomStep(1.5);
     else if (k === '-' || k === '_') zoomStep(1 / 1.5);
-    else if (k === 'Enter' && sel?.id) goZone(sel.id, card.speed);
+    else if (k === 'Enter' && sel?.id) goZone(sel.id);
     else return;
     e.preventDefault();
-  });
-  panel.el.addEventListener('keydown', (e) => {
-    if (e.key === '/' && !e.target.closest('input, textarea, select')) {
-      e.preventDefault();
-      if (getComputedStyle(places.el).display === 'none' || !places.el.offsetWidth) togglePlaces(true); else places.focus();
-    }
   });
   // after choosing a place in the overlay list on a narrow screen, put the list away so the card shows
   panel.body.addEventListener('click', (e) => {
@@ -841,7 +800,7 @@ export function createMapPanel(app) {
     const step = (dl) => {
       if (model) return; // opened meanwhile: build() finished the work
       try {
-        if (!warm) { warm = createModel(ctx, data); if (warm.list.length) warm.nameOf(warm.list[0]); idle(step); return; }
+        if (!warm) { warm = app.mapModel(); if (warm.list.length) warm.nameOf(warm.list[0]); idle(step); return; }
         const t0 = performance.now(), lim = dl && !dl.didTimeout ? Math.max(2, dl.timeRemaining() - 1) : 12;
         do warm.anchorOf(warm.list[i++]); while (i < warm.list.length && performance.now() - t0 < lim);
         if (i < warm.list.length) { idle(step); return; }
@@ -863,14 +822,14 @@ export function createMapPanel(app) {
     idle(step);
   }
 
-  let slow = 0;
   return {
-    ...panel,
+    el: body,
     prewarm,
     focusTarget: () => stage,
+    get open() { return isOpen; },
     get api() {
       return {
-        select: (id, o) => select(id, { fly: true, ...o }), deselect, view: () => view?.state, setView: (s, o) => view?.set(s, o),
+        select: (id, o) => select(id, { fly: true, ...o }), deselect, view: () => view?.state, setView: (s2, o) => view?.set(s2, o),
         fit: (k) => view?.fit(model.presets[k].rect, { pad: 18, animate: false }), labels: () => placed.map((p) => p.id), model: () => model, activity: () => activity,
         labelRects: () => placed.map((p) => ({ id: p.id, ...p.rect })), selected: () => sel?.id || null, trip: () => (trip ? { path: trip.path?.length || 0 } : null),
         stats: () => ({ ...stats }), siteToScreen: (X, Y) => { const T = view.tf(); return [T.x(X), T.y(Y)]; }, screenToSite: (x, y) => { const T = view.tf(); return [T.X(x), T.Y(y)]; },
@@ -878,35 +837,47 @@ export function createMapPanel(app) {
         marker: () => (view ? playerMark(view.tf()) : null), // { off, x, y } where "you" is drawn (stage css px)
         owns: (id, X, Y) => !!model && owns(id, X, Y),
         hit: (x, y) => { const r = hitAt(x, y); return { kind: r.kind, id: r.id || null, ev: r.ev?.id || null }; },
+        places: (on) => togglePlaces(on),
+        key: (on) => toggleKey(on),
       };
     },
-    onOpen(opts = {}) {
+    /** the visible part of the plan in site amot [[X0, Y0], [X1, Y1]] (the header disc's overview) */
+    viewRect() {
+      if (!view || !W) return null;
+      const T = view.tf(), v = view.visible();
+      return [[T.X(v.l), T.Y(v.b)], [T.X(v.r), T.Y(v.t)]];
+    },
+    pan(dx, dy) { view?.panBy(dx, dy); },
+    show(opts = {}) {
+      const was = isOpen;
       isOpen = true;
       if (!model) build();
-      try { ctx.player?.setInputEnabled?.(false); } catch { /* ignore */ }
       resize();
       ensureCoarse();
       computeActivity();
       places.render();
-      updateHeader();
       if (firstOpen) { initialView(); firstOpen = false; }
       if (opts.zone && model.get(opts.zone)) select(opts.zone, { fly: true, ev: opts.event ? { id: opts.event } : null });
       else if (sel) card.show(sel.id, { spot: sel.spot });
-      togglePlaces(false);
-      requestAnimationFrame(() => { resize(); syncTrip(); });
+      if (opts.centerMe) centerOnMe(false);
+      if (!was) togglePlaces(false, false);
+      requestAnimationFrame(() => { resize(); syncTrip(); if (opts.zone || opts.centerMe) needBase = true; });
     },
-    onClose() {
+    hide() {
+      if (!isOpen) return;
       isOpen = false;
-      try { ctx.player?.setInputEnabled?.(true); } catch { /* ignore */ }
       hideTip();
       hover = null;
       rasters.detail = null; // the big per-view raster is cheap to redo; keep memory low while closed
+      if (!travel.hidden) { travel.hidden = true; app.hostTravelBar(null); }
     },
     onEscape() {
-      if (document.activeElement === places?.input && places.clear()) return true;
       if (panel.body.classList.contains('is-places')) { togglePlaces(false); return true; }
+      if (vp.classList.contains('is-key') && isPhone()) { toggleKey(false); return true; }
       return false;
     },
+    /** a place chosen in the search while the map is open: select it here */
+    selectPlace(id) { if (!model) build(); select(id, { fly: true }); },
     tick(dt) {
       if (!isOpen || !W) return;
       const moving = view.step(dt);
@@ -918,12 +889,8 @@ export function createMapPanel(app) {
     },
     update() {
       if (!isOpen) return;
-      slow += 0.1;
-      if (slow < 0.25) return;
-      slow = 0;
       if (computeActivity()) { needBase = true; places.update(); }
       card.update(false);
-      updateHeader();
       syncTrip();
     },
   };

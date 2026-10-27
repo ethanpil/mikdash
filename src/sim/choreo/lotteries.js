@@ -24,6 +24,7 @@ import { gazitPlaces, mokedPlaces, lotRadius } from './g1/places.js';
 import { rand, clamp } from '../lib/core.js';
 import { CUE_LEAD } from '../lib/cue.js';
 import { stagedRetime } from '../lib/watch.js';
+import { lotteries as inspectHooks } from './describe/dawn.js';
 
 const WALK = 1.15, SLOW = 0.85;   // m/s ⚙
 const TEXT = {
@@ -44,6 +45,9 @@ const G2_ID = 'terumat-hadeshen';
 
 export default {
   id: 'lotteries',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 5,          // the officer leaves Beit HaMoked for the second lottery at its t0 − 4.75
   lag: 16,          // after the second lottery they wait in the Gazit for the barkai and go out to bring the lamb ⚙
   importance: 3,

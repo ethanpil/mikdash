@@ -7,6 +7,7 @@
 import { rand, smooth } from '../lib/core.js';
 import { crossed } from '../lib/cue.js';
 import { Itin, Troupe, daySeed, win, hm, observerNear } from './g4/lib.js';
+import { avtinas as inspectHooks } from './describe/courts.js';
 
 const SEED = 0x6176;
 // azarah.beit-avtinas: X 195.75–215.75, Y 258–263, floor +36; worktable along the south wall with four stone mortars,
@@ -21,6 +22,9 @@ const POSTS = [
 
 export default {
   id: 'beit-avtinas',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 6,
   lag: 6,
   importance: 1,

@@ -21,6 +21,8 @@ export function createController(ctx, physics) {
     eyeY: 0, bobPhase: 0, bobAmp: 0, speedH: 0, sumY: 0, sumX: 0, slope: 0, voidY: null,
     checkStand: false, // validate the position on the next walking step (set when fly mode ends)
     restVer: -1, // physics.version while standing still at `rest` (collision queries skipped)
+    offYaw: 0, offPitch: 0, // free look during a trip: the view's offset from the walker's own yaw/pitch (rad)
+    noBob: false, // head bob suppressed (a trip at 5× and faster)
   };
 
   // head-bob: setting 'headBob' (default on), off under prefers-reduced-motion
@@ -179,8 +181,9 @@ export function createController(ctx, physics) {
    *  manual: input state { fwd, strafe, up, run } (camera-relative)   — or —
    *  cmd: { dirX, dirZ, speed, fly } world-space command from the auto-walker (fly: a feet position to
    *       glide to; a walking command while flying hovers)
+   *  noCam: leave the camera alone (the caller sub-steps and applies it once per frame)
    */
-  function update(dt, cmd, manual) {
+  function update(dt, cmd, manual, noCam = false) {
     if (dt <= 0) return;
     const sy = Math.sin(s.yaw), cy = Math.cos(s.yaw);
     if (s.mode === 'fly' && !cmd) {
@@ -203,7 +206,7 @@ export function createController(ctx, physics) {
       if (l > 1) { dx /= l; dz /= l; }
       walk(dt, dx, dz, manual.run ? MOVE.run : MOVE.walk);
     }
-    applyCamera(dt);
+    if (!noCam) applyCamera(dt);
   }
 
   function applyCamera(dt) {
@@ -219,7 +222,7 @@ export function createController(ctx, physics) {
     if (bobOn === null) readBob();
     let bobY = 0, bobX = 0, bobZ = 0;
     if (dt > 0) {
-      const walking = bobOn && s.mode === 'walk' && s.grounded && s.speedH > 0.15;
+      const walking = bobOn && !s.noBob && s.mode === 'walk' && s.grounded && s.speedH > 0.15;
       const runK = Math.min(1, Math.max(0, (s.speedH - 1.6) / 2.6));
       if (walking) s.bobPhase += (s.speedH * dt) / (0.74 + 0.6 * runK);
       const targetAmp = walking ? Math.min(1, s.speedH / 1.3) : 0;
@@ -232,7 +235,7 @@ export function createController(ctx, physics) {
       }
     }
     cam.position.set(feet.x + bobX, s.eyeY + bobY, feet.z + bobZ);
-    cam.rotation.set(s.pitch, s.yaw, 0, 'YXZ');
+    cam.rotation.set(Math.max(-1.48, Math.min(1.48, s.pitch + s.offPitch)), s.yaw + s.offYaw, 0, 'YXZ');
     cam.updateMatrixWorld();
     eye.copy(cam.position);
   }

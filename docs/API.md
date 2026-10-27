@@ -230,6 +230,56 @@ player-3 / player-3-fix additions (floors at a figure's level, shut doors in nav
 - Internals: src/player/nav/doors.js `createDoors(ctx) -> { footprint(key), keyOf(id), measureAll(), select(opts), walls(opts, radius) -> { keys, cut, boxes, sig } }`, `SHUT_BELOW`. NavGraph: `markBlocks(boxes)`, `useBlocks(boxes, sig)`, `buildOverlay()`, `blocksAtPoint(p, boxes)`, `crosses(p, k, boxes)`, `route(s, from, to, boxes)`, `grid.findPath(from, to, boxes = null, sig = null)`.
 - Dev: `node src/sim/dev/run.mjs --q low --script src/player/dev/level-doors.js "date=2026-11-02&t=02:30"` (floor cases, chord sweeps over the Ulam steps and the 15 steps, G2's ways read with nearestFloor, door routes, the late re-measure).
 
+### player: travel, trips and input for the Luach console (docs/decisions/console-travel.md)
+
+Additive; every older call above keeps its meaning. One change of binding: E no longer rises (Space, Q and C still fly up and down); E inspects (player:inspect).
+
+#### player: ctx.player (src/player/index.js) — additions; every old call keeps its meaning
+
+```js
+ctx.player.goTo(target, speedOrOpts = 'walk') -> Promise<boolean>
+//   speedOrOpts: 'instant'|'slow'|'walk'|'fast'|'run'|number m/s (pace 1, as before)
+//              | { way: 'instant'|'walk'|'run'|number (m/s), pace: 0.25..10 (UI: ½ 1 2 5 10), label?: string | { en } }
+//   Every goTo is a trip with an id (travel:* events). A new goTo supersedes the running one.
+ctx.player.setPace(p) -> number          // the running trip's pace, clamped 0.25..10 (returned); emits travel:pace
+ctx.player.setWay('walk' | 'run')        // mid-trip; emits travel:pace
+ctx.player.finishTrip() -> Promise<boolean>   // veiled teleport to the trip's target; travel:end reason 'skipped'
+ctx.player.trip -> null | { id, label: { en } | null, way, pace, effectivePace, mps, s, total, remaining, eta,
+                            to: [X, Y, Z], zones: [{ zone, s0, s1 }] }      // a fresh snapshot per read; metres, seconds
+ctx.player.teleport(target, { fade = false } = {})   // fade false: now, returns boolean; fade true: under ctx.ui.fade,
+                                                     // returns Promise<boolean>
+ctx.player.setInputEnabled(true | false | { keys?, move?, look?, pointerLock?, pad?, touch? })
+//   boolean: all on / all off (and release the pointer). Object: only the given fields change; pointerLock or look
+//   false releases a capture. keys = the keyboard (movement keys also need move; E and Esc need only keys).
+ctx.player.setLockFilter(fn | null)      // fn(pointerdown event) -> false: an unlocked click does not capture the mouse
+                                          // (a short one is a player:tap)
+ctx.player.setVertical(-1 | 0 | 1)       // held fly down / release / up (touch Sink / Rise); a fly intent
+ctx.player.toggleFly() -> 'walk' | 'fly' // F's action (cancels a trip)
+ctx.player.heading / pitch               // the VIEW's (free look during a trip included); setting them, or setLook(),
+                                          // clears the free-look offset
+ctx.player.path                          // as before, or the trip's route while gliding to a landing
+```
+
+Pace: walking and climbing are sub-stepped (≤ 1/50 s of walking time per step, ≤ 12 steps a frame). A glide's clock
+runs × pace. Instant, the arrival's turn and the veil run in real time. The sim clock is never touched. At pace ≥ 5,
+head bob is off. Settings read: `lookMode` ('drag': never capture; drag looks, a click taps), `mouseSensitivity`,
+`invertY`, `headBob`.
+
+#### player: Bus (emitted by the player)
+
+| Event | Payload | When |
+|---|---|---|
+| `travel:start` | `{ id, label, way, pace, mps, distance, eta, to: [X,Y,Z], zones: [{ zone, s0, s1 }] }` | once the route is known (after nav planning; at once for Instant) |
+| `travel:progress` | `{ id, s, total, remaining, eta, pace, effectivePace }` | ≤ 4 Hz |
+| `travel:pace` | `{ id, pace, way }` | setPace / setWay |
+| `travel:zone` | `{ id, zone, prev, index, s, at: [X,Y,Z], final }` | each place entered along the route (runs ≥ 1 m, never the start, never twice in a row); then once more with `final: true` at arrival (the place the feet stand in) |
+| `travel:end` | `{ id, ok, reason: 'arrived'\|'cancelled'\|'superseded'\|'failed'\|'skipped' }` | once |
+| `player:tap` | `{ x, y, pointerType }` | a short click on the canvas that did not capture the mouse; a short single touch |
+| `player:inspect` | `{ source: 'key'\|'click'\|'pad', x?, y? }` | E (x/y: the pointer over the canvas while free), a click while captured (no x/y), pad X |
+| `player:intent` | `{ kind: 'move'\|'look'\|'fly'\|'escape'\|'tap' }` | ≤ 4 Hz per kind; move and fly stop a trip |
+
+`player:arrived` and `ui:goto` are unchanged.
+
 ## people
 
 ctx.people = {
@@ -411,63 +461,139 @@ audio-2-fix additions (second review: verse-by-verse sections, one level per sec
 - Internals: engine.fetchSection(opts, { priority, hold, first }) → Promise<AudioBuffer>[] (a section's verse chunks, in order); engine.playSection / schedulePart / scheduleLoop / endSection / sectionParts / fetchParts / activateSection / chain(v, when, fadeIn) / occlusionFloor; engine.onPart(v, part, when, offset) test hook; renderer.estimate(id, seconds), renderer.musicRate. synth: chant.js melodyChunks(events, length, sizes), CHUNK_PRE (0.35), CHUNK_TAIL (2); voice.js buildSegments notes may carry ghost: true (shapes the note before, not sung); music.js renderPsalm opts chunk, stringsGain and result { chunk, voicePeak, stringsPeak }, choirCalibration(o, fresh), calConfig, calKey, gatedLoudness, REF_TEXT; synth/index.js CHOIR_REF_DB (−21), TIER_CHOIR exported; a cue render may return channels with .gain (a fixed gain, still capped at −1 dBFS peak). songs.js songId accepts opts.date.
 - Dev: songs-test.mjs also checks the chunk layout, renders each picked section verse by verse against the whole, checks tempo and the week default, and the calibration table (--write-cal regenerates it, --check-cal all checks all 24 entries). song-live.js adds E (a cold section joins after one verse) and F (a cold 'choir' loop asked for mid-section).
 
-## ui
+## ui (the Luach console; docs/console-design.md, docs/decisions/console-ui.md)
 
-ctx.settings = { get(key), set(key, value) -> bool, isSet(key), all(), defs }: values persisted as raw strings in localStorage 'mikdash.<key>' (try/catch) and cached, so get() is cheap per mouse event. set() emits bus 'settings:change' {key, value}; changing reducedMotion also emits a headBob change while head bob is unset. Keys: quality(auto|low|medium|high|ultra, reload), amah(naeh|feinstein|chazonish, reload), volume(0..1), captions(bool), musicStyle(mishnah|sg1612), mouseSensitivity(0.2..3), invertY, fov(40..95, applied to ctx.camera unless ?fov=), headBob(default = !reducedMotion), labels, aggadah(default true), reducedMotion(default = OS setting), travelSpeed(instant|slow|walk|fast|run), minimap. Unknown keys are stored loosely. shot=1 ignores stored values.
-ctx.ui = { toast(msg | {en,he}, ms?), fade(to0..1, ms) -> Promise (the player's existing call), fade(ms) -> Promise (dips to black, resolves when black, lifts by itself), open('time'|'info'|'map'|'settings', opts?) -> bool (opts: {focusEvent:id} for time, {zone:id} for info; also dismisses the intro), close(), toggle(name), panel (current name|null), hints(on), enter(), enabled }. With ui=0 or shot=1 the same methods are no-ops and no UI code or CSS is loaded.
-Keys: T time, I info, M map, G settings, Esc closes the open panel (captured so the player does not also see it), Enter dismisses the intro.
-Consumes: bus 'caption' {text:{en,he}|string, duration}, 'zone:change' {zone: id|{id}}, 'time:date', 'ready'. Events: ctx.schedule.events / active(t) / upcoming(t,n) / at(zone,t), unwrapping {event} results if needed; times come from ctx.time.resolve(ev.when.start|end); ev.view.at may be [X,Y(,Z)] or {el,f}. Zone content: ctx.zones.content[id] | ctx.zones.ZONE_CONTENT | zones.info(id) | zones.get(id) | zones.list. Current zone: ctx.zones.current (id or {id}), else zoneAtSite(player feet). Travel: ctx.player.goTo(target, speed), else bus 'ui:goto'.
-Dev scripts: node src/ui/dev/uishots.mjs [--w --h --q --prefix --query --steps json]; node src/ui/dev/uitest.mjs.
+### ui: ctx.ui (src/ui/app.js)
 
-ctx.ui is unchanged: toast(msg | {en, he}, ms?), fade(to, ms) | fade(ms) -> Promise, open(name, opts?), close(), toggle(name), panel, hints(on), enter(), enabled. A toast with he now renders the Hebrew name first, in gold.
-ctx.settings is unchanged except that the unused 'minimap' key is removed.
-The UI's font stylesheet is now a script-inserted link[data-mk-fonts] plus preconnects, never an @import. __mikdashReady waits for document.fonts.ready, capped at 5 s.
-Exported from src/ui/data.js: LADDER rungs now carry src (Kelim 1:8 or 1:9 for rungs 7–10), and RESTRICTED_RUNG = 7.
-Exported from src/ui/timepanel.js: packLanes(items, nLanes = 3, gap = 0.06). Each item is { s0, span, ext, long }; the function sets item.lane.
-Internal changes: app.goTo(target, label | { event: title }, { speed, keepMap }); hud.travel(text | null); hud.coverable; and app.panelOpen() / app.introOpen() helpers.
-Bus usage is unchanged: it consumes 'caption', 'zone:change', 'time:date', 'ready' and 'settings:change'.
-Dev scripts: node src/ui/dev/uitest.mjs (45 checks, now including a phone pass) and node src/ui/dev/uishots.mjs.
+All the old calls keep working.
 
-ctx.ui.open('map', { zone?, event? }): opens the overlay; zone selects a place and flies to it, event (id) expands that row. ctx.ui.map (null until the map has been opened once) is a debug/test handle: { select(id, opts), deselect(), view() -> {cx,cy,k}, setView({cx,cy,k}, {animate}), fit('mount'|'courts'|'sanctuary'), labels() -> ids, labelRects(), selected(), trip() -> {path}|null, stats() -> {base,dyn,raster,baseMs,dynMs,rasterMs}, hit(x,y), siteToScreen(X,Y), screenToSite(x,y), anchor(id), model(), activity() }.
+```js
+ctx.ui = {
+  toast(msg | { en, he }, ms = 3200, { id }?),      // a notice: max 2, top centre of the free area
+  fade(to 0..1, ms) | fade(ms) -> Promise,          // the veil (player / director contract unchanged); a fade
+                                                    //   superseded by a newer one resolves at once
+  open(name, opts?) -> boolean,
+  //   names: 'here' | 'happening' | 'map' | 'time' | 'learn' | 'listen' | 'settings' | 'help' | a module's section id
+  //   legacy: 'info' → here ({ zone } → pinned), 'about' → learn ({ section: 'controls' } → help)
+  //   opts: here { zone, pinned, passedAt, scrollTo: 'about' }; happening { filter: 'all'|'here'|'near'|'aggadah' };
+  //         map { zone, event, centerMe }; time { focusEvent }; learn { section }; help { topic }
+  close(), toggle(name), get panel(),              // panel = the current section id | null
+  hints(on),                                        // no-op (the hint bar is gone)
+  enter(),                                          // dismiss the Welcome
+  enabled, map,                                     // map = the map's test handle (see below)
+  card(ref | hit, opts?) -> boolean,                // 'kind:id' | { kind, id } | an inspect Hit; zone refs open Here pinned
+                                                    //   (pushed over a search or a card); opts.fromWorld: picked in the
+                                                    //   world — with the dock closed the card is the Menu's only level
+  search(q?, { scope }?),                           // the Menu with the search focused (and filled); without a scope
+                                                    //   it follows the section it opens over (Places over the Map)
+  banner(zoneId | { en, he }, { kind: 'enter'|'arrive'|'restricted' }?),
+  modules,                                          // the registry (§5)
+  announce(text),                                   // a polite live-region line
+  console: {
+    state() -> { open, layout: 'dock'|'sheet-portrait'|'sheet-landscape', view: { type, id }, section, detent, welcome, stack },
+    results() -> Result[], card() -> Card | null, beacon() -> { name, expanded, rect }, banners() -> [{ zone, kind, text, t, via }],
+    pick(x, y) -> Hit | null, markers() -> [{ id, vis, label }], free() -> { l, r, t, b },
+    stats() -> { tickMs, tickMax, n, parts: { [name]: { ema, max } } }, travel() -> trip | null, input() -> 'mouse'|'touch'|'keyboard'|'pad',
+  },
+};
+```
 
-Panel contract in app.js:
-- New side 'map' (modal: true).
-- Panels may implement onClose() (called on hide) and onEscape() -> bool (true = Esc handled, do not close).
-- app.trip = { key, at:[X,Y(,Z)], label, speed, verb } | null is set by app.goTo for the walk in progress and cleared when it resolves.
+`ctx.ui.map` (unchanged from the map task, plus): `places(on)`, `key(on)`. The map section's instance also has
+`viewRect()` (the visible plan, for the header's overview disc) and `selectPlace(id)`.
 
-format.js: accessLead(text), the first sentence of a zone's access text, or the first two when the first is a terse heading.
+### ui: Bus
 
-Map module internals (src/ui/map/):
-- model.js: createModel(ctx, data) -> { list, get, groundAt, stackedAt, childrenOf, anchorOf, nameOf, otherLevels, extent, presets }.
-- plan.js: renderPlan(ctx, model, {k, x0, y1, w, h, dpr}) -> canvas.
-- view.js: createView(opts).
-- labels.js: layoutLabels / drawLabels.
-- places.js: createPlaces.
-- card.js: createCard(app, opts), seasonalRange(time, t0, t1).
+Emits `ui:card { ref, card }` when a card opens and `ui:menu { open, section }`. Consumes `caption` (with optional
+`source: 'audio'|'sim'|'narration'`), `zone:change`, `time:date`, `settings:change`, `quality:change`, `firstFrame`,
+`travel:start | progress | pace | zone | end` (C), `player:tap | inspect | intent` (C), `inspect:show` (B), and
+main.js's `warmup:issued` (the boot has settled: the Welcome's panel and the UI's idle work start then).
 
-Dev: node src/ui/dev/maptest.mjs [--q low] [--out shots/area-map] runs 40 desktop, phone and landscape checks.
+### ui: ctx.settings (src/ui/settings.js)
 
-Behaviour change: a single map click now selects; a double-click or Enter goes. app.goTo's keepMap option is still supported but the map no longer uses it.
+New keys: `travelWay` (instant | walk | run; default walk), `travelPace` (0.5 | 1 | 2 | 5 | 10; default 1), `lookMode`
+(lock | drag; default lock on a fine pointer, read by the player), `quickChips` (wake | always), `areaNames` (always |
+travel | off), `restrictedNotices` (bool, default true). `labels` is shown as "Activity markers". `travelSpeed` is
+migrated once (instant → instant; slow → walk ½×; walk → walk 1×; fast → walk 2×; run → run 1×) and removed.
+`ctx.settings.define({ key, type: 'bool'|'number'|'enum'|'select', values?, min?, max?, default, group?, label? })`
+declares a setting (modules: `module.<id>.<key>`) and returns an undefine function (the stored value is kept).
+After a quality / amah reload, `sessionStorage mikdash.resumeMenu = 'settings'` reopens the Menu at Settings.
 
-Additions; nothing existing changed.
+### ui: ctx.ui.modules (src/ui/console/modules.js)
 
-- `ctx.ui.map` debug/test handle gains:
-  - `marker()` returns `{ off, x, y, ang? }`: where "you" is drawn, in stage CSS px; `off` means the edge chevron.
-  - `owns(id, X, Y)` returns true where a click at that site point would select that place.
-- `layoutLabels(g, items, tf, blocked, scale, owns)`: new last argument `owns`. Items may set `slide: false`.
-- `labels.js` exports `warmLabel(g, { tier, name }, scale)`, which measures a label's text ahead of time.
-- The map panel object has `prewarm()`, called once by `app.js` in idle time after 'ready'.
-- `app.openPanel()` returns the open panel's name or null; the HUD uses it.
-- CSS:
-  - `.mk-mapv.is-tapguard` lets taps pass through to the map for 380 ms after a tap selects.
-  - `#ui-root.mk-open-map .mk-toasts` hides toasts while the map is open.
-  - `.mk-mapv__travel` is now positioned by script (`placeTravel`).
+As §5 of the design: `register(def) -> off`, `unregister(id)`, `has(id)`, `get(id)`. A def may carry `section`
+(`{ id, label, icon, order, key?, badge?(ctx), fullDetent?, mount(el, api) -> { show(opts), hide(), update(), tick?(dt), state?()
+(what Back restores: kept on the view's stack entry when another level covers it and passed back as show({ back, state })),
+onEscape?() -> bool, focusTarget?(), dispose() } }`), `listen` (`{ order, mount(el, api) -> { update, dispose } }`),
+`cardActions(card, api) -> [{ id, label, icon?, run }]`, `cardSections(card, api) -> [{ id, title, mount(el) | text | items | refs }]`,
+`search: { kind, label, docs(ctx) -> Doc[] }` (a live source), `commands: [{ id, title, keywords?, key?, run(api) }]`,
+`settings: [{ key, group, type, label, values?, default }]`, `banner(zoneId, api) -> { action: { label, run } } | null`,
+`status(ctx) -> { label, action? } | null` (the header's one chip), `on: { [busEvent]: (e, api) => {} }`.
+`api = { ctx, open, card, close, caption(text, ms), notice(text, ms), settings: { get, set }, h, t }`. A hook that
+throws is logged once and disables its module. The eight built-in sections register through it (orders 10…80).
 
-Behaviour:
-- Map double-tap timing uses event timestamps.
-- A newly selected place's card opens scrolled to the top.
-- The HUD's restricted-place notice is held while the map is open and shown when it closes, if the observer is still there.
-- "Also here" lists storeys that cover the whole place.
+### ui: Card data the renderer accepts (src/ui/console/card.js)
+
+B's `Card` (§6.2). Section objects may carry `text`, `lead` (+ `text`: the lead with "more ›"), `items` (strings or
+`{ text, ref?, sources? }`), `refs` (chips that open cards), `sources`, `open`, or `mount(el) -> { update(t) }` (live).
+The first section is open; the rest collapse. Actions render in the order see-in-action (≤ 2), follow, go (the Go
+control), time ("Set clock to start", `tSet`), map, learn, then module actions.
+
+### ui: Files
+
+`src/ui/console/`: console.js (the Menu, views, history, detents), layout.js, header.js, minimap.js, beacon.js,
+card.js, describe.js (cards when the inspect core is absent, `?inspect=0`; `parseRef`, `refStr`, `ROLE_NAMES`), eventrow.js (`eventRow`, `dynGroup`,
+`stageTitle`, `showAction`, `runShow`), go.js (travel), showbar.js (`dayText(fromDate, toDate)`), banner.js, search.js (`createSearchEngine`, `createSearchUI`),
+commands.js (`COMMANDS`, `sectionCommands(app)`), captions.js, markers.js, pickui.js, inputmode.js, gamepad.js, welcome.js (`UI_VERSION`, `WHATS_NEW`),
+modules.js, content.js, icons.js, console.css, sections/{here,happening,map,time,learn,listen,settings,help,widgets}.js.
+Kept and adapted: timepanel.js (`createTimeControl(app, { onArc })`, `packLanes`), mappanel.js (the Map section's
+view), map/card.js, map/places.js (a browse list; no input), map/plan.js (`renderPlan(ctx, model, { …, cpu })`: cpu → a
+software canvas). Retired: hud.js, intro.js, infopanel.js, aboutpanel.js,
+settingspanel.js, events.js, panel.js, and the tests dev/uitest.mjs and dev/maptest.mjs (every check ported to consoletest.mjs). `ABOUT_SOURCES` now comes from `console/sections/learn.js`.
+Dev: `src/ui/dev/consoletest.mjs`, `src/ui/dev/demo-module.js`, `uishots.mjs` (`--touch`, `print` steps).
+
+## search (src/search/; docs/decisions/console-travel.md)
+
+### search: createSearch (src/search/index.js)
+
+```js
+import { createSearch } from '../search/index.js';   // the UI loads it through import.meta.glob after 'firstFrame'
+const search = createSearch(ctx);       // cheap; documents prepared in idle slices (≤ 8 ms); the rites again on time:date
+search.ready -> Promise<void>           // the built-in sources (and objects.js / people-info.js when present) indexed
+search.add(source) -> () => void        // { kind, label: { en }, docs: Doc[] | (ctx) => Doc[], live?: boolean }
+                                         // live: called at query time (re-prepared only when a doc's text changes)
+search.query(q, { scope?: kind | kind[], limit = 40, boost?: { kinds?: { [kind]: factor }, near?: [X, Y], zone?,
+                  recent?: id[] } }) -> Result[]        // synchronous, best first
+search.rebuild()                        // re-prepare every static source
+search.normalize(q) -> { he, latin, skeleton, layoutSwapped }
+search.stats -> { slices, ms }          // the build's cost so far
+
+Doc = { id: '<subject ref>', kind, title: { en, he? }, translit?, aka?: string[], keywords?: string[], subtitle?: { en },
+        when?: { t0, t1, active }, at?: [X, Y, Z?], zone?, weight? }
+Result = { doc, score, field: 'title.en'|'title.he'|'translit'|'aka'|'keywords', ranges: [[start, end]], tier:
+           'exact'|'prefix'|'tokens'|'substring'|'skeleton'|'fuzzy' }
+```
+
+Built-in documents and their ids:
+
+| Kind | Id | From |
+|---|---|---|
+| place | `zone:<id>` | ZONE_CONTENT |
+| thing | `el:<element>`, `fire:<fx>` | the site elements of the kinds a person can point at, plus objects.js |
+| rite | `event:<id>` | the day's `ctx.schedule.events`, plus EVENTS with dayTypes 'occasional' (`occasional: true`, subtitle "Occasional") |
+| rite (live) | `event:<dynamic id>` | `schedule.dynamic(t)` plus `upcoming(t, 40, { dynamic: true })` |
+| offering | `offering:<id>` | OFFERING_TYPES |
+| role | `role:<id>` | ROLES_INFO (else the people roles) |
+| word | `term:<key>` | GLOSSARY |
+
+The UI adds `setting:`, `cmd:`, `learn:` and `help:` documents, and modules add their own. Rites carry a live `when`
+(the clock decides `active`) and a hidden `layer`. With the `aggadah` setting off, aggadah rites are not returned.
+Order: by band (exact › prefix › tokens / substring › skeleton / typo), then by score. Boosts act within a band:
+scope ×1.5 (the caller's `boost.kinds`); context: active ×1.3, `near` within 60 m ×1.2, same `zone` ×1.2, recent ×1.1,
+together at most ×1.25 (`CONTEXT_CAP` in engine.js).
+Lower-level pieces for tests: `engine.js` (`createEngine`, `prepare`, `prepareQuery`, `dl`), `normalize.js`,
+`layout.js` (`swapLayout`, `EN_HE`, `HE_EN`), `sources.js`.
+Lower-level pieces for tests: `engine.js` (`createEngine`, `prepare`, `prepareQuery`, `dl`), `normalize.js`,
+`layout.js` (`swapLayout`, `EN_HE`, `HE_EN`), `sources.js`.
 
 ## sim
 
@@ -555,6 +681,144 @@ sim-core-2 additions (shared fires, plan getters):
 - A choreo module may export plan(ctx, state, sim) -> its per-date plan (idempotent per sim.generation). Other choreos read it with sim.planOf(id) (also runtime.planOf(id)); the module is initialised first if it was not yet; null without the module or the export. Exported now: private-offerings (P.ok, P.counts, P.insts with inst.s — the bird pair handed over at Nikanor at inst.s + 0.5 —, P.hot bookings, P.G, P.metzoraBlood), terumat-hadeshen (W, B[i].tEnd), tamid-morning (M.t.gazitIn), and the G4 modules (nikanor-stations: M.swBlood / M.neBlood, the metzora's corner minutes).
 - G4's dynamic rows of the sets are 'set:<type>:<role>:<n>' (G5's stay 'offering:…'); g5/dynamic.js createSource(ctx, getPlan, { prefix }).
 - New tests: fires.js ("t=n3": arbitration, the live board, the dawn seam, the shared kitchen hearth, cost), shabbat-midday.js ("t=d4": showbread-eaten and shabbat-altar-day).
+
+## inspect (src/sim/inspect*.js; docs/decisions/console-inspect.md)
+
+### inspect: `ctx.inspect` (src/sim/inspect.js)
+
+Present when not in shot mode (or `?inspect=1`), absent with `?inspect=0`. Feature-detect it.
+
+```
+pick(clientX, clientY, { tolerancePx = 8, maxDist = 150 }?) -> Hit | null   figure hits carry the short label 'Role · doing' (≤ 40)
+pickCenter(opts?) -> Hit | null              at the centre of the free area (the reticle)
+hover(clientX, clientY) -> { ref, label, kind } | null      ≤ 10 Hz; a pointer resting within 2 px keeps its answer
+describe(subject, t = ctx.time.t) -> Card    subject: a Hit, { kind, id } or 'kind:id'
+anchorOf(ref) -> Vector3 | null              a live world point (feet / base centre) for rings and framing
+nearby(r = 15, { limit = 12 }?) -> NearbyItem[]   figures, crowds and objects near the observer, nearest first
+thingsIn(zoneId) -> ThingItem[]              the objects with content in a place
+setViewInset({ left, right, top, bottom }); viewInset   the console's free area, px from each edge
+frame(subject, { ms = 400 }?) -> Promise     turn the view to the subject (free-area centre)
+follow(subject | null)                       keep turning toward it until look / move / fly input
+seeInAction(action) -> ShowHandle            run a card's see-in-action action
+run(steps, { label }?) -> ShowHandle         director steps: { go }, { time }, { frame }, { say }, { wait }, { follow }
+show                                         the current ShowHandle or null
+back(); canBack; backLabel                   restore the snapshot taken before the last show
+ready: Promise; load()                       the describer chunk (after 'firstFrame'; load() forces it)
+picker, describer                            the parts (tests / debug); describer.labelOf(ref) -> {en} (the short label),
+                                             describer.heightOf(ref) -> m (an element's height, for framing its middle)
+```
+
+Bus: `inspect:show` `{ id, phase, mode, progress?, label:{en} }` at each phase, ≤ 4 Hz while warping.
+
+### inspect: Refs
+
+`actor:<choreo>:<pool>:<index>`, `crowd:<choreo>:<ci>`, `el:<siteElementId>`, `fire:<id>`, `zone:<id>`,
+`event:<id>` (dynamic too: `offering:…`, `set:…`), `offering:<type>` (offering type), `term:<glossary id>`,
+`role:<roles.js id>`.
+
+### inspect: Hit
+
+`{ ref, kind: 'person'|'animal'|'object'|'place', crowd?, label:{en}, distance, world: Vector3, at:[X,Y,Z] (amot),
+zone, screen:{x,y}, alternatives?: Hit[] (≤ 4 nearby figures) }`
+
+### inspect: Card
+
+```
+{ ref:{kind,id}, kind, crowd?, title:{en,he?}, translit?, subtitle?, what?:{en,sources?},
+  now?: { text:{en}, eventId?, step?, progress?, until? }     ("Out of sight" when the figure is not shown)
+  why?: { en, sources },  who?: { en, sources }, holding?: [{ id, title, what }],
+  sections: [{ id, title:{en}, text?, items?: [{ ref, title, when?, progress? }], sources? }],
+  related: [{ ref, title, kind }], actions: Action[], sources: string[],
+  confidence?: 'explicit'|'ordering'|'reconstruction', confidenceNote?,
+  subjectKey?, choreo?, hooked?: boolean, loading?: true, window?: { t0, t1 } }
+```
+
+Section ids used: `about`, `access` (with `lead`), `aka`, `attire`, `avnet`, `frequency`, `happening`, `instances`,
+`model`, `next`, `notes`, `occasional`, `occasions`, `offerings`, `rite`, `sanctity`, `seen`, `services`, `steps`,
+`storeys`, `things`, `timing`, `use`, `where`, `who`. The UI's Here section renders `happening`, `next`, `things` and
+`nearby` itself and skips those.
+
+### inspect: Action
+
+`{ id, kind, label:{en}, primary?, note?:{en} }` plus, by kind:
+
+- `see-in-action`: `mode: 'now'|'warp'|'jump'`, `t`, `date`, `eventId?`, `focus?`, `view?`, `follow`, `subjectKey?`,
+  `choreo?` and `what:{en}`. Pass it to `seeInAction`.
+- `go`: `target: { at:[X,Y,Z], heading? }`, `goLabel`. "Go closer" stands 3 m from the subject, toward the observer.
+- `follow`: `ref`.
+- `map`: `zone?`, `at?`, `eventId?`.
+- `learn`: `ref` (term or role).
+- `time`: `tSet`, `eventId` ("Set clock to start").
+- `another`: a see-in-action for the next instance of a dynamic kind.
+
+`momentActions(ctx, spec, t)` (inspect-show.js) builds the see-in-action set for any window
+`{ t0, t1, what, eventId?, view?, follow?, subjectKey?, choreo?, dayTypes?, tomorrow? (false: never), stepT0?, another? }`.
+Actions carry their `date`: "From the start" of a window begun before midnight is on the previous date; a start just
+after midnight within 20 min is a `warp` onto the next date. `minutesBetween(dateA, tA, dateB, tB)` is exported too.
+`shortDoing(text, max)` and `shortLabel(title, doing)` (inspect-describe.js) make the short labels.
+
+### inspect: ShowHandle
+
+`{ id, action, mode: 'now'|'warp'|'jump'|'run', label:{en} (the subject alone), phase:
+'placing'|'warping'|'jumping'|'framing'|'showing'|'done'|'cancelled'|'failed', from, target, progress (0..1), etaReal (s),
+skip(), cancel(), done: Promise, framedOn: 'subject'|'focus'|'event'|null, snap }`. `cancel()` restores the snapshot, as
+`back()` does. A second `seeInAction` while one is still on its way supersedes it (it stops without restoring) and keeps
+its Return snapshot; `back()` during a running show stops it first. A figure not found at the landing (`framedOn`
+'event') is looked for 20 s more and framed (and followed) when it comes.
+
+### inspect: Choreo hooks (every module in src/sim/choreo/)
+
+```
+describe(ctx, state, who, t, sim) -> { doing:{en}, phrase?:{en}, eventId?, step?, why?:{en,sources}, subjectKey,
+                                  next?:{ t, label, step } } | null
+    who = { kind:'person'|'animal', poolName, index, slot, role?, animal?, crowd? }
+locate(ctx, state, subjectKey, t, sim) -> { slot } | { at:[X,Y,Z] } | null
+```
+
+Hooks read only; the runtime never calls them. Build them with `describeWith(spec)` from
+`src/sim/choreo/describe/index.js` (spec documented in its header). The helpers are `textOf`, `poolsIn`,
+`whoOfSlot` and `pickEvent`. The libraries are `describe/tracks.js` (G5 tracks: `describeTrack`, `trackAt`,
+`stepAt`), `tamid.js`, `dawn.js`, `sanctuary.js` and `courts.js` (troupes and sets: `troupeKey`, `describeSet`,
+`locateSet`).
+
+### inspect: `ctx.people.pickShape(kindOrRole, poseName, scale = 1)` (src/people/pick.js)
+
+`{ type:'capsule', r, h } | { type:'box', len, wid, h, off } | { type:'sphere', r, y }`, in metres in the figure's
+local frame (box along the heading).
+
+### inspect: src/data/objects.js
+
+`OBJECTS[id]`, keyed by site element id, `fire:<id>` or a free id with its own `pickBox`:
+
+```
+{ title:{en,he?}, aka?:[…], purpose:{en,sources}|null, use?:{en,sources}, notes?:{en,sources}, glossary?,
+  inAction?:[{ event, label:{en} }], zone?|zones?, aliases?:[elementIds], confidence?, confidenceNote?,
+  pick?: false, pickBox?: { min:[X,Y,Z], max:[X,Y,Z] }, pickBoxes?: [{ min, max }],   (site amot; computed from SITE at load)
+  measures?: [{ label:{en}, amot, confidence?, sources }] }   sourced figures; they replace the box-derived rows
+```
+
+`inAction[i].focus`: `'event'` frames the event (where it is staged) rather than the object, `'element'` the object.
+Without it, an event staged > 8 m across or > 3 m above the object's base is framed as the event. Box-derived
+measures are labelled "(model, outer)" and left out for walls, slabs, floors, ledges and site-spanning boxes.
+
+`ALIASES[elementId] -> objectId`: parts that share one entry (a door to its chamber, a screen to its mikveh).
+
+### inspect: src/data/people-info.js
+
+- `ROLES_INFO[role]`: `{ title:{en,he}, who:{en,sources}, attire:{en,sources,confidence?} }`.
+- `ROLE_PARTICIPANTS[role]`: the event participant names that match the role.
+- `ANIMALS_INFO[kind]`: `{ title, what, glossary? }`.
+- `PROPS_INFO[propName]`: `{ title, glossary?, what:{en,sources}|null }`. `PROPS_INFO['<prop>:<role>']` wins for that
+  role (the Kohen Gadol's `bread_piece:kohen_gadol`).
+
+### inspect: Tests
+
+- `node src/sim/dev/tests/objects-check.mjs`: content and coverage.
+- `node src/sim/dev/run.mjs --q low --script src/sim/dev/tests/inspect.js "t=d3&inspect=1[&ip=ABCDE]"`: pick cost,
+  picks in event views, hook coverage, cards, every event's figures.
+- `… --script src/sim/dev/tests/inspect-show.js "t=d3&inspect=1&sn=10"`: the director's modes, budgets, framing,
+  Back and inset; overlapping shows (Back exact); moments around midnight; no Friday individual's offering offers
+  another date.
 
 ## offerings data
 

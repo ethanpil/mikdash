@@ -34,6 +34,7 @@ import { WALK } from './g5/track.js';
 import { g4Book } from './g4/book.js';
 import { mountSource } from './g4/watch.js';
 import { densityOf, poolSize, poissonDisc, EN_BAND_SPOTS, enBandWay, bandColumn, FAMILY_OFF, SOREG_SITES, STOA_SPOTS, STOA_IN, STOA_OUT, STOA_LANE } from './g4/crowd.js';
+import { courts as inspectHooks } from './describe/courts.js';
 
 const SEED = 0x4c31;
 const PISH = 'azarah.gate.moked.pishpash';
@@ -70,6 +71,9 @@ const SCOUR = [
 
 export default {
   id: 'courts-daily',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   planRank: 1,        // the boot's plan job, after private-offerings (g4/book.js ORDER: first of G4)
   lead: 30,
   lag: 12,

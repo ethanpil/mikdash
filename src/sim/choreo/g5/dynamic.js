@@ -6,7 +6,8 @@ import { segAt, sampleSeg } from './track.js';
 import { upperBound } from '../../lib/core.js';
 import { watchPoint } from '../../lib/watch.js';
 
-const FOCUS = {
+// (exported for the inspect hooks: describe/tracks.js — which roles a step is about)
+export const FOCUS = {
   arrive: ['A', 'O'], semichah: ['O', 'A'], shechitah: ['A', 'O'], holachah: ['K1'], zerikah: ['K1'], matanot: ['K1'], 'matanah-achat': ['K1'],
   hefshet: ['K2'], hadachah: ['K2'], or: ['K2'], tenufah: ['K3', 'O', 'KB'], haalaah: ['C0', 'K3', 'S'], nesachim: ['N2', 'N1'], achilah: ['K3', 'KM', 'KB'],
   takeout: ['O'], nikanor: ['KB', 'O'], kinnin: ['KB'], melikah: ['KB'], haktarah: ['KB', 'KM'], "hava'ah": ['O', 'KM'], afiyah: ['KM'], hagashah: ['KM'], kemitzah: ['KM'],

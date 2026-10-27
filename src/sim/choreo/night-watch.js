@@ -28,6 +28,7 @@ import { cueAt, crossed, CUE_LEAD } from '../lib/cue.js';
 import { m2w, AMAH } from '../../core/units.js';
 import { DEFAULT_OFFSET_FROM_ALOT } from '../../time/index.js';
 import { mokedPlaces } from './g1/places.js';
+import { nightWatch as inspectHooks } from './describe/dawn.js';
 
 const SEED = 0x6e77;
 const PATROL_SPEED = 1.15;         // m/s — a measured round ⚙
@@ -90,6 +91,9 @@ export const FIXTURES = [{
 
 export default {
   id: 'night-watch',
+  // inspect hooks (console-design §6.2): who each figure is and what it is doing; no behaviour change
+  describe: inspectHooks.describe,
+  locate: inspectHooks.locate,
   lead: 16,       // the Kaporet guard walks to his post before the Azarah is locked
   lag: 3,         // the Levites walk out after the watch
   importance: 2,
