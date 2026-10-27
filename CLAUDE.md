@@ -60,6 +60,16 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   with no lights but a shadow (warmup.js compileDepth); CSS animations of box-shadow/filter repaint every frame (the tag
   pulse cost 11 fps) — animate transform/opacity only; fps here is quantized by vsync, so A/B in-page, interleaved, in
   normal play.
+- Tier features are capability flags in `src/core/quality.js` (shadows static/cached/cascaded, shadowFilter, aa, ao,
+  interiors); code reads flags, never tier names. Low/medium take room sky visibility and AO from env's visibility volume
+  (`env/visibility.js`): per-room bricks of each opening's solid-angle share × the live door weights in the uniform block
+  (doors never need a recompute), and a 2 m precinct AO grid ray-marched through a 1 m voxelisation of the collision soup
+  in a Worker after the first view (a BVH ray-cast took minutes; huge terrain/plaza triangles must be clipped to the grid
+  before voxelising), cached in IndexedDB. Its samplers ride in three's ShaderLib standard/physical uniforms with a
+  texture whose clone() returns itself: a sampler3D a program declares but no material binds defaults to unit 0 and
+  clashes with the material's own sampler types (GL error, geometry vanishes). Low's sun shadow is 'static' (no per-frame
+  pass; figures keep contact shadows) with one hardware PCF tap: three's 5-tap lookup alone cost 4.3 ms of low's frame.
+  `tools/goldens.mjs` guards every tier's image (6 views × 4 tiers, noise floor, closer-to-ultra verdicts).
 - UI is the Luach console (docs/console-design.md): one always-on Menu beacon, Esc as the only key to remember,
   one card system for every subject, a module registry for new sections (narration mounts in Listen). Inspect is
   CPU picking (no GPU queries); its describer and content load after firstFrame so cold boot does not regress.

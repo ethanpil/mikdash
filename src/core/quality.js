@@ -51,8 +51,6 @@ export const TIER_ORDER = ['low', 'medium', 'high', 'ultra'];
 
 /** do figures (people, animals, their props) cast into the key light's shadow map? Not with 'static' maps */
 export const figuresCastShadows = (q) => q?.shadows === 'cached' || q?.shadows === 'cascaded';
-/** does the tier use env's visibility volume (room sky visibility and / or volume AO)? */
-export const usesVisibilityVolume = (q) => q?.interiors === 'volume' || q?.ao === 'volume';
 
 /** GPU/device classification — delegated to render/detect.js (GPU string + cached micro-benchmark). */
 export function autoDetect(renderer) {
