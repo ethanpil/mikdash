@@ -45,6 +45,10 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   from `frequency.alone` with one seeded day quantile, never perDay plus sets.
 - People shaders: no dFdx/fwidth inside pattern branches (ANGLE/D3D11 flattens them; 10–18 s compiles); robes use
   a bake-time skirt cage + `clothSkin` flatten pass (MAX_BONES 36); people splice their own `lights_fragment_begin`.
+- Curtains (the parochot, gate curtains, the lul's) and door leaves are movables, not colliders: a `ctx.physics.raycast`
+  passes them. Anything that samples what the eye sees from a room must stop at the room's box unless the ray leaves
+  through an open aperture (render/fx `roomExit`): fx's firelight adaptation saw past both parochot to the Azarah behind
+  the Heichal and held the night Kodesh at 1/20 of env's exposure on every tier (black on low; docs/decisions/kodesh-night-fx.md).
 - Performance (HD 4600, Edge, cold production, `tools/warmup-check.mjs`, play): first frame low ~13 s, medium ~22 s,
   high ~30 s, ultra ~37 s (gate-core; 20/35/52/64 before it, 56/115/190/235 before the perf pass). What the first view
   does not draw compiles after it: people hold every program but the far figures' and the props' LOD1 unless a figure in

@@ -555,7 +555,32 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
    * (centre-weighted, ctx.physics BVH): ADAPT_ALBEDO × E / π at each hit, misses count 0. Fires in the hit point's own
    * room are left out (env meters a room's own fires).
    */
-  const _vd = new Vector3(), _vp = new Vector3(), _vi = { V: 1, vol: null, s: 0 };
+  const _vd = new Vector3(), _vp = new Vector3(), _vi = { V: 1, vol: null, s: 0 }, _vc = { V: 1, vol: null, s: 0 };
+  // kodesh-night-fx: how far along (o, d) the ray leaves room v's box, and whether it leaves through one of its open
+  // apertures there (env/interiors.js world apertures: centre, normal axis and sign, half extents along the other two
+  // axes in order, openness). A physics ray passes what the colliders leave out — curtains (the parochot), door leaves,
+  // a slot like the lul — so from inside a room it could end beyond a wall the eye cannot see through.
+  const _ro = [0, 0, 0], _rd = [0, 0, 0], _re = [0, 0, 0];
+  function roomExit(v, o, d) {
+    _ro[0] = o.x; _ro[1] = o.y; _ro[2] = o.z; _rd[0] = d.x; _rd[1] = d.y; _rd[2] = d.z;
+    const lo = [v.min.x, v.min.y, v.min.z], hi = [v.max.x, v.max.y, v.max.z];
+    let t = Infinity, ax = -1;
+    for (let a = 0; a < 3; a++) {
+      if (Math.abs(_rd[a]) < 1e-9) continue;
+      const ta = ((_rd[a] > 0 ? hi[a] : lo[a]) - _ro[a]) / _rd[a];
+      if (ta < t) { t = ta; ax = a; }
+    }
+    if (!(t > 0) || ax < 0) return { t: Infinity, open: true };
+    for (let a = 0; a < 3; a++) _re[a] = _ro[a] + _rd[a] * t;
+    const sign = _rd[ax] > 0 ? 1 : -1;
+    let open = false;
+    for (const ap of v.apertures || []) {
+      if (ap.axis !== ax || ap.sign !== sign || !(ap.openness > 0.05)) continue;
+      const c = [ap.centre.x, ap.centre.y, ap.centre.z], o2 = [0, 1, 2].filter((k) => k !== ax);
+      if (Math.abs(_re[o2[0]] - c[o2[0]]) <= ap.hx && Math.abs(_re[o2[1]] - c[o2[1]]) <= ap.hy) { open = true; break; }
+    }
+    return { t, open };
+  }
   function viewFireLuminance(out = null) {
     const ph = ctx.physics, cam = ctx.camera;
     if (out) out.same = 0;
@@ -563,7 +588,10 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     const th = Math.tan(((cam.fov || 60) * Math.PI) / 360);
     // out.same: the same mean for the fires of the viewer's own room, where the ray ends in that room (qa-r1-fix-env-render)
     const at = ctx.env?.interiors?.at;
-    const camVol = out && at ? at(cam.position, _vi).vol : null;
+    const camIn = at ? at(cam.position, _vc) : null;
+    const camVol = out && camIn ? camIn.vol : null;
+    // kodesh-night-fx: the room the eye stands in (deep enough to be in it), whose walls and curtains bound what it sees
+    const room = camIn?.vol && camIn.s > 0.5 ? camIn.vol : null;
     let sum = 0, same = 0;
     for (const [x, y, w] of VIEW_RAYS) {
       _vd.set(x * th * (cam.aspect || 1), y * th, -1).normalize().applyQuaternion(cam.quaternion);
@@ -571,6 +599,14 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       try { hit = ph.raycast(cam.position, _vd, VIEW_FAR); } catch { hit = null; }
       if (!hit?.point) continue;
       _vp.copy(hit.point).addScaledVector(_vd, -0.08);
+      // kodesh-night-fx: a ray that leaves the eye's room other than through an open aperture (through the parochot, a shut
+      // door, the lul) ends at the room's boundary: the Kodesh looking west saw past both curtains and the lul to the
+      // Azarah's strip behind the Heichal, which the fire occluders (court walls, the altar's top) count as lit by the
+      // altar — 13.7 lx there, and the eye's firelight adaptation fell to 0.05 of env's on every tier
+      if (room) {
+        const ex = roomExit(room, cam.position, _vd);
+        if (!ex.open && hit.distance > ex.t + 0.08) _vp.copy(cam.position).addScaledVector(_vd, Math.max(ex.t - 0.08, 0));
+      }
       const E = illuminanceAt(_vp, { split: true });
       sum += w * Math.max(0, E.all - E.same);
       // open fires only (pyre, hearth, brazier): a room lit by its lamps (the Kodesh by the Menorah) stays as env meters it

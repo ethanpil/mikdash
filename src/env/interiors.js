@@ -545,6 +545,12 @@ export function createInteriors(ctx, opts = {}) {
   // Mean luminance ρ·E/π with E = 4π·I / area × FILL_GAIN (the fire lights' own scene units), shaped in the shader
   // by R²/(R² + d²) around the fires (R = a third of the room's size): FILL_PEAK × the mean next to the lamps.
   const FILL_GAIN = 1.6, FILL_RHO = 0.75, FILL_PEAK = 2.0;
+  // kodesh-night-fx: in a gilded room the fill stands in for the room's probe (low's Kodesh; medium+'s while its probe is
+  // stale) — calibrated against medium's probe in the night Kodesh (n3, looking west): at 0.5 the floor and the parochet
+  // match it (linear mean 0.0165 / 0.0018 vs 0.0162 / 0.0016), the gold walls stay ≈ 2.8× brighter (they mirror the fill's
+  // even glow, not the probe's dark far end). At 1 the room read 2.6× medium's, walls 7×. (The fill had been ≈ 20× too
+  // dark until fx's view adaptation stopped seeing past the parochot: render/fx/index.js roomExit)
+  const FILL_GOLD = 0.5;
   const _f = { V: 1, vol: null, s: 0 };
   const fillCol = new Float32Array([1, 0.46, 0.16, 0]);
   uni.set('mkFillCol', fillCol);
@@ -593,7 +599,7 @@ export function createInteriors(ctx, opts = {}) {
       if (c > 0 && cover < 1) {
         const dx = v.max.x - v.min.x, dy = v.max.y - v.min.y, dz = v.max.z - v.min.z;
         const area = 2 * (dx * dy + dy * dz + dz * dx);
-        fill = FILL_PEAK * (FILL_RHO * ((4 * Math.PI * c) / area) * FILL_GAIN / Math.PI) * gain * (1 - cover);
+        fill = FILL_PEAK * (FILL_RHO * ((4 * Math.PI * c) / area) * FILL_GAIN / Math.PI) * gain * (1 - cover) * (v.gold ? FILL_GOLD : 1);
         const ctr = C.get(v).multiplyScalar(1 / c);
         const R = Math.max(dx, dy, dz) / 3;
         if (!v.fillAt) v.fillAt = new Vector3();
