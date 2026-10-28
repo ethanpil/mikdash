@@ -1,5 +1,6 @@
 // Tiered frame pipeline.
-//   low      : direct render with renderer tone mapping; FX drawn as a second depth-tested scene. No post.
+//   low      : direct render with renderer tone mapping; FX drawn as a second depth-tested scene. No post; FXAA over the
+//              finished canvas when quality.aa is 'fxaa' (render/fxaa.js).
 //   medium+  : post.js (loaded on demand): HDR composer, AO (high+), FX after AO, bloom, grade, SMAA.
 // Exposure (env.exposure) is applied at tone mapping in both paths.
 import { NoToneMapping, AgXToneMapping, ACESFilmicToneMapping, NeutralToneMapping, CustomToneMapping } from 'three';
@@ -7,6 +8,8 @@ import { installGradeChunk } from './tonemap.js';
 import { exposure } from './env-link.js';
 import { DepthPrepass } from './prepass.js';
 import { tiledGpu } from './detect.js';
+import { FxaaPass } from './fxaa.js';
+import { compilePasses } from './warmup.js';
 
 installGradeChunk();
 
@@ -62,6 +65,12 @@ export class Pipeline {
       this.mode = 'direct';
       r.toneMapping = tm.three;
       r.autoClear = true;
+      // lowend-visuals: FXAA over the finished canvas (?fxaa=0 turns it off); its program is issued now, long before the
+      // first frame draws with it
+      if (quality.aa === 'fxaa' && this.ctx.params?.raw?.get?.('fxaa') !== '0') {
+        this.fxaa = new FxaaPass();
+        try { compilePasses(r, [{ material: this.fxaa.material, geometry: this.fxaa.geometry, toScreen: true }], this.fxaa.camera); } catch { /* compiled at first use */ }
+      }
     }
   }
 
@@ -80,6 +89,7 @@ export class Pipeline {
     r.autoClear = false;
     this.prepass.drawScene(r, scene, camera);
     r.render(this.fx.scene, camera);
+    this.fxaa?.render(r);
     r.autoClear = true;
   }
 
@@ -88,5 +98,7 @@ export class Pipeline {
   dispose() {
     this.post?.dispose();
     this.post = null;
+    this.fxaa?.dispose();
+    this.fxaa = null;
   }
 }

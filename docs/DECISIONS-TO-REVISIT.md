@@ -664,9 +664,12 @@ of a public history (K2), and fonts loaded from Google Fonts (K3).
 - **J1. three.js WebGLRenderer, not WebGPU.** The shader patches (fog, interiors, materials, people), the ANGLE/D3D11
   tuning and the warm-up are written for WebGL 2. *Alt:* WebGPURenderer (a port of every patch). *engineering.*
   *Change:* `src/core/engine.js`.
-- **J2. Four tiers, with low tuned against an Intel HD 4600.** Low: no shadows, no post, no probes; medium: one key
-  shadow, bloom, SMAA, probes; high: N8AO, two sun cascades, one fire-shadow slot; ultra: full-resolution AO, sun
-  shafts, two fire-shadow slots. *engineering.* *Change:* `src/core/quality.js`, `src/render/`.
+- **J2. Four tiers, with low tuned against an Intel HD 4600.** Low: a static sun shadow (the world only, re-drawn when it
+  changes; one PCF tap; figures keep contact shadows), FXAA, volume AO, no post, no probes; medium: one key shadow
+  (static world cached, figures each frame), volume AO, bloom, SMAA, probes; high: N8AO, two sun cascades, one
+  fire-shadow slot; ultra: full-resolution AO, sun shafts, two fire-shadow slots. Each feature is a flag in the tier
+  (`shadows`, `shadowFilter`, `aa`, `ao`, `interiors`). *engineering.* *Change:* `src/core/quality.js`, `src/render/`,
+  `src/env/visibility.js` (docs/decisions/lowend-visuals.md).
 - **J3. The automatic tier uses the GPU name and a short benchmark, at most medium on phones and on CPUs with ≤ 4
   threads, at most high under 8 threads,** because a first visit compiles every shader on the CPU. *Alt:* start every
   first visit at medium and offer an upgrade. *engineering.* *Change:* `src/render/detect.js`.
@@ -679,7 +682,13 @@ of a public history (K2), and fonts loaded from Google Fonts (K3).
 - **J6. Texture memory: low ≈ 22 MB, high ≈ 193 MB;** the hero wall texture 1664 px. *engineering.* *Change:*
   `src/world/materials/` set sizes.
 - **J7. The interior light model costs about 4–9 ms a frame on low; accepted so interiors read dark on the weakest
-  tier.** `?interiors=0` turns it off. *engineering.*
+  tier.** `?interiors=0` turns it off. *engineering.* *(lowend-visuals: on low and medium the per-opening loop is replaced
+  by a load-time visibility volume — each room's openings per cell × the live door weights — which drops the key light's
+  per-opening mask (the shadow map does it) and the exits through openings other than the main one; `?visvol=0` restores
+  the exact path.)*
+- **J7a. Low's AO is a 2 m precinct grid computed once per geometry in a Worker (≈ 3 s after the boot's compiles drain;
+  cached in IndexedDB), applied to the sky and room light only, strength 0.75.** *Alt:* screen-space AO (a post pipeline
+  low does not have), a finer grid (memory, time). *engineering.* *Change:* `src/env/visibility.js` `VIS`.
 - **J8. The choir renders at 32 kHz on low and medium.** *engineering.*
 
 ## K. Publishing and repository

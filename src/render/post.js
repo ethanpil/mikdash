@@ -91,7 +91,7 @@ export function buildPost(ctx, fx, quality, toneMapper, prepass = null) {
   const db = r.getDrawingBufferSize(new Vector2());
   const out = { composer, ao: null, bloom: null, shafts: null, shaftPass: null, haze: null };
 
-  if (quality.ao) {
+  if (quality.ao === 'n8ao') {
     const ao = new N8AOPostPass(scene, camera, db.x, db.y);
     const ultra = quality.key === 'ultra';
     ao.setQualityMode(ultra ? 'High' : 'Medium');

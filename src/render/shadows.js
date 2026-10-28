@@ -52,6 +52,33 @@ let chunkPatched = false;
  */
 const CASTER_SLOPE_OFFSET = 1;
 const SLOPE = '( 1.0 + min( sqrt( max( 1.0 - mkSc * mkSc, 0.0 ) ) / mkSc, 3.0 ) )'; // 1 + tan θ, ≤ 4 (mkSc = cos θ)
+/**
+ * lowend-visuals (quality.shadowFilter): the taps of the sun / moon / spot maps' PCF lookup — 5 (three's Vogel disk, each
+ * a hardware 2 × 2 compare) or 1 (one hardware compare: a one-texel penumbra). The 5-tap lookup was 4.3 ms of low's 22.5 ms
+ * Azarah frame on the HD 4600; the fires' cube maps (getPointShadow) are not touched. Returns true when the chunk changed:
+ * lit programs must then recompile (render/index.js).
+ */
+let tapsNow = 5, tapsStock = null;
+export function setShadowTaps(n) {
+  const taps = n === 1 ? 1 : 5;
+  if (taps === tapsNow) return false;
+  const c = ShaderChunk.shadowmap_pars_fragment;
+  const f = c.indexOf('float getShadow( sampler2DShadow');
+  const a = f < 0 ? -1 : c.indexOf('vec2 texelSize', f), b = a < 0 ? -1 : c.indexOf(') * 0.2;', a);
+  if (taps === 1) {
+    if (b < 0) { console.warn('[render] shadow chunk changed; one-tap PCF unavailable'); return false; }
+    tapsStock = c.slice(a, b + ') * 0.2;'.length);
+    ShaderChunk.shadowmap_pars_fragment = `${c.slice(0, a)}shadow = texture( shadowMap, shadowCoord.xyz ); // one hardware compare (render/shadows.js setShadowTaps)${c.slice(b + ') * 0.2;'.length)}`;
+  } else {
+    const k = c.indexOf('shadow = texture( shadowMap, shadowCoord.xyz ); // one hardware compare');
+    if (k < 0 || !tapsStock) return false;
+    const e = c.indexOf('\n', k);
+    ShaderChunk.shadowmap_pars_fragment = c.slice(0, k) + tapsStock + c.slice(e);
+  }
+  tapsNow = taps;
+  return true;
+}
+
 export function installCascadeBiasChunk() {
   if (chunkPatched) return true;
   const c = ShaderChunk.shadowmap_pars_fragment;

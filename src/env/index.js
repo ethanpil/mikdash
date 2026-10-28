@@ -58,6 +58,10 @@ const INTERIOR_ADAPT = 1.0;
 // closed parochot (≈ 2.5 decades below the court) therefore stays "a dark chamber", darker than the Kodesh lit
 // through its gate (≈ 1.7 decades) — render-env-2; before, both adapted to the same display level
 const FAST_ADAPT_DECADES = 2.0;
+// lowend-visuals: in normal play the precinct AO's ray-march waits for the boot's background compiles to drain
+// (bootTimes.drained; at most this long after the first view): beside ANGLE's link threads its worker took 24–37 s on the
+// HD 4600's 4-thread CPU, alone ≈ 3 s (env/visibility.js)
+const VIS_AO_WAIT_MS = 60000;
 // a lamp-lit room's log-average luminance over its surfaces' mean (the Kodesh probe: 0.2 at night, 0.27 by day)
 const FIRE_LOG = 0.3;
 // …and a room lit by its own lamps: lighting-polish raised the exposure key toward 0.115 with the fires' share of the
@@ -253,8 +257,24 @@ export async function init(ctx) {
   let interiors = null;
   const off = (k) => ctx.params?.raw?.get?.(k) === '0';
   if (!off('interiors')) {
-    try { interiors = createInteriors(ctx, { probes: qkey !== 'low' && !off('probes') }); } catch (e) { console.warn('[env] interior light unavailable', e); }
+    // lowend-visuals: the visibility volume where the tier's flags ask for it (?visvol=0: the exact paths everywhere)
+    const vq = ctx.quality || {};
+    const visOn = !off('visvol');
+    try { interiors = createInteriors(ctx, { probes: qkey !== 'low' && !off('probes'), volume: visOn && vq.interiors === 'volume', ao: visOn && vq.ao === 'volume' }); } catch (e) { console.warn('[env] interior light unavailable', e); }
   }
+  // the precinct AO is ray-marched after the first view (its worker would take CPU from the shader warm-up); a screenshot
+  // starts it at once and waits for it (main.js), normal play once the boot's background compiles have drained
+  ctx.bus.on('firstFrame', () => {
+    const vis = interiors?.visibility;
+    if (!vis) return;
+    if (ctx.params?.shot) { vis.startAO(); return; }
+    const t0 = performance.now();
+    const poll = () => {
+      if (ctx.bootTimes?.drained > 0 || performance.now() - t0 > VIS_AO_WAIT_MS) vis.startAO();
+      else setTimeout(poll, 500);
+    };
+    setTimeout(poll, 500);
+  });
   // a probe sees the sky dome, but not the Sun's or Moon's disc: the key light already brings their light (and
   // the GGX highlight that mirrors the disc); a captured disc would double it in every indirect term
   // Nor the stars and planets: point sprites a few texels wide on a 64² face, whose colours the PMREM blur smeared
@@ -465,8 +485,11 @@ export async function init(ctx) {
     setSkyFeatures(envMat, envFeatures(nt));
     probes?.dispose();
     probes = makeProbes(nt, ctx.quality?.key in TIERS ? ctx.quality.key : 'medium');
-    // the probe loop is compiled only where probes exist: recompile the lit materials when that changes
-    if (interiors && setInteriorProbes(ShaderChunk, !!probes)) {
+    // the probe loop is compiled only where probes exist: recompile the lit materials when that changes (lowend-visuals:
+    // likewise the visibility volume's paths)
+    const nq = ctx.quality || {};
+    const volChanged = !!interiors?.setVolumeFlags?.({ volume: nq.interiors === 'volume' && !off('visvol'), ao: nq.ao === 'volume' && !off('visvol') });
+    if (interiors && (setInteriorProbes(ShaderChunk, !!probes) || volChanged)) {
       scene.traverse((o) => {
         for (const m of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) if (m.isMeshStandardMaterial) m.needsUpdate = true;
       });
@@ -488,19 +511,40 @@ export async function init(ctx) {
   // drifts more than R / HOLD_STEP from it in any light-space axis (a step of the walk, a turn of the head): the map then
   // reaches R − R / 16 around the ideal centre instead of R, the light lags by ≤ 0.05°; a framing is computed as before
   const HOLD_DEG = 0.05, HOLD_R = 0.02, HOLD_STEP = 16;
-  const held = { on: false, valid: false, dir: new Vector3(), R: 0, D: 0, size: 0, c: new Vector3(), bx: new Vector3(), by: new Vector3() };
+  // lowend-visuals: above HIGH_VIEW m over the ground the map spans HIGH_R_PER_M × the height (≤ HIGH_R_MAX m)
+  const HIGH_VIEW = 25, HIGH_R_PER_M = 1.4, HIGH_R_MAX = 240;
+  const ground = { x: NaN, z: NaN, y: 0 };
+  function heightAboveGround() {
+    const p = camera.position;
+    if (!(Math.abs(p.x - ground.x) < 4 && Math.abs(p.z - ground.z) < 4)) {
+      let y = null;
+      try { y = ctx.physics?.floorAt?.(p.x, p.z, p.y); } catch { y = null; }
+      ground.x = p.x; ground.z = p.z; ground.y = Number.isFinite(y) ? y : p.y;
+    }
+    return p.y - ground.y;
+  }
+  const held = { on: false, valid: false, step: HOLD_STEP, dir: new Vector3(), R: 0, D: 0, size: 0, c: new Vector3(), bx: new Vector3(), by: new Vector3() };
   function updateShadowCamera(sunAltDeg) {
     if (!st.shadowsManaged || !key.castShadow) return;
-    const R = MathUtils.lerp(shadowTune.extent, 220, smooth(14, 3, sunAltDeg)); // whole Mount when shadows are long
+    let R = MathUtils.lerp(shadowTune.extent, 220, smooth(14, 3, sunAltDeg)); // whole Mount when shadows are long
+    // lowend-visuals: a viewer high above the ground (an aerial, flying) sees far more than ±80 m: where render caches the
+    // map (held framing: medium, low) it grows with the height and leads to where the view meets the ground
+    const above = held.on ? heightAboveGround() : 0;
+    let ahead = shadowTune.ahead;
+    if (above > HIGH_VIEW) {
+      R = Math.max(R, Math.min(HIGH_R_MAX, above * HIGH_R_PER_M));
+      const down = -tmp2.set(0, 0, -1).applyQuaternion(camera.quaternion).y;
+      ahead = MathUtils.clamp(down > 0.05 ? above / Math.tan(Math.asin(Math.min(down, 1))) / R : 1, shadowTune.ahead, 1);
+    }
     const D = sunAltDeg < 14 ? 2600 : 700; // reach far enough toward a low Sun to catch the eastern ridge
     const size = key.shadow.mapSize.x;
     const texel = (2 * R) / size;
     const dir = st.keyDir;
     const fwd = tmp.set(0, 0, -1).applyQuaternion(camera.quaternion).setY(0);
-    if (fwd.lengthSq() > 1e-6) fwd.normalize().multiplyScalar(R * shadowTune.ahead);
+    if (fwd.lengthSq() > 1e-6) fwd.normalize().multiplyScalar(R * ahead);
     if (held.on && held.valid && held.D === D && held.size === size && Math.abs(R / held.R - 1) < HOLD_R
       && held.dir.angleTo(dir) < HOLD_DEG * DEG) {
-      const g = held.R / HOLD_STEP;
+      const g = held.R / held.step;
       const ideal = tmp2.copy(camera.position).add(fwd).sub(held.c);
       if (Math.abs(ideal.dot(held.bx)) <= g && Math.abs(ideal.dot(held.by)) <= g && Math.abs(ideal.dot(held.dir)) <= g) return;
     }
@@ -992,8 +1036,11 @@ export async function init(ctx) {
     get shadowsManaged() { return st.shadowsManaged; },
     /** false: the render task drives sunLight.shadow (e.g. CSM); env stops moving the shadow camera */
     setShadowsManaged(on) { st.shadowsManaged = !!on; },
-    /** perf-fix-1: keep the key light's shadow framing within small drifts (render/shadow-cache.js caches its static depth) */
-    setShadowHold(on) { held.on = !!on; held.valid = false; },
+    /**
+     * perf-fix-1: keep the key light's shadow framing within small drifts (render/shadow-cache.js caches its static depth).
+     * opts.step (lowend-visuals): the drift allowed is R / step (default 16; render's 'static' maps pass 8)
+     */
+    setShadowHold(on, opts = {}) { held.on = !!on; held.valid = false; held.step = opts?.step > 0 ? opts.step : HOLD_STEP; },
     /**
      * perf-fix-2: point every linked program at env's fog uniforms and interiors block now (the boot's shader warm-up
      * calls it as programs link), so these synchronous per-program queries run in the warm-up's idle time, not in a frame
@@ -1037,6 +1084,8 @@ export async function init(ctx) {
     get interiors() { return interiors; },
     /** scene reflection probes (probes.js, medium+); null on low */
     get probes() { return probes; },
+    /** lowend-visuals: the visibility volume (env/visibility.js: room bricks, precinct AO) on the tiers that use it, else null */
+    get visibility() { return interiors?.visibility || null; },
     dispose() {
       probes?.dispose();
       luts.dispose(); pmrem.dispose(); cubeRT.dispose(); pmremRT?.dispose();

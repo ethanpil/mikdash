@@ -346,6 +346,8 @@ async function boot() {
   }
   ctx.bootDeferred = { world: [...deferred.keys()].map((m) => m.name || m.type), late, people: !!ppl?.holdDetail, released: released.length }; // (profiling)
   if (params.shot) for (let round = 0; round < 3; round++) { const more = await discover(1); if (!more.length) break; await linked(more); }
+  // lowend-visuals: the rooms' bricks of env's visibility volume (a worker started at env init, done long before this)
+  await ctx.env?.visibility?.roomsReady?.();
   mark('compiled');
   setLoading('Ready', 1);
   engine.drawing = true;
@@ -405,8 +407,10 @@ async function boot() {
   });
 
   if (params.shot) {
-    // a screenshot shows the finished frame: whatever was deferred is linked and drawn first
+    // a screenshot shows the finished frame: whatever was deferred is linked and drawn first (lowend-visuals: and env's
+    // visibility volume's AO, at full strength)
     await later;
+    if (ctx.env?.visibility) { await ctx.env.visibility.aoReady(); ctx.env.visibility.snapAO(); }
     // let shaders compile, textures upload and FX settle, then signal the screenshot tool
     const waitFrames = 30;
     const start = engine.frame;

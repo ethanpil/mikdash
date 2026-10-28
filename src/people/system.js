@@ -16,6 +16,7 @@ import { gripOffset } from './clips.js';
 import { PROPS, HELD_VESSELS, buildPropGeometry, propAttach, propTip } from './props.js';
 import { createPeopleMaterial, createPeopleDepthMaterials, HUMAN_RIG_ID } from './material.js';
 import { ContactShadows, poseFootprint, hoofPrints } from './contact.js';
+import { figuresCastShadows } from '../core/quality.js';
 import { compileScene, rendersOffscreen } from '../render/warmup.js';
 import { CLIP_ALIASES, CLIP_VARIANTS } from './clips.js';
 import { m2w, headingToYaw, AMAH } from '../core/units.js';
@@ -263,7 +264,7 @@ class Arch {
     // heroes (LOD0) cast their shadows through the LOD1 proxy below: the same silhouette at an eighth of the
     // triangles, which matters because every shadow pass (two sun cascades, six faces per torch shadow) draws it
     const b = new Batch(sys, `${this.key}:${lod}`, this.geos[lod], mat, sys.depthFig, {
-      castShadow: !!sys.quality.shadows && (lod === 1 || (lod === 0 && this.isAnimal)), cap: lod >= 2 ? 64 : 16,
+      castShadow: figuresCastShadows(sys.quality) && (lod === 1 || (lod === 0 && this.isAnimal)), cap: lod >= 2 ? 64 : 16,
     });
     // perf-1: LOD 2/3 share the non-detail program, which lerps and morphs: their instances push 0 for both
     b.flat = lod >= 2;
@@ -275,7 +276,7 @@ class Arch {
   shadowProxy() {
     if (this.proxy) return this.proxy;
     const sys = this.sys;
-    if (!sys.quality.shadows || this.isAnimal) return null;
+    if (!figuresCastShadows(sys.quality) || this.isAnimal) return null;
     if (!this.geos[1]) this.geos[1] = buildHumanGeometry(this.def.recipe, this.rig, 1);
     const b = new Batch(sys, `${this.key}:shadow`, this.geos[1], sys.proxyMat, sys.depthFig, { castShadow: true, cap: 16 });
     b.mesh.receiveShadow = false;
@@ -305,7 +306,7 @@ class PropVariant {
     const sys = this.sys;
     if (!this.geos[lod]) this.geos[lod] = buildPropGeometry(this.name, this.grip, this.side, lod);
     const mat = sys.propMat(PROPS[this.name]?.flesh ? 'FLESH' : 'PROP', lod);
-    const b = new Batch(sys, `prop:${this.name}:${this.grip}:${this.side}:${lod}`, this.geos[lod], mat, sys.depthProp, { castShadow: !!sys.quality.shadows && lod === 0, cap: 8 });
+    const b = new Batch(sys, `prop:${this.name}:${this.grip}:${this.side}:${lod}`, this.geos[lod], mat, sys.depthProp, { castShadow: figuresCastShadows(sys.quality) && lod === 0, cap: 8 });
     this.batches[lod] = b;
     sys.batches.push(b);
     return b;

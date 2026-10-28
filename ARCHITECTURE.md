@@ -154,6 +154,13 @@ Default date **2026-11-02** (Monday, 22 Cheshvan — ordinary weekday, psalm 48)
   (`quality.maxFireLights`, nearest to camera win); also `ctx.fx.attachTorch(object3D) -> handle`,
   `ctx.fx.smokeColumn({pos, …})` (altar & incense smoke rise **straight up** — Avot 5:5),
   `ctx.fx.setFire(id, intensity)`. Optional **Photo mode** (path-traced still) may be added later.
+* **Tier capabilities** (lowend-visuals): what each tier draws is chosen by flags in `ctx.quality` — `shadows`
+  (`'static'` low: the static world only, re-rendered when it changes; `'cached'` medium; `'cascaded'` high/ultra),
+  `shadowFilter` (`'pcf1'` low, `'pcf5'`), `aa` (`'fxaa'` low, `'smaa'`), `ao` (`'volume'` low/medium, `'n8ao'` high/ultra),
+  `interiors` (`'volume'` low/medium, `'exact'` high/ultra). Code reads the flag, never the tier's name. env's **visibility
+  volume** (`env/visibility.js`, a Worker after the boot) holds each room's openings per 0.4–8 m cell (replacing the
+  per-pixel aperture loop) and the precinct's ambient obscurance on a 2 m grid (ray-marched through a voxelisation of the
+  collision soup, cached in IndexedDB).
 
 ## 8. Zones — geometry in `site.zones`, content in `src/data/zones-content.js`
 
@@ -307,4 +314,8 @@ the search tests in `src/search/`.
 * Check console output is clean (no errors, no repeated warnings).
 * Performance: low tier must stay interactive on this iGPU; report draw calls & triangles for your part.
 * `node tools/warmup-check.mjs` boots every tier cold in production (shot + play) — the only check of cold boot.
+* `node tools/goldens.mjs --label NAME [--against base --noise base2 --expect low,medium]` captures 6 views × 4 tiers and
+  compares them with a golden set: tiers not in --expect must be unchanged (within the noise of two captures of one
+  build), tiers in --expect must not move away from ultra's image of the same view. Goldens live in `shots/goldens/`
+  (not committed): capture the base from a checkout of the base commit (e.g. a `git worktree`).
   `node tools/shot.mjs --prod` measures the production bundle.

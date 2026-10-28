@@ -85,6 +85,18 @@ Changed or added:
   - SunShaftsEffect({samples, resolutionScale, density, decay}): .setParams({color, narrow, broad, broadWeight, sunView, upView, camera}), .sunUv, .setDepthTexture(t).
 - render/shadows.js SHADOW_PRESETS: high {mapSize 2048, split 24, far 210}, ultra {mapSize 4096, split 30, far 300}, each with flyFrom 12, farPerMetre 3, farMax 700/900.
 
+## quality flags, visibility volume, static shadows, FXAA (lowend-visuals; docs/decisions/lowend-visuals.md)
+
+- `ctx.quality` capability flags: `shadows` false | 'static' | 'cached' | 'cascaded'; `shadowFilter` 'pcf1' (low: one hardware compare) | 'pcf5'; `aa` 'none' | 'fxaa' | 'smaa'; `ao` false | 'volume' | 'n8ao'; `interiors` 'volume' | 'exact'. low: static / fxaa / volume / volume; medium: cached / smaa / volume / volume; high, ultra: cascaded / smaa / n8ao / exact. `shadows` and `ao` stay truthy when on. src/core/quality.js exports `figuresCastShadows(q)` (figures cast only into 'cached' and 'cascaded' maps).
+- ctx.env.visibility (env/visibility.js; null where neither flag is 'volume', or with `?visvol=0`): `stats` { rooms, texels, atlas, roomBytes, roomMs, roomWorkerMs, aoCells, aoMs, aoWorkerMs, aoCached, aoRays, error }; `roomTexture`, `aoTexture` (Data3DTextures shared by every material: their clone() returns themselves); `brick(volume)` → { S, O } (brick texture coordinates = world × S + O); `roomsReady()` → Promise (main.js awaits it before the first frame); `startAO()` (env calls it 6 s after 'firstFrame' in play, at once in a screenshot); `aoReady()` → Promise<boolean>; `snapAO()`; `aoParams(out)`; `update(dt)`; `dispose()`.
+- ctx.env.interiors additions: `visibility`; `setVolumeFlags({ volume, ao })` → true when lit materials must recompile (env's tier switch does it).
+- env/interiors-glsl.js: `setInteriorVolume(ShaderChunk, { volume, ao })`; `#define MK_VOLUME` (the room's openings from its brick: no per-aperture loop; the key light is left to the shadow map) and `#define MK_VIS_AO` (the precinct AO on the image-based light). New MkInteriors members `mkVolE`, `mkVolF` (vec4 × 12: the slot's brick map), `mkVolW` (uvec4 × 12: its ≤ 4 openings' weights as half2 pairs), `mkVis`, `mkVisN` (the AO grid: origin, cell, cells, strength). Samplers `mkVisRoom`, `mkVisAO` (sampler3D) are registered in three's ShaderLib standard / physical uniforms.
+- ctx.env.setShadowHold(on, { step }) — step (default 16): the held framing may drift R / step; render's 'static' maps pass 8. The held framing also grows with the viewer's height above the ground (over 25 m: R = 1.4 × height, ≤ 240 m) and leads to where the view meets the ground.
+- render/shadow-cache.js `new KeyShadowCache(ctx, { figures })`: figures false = 'static' (no per-frame pass; static casters drawn straight into the map when their signature changes; a moving caster is left out until still for 90 frames). `ctx.post.shadowCache.stats` gains `skipped`.
+- render/fxaa.js `FxaaPass` (render(renderer) after the frame is in the canvas: copyFramebufferToTexture + one triangle); `ctx.post.pipeline.fxaa` (null unless the direct path has aa 'fxaa').
+- URL: `?visvol=0` (no visibility volume: the exact interiors, no volume AO), `?fxaa=0`.
+- Tools: `tools/goldens.mjs` (per-tier golden screenshots: --label, --against, --noise, --expect, contact sheet), `src/render/dev/lowend-ab.mjs` (interleaved cold A/B of two checkouts: first view and fixed-resolution fps).
+
 ## materials
 
 ctx.mats = createMaterialLibrary(ctx) (src/world/materials/index.js):

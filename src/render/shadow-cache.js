@@ -17,18 +17,31 @@
 // every frame: one that changes twice within 4 frames is drawn every frame with the people instead, outside the
 // signature, until it has been still for MOVING_HOLD frames. The two passes select their casters by castShadow
 // (toggled on the collected lists for the pass, restored after).
+//
+// lowend-visuals: `figures: false` (quality.shadows 'static', low) keeps the static world only. There is no per-frame
+// pass at all: three's shadow render is skipped while the signature holds (the map keeps its depth), and when it changes
+// the static casters are drawn straight into the map (no cache target, no blit). Figures are never drawn (they keep their
+// contact shadows: people/contact.js); a moving caster (a door while it swings, the golah wheel) is left out of the map
+// until it has been still for STATIC_HOLD frames, which costs two re-renders per door swing instead of one a frame.
+// env holds the framing over larger drifts (setShadowHold step 8: R / 8 instead of R / 16) so walking re-renders it
+// about every 10 m at the Sun's usual extent.
 import { WebGLRenderTarget, DepthTexture, UnsignedIntType, DepthFormat, NearestFilter } from 'three';
 
 // frames a moving caster must stay still before it returns to the cached set (one cache re-render then)
 const MOVING_HOLD = 300;
+// …in the 'static' mode (no per-frame pass: the caster is missing from the map meanwhile)
+const STATIC_HOLD = 90;
+// how far the held framing may drift in the 'static' mode (env setShadowHold: R / step)
+const STATIC_STEP = 8;
 
 export class KeyShadowCache {
-  constructor(ctx) {
+  constructor(ctx, { figures = true } = {}) {
     this.ctx = ctx;
+    this.figures = figures;
     this.enabled = ctx.params?.raw?.get?.('shadowcache') !== '0';
     this.rt = null;
     this.sig = NaN;
-    this.stats = { statics: 0, frames: 0, moving: 0 };
+    this.stats = { statics: 0, frames: 0, moving: 0, skipped: 0 };
     this._frame = 0;
     this._blit = false;
     const sm = ctx.renderer.shadowMap;
@@ -40,7 +53,7 @@ export class KeyShadowCache {
       self._render(orig, this, lights, key, scene, camera);
     };
     this._sm = sm;
-    ctx.env?.setShadowHold?.(this.enabled);
+    ctx.env?.setShadowHold?.(this.enabled, figures ? undefined : { step: STATIC_STEP });
   }
 
   /** env's key light when the cache applies to this shadow render, else null */
@@ -53,11 +66,12 @@ export class KeyShadowCache {
     if (sm.autoUpdate === false && sm.needsUpdate === false) return null;
     if (key.shadow.autoUpdate === false && key.shadow.needsUpdate === false) return null;
     if (!lights.includes(key)) return null;
-    if (!this.ctx.people?.root) return null;
+    if (this.figures && !this.ctx.people?.root) return null;
     return key;
   }
 
   _render(orig, sm, lights, key, scene, camera) {
+    if (!this.figures) { this._renderStatic(orig, sm, lights, key, scene, camera); return; }
     const needs = sm.needsUpdate;
     const others = lights.length > 1 ? lights.filter((l) => l !== key) : null;
     if (others?.length) { orig.call(sm, others, scene, camera); sm.needsUpdate = needs; }
@@ -97,6 +111,29 @@ export class KeyShadowCache {
     this.stats.moving = dyn.length;
   }
 
+  /** 'static' mode: the static casters straight into the map when their signature changed, else nothing */
+  _renderStatic(orig, sm, lights, key, scene, camera) {
+    const needs = sm.needsUpdate;
+    const others = lights.length > 1 ? lights.filter((l) => l !== key) : null;
+    if (others?.length) { orig.call(sm, others, scene, camera); sm.needsUpdate = needs; }
+    const shadow = key.shadow;
+    const people = this.ctx.people?.root || null;
+    const sig = this._scan(key, scene, people, STATIC_HOLD);
+    this.stats.moving = this._dynList.length;
+    this.stats.frames++;
+    if (shadow.map && sig === this.sig) { this.stats.skipped++; return; }
+    const pv = people?.visible, dyn = this._dynList;
+    if (people) people.visible = false;
+    for (const o of dyn) o.castShadow = false;
+    try { orig.call(sm, [key], scene, camera); } finally {
+      if (people) people.visible = pv;
+      sm.needsUpdate = needs;
+      for (const o of dyn) o.castShadow = true;
+    }
+    this.sig = sig;
+    this.stats.statics++;
+  }
+
   /** depth blit cache → the shadow map (bound by three for this pass) */
   _copy(shadow) {
     const r = this.ctx.renderer, gl = r.getContext();
@@ -116,7 +153,7 @@ export class KeyShadowCache {
    * with the people until they have been still for MOVING_HOLD frames). Returns a number that changes whenever the
    * static set or the light's framing does.
    */
-  _scan(key, scene, people) {
+  _scan(key, scene, people, hold = MOVING_HOLD) {
     const c = key.shadow.camera;
     let s = c.left * 1.1 + c.right * 1.3 + c.top * 1.7 + c.bottom * 1.9 + c.near * 2.3 + c.far * 2.9 + key.shadow.mapSize.x * 3.1;
     const a = key.matrixWorld.elements, b = key.target.matrixWorld.elements;
@@ -142,7 +179,7 @@ export class KeyShadowCache {
       if (r.t !== t) {
         if (frame - r.last <= 4) r.moving = true; // changing again within a few frames (a 30 Hz animation too)
         r.t = t; r.last = frame;
-      } else if (r.moving && frame - r.last > MOVING_HOLD) r.moving = false;
+      } else if (r.moving && frame - r.last > hold) r.moving = false;
       if (r.moving) { dyn.push(o); return; }
       statics.push(o);
       s += ++i * 0.618034 * t;
@@ -153,6 +190,7 @@ export class KeyShadowCache {
 
   dispose() {
     if (this._sm.render !== this._orig) this._sm.render = this._orig;
+    this.sig = NaN;
     this.rt?.dispose();
     this.rt = null;
     this.ctx.env?.setShadowHold?.(false);
