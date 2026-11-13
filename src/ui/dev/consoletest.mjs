@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Console behaviour checks (dev only; console-design §7.1). Starts its own Vite server and drives the app in Edge
+// Console behaviour checks (dev only; console-design §7.1). Starts its own Vite server and drives the app in a headless Chromium browser
 // (Playwright) at desktop 1280×720 (mouse), 1920×1080, phone 390×844 and 360×740 (touch, DPR 2), phone landscape 844×390
 // (touch), tablet 1024×768 (touch) and 768×1024. Ports every uitest.mjs and maptest.mjs check onto the console, plus the
 // console's own: the beacon, wake, invocation per device (pointer lock emulated with a stubbed pointerLockElement, the
@@ -8,7 +8,8 @@
 //   node src/ui/dev/consoletest.mjs [--q low] [--out shots/console-test] [--only desk,phone,landscape,tablet,wide]
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,15 +20,14 @@ const q = arg('--q', 'low');
 const out = arg('--out', 'shots/console-test');
 const only = new Set((arg('--only', 'desk,map,phone,landscape,tablet,wide')).split(','));
 mkdirSync(resolve(root, out), { recursive: true });
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null } });
 await server.listen();
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
+const { browser } = await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS, '--enable-unsafe-swiftshader'] });
 let fails = 0, passes = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? `  — ${extra}` : ''}`); if (ok) passes++; else fails++; };
 const logs = [];
-const shot = (pg, name) => pg.screenshot({ path: resolve(root, out, `${name}.png`) });
+const shot = (pg, name) => pg.screenshot({ path: resolve(root, out, `${name}.png`), timeout: 120000 });
 const overlaps = (rs) => { for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) { const a = rs[i], b = rs[j]; if (a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b) return `${a.id} × ${b.id}`; } return null; };
 
 /** a fresh context; opts.fresh: no stored settings; init(page) before load; enter: dismiss the Welcome */

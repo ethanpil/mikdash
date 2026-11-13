@@ -17,7 +17,8 @@
 // seen from it — fails on any miss), midnight.js (normal play, --keep-ui: no frame over 100 ms across a date change).
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,16 +41,15 @@ for (let i = 0; i < args.length; i++) {
 if (!opt.script) { console.error('--script FILE required'); process.exit(2); }
 const body = readFileSync(resolve(opt.script), 'utf8');
 
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({
   root, logLevel: 'error', configFile: join(root, 'vite.config.js'),
   server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null },
 });
 await server.listen();
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({
-  executablePath: EDGE, headless: true,
-  args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
+const { browser } = await launchBrowser(chromium, {
+  headless: true,
+  args: [...GPU_ARGS, '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
 });
 mkdirSync(resolve(root, opt.out), { recursive: true });
 let code = 0;
@@ -65,7 +65,7 @@ try {
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
   await page.exposeFunction('__simShot', async (name) => {
     const file = resolve(root, opt.out, `${name}.png`);
-    await page.screenshot({ path: file });
+    await page.screenshot({ path: file, timeout: 120000 });
     console.log(`[shot] ${file}`);
     return file;
   });

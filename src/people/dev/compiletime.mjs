@@ -4,16 +4,15 @@
 // once by a first page all the same (qa-r2: A/B of shader changes)
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { existsSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', hmr: false, watch: null } });
 await server.listen();
 const base = server.resolvedUrls.local[0];
 const cold = process.argv.includes('--cold');
-const launch = () => chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const launch = async () => (await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS] })).browser;
 let browser = await launch();
 // warm vite's transform cache once
 { const p = await browser.newPage(); await p.goto(`${base}src/people/dev/harness.html?solo=dove`); await p.waitForFunction(() => globalThis.__mikdashReady === true, null, { timeout: 300000 }); await p.close(); }

@@ -4,7 +4,8 @@
 // Prints console errors/warnings, draw calls, triangles and people stats.
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,11 +23,10 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--batch') for (const it of JSON.parse(readFileSync(args[++i], 'utf8'))) queries.push(it);
   else queries.push({ name: opt.name, query: a });
 }
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', hmr: false, watch: null } });
 await server.listen();
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const { browser } = await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS] });
 mkdirSync(resolve(root, opt.out), { recursive: true });
 try {
   for (const { name, query } of queries) {

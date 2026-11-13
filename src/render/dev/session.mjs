@@ -2,10 +2,11 @@
 // Dev harness for interactive lighting tests (lighting-polish). Not bundled (nothing imports it).
 //   node src/render/dev/session.mjs <script.mjs> [--q low] [--query "at=..&look=..&t=.."] [--out shots/x]
 // The script module exports `default async function (h)` where h = { page, shot(name), wait(ms), ev(fn|str, arg),
-// log(...), q, out }. Starts its own Vite dev server + headless Edge (same flags as tools/shot.mjs).
+// log(...), q, out }. Starts its own Vite dev server + headless Chromium (same flags as tools/shot.mjs).
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { mkdirSync, existsSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
+import { mkdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -24,11 +25,10 @@ for (let i = 0; i < args.length; i++) {
   else script = a;
 }
 const mod = await import(pathToFileURL(resolve(script)).href);
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null } });
 await server.listen();
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
+const { browser } = await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS, '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
 mkdirSync(resolve(root, opt.out), { recursive: true });
 const logs = [];
 try {

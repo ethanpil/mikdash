@@ -2,16 +2,16 @@
 // the page, print its result and console problems.  node src/people/dev/probe-main.mjs "<query>" checks.js [shot.png]
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
 import { join } from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../../..', import.meta.url));
 const [query, file, shotPath] = process.argv.slice(2);
 const js = readFileSync(file, 'utf8');
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', hmr: false, watch: null } });
 await server.listen();
-const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const { browser } = await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const logs = [];
 page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(`[${m.type()}] ${m.text().slice(0, 300)}`); });
