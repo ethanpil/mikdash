@@ -74,27 +74,36 @@ export function eventRow(app, ev, opts = {}) {
   const relEl = h('span.mk-row__rel.num');
   const prog = h('i.mk-row__prog', { 'aria-hidden': 'true' });
   const title = ev.dynamic && ev.typeName?.en ? `${ev.typeName.en}${ev.summary ? ` · ${ev.summary}` : ''}` : (ev.title?.en || ev.id);
+  // compact (ux-audit E): the title line, then place · time · Hebrew on one line; Show me (gold) and Go (plain, the
+  // travel defaults; the pace lives in the travel bar) beside them. ≈ 50–70 px a row instead of 133.
   const hit = h('button.mk-row__hit', { type: 'button', 'aria-label': `${title}${zoneName ? `, ${zoneName}` : ''}. Open its card`, on: { click: () => app.card(`event:${ev.id}`) } },
     h('span.mk-row__top', importance(ev.importance), h('span.mk-row__title', title)),
-    ev.title?.he && !ev.dynamic ? he(ev.title.he, 'mk-row__he') : null,
-    h('span.mk-row__meta', opts.place !== false && zoneName ? h('span', zoneName) : null, relEl, ev.layer === 'aggadah' ? h('span.mk-badge', 'Aggadah') : null));
-  const go = app.travel.control(() => app.travel.goEvent(ev), { small: true });
-  const show = h('button.mk-btn.mk-btn--sm.mk-row__show', {
+    h('span.mk-row__meta', opts.place !== false && zoneName ? h('span.mk-row__place', zoneName) : null, relEl,
+      ev.layer === 'aggadah' ? h('span.mk-badge', { title: 'Aggadah: the narrative and miracle traditions' }, 'Legend') : null,
+      ev.title?.he && !ev.dynamic ? he(ev.title.he, 'mk-row__he') : null));
+  const go = app.travel.control(() => app.travel.goEvent(ev), { small: true, primary: false, menu: false });
+  const show = h('button.mk-btn.mk-btn--sm.mk-btn--primary.mk-row__show', {
     type: 'button', 'data-act': 'show', hidden: true,
     on: { click: () => runShow(app, `event:${ev.id}`) },
   }, ico('show'), 'Show me', h('span.mk-kbd.mk-chipcap', { 'data-cap': 'show' }));
-  const el = h(`article.mk-row.imp-${ev.importance || 1}`, { 'data-ev': ev.id }, hit, h('div.mk-row__acts', go, show), prog);
+  const el = h(`article.mk-row.imp-${ev.importance || 1}`, { 'data-ev': ev.id }, hit, h('div.mk-row__acts', show, go), prog);
   let lastShow = null;
   function update(t = ctx.time?.t) {
     const canShow = !!ctx.inspect?.seeInAction;
-    if (canShow !== lastShow) { lastShow = canShow; show.hidden = !canShow; }
+    if (canShow !== lastShow) {
+      lastShow = canShow;
+      show.hidden = !canShow;
+      // without the inspect core (?inspect=0) Go is the row's one action, and gold
+      go.querySelector('.mk-go__main')?.classList.toggle('mk-btn--primary', !canShow);
+    }
     const r = data.times(ev);
     if (!r) { setText(relEl, ''); return; }
     const active = data.isActive(ev, t);
     el.classList.toggle('is-active', active);
     if (active) {
       prog.style.transform = `scaleX(${data.progress(ev, t).toFixed(3)})`;
-      setText(relEl, `now · ${Math.max(1, Math.round(wrap(r.t1 - t)))} min left`);
+      const left = Math.max(1, Math.round(wrap(r.t1 - t)));
+      setText(relEl, `now · ${left < 90 ? `${left} min` : `${Math.floor(left / 60)} h ${String(left % 60).padStart(2, '0')}`} left`);
     } else {
       prog.style.transform = 'scaleX(0)';
       setText(relEl, `${relTime(ev, r, t)} · ≈ ${clock(r.t0)}`);
@@ -118,7 +127,7 @@ export function dynGroup(app, items, opts = {}) {
   const hit = h('button.mk-row__hit.mk-dyn__hit', { type: 'button', 'aria-expanded': opts.open ? 'true' : 'false', 'aria-controls': moreId },
     h('span.mk-row__top', h('span.mk-dyn__chev', ico('next')), titleEl, count));
   const first = () => items.find((e) => app.data.isActive(e, ctx.time?.t)) || items[0];
-  const showOne = h('button.mk-btn.mk-btn--sm.mk-row__show', {
+  const showOne = h('button.mk-btn.mk-btn--sm.mk-btn--primary.mk-row__show', {
     type: 'button', 'data-act': 'show',
     on: { click: () => { const ev = first(); if (ev) runShow(app, `event:${ev.id}`, () => app.travel.goEvent(ev)); } },
   }, ico('show'), ctx.inspect?.seeInAction ? 'Show me one' : 'Watch one');

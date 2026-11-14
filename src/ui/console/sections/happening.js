@@ -23,12 +23,13 @@ export function happeningSection(app) {
         const nowBox = h('div.mk-hap__now');
         const nextBox = h('div.mk-evs');
         el.append(seg, h('section.mk-sec', h('h3.mk-h', 'Now'), nowBox), h('section.mk-sec', h('h3.mk-h', 'Next'), nextBox));
-        const FILTERS = [['all', 'Everywhere'], ['here', 'Here'], ['near', 'Near me'], ['aggadah', 'Aggadah']];
+        // "Legends": the aggadah layer in plain words (ux-audit finding 10); its title keeps the Hebrew term
+        const FILTERS = [['all', 'Everywhere'], ['here', 'Here'], ['near', 'Near me'], ['aggadah', 'Legends']];
         function paintSeg() {
           const agg = ctx.settings.get('aggadah') !== false;
           if (!agg && filter === 'aggadah') filter = 'all';
           seg.replaceChildren(...FILTERS.filter(([id]) => id !== 'aggadah' || agg).map(([id, label]) => h('button', {
-            type: 'button', 'aria-pressed': filter === id ? 'true' : 'false', 'data-filter': id, on: { click: () => { filter = id; key = ''; paintSeg(); render(); } },
+            type: 'button', 'aria-pressed': filter === id ? 'true' : 'false', 'data-filter': id, title: id === 'aggadah' ? 'Aggadah: the narrative and miracle traditions the sources report' : null, on: { click: () => { filter = id; key = ''; paintSeg(); render(); } },
           }, label)));
         }
         const near = (ev) => {
@@ -59,7 +60,13 @@ export function happeningSection(app) {
               const a = areas.get(z);
               if (ev.dynamic) { const p = ev.parent || ''; if (!a.dyn.has(p)) a.dyn.set(p, []); a.dyn.get(p).push(ev); } else a.stat.push(ev);
             }
-            const order = [...areas.entries()].sort((x, y) => (y[1].stat.length + y[1].dyn.size) - (x[1].stat.length + x[1].dyn.size));
+            // the headline rite first (ux-audit E): within an area by importance, then by start; areas by their most
+            // important rite, then by how much is going on there
+            const imp = (e) => e.importance || 1;
+            const t0 = (e) => data.times(e)?.t0 ?? 0;
+            for (const a of areas.values()) a.stat.sort((x, y) => imp(y) - imp(x) || t0(x) - t0(y));
+            const top = (a) => Math.max(0, ...a.stat.map(imp), ...[...a.dyn.values()].flat().map(imp));
+            const order = [...areas.entries()].sort((x, y) => top(y[1]) - top(x[1]) || (y[1].stat.length + y[1].dyn.size) - (x[1].stat.length + x[1].dyn.size));
             nowBox.replaceChildren(...(order.length ? order.map(([z, a]) => {
               const n = a.stat.length + [...a.dyn.values()].reduce((s, l) => s + l.length, 0);
               const name = (data.zone(z)?.name?.en || 'Elsewhere').split(' — ')[0];

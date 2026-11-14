@@ -2,10 +2,16 @@
 // Pointer free: hover shows a name tooltip, a pointer cursor and a DOM ring at the subject's feet. Pointer locked or a
 // gamepad: the centre reticle with its prompt "Kohen · slaughtering [E] Inspect". Click / tap / E / pad X picks; several
 // candidates under the point give a chooser. Without the inspect core none of this shows.
+// Structure (walls, gates, chambers, stairs, ramps, floors) is scenery for a FREE click or tap (ux-audit C): a click
+// captures the mouse (its hover shows the name, no pointer cursor); a tap wakes the Menu and shows a name chip that
+// opens the card. E, a captured (aimed) click, pad X and Nearby still open anything.
 import { Vector3 } from 'three';
 import { h, setText } from '../dom.js';
 
 const HOVER_HZ = 10, CENTER_HZ = 5, RING_HZ = 30;
+const CHIP_MS = 4000;
+/** site element kinds that are the building itself, not a thing in it (site.js kinds; fixtures, curtains, fires stay) */
+const STRUCT = new Set(['wall', 'gate', 'chamber', 'stair', 'slab', 'opening', 'ramp', 'floor', 'zone']);
 
 export function createPickUI(app) {
   const { ctx } = app;
@@ -20,13 +26,45 @@ export function createPickUI(app) {
   // under it
   const chooser = h('div.mk-chooser.mk-pop.mk-live', { role: 'dialog', 'aria-label': 'Several here', hidden: true });
   const live = h('div.sr-only', { 'aria-live': 'polite' });
+  // the name chip of a structure tapped (or clicked with the Menu open): a tap on it opens the card
+  const chipTxt = h('span');
+  const nameChip = h('button.mk-namechip.mk-live', { type: 'button', hidden: true, on: { click: () => { const hit = chipHit; hideChip(); if (hit) app.card(hit, { fromWorld: true }); } } },
+    chipTxt, h('span.mk-namechip__more', ' ›'));
   const el = h('div.mk-picklayer', ring, reticle, prompt, tip, live);
   const v = new Vector3();
 
   const ins = () => ctx.inspect;
   let hoverHit = null, mouse = null, hoverAcc = 0, centerAcc = 0, ringAcc = 0, centerHit = null, ringRef = null, ahead = null, chooseRef = null;
+  let chipHit = null, chipT = 0;
   /** a chooser row's subject: the ring moves to it now */
   function markChoice(ref) { chooseRef = ref; ringRef = ref; placeRing(); }
+
+  /** a hit on the building itself (a wall, gate, chamber, stair, ramp, slab or floor; or the place's floor) */
+  function isStructure(hit) {
+    if (!hit) return false;
+    if (hit.kind === 'place') return true;
+    const m = /^el:(.+)$/.exec(hit.ref || '');
+    if (!m) return false;
+    const kind = ctx.site?.elements?.[m[1]]?.kind || ctx.elOpt?.(m[1])?.kind;
+    return STRUCT.has(kind);
+  }
+
+  // ---------------- name chip ----------------
+  function showChip(hit, x, y) {
+    chipHit = hit;
+    setText(chipTxt, hit.label?.en || 'This place');
+    nameChip.setAttribute('aria-label', `${hit.label?.en || 'This place'}: open its card`);
+    nameChip.hidden = false;
+    const f = app.layout.free;
+    const w = nameChip.offsetWidth || 180, hgt = nameChip.offsetHeight || 44;
+    const cx = Number.isFinite(x) ? x : innerWidth / 2, cy = Number.isFinite(y) ? y : innerHeight / 2;
+    nameChip.style.left = `${Math.round(Math.max(f.l + 8, Math.min(innerWidth - f.r - w - 8, cx - w / 2)))}px`;
+    nameChip.style.top = `${Math.round(Math.max(f.t + 8, Math.min(innerHeight - f.b - hgt - 8, cy - hgt - 14)))}px`;
+    clearTimeout(chipT);
+    chipT = setTimeout(hideChip, CHIP_MS);
+  }
+  function hideChip() { clearTimeout(chipT); nameChip.hidden = true; chipHit = null; }
+  document.addEventListener('pointerdown', (e) => { if (!nameChip.hidden && !nameChip.contains(e.target)) hideChip(); }, true);
 
   // ---------------- hover (pointer free) ----------------
   canvas?.addEventListener('pointermove', (e) => {
@@ -34,14 +72,23 @@ export function createPickUI(app) {
     mouse = { x: e.clientX, y: e.clientY, buttons: e.buttons };
   }, { passive: true });
   canvas?.addEventListener('pointerleave', () => { mouse = null; setHover(null); });
+  // hoverHit: a subject a free click opens (it keeps the click from capturing the mouse); a structure only names itself
+  let hoverStruct = false;
   function setHover(hit) {
-    hoverHit = hit;
+    hoverStruct = isStructure(hit);
+    hoverHit = hoverStruct ? null : hit;
     const on = !!hit;
-    if (canvas) canvas.style.cursor = on ? 'pointer' : '';
+    if (canvas) canvas.style.cursor = on && !hoverStruct ? 'pointer' : '';
     tip.classList.toggle('in', on);
+    tip.classList.toggle('is-struct', on && hoverStruct);
     if (on) {
       setText(tip, hit.label?.en || '');
-      tip.style.transform = `translate(${Math.round(mouse.x + 14)}px, ${Math.round(mouse.y + 16)}px)`;
+      // inside the free area (the docked Menu's edge cut long names off — ux-audit bug 4)
+      const f = app.layout.free;
+      const w = tip.offsetWidth || 160, hgt = tip.offsetHeight || 28;
+      const x = Math.max(f.l + 4, Math.min(innerWidth - f.r - w - 6, mouse.x + 14));
+      const y = Math.max(f.t + 4, Math.min(innerHeight - f.b - hgt - 6, mouse.y + 16));
+      tip.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
     }
   }
 
@@ -56,12 +103,19 @@ export function createPickUI(app) {
     if (!I?.pick) return false;
     let hit = null;
     try { hit = Number.isFinite(x) ? I.pick(x, y) : I.pickCenter(); } catch (e) { console.error('[ui] pick', e); }
-    // a tap or a free click on bare floor or wall is empty scenery (it wakes the beacon); E and an aimed click open the place
-    if (hit && !places && hit.kind === 'place') hit = null;
+    // a tap or a free click on the building (bare floor, a wall, a gate, a chamber, steps) is scenery: a tap wakes the
+    // beacon and names it in a chip that opens its card; a free click names it only when the Menu is open (with the Menu
+    // closed that click captured the mouse instead and never gets here). E and an aimed click open it at once.
+    if (hit && !places && isStructure(hit) && !hit.alternatives?.length) {
+      if (pointerType !== 'mouse') { app.beacon?.wake('tap'); showChip(hit, x, y); return true; }
+      if (hit.kind !== 'place') { showChip(hit, x, y); return true; }
+      hit = null;
+    }
     if (!hit) {
       if (pointerType !== 'mouse') app.beacon?.wake('tap');
       return false;
     }
+    hideChip();
     if (announceOnly) {
       ahead = hit;
       say(`Ahead: ${hit.label?.en || 'something'}. Press Enter for details.`);
@@ -173,7 +227,7 @@ export function createPickUI(app) {
       let hit = null;
       try { hit = I.hover(mouse.x, mouse.y); } catch { hit = null; }
       setHover(hit);
-    } else if (locked && hoverHit) setHover(null);
+    } else if (locked && (hoverHit || hoverStruct)) setHover(null);
     // reticle + prompt, locked or pad
     const showRet = (locked || pad) && !app.menuOpen?.();
     reticle.classList.toggle('in', showRet);
@@ -199,5 +253,5 @@ export function createPickUI(app) {
     }
   }
 
-  return { el, chooser, tick, pickAt, get hover() { return hoverHit; } };
+  return { el, chooser, nameChip, tick, pickAt, hideChip, get hover() { return hoverHit; }, isStructure };
 }

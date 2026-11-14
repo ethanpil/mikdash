@@ -138,6 +138,8 @@ export function hereSection(app) {
           card = renderCard(app, c, {
             augment,
             pinned, sectionsFirst: true, now: false,
+            // where you stand: the header names it already (it was named five times over); a pinned place keeps its title
+            titleSrOnly: zone === data.currentZoneId(), typeText: zone === data.currentZoneId() ? 'Where you are' : null,
             onPin: () => { pinned = !pinned; if (!pinned) zone = data.currentZoneId(); render(); },
           });
           holder.replaceChildren(card.el);

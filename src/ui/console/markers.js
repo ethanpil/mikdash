@@ -85,9 +85,15 @@ export function createMarkers(app) {
       const aimed = locked && Math.hypot(x - W / 2, y - H / 2) < 48;
       let lbl = d <= NEAR || hoverId === it.ev.id || aimed;
       if (lbl && inCentre && hoverId !== it.ev.id) { if (centreLabel) lbl = false; else centreLabel = true; }
-      // the label runs to the right of its diamond: none where it would run under the Menu (the diamond stays)
-      if (lbl && hoverId !== it.ev.id && x > W - fr.r - LABEL_W) lbl = false;
-      if (lbl && bn && x - 10 < bn.r && x + LABEL_W > bn.l && y - 16 < bn.b && y + 16 > bn.t) lbl = false;
+      // the label runs to the right of its diamond, or to its left where the right would run under the Menu or off the
+      // screen; where neither fits, no label (the diamond stays). Its real width, measured once (a fixed 220 px guess let
+      // long titles run under the dock — ux-audit bug 4)
+      if (lbl && !it.lw) it.lw = it.txt.offsetWidth || 0;
+      const lw = it.lw || LABEL_W;
+      let left = false;
+      if (lbl && x + 12 + lw > W - fr.r - 6) { if (x - 12 - lw >= fr.l + 6) left = true; else lbl = false; }
+      if (lbl && bn && (left ? x - 12 - lw : x - 10) < bn.r && (left ? x + 10 : x + 12 + lw) > bn.l && y - 16 < bn.b && y + 16 > bn.t) lbl = false;
+      if (left !== it.left) { it.left = left; it.el.classList.toggle('is-left', left); }
       if (lbl !== it.lbl) { it.lbl = lbl; it.el.classList.toggle('is-label', lbl); }
     }
   }

@@ -239,6 +239,13 @@ export function createDirector(ctx, { schedule, runtime, inspect }) {
     pitch = clamp(pitch + pitchOff, PITCH_MIN, PITCH_MAX);
     return { heading: (bearing - yawOff + 360) % 360, pitch };
   }
+  /** the pitch that puts the horizon at the free area's centre (0 when the free area is centred vertically) */
+  function insetPitch() {
+    const inset = inspect.viewInset || { top: 0, bottom: 0 };
+    const H = globalThis.innerHeight || 720;
+    const tanV = Math.tan(((ctx.camera.fov || 60) * Math.PI / 180) / 2);
+    return Math.atan(((((inset.top || 0) - (inset.bottom || 0)) / 2) / (H / 2)) * tanV) * 180 / Math.PI;
+  }
   /** chest height of a figure at the subject's feet point */
   const chest = (p) => p.clone().add(new Vector3(0, 1.3, 0));
 
@@ -386,7 +393,8 @@ export function createDirector(ctx, { schedule, runtime, inspect }) {
         // own heading, level, rather than a look at the floor
         const e2 = ctx.player?.eye || ctx.camera.position;
         const vh = viewFor(action);
-        if (aim.on !== 'subject' && Math.hypot(aim.p.x - e2.x, aim.p.z - e2.z) < 2.5 && Number.isFinite(vh?.heading)) ctx.player?.setLook?.(vh.heading, 0);
+        // (level, raised by the free area's offset: a phone sheet covers the screen's lower part — ux-audit B)
+        if (aim.on !== 'subject' && Math.hypot(aim.p.x - e2.x, aim.p.z - e2.z) < 2.5 && Number.isFinite(vh?.heading)) ctx.player?.setLook?.(vh.heading, clamp(insetPitch(), PITCH_MIN, PITCH_MAX));
         else await frameTo(aim.p, veiled ? 0 : 400);
       }
       h.framedOn = aim?.on || null;

@@ -6,7 +6,7 @@
 import { h, he, setText, clear } from '../dom.js';
 import { ico } from './icons.js';
 import { parseSources } from '../sources.js';
-import { sentences } from '../format.js';
+import { sentences, clock } from '../format.js';
 import { parseRef, refStr } from './describe.js';
 
 const TYPE = {
@@ -33,6 +33,44 @@ const tx = (o) => (o == null ? '' : typeof o === 'string' ? o : (o.en ?? ''));
 /** an action label without the glyphs the inspect core writes in it ("▸ Watch now", "◎ Follow", "Go closer ▸"): the
  * button draws its own icon */
 const actLabel = (o) => tx(o).replace(/^\s*[▸◎↶►⟶→]\s*/u, '').replace(/\s*[▸►]\s*$/u, '');
+
+const lowerThe = (s) => s.replace(/^(The|A|An) /, (m) => m.toLowerCase());
+const durTxt = (m) => { m = Math.round(Math.abs(m)); return m < 60 ? `${Math.max(1, m)} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${String(m % 60).padStart(2, '0')}` : ''}`; };
+const LONG_JUMP = 60; // min: a clock jump longer than this is never the gold primary (ux-audit D)
+/**
+ * A see-in-action in one verb with its timing under it (ux-audit D): "Show me: the night watch" / "now · ≈1 h 14 left";
+ * "Show me: young kohanim on watch" / "moves the clock to ≈17:26, 11 h 30 ahead". The inspect core's own labels ("Watch
+ * now (…)", "Skip to ≈17:26 (in 11 h 30)") said when but not what. Its action id ends in the kind of moment.
+ * → { main, sub, mode, long }
+ */
+export function showWords(a, card, kind, time) {
+  const what0 = tx(a.what);
+  const title = tx(card?.title);
+  const short = (s) => { const i = s.indexOf(': '); return i >= 8 ? s.slice(0, i) : s; };
+  const what = what0 && what0 !== 'this' && !(kind === 'event' && what0 === title) ? lowerThe(short(what0)) : '';
+  const verb = what ? `Show me: ${what}` : 'Show me';
+  const m = String(a.id || '').split(':').pop();
+  const lbl = actLabel(a.label);
+  const paren = (/\(([^)]*)\)\s*$/.exec(lbl) || [])[1] || '';
+  let gap = null;
+  if (time && Number.isFinite(a.t) && Number.isFinite(time.t)) {
+    const days = a.date && time.dateString && a.date !== time.dateString ? Math.round((Date.parse(a.date) - Date.parse(time.dateString)) / 864e5) : 0;
+    gap = days * 1440 + a.t - time.t;
+  }
+  const at = Number.isFinite(a.t) ? `≈${clock(a.t)}` : '';
+  const long = a.mode === 'jump' && gap != null && Math.abs(gap) > LONG_JUMP;
+  let main = verb, sub = '';
+  if (m === 'now') sub = paren ? `now · ${paren}` : 'now';
+  else if (m === 'start') { main = 'From the start'; sub = gap != null && gap < 0 ? `back to ${at}, ${durTxt(gap)} ago` : `from ${at}`; }
+  else if (m === 'warp') sub = gap != null && gap >= 1 ? `begins in ${durTxt(gap)} · skips ahead` : 'begins in a moment';
+  else if (m === 'later') sub = `moves the clock to ${at}, ${durTxt(gap ?? 0)} ahead`;
+  else if (m === 'rewind') sub = `turns the clock back to ${at}`;
+  else if (m === 'tomorrow') sub = `tomorrow, ${at}`;
+  else if (m === 'another') { main = lbl.replace(/\s*\([^)]*\)\s*$/, '') || verb; sub = paren || ''; }
+  else { main = /^show me/i.test(lbl) ? lbl.replace(/\s*\([^)]*\)\s*$/, '') : verb; sub = paren || lbl; }
+  if (!sub) sub = a.mode === 'now' ? 'now' : at;
+  return { main, sub, mode: m, long };
+}
 
 /** a lead sentence, with the rest behind "more ›" */
 function leadMore(text, lead) {
@@ -119,15 +157,16 @@ function buildCard(app, card, opts = {}) {
   const titleId = `mk-card-${Math.random().toString(36).slice(2, 8)}`;
 
   // ---------------- head ----------------
-  const typeChip = h('span.mk-card__type', TYPE[kind] || 'About', card.title?.he && kind !== 'place' ? [' · ', he(card.title.he)] : null);
+  const typeChip = h('span.mk-card__type', opts.typeText || TYPE[kind] || 'About', card.title?.he && kind !== 'place' ? [' · ', he(card.title.he)] : null);
   const headBtns = [];
   if (opts.onPin) headBtns.push(h('button.mk-hbtn.mk-card__pin', { type: 'button', 'aria-pressed': opts.pinned ? 'true' : 'false', on: { click: opts.onPin } }, ico('pin'), h('span', opts.pinned ? 'Pinned' : 'Pin')));
   if (opts.onBack) headBtns.push(h('button.mk-hbtn.mk-card__back', { type: 'button', on: { click: opts.onBack } }, ico('prev'), h('span', opts.backLabel || 'Back')));
-  const titleEl = h('h3.mk-card__title', { id: titleId, tabindex: '-1' },
+  // titleSrOnly: the place you stand in, on Here — the header above already names it (ux-audit G); kept for screen readers
+  const titleEl = h(`h3.mk-card__title${opts.titleSrOnly ? '.sr-only' : ''}`, { id: titleId, tabindex: '-1' },
     card.title?.he ? he(card.title.he, 'mk-card__he') : null,
     h('span.mk-card__en', tx(card.title) || ref),
     card.translit ? h('span.mk-card__tr', card.translit) : null);
-  const sub = card.subtitle ? h('p.mk-card__sub', tx(card.subtitle)) : null;
+  const sub = card.subtitle && !opts.titleSrOnly ? h('p.mk-card__sub', tx(card.subtitle)) : null;
 
   // ---------------- now ----------------
   const nowTxt = h('span.mk-card__nowtxt');
@@ -203,19 +242,26 @@ function buildCard(app, card, opts = {}) {
     const list = [...(c.actions || [])];
     const order = { 'see-in-action': 0, follow: 1, go: 2, time: 3, map: 4, learn: 5 };
     list.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
-    let shown = 0, note = '';
+    let shown = 0, note = '', primary = false;
     for (const a of list) {
       if (a.kind === 'see-in-action') {
         if (!ctx.inspect?.seeInAction || shown >= 2) continue;
         shown++;
         // "This stops your walk": a show cancels the trip under way
         if (!note && tx(a.note)) note = tx(a.note);
-        acts.append(h(`button.mk-btn${shown === 1 ? '.mk-btn--primary' : ''}`, { type: 'button', 'data-act': 'show', on: { click: () => app.travel.runAction(a, c) } }, ico('show'), actLabel(a.label) || 'Show me'));
+        const s = showWords(a, c, kind, ctx.time);
+        // one verb everywhere, the timing under it; a clock jump of more than an hour is never the gold primary
+        const gold = !primary && !s.long;
+        if (gold) primary = true;
+        acts.append(h(`button.mk-btn.mk-btn--show2${gold ? '.mk-btn--primary' : ''}`, {
+          type: 'button', 'data-act': 'show', 'data-when': s.mode, 'aria-label': `${s.main}, ${s.sub}`, on: { click: () => app.travel.runAction(a, c) },
+        }, ico('show'), h('span.mk-btn__two', h('span.mk-btn__main', s.main), h('span.mk-btn__sub', s.sub))));
       } else if (a.kind === 'follow') {
         if (!ctx.inspect?.follow) continue;
         acts.append(h('button.mk-btn', { type: 'button', 'data-act': 'follow', on: { click: () => app.travel.runAction(a, c) } }, ico('follow'), actLabel(a.label) || 'Follow'));
       } else if (a.kind === 'go') {
-        acts.append(app.travel.control(() => app.travel.runAction(a, c), { label: actLabel(a.label) && actLabel(a.label).length < 22 ? actLabel(a.label) : 'Go', primary: !shown }));
+        acts.append(app.travel.control(() => app.travel.runAction(a, c), { label: actLabel(a.label) && actLabel(a.label).length < 22 ? actLabel(a.label) : 'Go', primary: !primary }));
+        primary = true;
       } else if (a.kind === 'time') {
         acts.append(h('button.mk-btn', { type: 'button', 'data-act': 'time', on: { click: () => { app.travel.runAction(a, c); update(); } } }, ico('time'), actLabel(a.label) || 'Set the clock'));
       } else if (a.kind === 'map') {

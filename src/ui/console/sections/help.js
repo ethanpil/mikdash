@@ -41,6 +41,9 @@ export function helpSection(app) {
             h('button.mk-linkbtn', { type: 'button', on: { click: () => app.open('learn', { section: 'how', from: 'nav' }) } }, 'How to read the badges and the ladder ›')),
           sec('whatsnew', h('span', 'What’s new ', newDot), h('ul.mk-list', WHATS_NEW.map((t) => h('li', t)))),
         );
+        // news of the last version only for someone who used it (a first visit has nothing to compare; ux-audit I)
+        const whatsNew = el.querySelector('#mk-help-whatsnew');
+        if (whatsNew && !app.welcome?.versionChanged) whatsNew.hidden = true;
         function paintDev() {
           devSeg.replaceChildren(...DEVICES.map((d) => h('button', { type: 'button', 'aria-pressed': d.id === device ? 'true' : 'false', 'data-device': d.id, on: { click: () => { device = d.id; paintDev(); } } }, d.label)));
           keys.replaceChildren(controlsEl(device));

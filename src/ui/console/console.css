@@ -251,8 +251,9 @@
 .mk-head__clockbtn:hover { border-color: var(--mk-line); }
 .mk-head__dial { width: 30px; height: 30px; flex: none; }
 .mk-head__clocktxt { display: flex; flex-direction: column; line-height: 1.2; }
-.mk-head__hour { font: 600 15px/1.2 var(--mk-display); white-space: nowrap; }
-.mk-head__civil { font-size: 13px; color: var(--mk-ink-2); }
+/* the hour a visitor reads first is the clock's; the seasonal hour is under it (ux-audit finding 10) */
+.mk-head__civil { font: 600 16px/1.2 var(--mk-display); color: var(--mk-ink); white-space: nowrap; }
+.mk-head__hour { font-size: 13px; color: var(--mk-ink-2); white-space: nowrap; }
 .mk-head__transport { display: flex; align-items: center; gap: 6px; }
 .mk-head__playico, .mk-head__flyico { display: inline-flex; }
 .mk-head__speedwrap { position: relative; }
@@ -291,6 +292,19 @@
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__aboutlong { display: none; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__aboutshort { display: inline; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__dial { display: none; }
+/* phones: the section strip is ONE row — disc, names + About, the clock (ux-audit G: it was ≈ 175 px of a 470 px sheet) */
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head { grid-template-areas: 'disc loc clock'; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0 10px; padding: 4px 12px 4px; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__loc { padding-top: 0; min-width: 0; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__names { flex: 0 1 auto; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__he { font-size: 18px; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__en { font-size: 15px; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__clockbtn { padding: 0 2px 0 4px; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__clocktxt { align-items: flex-end; text-align: right; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__hour { font-size: 12px; }
+/* phones, home: names and About on the disc's row, the clock and its transport on one row under it */
+#ui-root[data-layout='sheet-portrait'] .mk-menu[data-view='home'] .mk-head { grid-template-areas: 'disc loc close' 'clock clock clock' 'search search search' 'status status status'; align-items: center; gap: 4px 12px; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu[data-view='home'] .mk-head__names { flex-direction: row; align-items: baseline; gap: 8px; white-space: nowrap; overflow: hidden; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu[data-view='home'] .mk-head__clock { flex-wrap: nowrap; justify-content: space-between; }
 #ui-root[data-layout='sheet-landscape'] .mk-head { grid-template-areas: 'disc loc close' 'disc clock clock' 'search search search'; }
 #ui-root[data-layout='sheet-landscape'] .mk-head__names { flex-direction: row; align-items: baseline; gap: 8px; white-space: nowrap; overflow: hidden; }
 #ui-root[data-layout='sheet-landscape'] .mk-head__sanct { display: none; }
@@ -384,6 +398,11 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 .mk-card__srclist[hidden] { display: none; }
 .mk-card__acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding-bottom: 4px; }
 .mk-card__acts[hidden] { display: none; }
+/* a card's Show me: the verb and what it shows, its timing under it (ux-audit D) */
+.mk-btn--show2 { max-width: 100%; padding-top: 5px; padding-bottom: 5px; border-radius: 18px; text-align: left; }
+.mk-btn__two { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+.mk-btn__main, .mk-btn__sub { overflow: hidden; text-overflow: ellipsis; }
+.mk-btn__sub { font-size: 12.5px; font-weight: 400; opacity: 0.82; }
 .mk-card__actnote { margin: 4px 0 0; font-size: 14px; font-style: italic; }
 .mk-card__acts { margin-top: 12px; }
 .mk-card__blksrcs { margin-top: 4px; }
@@ -399,16 +418,20 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 /* ============================================================================
    The single event row (§3.5) and the Go control (§3.3.7)
    ============================================================================ */
-.mk-evs { display: flex; flex-direction: column; gap: 8px; }
-.mk-row { position: relative; border-radius: 12px; border: 1px solid var(--mk-line-2); background: rgba(241, 232, 212, 0.025); overflow: hidden; }
+.mk-evs { display: flex; flex-direction: column; gap: 6px; }
+/* compact (ux-audit E): title + one meta line on the left, Show me and Go on the right; ≈ 50–70 px a row */
+.mk-row { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: 12px; border: 1px solid var(--mk-line-2); background: rgba(241, 232, 212, 0.025); overflow: hidden; }
 .mk-row.is-active { border-color: rgba(212, 166, 64, 0.38); background: linear-gradient(180deg, rgba(212, 166, 64, 0.08), rgba(212, 166, 64, 0.02)); }
 .mk-row.is-focus { box-shadow: inset 0 0 0 1px var(--mk-gold-hi); }
-.mk-row__hit { display: flex; flex-direction: column; width: 100%; padding: 9px 12px 4px 13px; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
-.mk-row__top { display: flex; align-items: center; gap: 8px; }
-.mk-row__title { flex: 1; min-width: 0; font: 600 16.5px/1.22 var(--mk-display); color: var(--mk-ink); }
-.mk-row__he { margin-top: 1px; font-size: 15px; color: var(--mk-gold-hi); text-align: left; }
-.mk-row__meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 3px; font-size: 13.5px; color: var(--mk-ink-2); }
-.mk-row__acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 12px 10px 13px; }
+.mk-row__hit { display: flex; flex-direction: column; min-width: 0; width: 100%; padding: 7px 6px 7px 12px; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.mk-row__top { display: flex; align-items: center; gap: 7px; }
+.mk-row__title { flex: 1; min-width: 0; font: 600 15.5px/1.2 var(--mk-display); color: var(--mk-ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.mk-row__meta { display: flex; align-items: baseline; gap: 0 8px; margin-top: 2px; font-size: 13px; line-height: 1.3; color: var(--mk-ink-2); white-space: nowrap; overflow: hidden; }
+.mk-row__meta > * { flex: none; }
+.mk-row__he { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 14px; color: var(--mk-gold-hi); }
+.mk-row__acts { display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 4px; }
+#ui-root:not([data-input='pad']) .mk-row__acts .mk-chipcap { display: none; }
+.mk-row .mk-dyn__list { grid-column: 1 / -1; }
 .mk-row__prog { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, var(--mk-gold-lo), var(--mk-gold-hi)); transform-origin: 0 50%; transform: scaleX(0); }
 .mk-row__show[hidden] { display: none; }
 .mk-imp { display: inline-flex; gap: 2px; flex: none; }
@@ -423,6 +446,7 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 .mk-sample { margin-top: 16px; font-size: 13px; color: var(--mk-ink-3); text-align: center; font-style: italic; }
 .mk-go { display: inline-flex; align-items: stretch; }
 .mk-go__main { border-radius: 999px 0 0 999px; padding-right: 10px; }
+.mk-go__main.mk-go__main--solo { border-radius: 999px; padding-right: 12px; }
 .mk-go__more { border-radius: 0 999px 999px 0; border-left-width: 0; padding: 4px 9px 4px 8px; gap: 3px; font-size: 13px; color: var(--mk-ink-2); }
 .mk-btn--primary + .mk-go__more { border-left: 1px solid rgba(27, 20, 9, 0.35); }
 .mk-go__more .ico { width: 14px; height: 14px; }
@@ -431,6 +455,9 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 /* coarse pointers: every control at least 44 px tall (§3.8); inline "more ›" links get a larger hit area instead */
 #ui-root.mk-coarse :is(.mk-btn, .mk-btn--sm, .mk-chip3--btn, .mk-src, .mk-head__about, .mk-sgroup__more, .mk-card__srcbtn, .mk-travel .mk-seg button, .mk-learn__entry, .mk-nearby__b, .mk-nearby__all, .mk-daybtn) { min-height: var(--mk-hit); }
 #ui-root.mk-coarse .mk-src { padding-top: 4px; padding-bottom: 4px; }
+/* phones: segmented filters, the map card's Clear and "All ›" too (ux-audit I: 30, 36 and 17 px tall) */
+#ui-root.mk-coarse :is(.mk-seg button, .mk-mapcard__x, .mk-h__more) { min-height: var(--mk-hit); }
+#ui-root.mk-coarse .mk-h__more { display: inline-flex; align-items: center; padding: 0 6px; }
 #ui-root.mk-coarse .mk-head__about { display: inline-flex; align-items: center; }
 #ui-root.mk-coarse .mk-travel .mk-seg button { min-width: 44px; }
 #ui-root.mk-coarse .mk-card__more { position: relative; }
@@ -472,6 +499,9 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 .mk-travel__steps { display: flex; gap: 4px; }
 /* touch: the pace row is the control (§3.3.3); Slower / Faster carry the + / − keys and the D-pad on fine pointers */
 #ui-root.mk-coarse .mk-travel__steps { display: none; }
+#ui-root:not(.mk-coarse) .mk-travel__pace { display: none; }
+.mk-travel__steps { align-items: center; }
+.mk-travel__pacenow { min-width: 2.6em; text-align: center; font: 600 15px/1 var(--mk-display); color: var(--mk-gold-hi); }
 .mk-travel__stop { color: var(--mk-ink); }
 .mk-mapv__travel .mk-travel { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); }
 .mk-vignette { position: fixed; inset: 0; z-index: 9; pointer-events: none; opacity: 0; transition: opacity 600ms; background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 52%, rgba(0, 0, 0, 0.55) 100%); }
@@ -543,6 +573,7 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 .mk-marker__d { width: 10px; height: 10px; margin: -5px 0 0 -5px; transform: rotate(45deg); background: var(--mk-gold); border: 1px solid #1a140d; flex: none; }
 .mk-marker__t { position: absolute; left: 10px; top: -13px; padding: 2px 10px; border-radius: 999px; font-size: 13.5px; white-space: nowrap; background: rgba(12, 9, 6, 0.8); border: 1px solid rgba(212, 166, 64, 0.45); opacity: 0; transform: translateX(-4px); transition: opacity 160ms, transform 160ms; pointer-events: none; }
 .mk-marker.is-label .mk-marker__t, .mk-marker:focus-visible .mk-marker__t { opacity: 1; transform: none; }
+.mk-marker.is-left .mk-marker__t { left: auto; right: 10px; }
 #ui-root.mk-coarse .mk-marker.is-on { pointer-events: none; }
 .mk-picklayer { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
 .mk-picklayer.is-off { display: none; }
@@ -556,6 +587,18 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 .mk-rprompt { position: absolute; left: 50%; top: calc(50% + 22px); transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; font-size: 14.5px; background: rgba(8, 6, 4, 0.72); opacity: 0; transition: opacity 160ms; white-space: nowrap; }
 .mk-rprompt.in { opacity: 1; }
 .mk-rprompt__v { color: var(--mk-gold-hi); }
+.mk-ptip.is-struct { color: var(--mk-ink-2); border-color: rgba(241, 232, 212, 0.12); }
+/* a structure's name, tapped (ux-audit C): a tap on it opens the card */
+.mk-namechip {
+  position: fixed; z-index: 30; display: inline-flex; align-items: center; gap: 2px; min-height: 44px; max-width: min(340px, 86vw);
+  padding: 6px 16px; border-radius: 999px; border: 1px solid rgba(212, 166, 64, 0.55); color: var(--mk-ink); font-size: 15px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; pointer-events: auto;
+  background: rgba(14, 11, 7, 0.92); animation: mk-chipin var(--mk-dur) ease-out;
+}
+.mk-namechip > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.mk-namechip__more { color: var(--mk-gold-hi); flex: none; }
+@keyframes mk-chipin { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+#ui-root.mk-reduce .mk-namechip { animation: none; }
 .mk-chooser { width: 260px; pointer-events: auto; }
 .mk-chooser__h { margin: 2px 8px 6px; font-size: 13px; color: var(--mk-ink-2); }
 
@@ -619,8 +662,7 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 .mk-mapview > .mk-mapbody { flex: 1; min-height: 0; height: 100%; }
 .mk-mapv__tools { position: absolute; z-index: 2; left: 12px; top: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; max-width: calc(100% - 90px); }
 .mk-mapv__tools .mk-mapv__presets { position: static; }
-.mk-keybtn { display: none; }
-#ui-root[data-layout^='sheet'] .mk-keybtn { display: inline-flex; }
+.mk-keybtn { display: inline-flex; }
 .mk-keybtn[aria-expanded='true'], .mk-placesbtn[aria-expanded='true'] { color: var(--mk-gold-hi); border-color: rgba(212, 166, 64, 0.7); }
 .mk-mapcard__x { min-height: 36px; padding: 4px 9px; }
 #ui-root[data-layout='dock'] .mk-mapcard__xt { display: none; }
@@ -649,6 +691,8 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 #ui-root.mk-menu-open .mk-coach { display: none; }
 .mk-coach[hidden] { display: none; }
 .mk-coach[data-at='beacon'], .mk-coach[data-at='disc'] { top: calc(var(--mk-safe-t) + 60px); left: var(--mk-safe-l); }
+/* (desktop: under the wake row while the chips are awake — it hid the hour and Map chips; ux-audit I) */
+#ui-root:not(.mk-coarse).mk-awake .mk-coach[data-at='beacon'], #ui-root:not(.mk-coarse).mk-awake .mk-coach[data-at='disc'] { top: calc(var(--mk-safe-t) + 112px); }
 .mk-coach[data-at='centre'] { top: 56%; left: 50%; transform: translateX(-50%); }
 .mk-coach[data-at='centre'].in { transform: translateX(-50%); }
 #ui-root.mk-coarse .mk-coach[data-at='beacon'], #ui-root.mk-coarse .mk-coach[data-at='disc'] { top: auto; left: auto; right: var(--mk-safe-r); bottom: calc(var(--mk-safe-b) + 64px); max-width: min(52vw, 300px); }
@@ -664,3 +708,9 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 #ui-root[data-layout^='sheet'] .mk-card__en { font-size: 19px; }
 #ui-root[data-layout='sheet-portrait'] .mk-cap__en { font-size: 16px; }
 #ui-root[data-layout='sheet-portrait'] .mk-cap__he { font-size: 18px; }
+
+/* The Welcome is its own panel, not the whole console around it (ux-audit I: 15 controls on the first screen, one of
+   which mattered); its sentence names the place and the hour. The rail, the header and the phone's drill bar
+   ("‹ Menu", Close) return with the first section. */
+.mk-menu[data-view='welcome'] :is(.mk-rail, .mk-head, .mk-drill) { display: none; }
+.mk-menu[data-view='welcome'] .mk-menu__body { grid-template-columns: minmax(0, 1fr); border-top: 0; }

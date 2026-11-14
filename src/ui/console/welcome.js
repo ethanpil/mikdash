@@ -4,10 +4,10 @@
 // 8 s; 'mikdash.coach'). The touch joystick / look ghosts show in the first touch session only. Returning visitors skip
 // the Welcome; "Welcome back · Esc opens the menu" shows in their first 3 returning sessions; a new version puts a dot
 // on Help → What's new and, once, on the beacon.
-import { h, he } from '../dom.js';
+import { h, he, setText } from '../dom.js';
 import { ico } from './icons.js';
 import { hebrewAt, dayPhrase } from '../format.js';
-import { welcomeLines, keyCaps, ESSENTIALS } from '../controls.js';
+import { welcomeLines, keyCaps, essentialsFor } from '../controls.js';
 
 /** the console's version: a change shows "What's new" (Help) and a dot on the beacon once */
 export const UI_VERSION = '2026.11-luach';
@@ -40,13 +40,14 @@ export function createWelcome(app) {
   const lines = h('div.mk-welcome__lines');
   const enterBtn = h('button.mk-btn.mk-btn--primary.mk-welcome__go', { type: 'button', on: { click: (e) => enter(e) } }, 'Enter the courts');
   const method = h('button.mk-linkbtn.mk-welcome__method', { type: 'button', on: { click: (e) => { enter(e, { lock: false }); app.open('learn', { section: 'method' }); } } }, 'How this was reconstructed ›');
+  const essEl = h('p.mk-welcome__fine');
   const el = h('div.mk-welcome', { role: 'document', 'aria-labelledby': 'mk-welcome-title', 'aria-describedby': 'mk-welcome-text' },
     h('h1.mk-welcome__title', { id: 'mk-welcome-title', lang: 'he', dir: 'rtl' }, 'מקדש', h('span.sr-only', { lang: 'en' }, ' — Mikdash')),
     h('div.mk-welcome__sub', { 'aria-hidden': 'true' }, 'Mikdash'),
     h('div.mk-orn', { 'aria-hidden': 'true' }, h('i')),
     sentence, heDate, lines,
     h('div.mk-welcome__cta', enterBtn),
-    h('p.mk-welcome__fine', ESSENTIALS),
+    essEl,
     h('p.mk-welcome__fine', 'Every measure comes from the sources; where they are silent, the reconstruction says so.'),
     method);
 
@@ -66,6 +67,7 @@ export function createWelcome(app) {
     heDate.replaceChildren(hd?.he ? he(hd.he) : '');
     const dev = app.input.mode === 'pad' ? 'pad' : app.coarse ? 'touch' : 'mouse';
     lines.replaceChildren(...welcomeLines(dev).map(([k, t]) => h('div.mk-welcome__line', h('span.mk-welcome__caps', keyCaps(k)), h('span', t))));
+    setText(essEl, essentialsFor(dev));
   }
 
   // ---------------- coach marks ----------------

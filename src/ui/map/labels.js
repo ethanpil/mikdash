@@ -1,8 +1,8 @@
 // Map labels: one per zone, English (short name) + Hebrew, sized by tier, placed greedily by priority so no two
 // labels (or a label and an overlay) ever overlap. Small places appear only when their mark is big enough on
 // screen; a label that does not fit inside its place may sit just outside it (gates on a wall line). Long, narrow
-// strips (Ezrat Yisrael, Ezrat Kohanim) take a rotated label. Activity adds a count badge or a "soon" pill and,
-// zoomed in, the top activity's title as a callout.
+// strips (Ezrat Yisrael, Ezrat Kohanim) take a rotated label. Activity adds the headline rite's short title as a callout
+// (where it fits, at any zoom) and a count badge when more than one thing is going on; a "soon" pill otherwise.
 
 const EN_FONT = "'Cormorant Garamond', 'EB Garamond', Georgia, serif";
 const HE_FONT = "'Frank Ruhl Libre', 'David Libre', David, 'Times New Roman', serif";
@@ -89,13 +89,14 @@ export function layoutLabels(g, items, tf, blocked, scale = 1, owns = null) {
     // extras on the first line: level tag, activity badge or "soon" pill
     const tag = it.level && it.level !== 'ground' ? it.level.toUpperCase() : null;
     const tagW = tag ? measure(g, tagFont, tag) + 10 * scale : 0;
-    const badgeW = it.active ? 18 * scale : it.soon != null ? measure(g, tagFont, `${Math.max(1, Math.round(it.soon))} MIN`) + 12 * scale : 0;
+    // the count only when more than one thing is going on (the callout names the headline one)
+    const badgeW = it.active > 1 ? 18 * scale : !it.active && it.soon != null ? measure(g, tagFont, `${Math.max(1, Math.round(it.soon))} MIN`) + 12 * scale : 0;
     const extra = (tag ? tagW + 5 : 0) + (badgeW ? badgeW + 5 : 0);
 
     const variants = [];
     const enW = measure(g, enFont, it.name.short);
     const heW = it.name.he ? measure(g, heFont, it.name.he) : 0;
-    const co = it.callout ? clip(it.callout, 34) : null;
+    const co = it.callout ? clip(it.callout, 30) : null;
     const coW = co ? measure(g, coFont, co) : 0;
     const mk = (enLines, withHe, withCo) => {
       const lines = enLines.map((t) => ({ text: t, font: enFont, fs: fsEn, kind: 'en', w: measure(g, enFont, t) }));
@@ -106,13 +107,15 @@ export function layoutLabels(g, items, tf, blocked, scale = 1, owns = null) {
       return { lines, w, h };
     };
     const big = it.tier === 3 || sw > 70 * scale || it.selected;
-    const wantCo = !!co && Math.min(sw, sh) >= 54 && k >= 1.6;
+    // an active place always tries its callout first, at any zoom (it may sit just outside a small place); the variants
+    // without it follow, so a crowded plan still names the place
+    const wantCo = !!co && (it.active > 0 || (Math.min(sw, sh) >= 54 && k >= 1.6));
     const long = it.name.short.length > 18 ? wrapTwo(it.name.short) : null;
     if (heW && big) variants.push(mk([it.name.short], true, wantCo));
     if (heW && long) variants.push(mk(long, true, wantCo));
     variants.push(mk([it.name.short], false, wantCo));
     if (long) variants.push(mk(long, false, wantCo));
-    if (wantCo) variants.push(mk([it.name.short], false, false));
+    if (wantCo) { if (heW && big) variants.push(mk([it.name.short], true, false)); variants.push(mk([it.name.short], false, false)); }
 
     let done = null;
     // rotated: a long narrow strip whose name runs along it
@@ -219,7 +222,7 @@ export function drawLabels(g, placed, alpha) {
         g.fillText(L.tag, x + tw / 2, cy + 0.5);
         x += tw + 5;
       }
-      if (it.active) {
+      if (it.active > 1 && L.badgeW) {
         const r = L.badgeW / 2;
         g.fillStyle = '#e2b85a';
         g.strokeStyle = 'rgba(10,8,5,0.9)';
@@ -229,7 +232,7 @@ export function drawLabels(g, placed, alpha) {
         g.font = `700 ${Math.round(r * 1.25)}px ${SM_FONT}`;
         g.textAlign = 'center';
         g.fillText(String(it.active), x + r, cy + 0.5);
-      } else if (it.soon != null && L.badgeW) {
+      } else if (!it.active && it.soon != null && L.badgeW) {
         const tw = L.badgeW, th = Math.min(TAG_FS + 4, lh + 1);
         g.save();
         g.fillStyle = 'rgba(10,8,5,0.78)';
