@@ -82,7 +82,8 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   the renderer's UNLINKED PROGRAMS, not queued objects (≤ logical cores − 2, none for 2.5 s after Enter): a program issued
   while all of ANGLE's (cores − 1) link workers are busy blocks the GPU process, which froze play 1–10 s after Enter
   (gate-core-r2); a shadow pass keys its depth programs
-  with no lights but a shadow (warmup.js compileDepth); CSS animations of box-shadow/filter repaint every frame (the tag
+  with the light state the depth pre-pass left (all the scene's lights, see `prepassLight` below) and no fog, so
+  warmup.js compileDepth compiles them with the scene's lights and its fog lifted; CSS animations of box-shadow/filter repaint every frame (the tag
   pulse cost 11 fps) — animate transform/opacity only; fps here is quantized by vsync, so A/B in-page, interleaved, in
   normal play.
 - Every scene light carries the depth pre-pass's layer (render/prepass.js `prepassLight`, called where a light is made:
@@ -90,6 +91,17 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   frame and every lit material is re-keyed in the main pass (getProgram for 70+ materials: ≈ 1 ms of JS and ≈ 250 KB of
   garbage a frame); the pre-pass's warm-up compiles with `ctx.scene` as its light scene, because three keys even
   MeshDepthMaterial by the light counts (docs/decisions/perf-cpu.md, round 2).
+- Landscape batches (the kits' city and Mount batches, the rocks, the groves' far level, the stoa columns) are split into
+  cells round the Mount so three culls what lies behind the viewer (world/sectors.js: a disc, then rings × 6 sectors; a
+  plain wedge from the centre never culls for a viewer on the Mount, its sphere holds the apex). A cell under 4000
+  triangles joins one remainder piece per batch and a batch that would be mostly remainder stays whole: −20 to −27 % of
+  the frame's triangles for +16 to +33 draw calls. Split after the kit has registered its colliders. `?sectors=0` builds
+  them whole: the GPU benefit was never measured (no GPU where it was built), so A/B it on the HD 4600 before widening.
+- A point on an opening's plane, or in a room's margin just beyond it, reads that opening as from the plane itself
+  (env/interiors.js `apertureFraction`, `APERTURE_BEYOND`). It read 0, so an eye standing in a stoa's open side or in any
+  doorway was metered as in a closed room: the court 16–20× over, white at any hour. The stoas are `colonnade` volumes:
+  the share of the view that leaves between the columns (`viewOut`) is metered at the outdoor level. The shader's
+  `mkAperture` still returns 0 beyond the plane (left alone: it would re-key every lit program).
 - Tier features are capability flags in `src/core/quality.js` (shadows static/cached/cascaded, shadowFilter, aa, ao,
   interiors); code reads flags, never tier names. Low/medium take room sky visibility and AO from env's visibility volume
   (`env/visibility.js`): per-room bricks of each opening's solid-angle share × the live door weights in the uniform block

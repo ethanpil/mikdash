@@ -243,8 +243,9 @@ export function inSight(ctx, x, y, z, heights = [0.5, 1.5]) {
  * the Set of materials.
  * perf-cpu round 2: the shadow pass now sees the frame's lights — it keys its programs with the light state of the render
  * state's previous setupLights, the depth pre-pass's, which since the lights carry its layer (render/prepass.js
- * prepassLight) counts them all. With `lightRoot` (the scene: main.js) the programs are compiled with its lights, inside
- * the frame's light state (withFrameLights); without it, as before (no lights, one bare casting Light).
+ * prepassLight) counts them all. With `lightRoot` (the scene: main.js) the programs are compiled with its lights (and
+ * without its fog, as the shadow pass draws), inside the frame's light state (withFrameLights); without it, as before (no
+ * lights, one bare casting Light).
  */
 const SHADOW_SIDE = { [FrontSide]: BackSide, [BackSide]: FrontSide, [DoubleSide]: DoubleSide };
 let _shadowOnly = null;
@@ -279,7 +280,12 @@ export function compileDepth(renderer, root, camera, lightRoot = null) {
       dm.side = om?.shadowSide ?? SHADOW_SIDE[om?.side ?? FrontSide];
       _target ||= new WebGLRenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
       renderer.setRenderTarget(_target);
-      const lit = withFrameLights(() => renderer.compile(o, camera, lightRoot || _shadowOnly));
+      // (the shadow pass draws with no scene, so no fog: the light scene's fog is lifted for the compile — three keys
+      // every program by the scene's fog too)
+      const ls = lightRoot || _shadowOnly, fog = ls.fog;
+      ls.fog = null;
+      let lit;
+      try { lit = withFrameLights(() => renderer.compile(o, camera, ls)); } finally { ls.fog = fog; }
       for (const x of lit) if (x === dm) out.add(x);
     } catch (e) {
       console.warn('[warmup] depth compile failed', e);

@@ -297,7 +297,7 @@ renderer's programs and the pre-pass material's own), and `tools/perf-cpu-world.
 triangles by pass and builder, each world mesh's triangles in the frustum, a screenshot, the collision soup's count /
 triangles / checksum). Base = a copy of HEAD 478bc94; each pair booted the same way, one browser at a time.
 
-## 1. The pre-pass no longer changes three's light state (render/prepass.js, env/index.js, render/fx/lights.js, render/shadows.js, main.js)
+## 1. The pre-pass no longer changes three's light state (render/prepass.js, env/index.js, render/fx/lights.js, render/shadows.js, render/warmup.js, main.js)
 
 - **Every scene light carries `PREPASS_LAYER` (`prepassLight(light)`, called where each light is made: env's key light —
   the moon is the same object —, fx's fire-light pool in `FireLights.setMax`, the cascades' `SunLight`).** — the pre-pass
@@ -311,6 +311,16 @@ triangles / checksum). Base = a copy of HEAD 478bc94; each pair booted the same 
   frame. With the warm-up keyed like the frame, the pre-pass material holds 2 programs (plain, instanced) where it held 3.
 - Shadow maps are untouched: the pre-pass still renders with `shadowMap.autoUpdate` and `needsUpdate` false, so three's
   `shadowMap.render` returns at once; its depth material reads no light uniform.
+- **The shadow pass's programs are now keyed with the lights too; gate-core's warm-up of the people's shadow programs
+  follows (render/warmup.js `compileDepth`, round 2b).** — three draws a shadow map before it counts the frame's lights,
+  with the light state of the render state's previous `setupLights`: the pre-pass's, which held no light before and holds
+  them all now. `compileDepth` keyed the people's depth / distance programs "no lights but a shadow", so on medium the
+  people's depth materials each held two programs (the warmed one and one compiled at the first shadow draw — the
+  synchronous link gate-core removed). It now compiles with the scene's lights (main.js already passes `ctx.scene`), in the
+  frame's light state (`withFrameLights`) and with the scene's fog lifted (the shadow pass draws with no scene: three keys
+  every program by the fog too; the first fix missed it and still left two programs). Medium, after visiting three views:
+  no material with two programs but the pre-pass's plain + instanced pair (base: the pre-pass material held 3); programs
+  91 → 90. Not run on high / ultra (the cascades' borrow and the fires' cube shadows go through the same code).
 
 Proof (Azarah d3, shot mode, 4 drawn frames, base → new):
 
@@ -328,6 +338,11 @@ Without a pre-pass (`?prepass=0`, low): getProgram 0 → 0 per frame, draws, fra
 by this item (the layer is on the lights only; no camera without the pre-pass looks at layer 29). Images: see item 3 — the
 base vs final shots (items 1 and 3 together) at the dawn start, Azarah d3 and n3, low and medium, differ only in the
 real-time flames, smoke and breathing.
+
+- **High, checked (round 2c, `tools/perf-cpu-twoprog.js`, shot mode, Azarah d3 and n3 — the cascades' SunLight, and at
+  night the fires' cube shadows):** no material holds two programs but the pre-pass's plain + instanced pair (they differ
+  only in the instancing bit); getProgram calls 0 per frame at both (3 drawn frames each); 103 programs, 725 / 874 calls;
+  console: only SwiftShader's two warnings. No fix needed. (Ultra not run.)
 
 ## 3. Cells round the Mount for the landscape's batches (src/world/sectors.js new; terrain/index.js, terrain/features.js, terrain/trees.js, mount/index.js, mount/stoas.js)
 
@@ -396,7 +411,14 @@ batches are all in view (98 306 → 98 306 triangles on low). The terrain's pre-
   over 8/255): low a 0.021 / 0.02 %, b 0.102 / 0.35 %, n3 0.453 / 0.34 %, aerial 0.006 / 0.004 %; medium a 0.022 / 0.03 %,
   b 0.079 / 0.27 %, n3 0.290 / 0.34 %, aerial 0.006 / 0.008 % — the altar's flames and smoke and their real-time light,
   nothing else; shadows included (medium's cached map, low's static map).
-- gate-core in play (low, default boot, intro up; base vs new, 4 s after 'shown' and at 'drained'): GATECORE_LINE
+- gate-core: on this machine the boot defers nothing (SwiftShader has no KHR_parallel_shader_compile, which `deferOn`
+  requires), so the live check in play (low, default boot, intro up, base vs new, 4 s after 'shown' and at 'drained') can
+  only show that nothing else changed: 4 world meshes hidden in both (the same: the kiyor's bail, the incoming showbread's
+  reeds, the cover's grass and stones), no world material hidden, `bootDeferred` identical (empty), program lists equal but
+  for item 1's depth programs and the baker's `matgen:*` programs (released as their bakes finish: timing). The id pass
+  itself (`seenMeshes` / `unseenMaterials`, `tools/perf-cpu-idpass.js`) run by hand from three cameras (dawn start, Azarah
+  d3, south of the Mount): the same materials unseen, base vs new, on low (46 / 36 / 43) and medium (51 / 34 / 45). The
+  deferral on a GPU with the extension (the HD 4600) is not exercised here: `tools/warmup-check.mjs` there.
 
 **The GPU benefit is unmeasured here.** On the HD 4600 measure, in one page, interleaved, normal play, `?sectors=0`
 against the default at the dawn start, the Azarah and an aerial: the GPU frame (render/dev/gpu-split.mjs), the main
