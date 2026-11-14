@@ -194,7 +194,13 @@ export const gates = describeWith({
 });
 
 // ------------------------------------------------------------------------------------------------ night-watch
-const NW = ['night-watch', 'watch-upper-chambers', 'ish-har-habayit', 'sleeping-guard'];
+const NW = ['night-watch', 'watch-upper-chambers', 'ish-har-habayit', 'sleeping-guard', 'gates-opened', 'gates-shut'];
+// the gatekeeper's own gate (night-watch.js GATE_OF: the posts at the Mount's and the Azarah's gates; not Tadi)
+const atGate = (state, who) => { const id = state?.levites?.[who.index]?.id || ''; return id.startsWith('gate-') && id !== 'gate-tadi'; };
+const GATE_TEXT = (open) => (ctx, state, who) => (atGate(state, who)
+  ? (open ? 'Drawing the bar of his gate and standing aside as its leaves swing open with the trumpets — Levites are the gatekeepers "to open the gates of the Mikdash and to shut its doors" (Rambam KhM 3:2), at the word of the officer over the locking (KhM 7:3)'
+    : 'Standing aside as his gate\'s leaves swing shut, then barring them — the Levites shut the doors of the Mikdash (Rambam KhM 3:2)')
+  : (state?.levites?.[who.index]?.id === 'gate-tadi' ? 'At Tadi, the northern gate of the Mount, which is not opened: it "served for nothing" (Middot 1:3)' : 'Standing at his post'));
 export const nightWatch = describeWith({
   id: 'night-watch',
   pools: {
@@ -204,6 +210,8 @@ export const nightWatch = describeWith({
         'night-watch': (ctx, state, who) => (SLEEP.test(pose(who)) ? 'Asleep at his post' : 'Standing at his post through the night — one of the twenty-one Levite posts; a guard does not sit'),
         'sleeping-guard': (ctx, state, who) => (SLEEP.test(pose(who)) ? 'Found asleep at his post: the officer strikes him with his staff, and may burn his garment' : 'Standing at his post'),
         'ish-har-habayit': (ctx, state, who) => (SLEEP.test(pose(who)) ? 'Asleep at his post' : 'Standing at his post; the officer comes round: "Shalom alecha!"'),
+        'gates-opened': GATE_TEXT(true),
+        'gates-shut': GATE_TEXT(false),
       },
     },
     officer: { phrase: 'the officer of the Mount (Ish Har HaBayit)', events: NW, doing: { 'ish-har-habayit': 'Going round every post with torches burning before him; at each the greeting is "Shalom alecha!" (the Mishnah can be read that he says it to a guard not standing; the Rambam, that the guard stands and greets him) — one found asleep he strikes with his staff', 'sleeping-guard': 'He finds a guard asleep and strikes him with his staff', 'night-watch': 'On his round of the posts' } },

@@ -185,15 +185,19 @@ const _sh = { ...DEFAULTS };
  * hands (B.t.bowlsOff); "these draw and those lay down, the handbreadth of this one beside the handbreadth of that"
  * (Menachot 11:7): the old set slid off to the south as the incoming is slid on from the north over the slide, the old
  * hidden once it is in the stack-men's hands; the new bowls set on (bowlsSet); then the sets swapped back (they are
- * identical, so nothing visible changes). The kanim out from Friday after the afternoon service until after Shabbat
- * (Menachot 11:6) ⚙ the hours. A pure function of (t, date).
+ * identical, so nothing visible changes). The kanim out from Friday after the afternoon service until Sunday by day
+ * (Menachot 11:6; Rambam TuM 5:11) ⚙ the hours. A pure function of (t, date).
  */
 function shulchan(ctx, state, B, t) {
   const S = _sh;
   Object.assign(S, DEFAULTS);
   const dt = ctx.time?.dayType, z = ctx.time?.zmanim || {};
-  if (dt === 'friday' && t >= (z.minchaKetana ?? 900) + 60) S.kanim = false;
-  if (dt === 'shabbat' && t < (z.tzeit ?? 1080) + 30) S.kanim = false;
+  // the kanim: drawn out on Friday by the kohen of 'kanim-out' (Menachot 11:6), out all Shabbat, put back on Sunday by
+  // day at 'kanim-in' (Rambam TuM 5:11) — at the middle of each event's window (temple-duties stages the man) ⚙
+  const mid = (id) => { const e = ctx.schedule?.byId?.(id); return e && Number.isFinite(e.t0) ? e.t0 + since(e.t1, e.t0) / 2 : NaN; };
+  if (dt === 'friday') { const m = mid('kanim-out'); if (t >= (Number.isFinite(m) ? m : (z.minchaKetana ?? 900) + 60)) S.kanim = false; }
+  if (dt === 'shabbat') S.kanim = false;
+  if (ctx.time?.weekday === 0) { const m = mid('kanim-in'); if (t < (Number.isFinite(m) ? m : (z.sunrise ?? 360) + 80)) S.kanim = false; }
   const T = B?.t;
   if (T && Number.isFinite(T.swapBack)) {
     const s0 = T.slide[0], s1 = T.slide[1], back = T.swapBack;

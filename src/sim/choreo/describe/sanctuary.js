@@ -87,7 +87,8 @@ export const ketoret = describeWith({
     },
     levites: {
       sub: (who) => (LEVITES[who.index]?.inst || 'voice'), events: G3,
-      phrase: { cymbal: 'the Levite of the cymbal — one cymbal only (the office the Mishnah names for Ben Arza)', kinnor: 'a Levite with a kinnor', nevel: 'a Levite with a nevel', voice: 'a Levite singer' },
+      phrase: { cymbal: 'the Levite of the cymbal — one cymbal only (the office the Mishnah names for Ben Arza)', kinnor: 'a Levite with a kinnor', nevel: 'a Levite with a nevel', voice: 'a Levite singer',
+        officer: 'the officer over the song — in the Mishnah\'s list Hugras ben Levi (Shekalim 5:1). He chooses each day the Levites who sing on the duchan, and the trumpets sound over the offerings at his word (Rambam KhM 7:5). Hugras knew an art of the song and would not teach it (Yoma 3:11); singing, he put his thumb in his mouth and a finger between the strings (Yoma 38b) — not shown' },
       doing: {
         libation: { cymbal: 'Striking the cymbal as the segan waves the flags — and the Levites begin the song', _: 'On the duchan, ready for the song' },
         'song-weekday': SING, 'song-friday': SING, 'song-shabbat': SING,

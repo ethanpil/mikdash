@@ -70,7 +70,8 @@ for (const e of EVENTS) {
   if (![1, 2, 3].includes(e.importance)) err(`${tag}: importance`);
   if (!LAYERS.has(e.layer)) err(`${tag}: layer`);
   if (e.offerings !== undefined && !(Array.isArray(e.offerings) && e.offerings.length && e.offerings.every((o) => OFFERING_TYPES[o]))) err(`${tag}: offerings ${e.offerings} (ids of OFFERING_TYPES in src/data/offerings.js)`);
-  const extra = Object.keys(e).filter((k) => !['id', 'title', 'dayTypes', 'when', 'timing', 'zone', 'pos', 'view', 'summary', 'description', 'participants', 'sources', 'sounds', 'choreo', 'importance', 'layer', 'offerings', 'byDay', 'occasion', 'byOccasion'].includes(k));
+  const extra = Object.keys(e).filter((k) => !['id', 'title', 'dayTypes', 'when', 'timing', 'zone', 'pos', 'view', 'summary', 'description', 'participants', 'sources', 'sounds', 'choreo', 'importance', 'layer', 'offerings', 'byDay', 'occasion', 'byOccasion', 'onWeekday'].includes(k));
+  if (e.onWeekday !== undefined && !(Number.isInteger(e.onWeekday) && e.onWeekday >= 0 && e.onWeekday <= 4 && e.dayTypes?.join() === 'weekday')) err(`${tag}: onWeekday ${e.onWeekday} (0–4, with dayTypes ['weekday'])`);
   if (extra.length) err(`${tag}: unexpected keys ${extra}`);
   const BS2 = String.fromCharCode(10, 10);
   // byDay: { [dayType]: { summary?, description?, sounds? } } — that day type's own text (eventsFor returns it)

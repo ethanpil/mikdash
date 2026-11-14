@@ -33,6 +33,9 @@ const overlaps = (rs) => { for (let i = 0; i < rs.length; i++) for (let j = i + 
 /** a fresh context; opts.fresh: no stored settings; init(page) before load; enter: dismiss the Welcome */
 async function boot(name, ctxOpts, { enter = true, query = '', init = null } = {}) {
   const context = await browser.newContext(ctxOpts);
+  // a loaded machine with software rendering: Playwright's "stable" wait (two equal boxes on consecutive frames) can take
+  // far longer than its 30 s default (ux-audit: the desktop profile aborted at the first rail click)
+  context.setDefaultTimeout(180000);
   const page = await context.newPage();
   page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(`[${name} ${m.type()}] ${m.text()}`); });
   page.on('pageerror', (e) => logs.push(`[${name} pageerror] ${e.message}`));
@@ -90,11 +93,14 @@ try {
       check('Welcome at 1280×720 and 1366×768: "Enter the courts" is in view', [cta1, cta2].every((c) => c.t >= 0 && c.b <= c.vb && c.b <= c.ih), JSON.stringify({ cta1, cta2 }));
       check('boot: the sleeping quick chips are out of the Tab order, and already labelled', await ev(() => [...document.querySelectorAll('.mk-qchip')].every((c) => c.tabIndex === -1) && /hour/.test(document.querySelector('.mk-qchip--hour').textContent)),
         JSON.stringify(await ev(() => [...document.querySelectorAll('.mk-qchip')].map((c) => `${c.tabIndex}:${c.textContent}`))));
-      // a rail tab beside the Welcome, then Close: the Welcome ends; nothing is left swallowing keys or picks
-      await page.click('.mk-tab[data-section=time]');
+      // the Welcome is its own panel: no rail, no header around it (ux-audit I)
+      check('the Welcome stands alone: the rail and the header are hidden', await ev(() => ['.mk-rail', '.mk-menu .mk-head'].every((q) => getComputedStyle(document.querySelector(q)).display === 'none')));
+      // a section opened during the Welcome (a module, a link), then Close: the Welcome ends; nothing is left swallowing
+      // keys or picks
+      await ev(() => __mikdash.ui.open('time', { from: 'nav' }));
       await page.waitForTimeout(400);
       const wr = await ev(() => ({ s: __mikdash.ui.console.state(), intro: document.getElementById('ui-root').classList.contains('mk-intro-open') }));
-      check('a rail tab during the Welcome ends it and opens that section', !wr.s.welcome && !wr.intro && wr.s.view?.type === 'section' && wr.s.view.id === 'time', JSON.stringify(wr));
+      check('a section opened during the Welcome ends it and opens that section', !wr.s.welcome && !wr.intro && wr.s.view?.type === 'section' && wr.s.view.id === 'time', JSON.stringify(wr));
       await page.click('.mk-head__close');
       await page.waitForTimeout(400);
       await ev(() => document.activeElement?.blur?.());
@@ -342,11 +348,17 @@ try {
       check('the Here filter narrows the list', nHere <= nAll, `${nAll} → ${nHere}`);
       await page.click('.mk-hap__filter [data-filter=all]');
       await page.waitForTimeout(400);
-      // the Go menu: way Instant becomes the default
-      await page.click('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-go__more');
+      // an event row's Go has no way / pace menu (ux-audit E: the pace lives in the travel bar); Show me is its gold action
+      check('event rows: Show me is the gold action, Go has no menu', await ev(() => { const r = document.querySelector('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn)'); return !!r && !r.querySelector('.mk-go__more') && r.querySelector('.mk-row__show').classList.contains('mk-btn--primary') && !r.querySelector('.mk-go__main').classList.contains('mk-btn--primary'); }));
+      // the Go menu (a card's): way Instant becomes the default, and the rows' Go uses it
+      await ev(() => __mikdash.ui.card('event:' + __mikdash.schedule.active().find((e) => !e.dynamic).id));
+      await page.waitForTimeout(500);
+      await page.click('.mk-cardview .mk-go__more');
       await page.click('.mk-gomenu [data-way=instant]');
-      check('the Go menu sets the default way (sticky)', await ev(() => __mikdash.settings.get('travelWay') === 'instant' && /Instant/.test(document.querySelector('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-go__sub').textContent)));
+      check('the Go menu sets the default way (sticky)', await ev(() => __mikdash.settings.get('travelWay') === 'instant' && /Instant/.test(document.querySelector('.mk-cardview .mk-go__sub').textContent)));
       await page.keyboard.press('Escape');
+      await ev(() => __mikdash.ui.open('happening'));
+      await page.waitForTimeout(400);
       const before = await ev(() => { const p = __mikdash.player.position; return [p.x, p.z]; });
       const bnBefore = await ev(() => JSON.stringify(__mikdash.ui.console.banners().slice(-1)[0] || null));
       const goTitle = await ev(() => document.querySelector('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-row__title, .mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-row__en')?.textContent || null);

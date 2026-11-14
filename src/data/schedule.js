@@ -159,7 +159,7 @@ const V = {
   avtinas: [212.75, 261.8, 36],        // inside Beit Avtinas
 };
 
-const DUCHAN_TEXT = `No fewer than twelve Levites stood on the duchan, with no upper limit (Arachin 2:6): harps (nevalim) two to six, lyres (kinnorot) nine or more, and a single cymbal (Arachin 2:3, 2:5). Levite boys joined the song by voice, "to add spice to the sweetness"; Rabbi Eliezer ben Yaakov says they stood on the ground, their heads between the Levites' feet (Arachin 2:6). At each section of the psalm the trumpeters blew a teki'ah and the people prostrated: for every section a teki'ah, for every teki'ah a prostration (Tamid 7:3).`;
+const DUCHAN_TEXT = `No fewer than twelve Levites stood on the duchan, with no upper limit (Arachin 2:6): harps (nevalim) two to six, lyres (kinnorot) nine or more, and a single cymbal (Arachin 2:3, 2:5). Levite boys joined the song by voice, "to add spice to the sweetness"; Rabbi Eliezer ben Yaakov says they stood on the ground, their heads between the Levites' feet (Arachin 2:6). At each section of the psalm the trumpeters blew a teki'ah and the people prostrated: for every section a teki'ah, for every teki'ah a prostration (Tamid 7:3). The officer over the song chose each day who stood on the duchan, and the trumpets sounded over the offerings at his word (Rambam KhM 7:5); the Mishnah's list of officers names Hugras ben Levi over the song (Shekalim 5:1) — shown standing at the south end of the duchan, singing.`;
 
 export const DAY_TYPES = ['weekday', 'friday', 'shabbat'];
 
@@ -183,6 +183,24 @@ export const EVENTS = [
     sources: ['Middot 1:9', 'Shekalim 5:1', 'Tamid 1:1'],
     sounds: ['keys', 'gate-boom'],
     choreo: 'locking-up',
+    importance: 2,
+    layer: 'ritual',
+  },
+  {
+    id: 'gates-shut',
+    title: { en: 'The Levites shut the gates', he: 'הגפת השערים' },
+    dayTypes: ALL,
+    when: { start: tzeit(0), end: tzeit(5.5) },
+    timing: { confidence: 'reconstruction', note: 'Middot 1:9 says only "when the time of locking came"; shown as the night watch takes its posts at nightfall, the Azarah\'s gates first, then the Mount\'s.' },
+    zone: 'nikanor',
+    pos: [261, 330.5, 13.5],
+    view: { at: V.nikanorLanding, heading: 289 },
+    summary: `At each gate the Levite of the night watch swings the leaves shut and bars them — the Levites are the gatekeepers.`,
+    description: `The Levites guard the Mikdash, and some of them are gatekeepers, "to open the gates of the Mikdash and to shut its doors" (Rambam KhM 3:2); they lock and open at the word of the officer over the locking of the gates (Rambam KhM 7:3) — in the Mishnah's list Ben Gever (Shekalim 5:1). At night Levites stand at the five gates of the Mount and the five of the Azarah (Middot 1:1).\n\nThe model shows each gate's Levite stepping aside as its leaves swing shut and barring them. The keys of the Azarah stay with the elders of the beit av in Beit HaMoked (Tamid 1:1), where a kohen locks from within (Middot 1:9). Tadi, the northern gate of the Mount, "served for nothing" (Middot 1:3) and is not opened at all.`,
+    participants: [{ role: 'guard_levi', count: 9, note: 'the night watch\'s Levite at each of the four open gates of the Mount and the five of the Azarah (Middot 1:1)' }],
+    sources: ['Rambam KhM 3:2', 'Rambam KhM 7:3', 'Shekalim 5:1', 'Middot 1:1', 'Middot 1:3', 'Middot 1:9', 'Tamid 1:1'],
+    sounds: ['gate-boom'],
+    choreo: 'night-watch',
     importance: 2,
     layer: 'ritual',
   },
@@ -347,6 +365,42 @@ export const EVENTS = [
     importance: 2,
     layer: 'ritual',
     offerings: ['olah', 'chatat', 'asham', 'shelamim', 'todah', 'bechor'],
+  },
+  {
+    id: 'altar-wiping',
+    title: { en: 'Friday: the altar wiped with a cloth because of the blood', he: 'מלבנים אותו במפה מפני הדמים' },
+    dayTypes: ['friday'],
+    when: { start: dayH(9.8), end: dayH(10.45) },
+    timing: { confidence: 'reconstruction', note: 'Every erev Shabbat (Middot 3:4, Rabbi); the hour is not given — shown after the day\'s last blood, the afternoon tamid\'s.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.yesod', f: [0.97, 0.97, 1] },
+    view: { at: [239, 346, 16], heading: 228 },
+    summary: `Kohanim with cloths wipe the altar's stones where the blood is thrown and poured — every Friday, by Rabbi's teaching.`,
+    description: `The stones of the ramp and of the altar were whitened twice a year, at Pesach and at Sukkot; "Rabbi says: every erev Shabbat they whiten it with a cloth because of the blood" (Middot 3:4). Bartenura reads Rabbi as adding to the first view, not disputing it: the whitewash twice a year, and every Friday they wiped the stones with a cloth because of the blood. The model shows Rabbi's Friday wiping, the twice-yearly whitewash being a festival matter.\n\nWho wiped, with how many cloths and at what hour, the sources do not say: a few kohanim are shown at the north-east and south-west corners and along the southern yesod, where an olah's blood is thrown and the remainders are poured (Zevachim 5:4), after the afternoon tamid. No iron touched the altar's stones (Middot 3:4).`,
+    participants: [{ role: 'kohen', count: 3, note: 'how many is not recorded' }],
+    sources: ['Middot 3:4', 'Bartenura on Middot 3:4', 'Zevachim 5:4'],
+    sounds: [],
+    choreo: 'temple-duties',
+    importance: 2,
+    layer: 'ritual',
+  },
+  {
+    id: 'kanim-out',
+    title: { en: 'Friday: the kanim drawn out of the showbread', he: 'שומטין את הקנים' },
+    dayTypes: ['friday'],
+    when: { start: dayH(10.5), end: dayH(10.75) },
+    timing: { confidence: 'reconstruction', note: '"From erev Shabbat" (Menachot 11:6); the hour is not given — shown after the afternoon service.' },
+    zone: 'heichal',
+    pos: { el: 'heichal.shulchan' },
+    view: { at: [135.6, 337.5, 22], heading: 271 },
+    summary: `A kohen goes into the Heichal and draws the twenty-eight golden reeds out from between the loaves, laying them along the table — their setting and removal do not override Shabbat.`,
+    description: `Twenty-eight kanim, each like half a hollow reed, lay between the loaves, fourteen to each stack, so the air would pass through the bread. "Neither the setting of the kanim nor their removal overrides Shabbat: rather he goes in on erev Shabbat, draws them out and lays them along the length of the table" (Menachot 11:6; Rambam TuM 5:11).\n\nThe hour is not given: the model shows one kohen going in after the afternoon service. That the kanim are laid along the table is not modelled: they are drawn out of the stacks and are not seen until they are put back after Shabbat.`,
+    participants: [{ role: 'kohen', count: 1 }],
+    sources: ['Menachot 11:6', 'Rambam TuM 5:11', 'Rambam TuM 5:2'],
+    sounds: [],
+    choreo: 'temple-duties',
+    importance: 1,
+    layer: 'halachic',
   },
   {
     id: 'friday-last-fats',
@@ -864,6 +918,24 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     layer: 'ritual',
   },
   {
+    id: 'gates-opened',
+    title: { en: 'The Levites open the gates', he: 'פתיחת השערים בידי הלוים' },
+    dayTypes: ALL,
+    when: { start: sunrise(-7.5), end: sunrise(-5) },
+    timing: { confidence: 'reconstruction', note: 'With the three blasts for the opening of the gates (Sukkah 5:5), which are blown only at the word of the officer over the locking (Rambam KhM 7:3); the hour is not given.' },
+    zone: 'nikanor',
+    pos: [261, 330.5, 13.5],
+    view: { at: V.nikanorLanding, heading: 289 },
+    summary: `As the trumpets sound for the opening of the gates, the Levite at each gate draws the bar and the leaves swing open — all but Tadi, which "served for nothing".`,
+    description: `Levites are the gatekeepers, "to open the gates of the Mikdash and to shut its doors" (Rambam KhM 3:2). The officer over the locking of the gates — Ben Gever in the Mishnah's list (Shekalim 5:1) — gives the word to lock and to open, and the trumpeters blow the three blasts for the opening only with his leave (Rambam KhM 7:3). The Levites of the night watch are standing at the five gates of the Mount and the five of the Azarah (Middot 1:1).\n\nTadi, the northern gate of the Mount, "served for nothing" (Middot 1:3) and stays shut; Rabbi Eliezer ben Yaakov has the kohen who became impure in the night go out by it, by the passage under the Chel (Middot 1:9). Which leaf first and how they were barred is not recorded: the model shows each Levite drawing the bar, stepping aside along the wall, and watching his gate swing open.`,
+    participants: [{ role: 'guard_levi', count: 9, note: 'the night watch\'s Levite at each of the four open gates of the Mount and the five of the Azarah (Middot 1:1)' }],
+    sources: ['Rambam KhM 3:2', 'Rambam KhM 7:3', 'Shekalim 5:1', 'Middot 1:1', 'Middot 1:3', 'Middot 1:9', 'Sukkah 5:5'],
+    sounds: ['gate-boom'],
+    choreo: 'night-watch',
+    importance: 2,
+    layer: 'ritual',
+  },
+  {
     id: 'great-gate',
     title: { en: 'The great gate of the Heichal opens', he: 'פתיחת השער הגדול' },
     dayTypes: ALL,
@@ -997,6 +1069,24 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     choreo: 'tamid-morning',
     importance: 2,
     layer: 'ritual',
+  },
+  {
+    id: 'ramp-salt',
+    title: { en: 'Salt strewn on the ramp so no one slips', he: 'זריקת מלח על גבי הכבש' },
+    dayTypes: ALL,
+    when: { start: sunrise(31.5), end: sunrise(35) },
+    timing: { confidence: 'ordering', note: 'With the salting of the limbs on the ramp (Rambam TuM 6:3) — shown as the nine leave it for the Shema; the minutes are reconstruction.' },
+    zone: 'kevesh',
+    pos: [221.5, 292, 20.6],
+    view: { at: [232, 286, 16], heading: 282 },
+    summary: `A kohen casts handfuls of salt over the ramp's walking surface, so the kohanim going up with the wood do not slip — on Shabbat too.`,
+    description: `The limbs are salted on the ramp, "and salt is thrown on the ramp, even on Shabbat, so that the kohanim do not slip and fall there when they go up with the wood to the pile; and though the salt is between their feet and the ramp, they do not mind it, since this walking is not a service" (Rambam TuM 6:3). The Mishnah lists it among what is permitted in the Mikdash on Shabbat: "they strew salt on the ramp so that they will not slip" (Eruvin 10:14).\n\nWho strewed it and when are not recorded: the model shows one kohen with salt in his hand walking up the ramp's east half and down its west, casting it, once the tamid's limbs are laid and salted and the nine have gone to the Shema.`,
+    participants: [{ role: 'kohen', count: 1, note: 'who did it is not recorded' }],
+    sources: ['Rambam TuM 6:3', 'Eruvin 10:14'],
+    sounds: [],
+    choreo: 'temple-duties',
+    importance: 1,
+    layer: 'halachic',
   },
   {
     id: 'gazit-shema',
@@ -1186,6 +1276,25 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     choreo: 'birkat-kohanim',
     importance: 3,
     layer: 'ritual',
+  },
+  {
+    id: 'kanim-in',
+    title: { en: 'Sunday: the kanim put back between the loaves', he: 'מכניס את הקנים בין החלות' },
+    dayTypes: ['weekday'],
+    onWeekday: 0,
+    when: { start: sunrise(78), end: sunrise(83) },
+    timing: { confidence: 'reconstruction', note: '"On the first day of the week" (Rambam TuM 5:11); the hour is not given — shown by day, after the morning incense and the blessing.' },
+    zone: 'heichal',
+    pos: { el: 'heichal.shulchan' },
+    view: { at: [135.6, 337.5, 22], heading: 271 },
+    summary: `After Shabbat a kohen goes into the Heichal and puts the twenty-eight golden reeds back between the loaves of the showbread.`,
+    description: `The kanim were drawn out of the bread on Friday, for neither setting them nor removing them overrides Shabbat (Menachot 11:6). "And on the first day of the week he goes in and puts the kanim back between the loaves" (Rambam TuM 5:11). The Mishnah says only how they were taken out; the day they went back is the Rambam's.\n\n"The first day of the week" could begin at nightfall on Saturday; the model shows it by day on Sunday, after the morning incense and the priestly blessing, when the Heichal is free. One kohen is shown; the hour is reconstruction.`,
+    participants: [{ role: 'kohen', count: 1 }],
+    sources: ['Rambam TuM 5:11', 'Menachot 11:6'],
+    sounds: [],
+    choreo: 'temple-duties',
+    importance: 1,
+    layer: 'halachic',
   },
   {
     id: 'limbs-up',
@@ -2086,6 +2195,24 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
 
   // ======================================================================================== THE AFTERNOON
   {
+    id: 'afternoon-call',
+    title: { en: 'The call before the afternoon tamid', he: 'הכרזה לתמיד של בין הערבים' },
+    dayTypes: ALL,
+    when: { start: dayH(7.95), end: dayH(8.05) },
+    timing: { confidence: 'reconstruction', note: 'The Rambam\'s rule: "when the time of the offering comes he cries out" (KhM 7:2). No text describes the afternoon call itself; its hour and place are reconstruction.' },
+    zone: 'fifteen-steps',
+    pos: [263, 330.5, 13.5],
+    view: { at: V.enNikanor, heading: 270 },
+    summary: `"Arise, kohanim, to the service; Levites, to the platform; Israel, to the ma'amad!" — the time of the afternoon offering is cried out.`,
+    description: `"The officer over the times and his men keep the times: when the time of the offering comes, he or one of his men with his leave cries out and says: Arise, kohanim, to the service, Levites to the platform, and Israel to the ma'amad — and when his voice is heard each one comes to his work" (Rambam KhM 7:2). The Mishnah names Gevini the crier among the officers (Shekalim 5:1), and the Gemara gives his cry at the dawn service (Yoma 20b).\n\nThe Rambam states a rule for every offering; no text describes the call before the afternoon tamid in itself. The model applies the rule: a Levite of the officer's men cries it from the head of the fifteen steps, where the dawn call is shown — the place and the hour are reconstruction, and he is not named.`,
+    participants: [{ role: 'levi', count: 1, note: 'one of the men of the officer over the times — not named' }],
+    sources: ['Rambam KhM 7:2', 'Shekalim 5:1', 'Yoma 20b'],
+    sounds: ['gevini'],
+    choreo: 'temple-duties',
+    importance: 2,
+    layer: 'ritual',
+  },
+  {
     id: 'afternoon-lottery',
     title: { en: 'A lottery for the afternoon incense', he: 'פייס לקטרת של בין הערבים' },
     dayTypes: WEEKDAYS,
@@ -2352,7 +2479,8 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
 // such a day; an ordinary event may carry `byOccasion: { 'rosh-chodesh': { when?, timing?, summary?, description?,
 // sounds? } }` — what changes on it that day (the individuals' offerings wait for the musaf; on Shabbat the showbread
 // follows both musafim). A byDay text of an occasion event may also give its `when` (the Shabbat Rosh Chodesh windows).
-// eventsFor(dayType, time) reads time.occasions (none when no time is given: the ordinary day, as before); on an
+// eventsFor(dayType, time) reads time.occasions and time.weekday (`onWeekday`: an event of one civil weekday only — none
+// without a time) (no occasions when no time is given: the ordinary day, as before); on an
 // ordinary day every event is returned exactly as before.
 export const OCCASIONS = ['rosh-chodesh'];
 const DAY_COPIES = new Map();
@@ -2372,6 +2500,9 @@ function onDay(ev, dayType, occ) {
  */
 export function eventsFor(dayType, time) {
   const occ = Array.isArray(time?.occasions) ? time.occasions.filter((k) => OCCASIONS.includes(k)) : [];
-  return EVENTS.filter((e) => (!e.dayTypes || e.dayTypes.includes(dayType)) && (!e.occasion || occ.includes(e.occasion)))
+  // an event of one civil weekday (`onWeekday`: 0 = Sunday — the kanim put back after Shabbat) only when time says so
+  const wd = Number.isInteger(time?.weekday) ? time.weekday : null;
+  return EVENTS.filter((e) => (!e.dayTypes || e.dayTypes.includes(dayType)) && (!e.occasion || occ.includes(e.occasion))
+    && (!Number.isInteger(e.onWeekday) || e.onWeekday === wd))
     .map((e) => onDay(e, dayType, occ));
 }

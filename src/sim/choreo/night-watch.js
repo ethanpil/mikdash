@@ -29,6 +29,7 @@ import { m2w, AMAH } from '../../core/units.js';
 import { DEFAULT_OFFSET_FROM_ALOT } from '../../time/index.js';
 import { mokedPlaces } from './g1/places.js';
 import { nightWatch as inspectHooks } from './describe/dawn.js';
+import { gateTimes } from './gates.js';
 
 const SEED = 0x6e77;
 const PATROL_SPEED = 1.15;         // m/s — a measured round ⚙
@@ -649,6 +650,9 @@ function guards(ctx, state, sim, t, P, O, incPost) {
     }
     let X = p.X, Y = p.Y;
     if (aside && p === incPost) { const r = (p.face * Math.PI) / 180; X += Math.sin(r) * 1.5; Y += Math.cos(r) * 1.5; }
+    // the gatekeeper's duty: he opens his gate at dawn and shuts it at the locking (gateDuty)
+    const D = gateDuty(ctx, state, sim, p, t);
+    if (D) { g.placeNear(D.X, D.Y, p.Z).heading(D.h).pose(D.pose, D.ph).show(); continue; }
     let h = p.face + 16 * state.sway[i](since(t, swayFrom));
     if (O && !O.gate) {
       const dist = Math.hypot((O.X - X) * AMAH, (O.Y - Y) * AMAH);
@@ -656,6 +660,57 @@ function guards(ctx, state, sim, t, P, O, incPost) {
     }
     g.placeNear(X, Y, p.Z).heading(((h % 360) + 360) % 360).pose('stand').show();
   }
+}
+
+// the Levite posts at the gates (Middot 1:1) → the gate each keeps (Tadi is never opened — gates.js MOUNT)
+const GATE_OF = {
+  'gate-shushan': 'mount.gate.shushan', 'gate-chuldah-e': 'mount.gate.chuldah-e', 'gate-chuldah-w': 'mount.gate.chuldah-w', 'gate-kiponus': 'mount.gate.kiponus',
+  'gate-nikanor': 'azarah.gate.nikanor', 'gate-mayim': 'azarah.gate.mayim', 'gate-bechorot': 'azarah.gate.bechorot', 'gate-delek': 'azarah.gate.delek', 'gate-korban': 'azarah.gate.korban',
+};
+const ASIDE = 6.2;          // amot along the wall from his post while the leaves swing (a leaf is 5 amot) ⚙
+const BAR = 0.4;            // minutes at the bar or lock: before the opening, after the shutting ⚙
+const STEP = 0.15;          // minutes to step aside and back ⚙
+/**
+ * Levites are the gatekeepers "to open the gates of the Mikdash and to shut its doors" (Rambam KhM 3:2), at the word of
+ * the officer over the locking (KhM 7:3; Shekalim 5:1 "בֶּן גֶּבֶר עַל נְעִילַת שְׁעָרִים"): the watch's Levite at each gate
+ * (Middot 1:1) draws the bar, steps aside along the wall and watches the leaves swing open as the trumpets sound
+ * (gates.js times them) — and at the locking steps aside as they swing shut, then bars them ⚙. The keys stay with the
+ * elders of the beit av (Tamid 1:1). Returns { X, Y, h, pose, ph } while on duty, else null.
+ */
+function gateDuty(ctx, state, sim, p, t) {
+  const id = GATE_OF[p.id];
+  if (!id) return null;
+  if (state.gateGen !== sim.generation) { state.gateGen = sim.generation; state.gateT = gateTimes(ctx, sim); }
+  const G = state.gateT?.[id];
+  if (!G) return null;
+  const b = ctx.elOpt?.(id)?.box;
+  if (!b) return null;
+  const cx = (b.min[0] + b.max[0]) / 2, cy = (b.min[1] + b.max[1]) / 2;
+  const alongX = (b.max[0] - b.min[0]) > (b.max[1] - b.min[1]);      // the wall (and the leaves' line) runs along X
+  const face = headingTo(p.X, p.Y, cx, cy);
+  const aside = (k) => (alongX ? [p.X + ASIDE * k, p.Y] : [p.X, p.Y + ASIDE * k]);
+  // in the Chuldah passages (below the Mount's floor) there is no wall to stand along: back up the passage instead
+  const inward = () => { const dx = p.X - cx, dy = p.Y - cy, L = Math.hypot(dx, dy) || 1; return [p.X + (dx / L) * ASIDE, p.Y + (dy / L) * ASIDE]; };
+  const A = p.Z < -1 ? inward() : aside(1);
+  const opening = [wrap(G.tOpen - BAR - STEP), wrap(G.tOpen + G.swing + STEP)];       // bar, aside, swing, back
+  const shutting = [wrap(G.tClose - STEP), wrap(G.tClose + G.swing + STEP + BAR)];
+  const mv = (u, from, to) => [from[0] + (to[0] - from[0]) * u, from[1] + (to[1] - from[1]) * u];
+  if (within(t, opening[0], opening[1])) {
+    const s = since(t, opening[0]);
+    if (s < BAR) return { X: p.X, Y: p.Y, h: face, pose: 'lock' };                       // the bar drawn
+    if (s < BAR + STEP) { const q = mv((s - BAR) / STEP, [p.X, p.Y], A); return { X: q[0], Y: q[1], h: face, pose: 'walk' }; }
+    if (s < BAR + STEP + G.swing) return { X: A[0], Y: A[1], h: headingTo(A[0], A[1], cx, cy), pose: 'stand' };
+    const q = mv(clamp((s - BAR - STEP - G.swing) / STEP), A, [p.X, p.Y]);
+    return { X: q[0], Y: q[1], h: face, pose: 'walk' };
+  }
+  if (within(t, shutting[0], shutting[1])) {
+    const s = since(t, shutting[0]);
+    if (s < STEP) { const q = mv(s / STEP, [p.X, p.Y], A); return { X: q[0], Y: q[1], h: face, pose: 'walk' }; }
+    if (s < STEP + G.swing) return { X: A[0], Y: A[1], h: headingTo(A[0], A[1], cx, cy), pose: 'stand' };
+    if (s < 2 * STEP + G.swing) { const q = mv((s - STEP - G.swing) / STEP, A, [p.X, p.Y]); return { X: q[0], Y: q[1], h: face, pose: 'walk' }; }
+    return { X: p.X, Y: p.Y, h: face, pose: 'lock' };                                     // and barred
+  }
+  return null;
 }
 
 function walkGuard(ctx, state, g, gp, d, out) {

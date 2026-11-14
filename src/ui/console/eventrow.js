@@ -78,7 +78,8 @@ export function eventRow(app, ev, opts = {}) {
   // travel defaults; the pace lives in the travel bar) beside them. ≈ 50–70 px a row instead of 133.
   const hit = h('button.mk-row__hit', { type: 'button', title, 'aria-label': `${title}${zoneName ? `, ${zoneName}` : ''}. Open its card`, on: { click: () => app.card(`event:${ev.id}`) } },
     h('span.mk-row__top', importance(ev.importance), h('span.mk-row__title', title)),
-    h('span.mk-row__meta', opts.place !== false && zoneName ? h('span.mk-row__place', zoneName) : null, relEl,
+    // the time first: on a narrow row the place is what gets cut, not "now · 9 min left"
+    h('span.mk-row__meta', relEl, opts.place !== false && zoneName ? h('span.mk-row__place', zoneName) : null,
       ev.layer === 'aggadah' ? h('span.mk-badge', { title: 'Aggadah: the narrative and miracle traditions' }, 'Legend') : null,
       ev.title?.he && !ev.dynamic ? he(ev.title.he, 'mk-row__he') : null));
   const go = app.travel.control(() => app.travel.goEvent(ev), { small: true, primary: false, menu: false });

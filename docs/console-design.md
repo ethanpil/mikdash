@@ -214,9 +214,9 @@ Three engineers build it in parallel (§6):
 | Enter | Dismiss the intro; Go on the map; set the clock on an arc | Activates the focused control. On a map selection: Go. Arcs: open the event card |
 | Tab | Trapped in modals | Standard. Trapped only in full-screen phone sheets (`aria-modal`) |
 | Click scene, locked | Nothing | **Inspect at the reticle** |
-| Click scene, free | Lock the pointer | Inspect when over a subject; else lock |
+| Click scene, free | Lock the pointer | Inspect when over a person, animal or thing; on structure (walls, gates, chambers, stairs, floors) or empty scenery, lock (ux-audit C) |
 | Mouse look during a guided walk | **Cancelled the walk** | Looks around freely; the walk continues (§4.3) |
-| Touch tap on the world | Nothing | Inspect; on empty scenery, wake the beacon |
+| Touch tap on the world | Nothing | Inspect a person, animal or thing; on structure, wake the beacon and show its **name chip** (a tap on it opens the card, 6 s); on empty scenery, wake the beacon (ux-audit C) |
 | Two-finger tap | Run / walk | Unchanged |
 | Pad X | — | Inspect |
 | Pad Start / View | — | Menu / Map |
@@ -459,6 +459,12 @@ SOURCES 3 ›
 [▸ Show me: hands and feet sanctified (now)] [Go ▸ Walk·1×] [Map] [Learn ›]
 ```
 
+A card's see-in-action buttons use one verb (ux-audit D): **"Show me: <what>"** with the timing under it ("now · ≈1 h
+14 left", "begins in 11 min · skips ahead", "moves the clock to ≈05:59, 1 h 22 ahead", "turns the clock back to ≈03:52");
+"From the start" keeps its own words. A clock jump of more than an hour is never the gold primary (Go takes it). On Here,
+the card of the place you stand in drops its title block (the header names the place) and its type chip reads "Where you
+are" (ux-audit G). The phone's section strip is one row: disc, names, About, the clock.
+
 Place, event, offering, term and role cards share the skeleton:
 
 - a **type chip**;
@@ -528,7 +534,7 @@ Place, event, offering, term and role cards share the skeleton:
 |---|---|---|---|
 | 10 | ⌂ **Here** | The **place card** for `zones.current`. It follows you unless pinned. Order: Happening here (≤ 3, then "All in Happening ›"); **Things here** (element chips, `ctx.inspect.thingsIn`); **Nearby** (subjects within 15 m with bearing words, `ctx.inspect.nearby`); Who may enter (lead + more); What is done here; About; Sources (count chip); "Also here" storeys; [Go to this place's stand] | Info panel, the location-card click, the ⓘ tool, the map card's About |
 | 20 | ✦ **Happening** | Filter: **Everywhere · Here · Near me (≤ 60 m)** plus an Aggadah chip when that layer is on. "Now", grouped by area with counts. Dynamic offering groups collapse to "7 individual offerings at the rings · **Show me one ▸**" and expand to instance rows. "Next" (6). Every row is the single **event row** | The Time panel lists; the floating-tag destination; the map's "Happening now" group; Info's "Happening here" |
-| 30 | ▦ **Map** | The existing map code (plan, labels, view, presets, zoom, scale bar, live fills and markers, route line, double-click/Enter = Go). The places list becomes a browse list with **no input**; the header search filters it with the Places scope. Legend → a labelled **Key** toggle, visible on phones. The phone's initial view is fitted (no empty top band). The selection uses the shared card plus the map extras ("This spot", "No floor to stand on here") | The Map modal |
+| 30 | ▦ **Map** | The existing map code (plan, labels, view, presets, zoom, scale bar, live fills and markers, route line, double-click/Enter = Go). The places list becomes a browse list with **no input**; the header search filters it with the Places scope. Legend → a labelled **Key** toggle on every layout, closed by default; each active area's label carries its headline rite's short title (a count badge only when more than one); a Go from the dock's Map returns the Menu to its dock width (ux-audit H, F). The phone's initial view is fitted (no empty top band). The selection uses the shared card plus the map extras ("This spot", "No floor to stand on here") | The Map modal |
 | 40 | ◔ **Time** | The dial (arcs and handle; keys unchanged), transport (−1 seasonal hour, ❚❚, +1; 1× 10× 60× 600×), the date row, the zman buttons, "How the hours are counted" (the **single home** of that explanation). An arc click or Enter → the **event card** under the dial (Go, Show me, "Set clock to start") | The Time panel without its lists |
 | 50 | ❡ **Learn** | The codex, with sections: Places · Rites & events (today, and other day types read-only) · People (roles) · Things (objects with content) · Offerings (`OFFERING_TYPES`) · **Words** (the 347 glossary terms, A–Z and א–ת) · How to read (badges, the **sanctity ladder** in full, a link to Time's hours) · Method · Where the sources differ (12) · The amah · Credits & licences. Every entry is a card (`describe(ref)`) | About; the unused glossary; Info's sources |
 | 60 | ♪ **Listen** | Volume; Sound on/off; **Subtitles**; Music style; **Recent captions** (the last 50, each with ≈time and source, tap = replay text); the module slot "Narration" (only when a module registers) | Settings → Sound |
@@ -542,7 +548,10 @@ a key or a card goes to that section.
 
 - the importance diamonds, the title, the Hebrew;
 - the place, "now · 12 min left" or "in 14 min", and a progress bar;
-- **exactly two buttons: [Go ▸] and [Show me ▸]**.
+- **exactly two buttons: [Show me ▸] (gold, the primary) and [Go ▸]** (the travel defaults, no way/pace menu: the
+  pace lives in the travel bar). Compact: the title on one line in the dock (two on phones), then "now · 9 min left ·
+  place · Hebrew" on one line; ≥ 5 rows in view in the dock and 3 at the phone's peek. Happening sorts the headline rite
+  first within an area and the area with it first (ux-audit E).
 
 A click on the row opens the event card. The per-row `<select>` and "Start" are removed.
 
@@ -648,7 +657,8 @@ travel vignette stays, because it reduces motion sickness.
 
 ### 3.9 First run and returning users
 
-**First run.** Shown when `localStorage mikdash.seen` is missing. The Menu opens in the **Welcome** state: a docked
+**First run.** (ux-audit I: the Welcome is its own panel — no rail, header or drill bar around it — and its essentials
+line follows the device.) Shown when `localStorage mikdash.seen` is missing. The Menu opens in the **Welcome** state: a docked
 panel on desktop (the world visible beside it), the full sheet on phones. It contains:
 
 - מקדש / Mikdash;

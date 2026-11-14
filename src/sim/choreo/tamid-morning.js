@@ -51,7 +51,11 @@ const hooks = describeWith({
       phrase: 'one of the two sent to bring a lamb from the lamb chamber', sub: (who) => who.index,
       doing: {
         'lamb-brought': { 0: 'Choosing an inspected lamb in the lamb chamber of Beit HaMoked and leading it out to the court', _: 'With him at the lamb chamber' },
-        'lamb-watered': { 0: 'Holding the lamb on its rope at the watering', _: 'Going back to Lishkat HaGazit' },
+        // by his pose: on the rope until he hands the lamb over at the watering, then back (UX audit)
+        'lamb-watered': {
+          0: (ctx, state, who) => { const p = who.slot?.actor?.poseName || who.slot?._pose || ''; return /^lead/.test(p) ? 'Holding the lamb on its rope at the watering' : /walk/.test(p) ? 'Going back to Lishkat HaGazit, the lamb handed over' : 'Handing the lamb over at the watering'; },
+          _: 'Going back to Lishkat HaGazit',
+        },
       },
     },
     'vessel-bearers': { phrase: 'one of the kohanim bringing out the vessels', doing: { vessels: 'Bringing the ninety-three vessels of silver and gold out of Lishkat HaKelim' } },

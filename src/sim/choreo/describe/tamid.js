@@ -30,7 +30,12 @@ export function crewDoing(corner) {
   const slaughter = {
     S: `Slaughtering the lamb at the ${corner} corner, on the second ring — he stands on its east, facing west`,
     R: 'Receiving the blood in a silver basin as the lamb is slaughtered',
-    _: L(() => 'Holding the lamb — not tied but bound, its head to the south and its face to the west'),
+    // only the two who kneel at it hold it (pose hold_legs); the others stand back until the flaying (UX audit: a man
+    // standing was labelled "Holding the lamb")
+    _: (ctx, state, who, t, ev, sub) => (String(sub).startsWith('L')
+      ? (/^hold_legs/.test(who.slot?.actor?.poseName || who.slot?._pose || '') ? 'Holding the lamb — not tied but bound, its head to the south and its face to the west'
+        : `Standing by at the slaughter; he will receive ${part(sub)} at the flaying`)
+      : null),
   };
   const blood = {
     R: 'Putting the blood on the altar: at the north-east corner and at the south-west, each throw on two sides; the rest poured on the southern yesod',

@@ -8,7 +8,7 @@
 // brother 12). The lambs come up the flight of Sha'ar HaKorban (Middot 1:5), led by two Levites ⚙, just before the
 // window, so they stand at the rings with the crew from its start; slaughter at two rings of the second row, both bloods
 // by the same receiver, flaying at two dwarf pillars,
-// the parts on the lower half of the ramp on its west side (Shekalim 8:8), salted, up onto the great pile, then the
+// the parts on the lower half of the ramp on its east side (Rambam TuM 6:3), salted, up onto the great pile, then the
 // flour mixed with oil; the wine at the south-west horn. The plan is g6/musaf.js (pure function of the date).
 //
 // The song (RH 31a: Ha'azinu in six sections, הזי"ו ל"ך, one each Shabbat) with nine blasts (Sukkah 5:5) is the
@@ -31,7 +31,7 @@ const TEXT = {
   brought: { en: 'Shabbat musaf: two yearling lambs without blemish (Bamidbar 28:9), brought in through Sha\'ar HaKorban (Middot 1:5) — by which, the commentators say, the most-holy offerings came in — wait at the rings', he: 'וּבְיוֹם הַשַּׁבָּת שְׁנֵי כְבָשִׂים בְּנֵי שָׁנָה תְּמִימִם' },
   cut: { en: 'The morning\'s winners serve the musaf too — whoever won a task at the tamid does it for the two musaf lambs: the same slaughterer, the same receiver of the blood (Rambam TuM 4:9)', he: 'כָּל שֶׁזָּכָה בַּעֲבוֹדָה מֵעֲבוֹדַת הַתָּמִיד שֶׁל שַׁחַר הוּא זוֹכֶה בָּהּ בִּשְׁנֵי כִּבְשֵׂי מוּסָף' },
   blood: { en: 'An olah: its blood is thrown at the north-east corner and at the south-west, below the red line — two gifts that are four (Zevachim 5:4)', he: 'שְׁתֵּי מַתָּנוֹת שֶׁהֵן אַרְבַּע' },
-  laid: { en: 'The musaf limbs are laid on the lower half of the ramp, on its west side, and salted (Shekalim 8:8)', he: 'וְשֶׁל מוּסָפִין נִתָּנִין מֵחֲצִי כֶבֶשׁ וּלְמַטָּה בַּמַּעֲרָב' },
+  laid: { en: 'The musaf limbs are laid on the lower half of the ramp, on its EAST side — the tamid\'s lie on its west — and salted (Rambam TuM 6:3)', he: 'וְשֶׁל מוּסָפִין הָיוּ נוֹתְנִין אוֹתָן מֵחֲצִי כֶּבֶשׁ וּלְמַטָּה בְּמִזְרָחוֹ' },
   up: { en: 'Up onto the fire: the limbs of the two lambs, then their fine flour mixed with oil — two tenths of an ephah (Bamidbar 28:9)', he: 'וּשְׁנֵי עֶשְׂרֹנִים סֹלֶת מִנְחָה בְּלוּלָה בַשֶּׁמֶן' },
 };
 

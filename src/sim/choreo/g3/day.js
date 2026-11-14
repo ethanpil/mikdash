@@ -13,7 +13,7 @@ export const POOLS = {
   brothers: { role: 'kohen', count: 18, seed: 0x6734, importance: 2 },
   segan: { role: 'segan', count: 1, seed: 0x7367, importance: 3 },      // = tamid-morning's segan (Shabbat hand-over)
   kg: { role: 'kohen_gadol', count: 1, seed: 0x6b67, importance: 3 },   // = tamid-morning's Kohen Gadol
-  levites: { role: 'levi', count: 12, seed: 0x6735, importance: 3 },
+  levites: { role: 'levi', count: 13, seed: 0x6735, importance: 3 },      // g3/song.js LEVITES: twelve and the officer
   boys: { role: 'levi_boy', count: 4, seed: 0x6736, importance: 2 },
 };
 // servers: F friend (am) · M memuneh · I2 incense (pm) · F2 friend (pm) · T1/T2 trumpeters (pm) · W2 wine (pm) · P2 pan · B2 menorah (Shabbat pm)

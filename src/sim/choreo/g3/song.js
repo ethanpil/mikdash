@@ -31,6 +31,9 @@ export const LEVITES = [
   { dy: -3.2, inst: 'kinnor' }, { dy: 3.2, inst: 'kinnor' }, { dy: -4.8, inst: 'nevel' }, { dy: 4.8, inst: 'nevel' },
   { dy: -6.4, inst: 'kinnor' }, { dy: 8.6, inst: 'kinnor' }, { dy: -8.0, inst: 'kinnor' }, { dy: 10.2, inst: 'kinnor' },
   { dy: -9.6, inst: 'kinnor' }, { dy: 11.8, inst: 'kinnor' }, { dy: 13.4, inst: 'kinnor' },
+  // the officer over the song (Shekalim 5:1 "הֻגְרַס בֶּן לֵוִי עַל הַשִּׁיר"; Rambam KhM 7:5: he chooses each day who sings on
+  // the duchan, and the blasts over the offerings are at his word) at the south end, singing by mouth, no instrument ⚙
+  { dy: -11.2, inst: 'officer' },
 ];
 const BOYS = [-2.4, 2.4, -5.6, 9.4];
 const TRUMP_DY = [1.6, -1.6];          // at his right and at his left (he faces west: right = north)
@@ -148,7 +151,7 @@ export function buildSession(ctx, P, W, D, o) {
     const side = dy >= 0 ? 'N' : 'S';
     const m = P.music[side];
     const react = 0.01 + 0.05 * rand(SEED, boy ? 'br' : 'lr', i, o.key);
-    const inst = boy ? null : LEVITES[i].inst;
+    const inst = boy || LEVITES[i].inst === 'officer' ? null : LEVITES[i].inst;
     // a lyre hangs in the left hand; played, the clip holds it in the left (people draws the right-hand prop there)
     const props = inst === 'cymbal' ? ['cymbal', 'cymbal'] : inst ? [null, inst] : [null, null];
     const playing = inst && inst !== 'cymbal' ? [inst, null] : props;

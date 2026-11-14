@@ -46,6 +46,14 @@ export const TOP1 = [
 ];
 
 export const TOP3 = [
+  // everyday English (the UX audit: engine.js SYNONYMS, expandQuery)
+  ['sacrifice', ['offering:olah', 'term:korban', 'term:olah', 'term:tamid', 'event:tamid-slaughter', 'event:tamid-afternoon', 'event:meal-offerings', 'event:maamad-morning']],
+  ['singing', ['el:azarah.duchan', 'event:song-weekday', 'term:duchan']],
+  ['music', ['setting:musicStyle', 'zone:music-chambers', 'el:en.music-chambers', 'event:song-weekday']],
+  ['where do women stand', ['zone:ezrat-nashim', 'zone:en-gallery', 'event:women-court']],
+  ['bread', ['el:heichal.shulchan', 'term:shulchan', 'event:chavitin-bakers']],
+  ['incense', ['term:ketoret', 'el:heichal.mizbach-hazahav', 'zone:beit-avtinas']],
+  ['priest', ['role:kohen', 'term:kohen']],
   ['נקנור', ['zone:nikanor', 'el:azarah.gate.nikanor']],
   ['ניקנור', ['zone:nikanor', 'el:azarah.gate.nikanor']],
   ['holy of holies', ['zone:kodesh-hakodashim', 'term:kodesh hakodashim']],

@@ -281,3 +281,59 @@ idle machine, or give that suite a longer action timeout, before reading anythin
   click key type ui logs`; `-e "__quit"` stops it). `steps/lib.js` adds `clickText`, `rectOf`, `viewText`.
 - Use mouse/touch coordinates, not `page.click(selector)`: Playwright's actionability waits time out on this machine.
   `page.setDefaultTimeout(600000)` first: screenshots take 30–120 s here.
+
+## Phase 2 — what was changed
+
+Every fix is in `src/ui/**`, except one minimal change in `src/sim/inspect-show.js` (see B). Before shots are phase 1's
+`shots/ux/desk-*.png` / `phone-*.png`; after shots are in `shots/ux/after/` with the same name, same device, same state.
+
+- **A. The travel bar leaves the map when the map stops covering the world** — `mappanel.js syncTrip` hosts the bar in
+  the map only while `app.fullScreen()`; `console.js fullScreen()` no longer counts a phone's portrait Map at its mini
+  detent as full screen (the Map is `is-wide` there too); `app.onFree` re-syncs on every detent change. Player input is
+  locked by the Map only while it covers the world, so the walk can be stopped by the joystick too. — Alternative: a second
+  bar (the duplication console-ui.md removed).
+- **B. Show me on a phone drops the sheet to mini first** (`app.onShowStart`, called by `go.js runAction` before
+  `seeInAction`), so the director frames in the strip of world it then reads from `viewInset`. A world pick during a show
+  is framed too (`app.js scheduleFrame` no longer stands aside in the `showing` phase), and on sheets the subject's chest
+  is checked as well as the tap point. **`src/sim/inspect-show.js` (the brief's one exception):** the "stand-in at your
+  feet" branch set pitch 0 and ignored the inset; it now uses `insetPitch()` (the same offset `lookAt` already applies).
+  Nothing else there changed. — Alternative: the sheet stays at peek and the director pans (it cannot: a peek leaves 44 %).
+- **C. Structure is scenery for a free click / tap** (`pickui.js`): site kinds wall, gate, chamber, stair, slab, opening,
+  ramp, floor, zone (from `ctx.site.elements[id].kind`; fixtures, curtains and fires stay subjects) and the bare place.
+  Desktop: hover names it in a muted tooltip with no pointer cursor and does not block the lock filter, so a click
+  captures the mouse (measured: `el:en.wall.east` click → pointer locked, no card). Touch: a tap wakes the beacon and
+  shows a 44 px name chip ("Ezrat Nashim wall — east (low) ›") for 6 s; tapping it opens the card. E, an aimed click,
+  pad X and Nearby still open structure directly. Help → controls (touch and mouse rows) reworded. — Alternative: ask the
+  inspect core for a `structural` flag (not needed: the element kind is on `ctx.site`).
+- **D. One verb for see-in-action** (`card.js showWords`): "Show me: <what>" (the core's `a.what`, its "Title: subtitle"
+  cut at the colon, "the" lower-cased) with the timing as a sub-line derived from the action's id suffix
+  (now/start/warp/later/rewind/tomorrow/another) and `a.t`/`a.date`; a jump over 60 min is never gold (Go takes it).
+- **E. Compact event row** (`eventrow.js`, `go.js control({ menu: false })`, `happening.js`, css): Show me gold and
+  first, Go plain without the way/pace menu; meta line "now · 9 min left · place · Hebrew" (time first so it is the place
+  that gets cut); dock: one title line (full title as tooltip), icon-less buttons; phones: area headings hidden, the place
+  on the row instead. Happening: headline (importance) first within an area, areas by their top importance then count.
+  Measured: desktop 5 rows in view (53 px each, was 2½ at 133 px); phone peek 3 rows (was 1). "Aggadah" filter →
+  "Legends" (tooltip keeps the term).
+- **F. Arrival faces what you came for** (`go.js faceOnArrival`): an event trip calls `ctx.inspect.frame(showAction)`
+  (else turns to `data.eventPos`); a place trip turns to the place's centre when it is > 4 m away, else to the most open
+  of 16 level directions (one `ctx.physics.raycast` each, once). Any look/move input cancels the turn. A Go from the
+  dock's Map returns the Menu to the section before the Map (`app.onTripStart`, `console.prevSection`). The travel bar's
+  "Walking to watch: The …" is now "Walking to the …".
+- **G. Phone header**: a section's strip is one row (disc 44 px, names, About, the civil time); the home header is two
+  rows; civil time is shown first everywhere, the seasonal hour under it (desktop) or on the Time tile. Here: the card of
+  the place you stand in hides its title block (sr-only) and its type chip reads "Where you are". The Back chip's long life
+  (10 min in the header) is the spec's intent (§4.1 step 6), not a bug: kept; the phone's Show chip now reads "Back to
+  04:37" (the place moved to its title) so "Showing: …" is no longer squeezed to one word.
+- **H. Map**: the legend is behind the Key chip on every layout (closed by default; Esc closes it); each active area's
+  label carries its headline rite's short title (at any zoom, where it fits) and a count badge only when > 1; the
+  selection card's growth (rows arriving) re-measures the controls and keeps the selected place in view (phone's Me
+  button: zoom bottom 411 px, card top 427 px — no longer under it). Marker labels flip to the left of their diamond
+  where the right would run under the Menu (real width, measured), and the pick tooltip is clamped to the free area.
+- **I. Cheap ones**: coarse targets ≥ 44 px for `.mk-seg` buttons, the map card's Clear and "All ›"; What's new hidden
+  unless `welcome.versionChanged`; the desktop coach mark moves under the wake row while it is awake; the rail lights a
+  section only while that section is the view shown; the Welcome is its own panel (rail, header, drill bar hidden; 2
+  controls instead of 15 on desktop, 2 instead of 7 on the phone) with a per-device essentials line
+  (`controls.js essentialsFor`); the travel bar on fine pointers shows Slower · 1× · Faster instead of five pills plus
+  Slower/Faster (touch keeps the pills).
+- **Not done** (brief): findings 10 (the dial's "11") and 16 / the "0 hour" bug — they live in `timepanel.js` /
+  `format.js`, which another agent owns now. Glosses for transliterated names on map labels/rows were not added.
