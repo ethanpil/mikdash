@@ -113,8 +113,7 @@ export async function build(ctx) {
   if (UV_SCALE !== 1) { const uv = grid.attributes.uv.array; for (let i = 0; i < uv.length; i++) uv[i] *= UV_SCALE; }
   // render tiles (index ranges of the grid: small tiles near the Mount where the cells are fine)
   const nTiles = detail === 0 ? 2 : detail === 1 ? 3 : 4;
-  // (perf-cpu round 2: cells round the Mount for the ground were tried on medium — world/sectors.js splitIndexedByCell —
-  // and dropped: with it the Azarah view drew 53 more calls, and the pre-pass's terrain (ground and city batches) fell
+  // (perf-cpu round 2: cells round the Mount for the ground were tried on medium and dropped: with it the Azarah view drew 53 more calls, and the pre-pass's terrain (ground and city batches) fell
   // only 242 k → 204 k triangles — most of the ground there is in view. The grid-index tiles stay, although all of them
   // meet near the Mount's centre and none is culled from a viewer there)
   const tiles = splitGrid(grid, xs.length, ys.length, nTiles);
@@ -162,7 +161,7 @@ export async function build(ctx) {
   // perf-cpu round 2: the landscape's merged batches (the city's rubble, ashlar and roofs, the terraces, the streets) in
   // cells round the Mount (world/sectors.js), so three culls what is behind the viewer; colliders were registered whole
   const kg = kit.build();
-  if (sectorsOn(ctx)) splitMeshes(kg.children.slice());
+  if (sectorsOn(ctx)) splitMeshes(ctx, kg.children.slice());
   group.add(kg);
   const trees = buildTrees(ctx, T, detail, { ...feat, courts: city.courtTrees });
   if (trees) group.add(trees);

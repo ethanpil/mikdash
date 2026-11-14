@@ -39,7 +39,7 @@ export async function build(ctx) {
   // perf-cpu round 2: the Mount's big merged batches (its walls' ashlar, the stoas' roofs and floors) in cells round the
   // Mount (world/sectors.js), so the parts behind the viewer are culled; colliders were registered whole by the kit
   const kg = kit.build();
-  if (sectorsOn(ctx)) splitMeshes(kg.children.slice(), { rings: MOUNT_RINGS });
+  if (sectorsOn(ctx)) splitMeshes(ctx, kg.children.slice(), { rings: MOUNT_RINGS });
   group.add(kg);
   group.userData.stats = {
     batchedTris: Math.round(kit.tris), columns: stoas.columns, gateBays: stoas.bays.length,

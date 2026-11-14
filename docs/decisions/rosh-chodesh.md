@@ -140,7 +140,8 @@ HaKorbanot 6:4, 6:15–19; Zevachim 12:2; Vayikra 1:6; Middot 3:4 and Bartenura 
 - **A group moves as one (g7/plan.js `bullFile`, rosh-chodesh-musaf.js `follow`).** One Script for the group's centre
   (take, row, file, the top), its men placed dx amot to its left each frame, turning about the centre; each man's own
   Script brings him to his place before the take and home after the toss and is hidden while the group carries. A pure
-  function of the clock like everything else (jump-safe).
+  function of the clock like everything else (jump-safe). A group's men leave the Gazit 0.035 min apart and go down
+  from the top 0.04 min apart (walking the same way abreast they overlapped).
 - **The parts' sizes are the bull's** (rig `bull`: withers 1.3 m, body 1.5 m ≈ 2 × the lamb): the hind leg from the hip
   to below the hock ≈ 0.94 m (the lamb's leg × 2.3 in length, × 2.1 in girth); the head baked from the live bull (in its
   hair, as the lamb's: the flaying ends at the breast before the head is cut, Tamid 4:2), the place of slaughter up with

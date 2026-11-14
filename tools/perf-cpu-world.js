@@ -94,8 +94,13 @@ const coll = (() => {
   }
   return { n, tris, checksum: +sum.toFixed(1) };
 })();
-const out = { colliders: coll };
+// attributes of the world's meshes that are not Float32 (round 2b: the split copies each attribute's own typed array)
+const nonFloat = new Set();
+ctx.world.traverse((o) => { if (o.isMesh && o.geometry) for (const [k, a] of Object.entries(o.geometry.attributes)) if (!(a.array instanceof Float32Array) || a.normalized) nonFloat.add(`${o.name}.${k}:${a.array.constructor.name}${a.normalized ? ' normalized' : ''}`); });
+const only = (ctx.params.raw.get('views') || '').split(',').filter(Boolean);
+const out = { colliders: coll, nonFloat: [...nonFloat].slice(0, 40), sectorStats: ctx.sectorStats || null };
 for (const [name, date, t, at, look, pos] of VIEWS) {
+  if (only.length && !only.some((v) => name.startsWith(v))) continue;
   if (ctx.time.dateString !== date) { ctx.time.setDate(date); await frames(2); }
   ctx.time.set(ctx.time.parse(t));
   if (pos) { ctx.player.setMode('fly'); ctx.player.teleport({ pos: [pos[0], pos[1], pos[2]] }); }
