@@ -114,6 +114,13 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   `byOccasion` and are read through `eventsFor(dayType, time)`. Rosh Chodesh's limbs are laid on the altar top between
   the horns (TuM 6:3); its musaf psalm is not recorded (Ps 81 stands in, said so in the caption). Its 123 kohanim are
   pooled only on the first Rosh Chodesh date of a session (`src/sim/choreo/g7`), so an ordinary boot carries none.
+- A bull's limbs that Yoma 2:7 gives to two or three men are carried whole (Rambam Ma'aseh HaKorbanot 6:19: the large
+  limb of an ox is not divided): the prop rides ONE man's right palm (grip 'palm', seated level in people's
+  `carry_heavy`) and reaches over his partners' palms; the group is one centre Script whose men are placed `HEAVY.pair`
+  (0.634 m) apart each frame (g7 `bullFile` / rosh-chodesh-musaf `follow`), so the bulls and their crews are pooled at
+  scale 1. The bulls' file goes round the altar's east and up the ramp's east half (two abreast do not fit between the
+  yesod and the amah's channel). The flayed bull is the bull rig's own body lines skinned on the CPU to the bound pose
+  (props.js `bullCarcass`), in the figure's place; a new prop needs a `PROPS_INFO` entry (`objects-check.mjs`).
 - Gates: the night watch's own Levites draw the bars and open/shut the Mount and Azarah gates (Rambam KhM 3:2; door
   times from `gates.js gateTimes`, shared with night-watch.js); the kohanim still open the great gate (Tamid 3:7); Tadi
   never opens (Middot 1:3). Events may carry `onWeekday` (0 = Sunday: the showbread's reeds come out on Friday and go
