@@ -148,3 +148,34 @@ Not changed (measured, and why):
   getters) and per-frame object literals in cue checks (`rosh-chodesh-musaf` `Object.entries` + `say(…, {…})`).
 - **The day's plan job** (1.1–1.9 s of CPU after the boot and after a date change, slices up to 130–615 ms here): not
   per-frame; its long slices are single generator steps. Splitting them is a sim-planner task.
+
+## Evidence
+
+**Output unchanged.**
+- `tools/perf-cpu-snap.js` (every shown sim figure's place / heading / pose / phase / prop, every people batch's instances —
+  matrix, tint, mask, rig row — the LOD counts and the torch anchors, at 7 moments: dawn start, d3, sunrise+40, the Rosh
+  Chodesh musaf, n3, d7.5, a Shabbat d4), a copy of the tree with only people/system.js and people/props.js at their
+  previous version against this one: identical at all 7 moments, except a prop batch's pAnimB.x, its holder's animation
+  frame, which follows the real-time clock (a sleeper's breathing; compared without it). (A first pair differed by the
+  seal-buyers that another agent's uncommitted chambers-daily.js adds to the working tree; the base copy was then refreshed
+  from the working tree.)
+- `tools/perf-cpu-tick.js`: the lazy tick against an every-frame tick, 991 actors, 600 frames: worst phase difference
+  2.2e-15, fade 0.
+- `src/sim/dev/tests/jumps.js` "t=d3" (run with drawing off — the same script after `ctx.engine.drawing = false`):
+  deterministic, no diffs.
+- Screenshots, low, shot mode, base copy vs this tree (`shots/perf-cpu/{b,n3}-{base,new}.png`, diffs `*-diff-x8.png`):
+  Azarah d3 0.116/255 mean, 0.44 % of pixels > 8/255; n3 0.330/255, 0.45 % — the altar's flames and smoke (real-time
+  animation) and the figures' idle breathing; same draw calls and triangles (251 / 674 120).
+
+**Interleaved A/B in one machine state** (`tools/perf-cpu-bench.js`, base copy and this tree alternated, 2 runs each;
+600 calls per figure; min of the two runs):
+
+| moment | people.update ms/call base → new | KB/call base → new | scene.updateMatrixWorld ms base → new |
+|---|---|---|---|
+| a start | 0.300 → 0.096 | 122 → 46 | 0.190 → 0.028 |
+| b d3 1× | 0.242 → 0.135 | 143 → 62 | 0.185 → 0.047 |
+| b d3 60× | 0.232 → 0.114 | 146 → 60 | 0.214 → 0.028 |
+| c RC musaf | 0.279 → 0.111 | 161 → 60 | 0.218 → 0.028 |
+| d n3 | 0.190 → 0.071 | 129 → 36 | 0.243 → 0.033 |
+
+(The sim runtime, unchanged, measured 0.09–0.67 ms/call in the same runs: the machine's noise for code that did not change.)

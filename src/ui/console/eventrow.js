@@ -76,7 +76,7 @@ export function eventRow(app, ev, opts = {}) {
   // the first Hebrew term in the title gets its plain-English gloss, on the first row of the list that uses it
   // (opts.gloss: the list's Set of terms already glossed; ux-audit finding 10)
   const glossEl = h('span.mk-row__gloss', { hidden: true });
-  let glossDone = !opts.gloss;
+  let glossDone = !opts.gloss, glossFit = null; // glossFit: false = shown and not yet measured
   const prog = h('i.mk-row__prog', { 'aria-hidden': 'true' });
   const title = ev.dynamic && ev.typeName?.en ? `${ev.typeName.en}${ev.summary ? ` · ${ev.summary}` : ''}` : (ev.title?.en || ev.id);
   // compact (ux-audit E): the title line, then place · time · Hebrew on one line; Show me (gold) and Go (plain, the
@@ -99,8 +99,15 @@ export function eventRow(app, ev, opts = {}) {
       glossDone = true;
       const g = glossIn(app, ev.title?.en || '', opts.gloss);
       // (the gloss takes the Hebrew title's room on the row; the card keeps the Hebrew)
-      if (g) { glossEl.replaceChildren(h('i', g.term), `: ${g.gloss}`); glossEl.hidden = false; el.classList.add('has-gloss'); }
+      if (g) { glossEl.replaceChildren(h('i', g.term), `: ${g.gloss}`); glossEl.hidden = false; el.classList.add('has-gloss'); glossFit = false; }
     } else if (!glossDone) app.content?.load?.();
+    // a gloss is never shown cut, and never cuts the place to a letter: the first time the row is laid out, if either
+    // does not fit whole on the meta line, the gloss takes a line of its own (as it always does on phones)
+    if (glossFit === false && el.offsetWidth) {
+      glossFit = true;
+      const cut = (e) => !!e && !e.hidden && e.offsetWidth > 0 && e.scrollWidth > e.clientWidth + 1;
+      if (cut(glossEl) || cut(el.querySelector('.mk-row__place'))) el.classList.add('gloss-line');
+    }
     const canShow = !!ctx.inspect?.seeInAction;
     if (canShow !== lastShow) {
       lastShow = canShow;

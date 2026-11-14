@@ -294,7 +294,7 @@
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__dial { display: none; }
 /* phones: the section strip is ONE row — disc, names + About, the clock (ux-audit G: it was ≈ 175 px of a 470 px sheet) */
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head { grid-template-areas: 'disc loc clock'; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 0 10px; padding: 4px 12px 4px; }
-#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__loc { padding-top: 0; min-width: 0; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__loc { padding-top: 0; min-width: 0; overflow: hidden; } /* (the names give way first: the clock is never overlapped) */
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__names { flex: 0 1 auto; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__he { font-size: 18px; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__en { font-size: 15px; }
@@ -302,6 +302,9 @@
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__clocktxt { align-items: flex-end; text-align: right; }
 /* (the seasonal hour is on the Time tile and the home header; here it squeezed the place's name — ux-audit G) */
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__hour { display: none; }
+/* (About's row keeps its width: the names shrink and ellipsize first, never About into the clock) */
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__sanctrow { flex: none; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__names { flex: 0 1 auto; min-width: 0; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__he { flex: 0 4 auto; min-width: 0; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__en { flex: 0 1 auto; }
 /* phones: Happening's filter is its own heading (no "Now" above it); compact area headings — three rows at the peek */
@@ -638,7 +641,8 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
    Sections
    ============================================================================ */
 .mk-hap__filter { margin-bottom: 4px; }
-.mk-hap__area { margin-bottom: 8px; }
+.mk-hap__area { margin-bottom: 4px; }
+.mk-hap__area .mk-evs { gap: 4px; }
 .mk-hap__areah { margin: 2px 0 4px; font: 600 14.5px/1.2 var(--mk-display); }
 .mk-nearby { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .mk-nearby__b { display: flex; width: 100%; align-items: baseline; gap: 10px; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--mk-ink); cursor: pointer; text-align: left; }
@@ -741,5 +745,5 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 .mk-menu[data-view='welcome'] .mk-menu__body { grid-template-columns: minmax(0, 1fr); border-top: 0; }
 /* phones: a glossed row gives its gloss a line of its own (the row is too narrow to share it; only the first row that
    uses a term has one) */
-#ui-root[data-layout^='sheet'] .mk-row.has-gloss .mk-row__meta { flex-wrap: wrap; }
-#ui-root[data-layout^='sheet'] .mk-row.has-gloss .mk-row__gloss { order: 9; flex-basis: 100%; white-space: normal; }
+#ui-root[data-layout^='sheet'] .mk-row.has-gloss .mk-row__meta, .mk-row.gloss-line .mk-row__meta { flex-wrap: wrap; }
+#ui-root[data-layout^='sheet'] .mk-row.has-gloss .mk-row__gloss, .mk-row.gloss-line .mk-row__gloss { order: 9; flex-basis: 100%; white-space: normal; }

@@ -12,7 +12,7 @@ const f2 = (x) => (x == null ? '-' : (+x).toFixed(2));
 console.log('| scene | run | upd tick | sim | zones | people | player | env | fx+world(50) | world(45/55) | audio | ui | busy | gc | KB/f | draw JS | draw tick | calls | tris | programs | figures drawn (L0/1/2/3) |');
 console.log('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
 for (const d of dirs) {
-  for (const f of readdirSync(d).filter((x) => x.endsWith('.json') && x !== 'summary.json').sort()) {
+  for (const f of readdirSync(d).filter((x) => x.endsWith('.json') && x !== 'summary.json' && !x.startsWith('exp-')).sort()) {
     const r = JSON.parse(readFileSync(join(d, f), 'utf8'));
     const u = r.update, w = r.draw, p = u.stats.perSystem;
     const ps = w.stats.people;
