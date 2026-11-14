@@ -170,7 +170,7 @@ if (out.duchan !== 13) fails.push(`${out.duchan} Levites on the duchan during th
 time.setDate('2026-11-06'); await frames(3);
 const ww = win('altar-wiping');
 let wipers = 0;
-for (let t = ww[0]; t <= ww[1]; t += 3) { await at(t); const w = shown('temple-duties', 'wipers'); wipers = Math.max(wipers, w.filter((x) => x._pose === 'tend_lamp').length); sweep(`wipe ${time.format(t)}`); }
+for (let t = ww[0]; t <= ww[1]; t += 3) { await at(t); const w = shown('temple-duties', 'wipers'); wipers = Math.max(wipers, w.filter((x) => x._pose === 'wipe').length); sweep(`wipe ${time.format(t)}`); }
 out.wipers = wipers;
 if (wipers !== 3) fails.push(`${wipers} wipers at work, want 3`);
 const ko = win('kanim-out');
