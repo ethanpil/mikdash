@@ -47,12 +47,12 @@ Go ▸ = travel.**
 | `/` or `Ctrl` `K` | search everything: places, rites, people, things, words, settings, in English, Hebrew or transliteration |
 | `?` | help: the controls for your device |
 | `P` | pause / play the clock |
-| Click, or `E` | learn about anyone or anything: its card, with Go ▸ and Show me ▸ (`E` or a click aims at the centre dot while the mouse is captured) |
+| Click, or `E` | learn about a person, an animal or a thing: its card, with Show me ▸ and Go ▸. A click on a wall or the floor captures the mouse; `E` opens anything, walls and gates too (`E` or a click aims at the centre dot while the mouse is captured) |
 | `+` `−` | faster / slower during a trip |
 
 **Touch:** drag with the left thumb to walk and with the right thumb to look; tap with two fingers to switch between
-walking and running. Tap the Menu button for the Menu; tap empty scenery for the quick chips (the hour, Map, Search); tap
-anyone or anything to learn about it. **Gamepad:** sticks walk and look, LT runs, Y flies, Start opens the Menu, View
+walking and running. Tap the Menu button for the Menu; tap a wall, a gate or the floor for its name (tap the name for its
+card) and the quick chips (the hour, Map, Search); tap a person, an animal or a thing to learn about it. **Gamepad:** sticks walk and look, LT runs, Y flies, Start opens the Menu, View
 the map, X learns about what you face; in the Menu the D-pad moves, A chooses, B goes back, LB/RB change section.
 
 Every **Go ▸** walks, runs or moves you at once, at a pace of ½× to 10×; your choice becomes the default. Looking around

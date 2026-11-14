@@ -118,7 +118,8 @@ export function eventRow(app, ev, opts = {}) {
       setText(relEl, `now · ${left < 90 ? `${left} min` : `${Math.floor(left / 60)} h ${String(left % 60).padStart(2, '0')}`} left`);
     } else {
       prog.style.transform = 'scaleX(0)';
-      setText(relEl, `${relTime(ev, r, t)} · ≈ ${clock(r.t0)}`);
+      // (opts.clock: a list of the whole day — Time's main rites — names the hour, not "in 22 h 58")
+      setText(relEl, opts.clock ? `≈ ${clock(r.t0)}` : `${relTime(ev, r, t)} · ≈ ${clock(r.t0)}`);
     }
   }
   const cap = (k) => { const v = app.input.cap(k.dataset.cap); setText(k, v || ''); k.hidden = !v; };

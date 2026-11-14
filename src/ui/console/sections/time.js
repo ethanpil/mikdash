@@ -39,7 +39,7 @@ export function timeSection(app) {
           if (k !== mainKey) {
             mainKey = k;
             const seen = new Set();
-            mainRows = list.map((e) => eventRow(app, e, { gloss: seen }));
+            mainRows = list.map((e) => eventRow(app, e, { gloss: seen, clock: true }));
             mainBox.replaceChildren(...mainRows.map((r) => r.el));
             mainSec.hidden = !list.length;
           }

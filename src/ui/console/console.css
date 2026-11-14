@@ -448,7 +448,7 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 .mk-row__title { flex: 1; min-width: 0; font: 600 15.5px/1.2 var(--mk-display); color: var(--mk-ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .mk-row__meta { display: flex; align-items: baseline; gap: 0 8px; margin-top: 2px; font-size: 13px; line-height: 1.3; color: var(--mk-ink-2); white-space: nowrap; overflow: hidden; }
 .mk-row__meta > * { flex: none; }
-.mk-row__meta > .mk-row__place { flex: 0 2 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mk-row__meta > .mk-row__place { flex: 0 60 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .mk-row__meta > .mk-row__gloss { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--mk-ink); }
 .mk-row__gloss i { color: var(--mk-gold-hi); }
 .mk-row.has-gloss .mk-row__he { display: none; }
@@ -739,3 +739,7 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
    ("‹ Menu", Close) return with the first section. */
 #ui-root .mk-menu[data-view='welcome'] :is(.mk-rail, .mk-head, .mk-drill) { display: none; }
 .mk-menu[data-view='welcome'] .mk-menu__body { grid-template-columns: minmax(0, 1fr); border-top: 0; }
+/* phones: a glossed row gives its gloss a line of its own (the row is too narrow to share it; only the first row that
+   uses a term has one) */
+#ui-root[data-layout^='sheet'] .mk-row.has-gloss .mk-row__meta { flex-wrap: wrap; }
+#ui-root[data-layout^='sheet'] .mk-row.has-gloss .mk-row__gloss { order: 9; flex-basis: 100%; white-space: normal; }

@@ -91,6 +91,12 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - UI is the Luach console (docs/console-design.md): one always-on Menu beacon, Esc as the only key to remember,
   one card system for every subject, a module registry for new sections (narration mounts in Listen). Inspect is
   CPU picking (no GPU queries); its describer and content load after firstFrame so cold boot does not regress.
+- A free click or tap on structure (walls, gates, chambers, stairs, floors) is scenery: a click captures the mouse, a
+  tap wakes the Menu with a name chip that opens the card; E, an aimed click and Nearby open anything
+  (`ui/console/pickui.js`). Event rows lead with Show me (gold); a clock jump of more than an hour is never a primary
+  button. On phones the Map hosts the travel bar only while it really covers the world (not at its mini detent), and a
+  Show me drops the sheet to mini before framing. Glosses come from the glossary's first clause (`console/gloss.js`),
+  never a second word list (docs/decisions/ux-audit.md, phase 2).
 - Occasions: `ctx.time.occasions` (Rosh Chodesh = the 1st of a month only, never 1 Tishrei: in the Temple the musaf
   was offered on one day, Rambam Kiddush HaChodesh 3:5–6) are orthogonal to `dayType`; events take `occasion` /
   `byOccasion` and are read through `eventsFor(dayType, time)`. Rosh Chodesh's limbs are laid on the altar top between

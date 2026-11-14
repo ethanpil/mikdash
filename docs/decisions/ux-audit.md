@@ -359,3 +359,26 @@ Every fix is in `src/ui/**`, except one minimal change in `src/sim/inspect-show.
 - consoletest: see the final report; a baseline run of the desktop profile with the pre-change `src/ui` (scratch copy)
   failed the same load-timing checks (W A S D 0.09 m, the on-foot banner dwell, the restricted banner) and stopped at the
   same banner click.
+
+## Phase 2 addendum (timepanel.js / format.js released)
+
+- **"0 hour since sunrise"** — `format.js elapsedPhrase(half, elapsed)`: "at sunrise" under 0.04 h, "just after sunrise"
+  under ¼ h, else "10¾ hours since sunset" (and "1 hour", not "1 hours"); `timepanel.js` uses it. Verified at sunrise
+  (`after/desk-18-time-sunrise.png`: "at sunrise") and 6 min after ("just after sunrise").
+- **Glosses (finding 10)** — `console/gloss.js`: no word list of its own. A term's gloss is the first clause of its
+  glossary definition (`src/data/glossary.js`, loaded with the card content), kept only when that clause is whole and
+  ≤ 42 characters (a clause cut mid-way is worse than none). Matched on the glossary key and its transliteration only (not
+  the English aka's: "priests" needs no gloss). Shown on the first row of a list that uses the term (Happening, Here's
+  Happening here, Time's main rites), in place of the row's Hebrew title; phones give it its own line. Places gloss from
+  their own names ("Lishkat HaGazit — the Chamber of Hewn Stone"): Happening's area headings (dock) and Here's type chip
+  ("Where you are · the Temple Mount", the only gloss of the place on a phone's strip). Rosh Chodesh's badge and "Next
+  Rosh Chodesh ›" untouched. — Alternative: hover glosses (no hover on touch).
+- **Time (finding 16)** — the tab-stop count in my audit was wrong: the arcs already use a roving tabindex (one stop),
+  and the dial ring is one stop with arrow keys; the 94 were every `role=button` arc, most `tabindex=-1`. Measured now:
+  43 Tab stops in the whole Time view on desktop (header + rail + dial + transport + date + zmanim + the new list). Added
+  **The day's main rites** under the zmanim (`sections/time.js`): the date's importance-3 rites (16 on a weekday) as event
+  rows with clock times (`eventRow({ clock: true })`), Show me jumping there. Safe: it reads `app.data.events()` (the
+  schedule of the date shown) and the existing row; nothing in `timepanel.js` changed for it.
+- **Desktop Back after a Show me** — framing a picked figure during `showing` (fix B) is now limited to phone sheets: on the
+  dock it could re-frame the card's subject after Back (consoletest "Back restores the clock and the view", dh 25°).
+  Re-checked by hand: dh 0.
