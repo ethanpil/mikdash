@@ -6,7 +6,9 @@
 const sys = ctx.people.system;
 const N = +(ctx.params.raw.get('ticks') || 240);
 await frames(10);
+ctx.engine.drawing = false;   // (frames without drawing: SwiftShader takes seconds to draw one)
 const actors = [...sys.actors].filter((a) => a.arch && a.clip);
+for (const a of actors) a._flush();   // (a hidden one may hold time not yet applied: the copies start from the same state)
 const mirror = actors.map((a) => {
   const m = Object.create(Object.getPrototypeOf(a));
   Object.assign(m, { sys: { atlas: { freeScratch() {} } }, clip: a.clip, phase: a.phase, fade: a.fade, prev: a.prev, auto: a.auto, speed: a.speed, scale: a.scale, scratch: -1 });
@@ -23,6 +25,7 @@ sys.update = function (dt) {
 };
 await frames(N);
 sys.update = orig;
+ctx.engine.drawing = true;
 let worstP = 0, worstF = 0, hidden = 0, n = 0;
 const bad = [];
 actors.forEach((a, i) => {

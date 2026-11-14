@@ -4,6 +4,7 @@
 import { h, he, setText } from '../dom.js';
 import { ico } from './icons.js';
 import { clock, wrap } from '../format.js';
+import { glossIn } from './gloss.js';
 
 /** what a group of individuals' offerings is doing now, by its parent event (the stream's stages in g5/plan.js) */
 const STAGES = {
@@ -72,6 +73,10 @@ export function eventRow(app, ev, opts = {}) {
   const times = data.times(ev);
   const zoneName = (data.zone(ev.zone)?.name?.en || '').split(' — ')[0];
   const relEl = h('span.mk-row__rel.num');
+  // the first Hebrew term in the title gets its plain-English gloss, on the first row of the list that uses it
+  // (opts.gloss: the list's Set of terms already glossed; ux-audit finding 10)
+  const glossEl = h('span.mk-row__gloss', { hidden: true });
+  let glossDone = !opts.gloss;
   const prog = h('i.mk-row__prog', { 'aria-hidden': 'true' });
   const title = ev.dynamic && ev.typeName?.en ? `${ev.typeName.en}${ev.summary ? ` · ${ev.summary}` : ''}` : (ev.title?.en || ev.id);
   // compact (ux-audit E): the title line, then place · time · Hebrew on one line; Show me (gold) and Go (plain, the
@@ -79,7 +84,7 @@ export function eventRow(app, ev, opts = {}) {
   const hit = h('button.mk-row__hit', { type: 'button', title, 'aria-label': `${title}${zoneName ? `, ${zoneName}` : ''}. Open its card`, on: { click: () => app.card(`event:${ev.id}`) } },
     h('span.mk-row__top', importance(ev.importance), h('span.mk-row__title', title)),
     // the time first: on a narrow row the place is what gets cut, not "now · 9 min left"
-    h('span.mk-row__meta', relEl, opts.place !== false && zoneName ? h('span.mk-row__place', zoneName) : null,
+    h('span.mk-row__meta', relEl, glossEl, opts.place !== false && zoneName ? h('span.mk-row__place', zoneName) : null,
       ev.layer === 'aggadah' ? h('span.mk-badge', { title: 'Aggadah: the narrative and miracle traditions' }, 'Legend') : null,
       ev.title?.he && !ev.dynamic ? he(ev.title.he, 'mk-row__he') : null));
   const go = app.travel.control(() => app.travel.goEvent(ev), { small: true, primary: false, menu: false });
@@ -90,6 +95,12 @@ export function eventRow(app, ev, opts = {}) {
   const el = h(`article.mk-row.imp-${ev.importance || 1}`, { 'data-ev': ev.id }, hit, h('div.mk-row__acts', show, go), prog);
   let lastShow = null;
   function update(t = ctx.time?.t) {
+    if (!glossDone && app.content?.glossary) {
+      glossDone = true;
+      const g = glossIn(app, ev.title?.en || '', opts.gloss);
+      // (the gloss takes the Hebrew title's room on the row; the card keeps the Hebrew)
+      if (g) { glossEl.replaceChildren(h('i', g.term), `: ${g.gloss}`); glossEl.hidden = false; el.classList.add('has-gloss'); }
+    } else if (!glossDone) app.content?.load?.();
     const canShow = !!ctx.inspect?.seeInAction;
     if (canShow !== lastShow) {
       lastShow = canShow;

@@ -32,6 +32,7 @@ function worldInView() {
   const shown = (o) => { for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; };
   const tmp = new Float32Array(9);
   const m = new Float64Array(16);
+  const big = [];
   for (const top of ctx.world.children) {
     let all = 0, inv = 0, meshes = 0, culledByThree = 0;
     top.traverse((o) => {
@@ -49,6 +50,7 @@ function worldInView() {
         if (!F.intersectsSphere(sp)) { culledByThree += nTri * inst; return; }
       }
       const W = o.matrixWorld.elements;
+      const all0 = all, inv0 = inv;
       for (let k = 0; k < inst; k++) {
         if (o.isInstancedMesh) {
           const I = o.instanceMatrix.array, b = k * 16;
@@ -67,9 +69,11 @@ function worldInView() {
           all++; if (!out) inv++;
         }
       }
+      big.push([`${top.name}/${o.name || ''}:${[].concat(o.material).map((x) => x.name).join('+')}${o.isInstancedMesh && !o.userData.mkSingle ? ` ×${inst}` : ''}`, all - all0, inv - inv0]);
     });
     res[top.name] = { meshes, drawnTris: all, inFrustum: inv, share: all ? +(inv / all).toFixed(3) : 0, culledByThree };
   }
+  res.biggest = big.sort((a, b) => b[1] - a[1]).slice(0, 14);
   return res;
 }
 const step = (speed) => {

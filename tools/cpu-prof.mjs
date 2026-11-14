@@ -49,6 +49,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--h') opt.h = +args[++i];
   else if (a === '--only') opt.only = args[++i].split(',');
   else if (a === '--noheap') opt.heap = false;
+  else if (a === '--exp') opt.exp = args[++i];
   else bootQuery = a.replace(/^\?/, '');
 }
 
@@ -397,6 +398,30 @@ for (const s of scenes) {
   const res = { scene: s, applied, pos, update: upd, draw: drw, draws };
   writeFileSync(join(outDir, `${s.name}.json`), JSON.stringify(res, null, 1));
   results.push(res);
+}
+// --exp lights29: the render-side proposal for the pre-pass's light state (docs/decisions/perf-cpu.md), tried in the page
+// without changing any file — every light also on the pre-pass layer, so the pre-pass sees the main pass's light counts and
+// three's light-state version stays put; draw windows with it off / on / off / on on the last scene
+if (opt.exp === 'lights29') {
+  const toggle = (on) => page.evaluate((on) => {
+    const c = globalThis.__mikdash;
+    c.scene.traverse((o) => { if (o.isLight) { if (on) o.layers.enable(29); else if (!o.userData.__l29) o.layers.disable(29); } });
+  }, on);
+  await page.evaluate(() => globalThis.__mikdash.scene.traverse((o) => { if (o.isLight && o.layers.isEnabled(29)) o.userData.__l29 = true; }));
+  const ex = [];
+  for (const on of [false, true, false, true]) {
+    await toggle(on);
+    await page.waitForTimeout(4000);
+    const w = await windowOf({ name: `exp-lights29-${on ? 'on' : 'off'}-${ex.length}` }, 'draw', opt.dsecs);
+    const keyed = await page.evaluate(() => globalThis.__cp.breakdown(4)).then((d) => d['keyed (getProgram calls per material over n frames)']);
+    const gp = w.cpu.totalTop.find(([k]) => /^getProgram three/.test(k));
+    const row = { on, frames: w.stats.frames, drawJs: w.stats.perSystem.draw, busy: w.cpu.busyMsPerFrame, gc: w.cpu.gcMsPerFrame, kbPerFrame: w.heap?.kbPerFrame, getProgramMs: gp ? gp[1] : 0, keyedPer4Frames: Object.values(keyed || {}).reduce((x, y) => x + y, 0) };
+    ex.push(row);
+    console.log(`[${stamp()}] exp lights29 ${JSON.stringify(row)}`);
+    await page.screenshot({ path: join(outDir, `exp-lights29-${on ? 'on' : 'off'}-${ex.length}.png`) }).catch(() => {});
+  }
+  await toggle(false);
+  writeFileSync(join(outDir, 'exp-lights29.json'), JSON.stringify(ex, null, 1));
 }
 writeFileSync(join(outDir, 'summary.json'), JSON.stringify({ opt, bootQuery, boot, results: results.map((r) => ({ name: r.scene.name, pos: r.pos,
   ...Object.fromEntries(['update', 'draw'].map((m) => [m, { stats: r[m].stats, cpu: { busy: r[m].cpu.busyMsPerFrame, gc: r[m].cpu.gcMsPerFrame, byArea: r[m].cpu.byArea }, heap: r[m].heap && { kbPerFrame: r[m].heap.kbPerFrame, byArea: r[m].heap.byArea } }])) })), logs }, null, 1));

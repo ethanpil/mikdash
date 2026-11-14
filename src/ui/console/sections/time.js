@@ -4,6 +4,8 @@
 import { createTimeControl } from '../../timepanel.js';
 import { renderCard } from '../card.js';
 import { seasonal, fromDial } from '../../format.js';
+import { h } from '../../dom.js';
+import { eventRow } from '../eventrow.js';
 
 export function timeSection(app) {
   const { ctx } = app;
@@ -25,16 +27,36 @@ export function timeSection(app) {
           requestAnimationFrame(() => { card?.el.scrollIntoView({ block: 'nearest', behavior: app.reducedMotion() ? 'auto' : 'smooth' }); card?.focus(); });
           ctx.bus.emit('ui:card', { ref: `event:${ev.id}`, card: c });
         }
-        el.append(ctl.el);
+        // the day's main rites (importance 3) as event rows: Show me jumps there (ux-audit finding 16; the arcs on the dial
+        // are thin and need a steady pointer). The schedule of the date shown (ctx.schedule.events follows setDate).
+        const mainBox = h('div.mk-evs');
+        const mainSec = h('section.mk-sec.mk-time__main', h('h3.mk-h', 'The day’s main rites'), mainBox);
+        let mainKey = '', mainRows = [];
+        function paintMain() {
+          const list = app.data.events().filter((e) => !e.dynamic && (e.importance || 1) >= 3 && app.data.dayOk(e) && app.data.times(e))
+            .sort((a, b) => app.data.times(a).t0 - app.data.times(b).t0).slice(0, 16);
+          const k = `${ctx.time?.dateString}|${list.map((e) => e.id).join()}`;
+          if (k !== mainKey) {
+            mainKey = k;
+            const seen = new Set();
+            mainRows = list.map((e) => eventRow(app, e, { gloss: seen }));
+            mainBox.replaceChildren(...mainRows.map((r) => r.el));
+            mainSec.hidden = !list.length;
+          }
+          for (const r of mainRows) r.update();
+        }
+        el.append(ctl.el, mainSec);
         // LT / RT on a gamepad: ∓ 1/12 seasonal hour
         app.stepClockFn = (hours) => { const t = ctx.time; if (t?.zmanim) t.set(fromDial(t, seasonal(t, t.t).s + hours)); };
         return {
           show(opts = {}) {
             ctl.rebuild();
+            mainKey = '';
+            paintMain();
             if (opts.focusEvent) { const ev = ctx.schedule?.byId?.(opts.focusEvent) || app.data.events().find((e) => e.id === opts.focusEvent); if (ev) onArc(ev); }
           },
           hide() {},
-          update() { ctl.update(false); card?.update(); },
+          update() { ctl.update(false); card?.update(); paintMain(); },
           focusTarget: () => ctl.focusTarget(),
           control: ctl,
         };

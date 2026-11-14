@@ -4,6 +4,7 @@
 import { h } from '../../dom.js';
 import { w2m, AMAH } from '../../../core/units.js';
 import { eventRow, dynGroup, stageTitle } from '../eventrow.js';
+import { zoneGloss } from '../gloss.js';
 
 const NEAR_M = 60;
 
@@ -52,6 +53,7 @@ export function happeningSection(app) {
           if (k !== key) {
             key = k;
             rows = [];
+            const seen = new Set(); // (terms glossed in this list: each at its first row)
             // by area: the day's events, then each stage's individual offerings as one row
             const areas = new Map();
             for (const ev of act) {
@@ -71,16 +73,17 @@ export function happeningSection(app) {
               const n = a.stat.length + [...a.dyn.values()].reduce((s, l) => s + l.length, 0);
               const name = (data.zone(z)?.name?.en || 'Elsewhere').split(' — ')[0];
               const box = h('div.mk-evs');
-              for (const ev of a.stat) { const r = eventRow(app, ev); rows.push(r); box.append(r.el); }
+              for (const ev of a.stat) { const r = eventRow(app, ev, { gloss: seen }); rows.push(r); box.append(r.el); }
               for (const [pid, list] of a.dyn) {
                 const parent = ctx.schedule?.byId?.(pid);
                 const g = dynGroup(app, list, { key: `${z}-${pid}`, title: stageTitle(pid, parent?.title?.en || list[0]?.parentTitle?.en, list.length), open: openGroups.has(`${z}-${pid}`), onToggle: (on) => (on ? openGroups.add(`${z}-${pid}`) : openGroups.delete(`${z}-${pid}`)) });
                 rows.push(g);
                 box.append(g.el);
               }
-              return h('div.mk-hap__area', h('h4.mk-hap__areah', h('button.mk-linkbtn', { type: 'button', on: { click: () => app.card(`zone:${z}`) } }, name), h('span.mk-muted', ` · ${n}`)), box);
+              const gl = zoneGloss(app, z);
+              return h('div.mk-hap__area', h('h4.mk-hap__areah', h('button.mk-linkbtn', { type: 'button', on: { click: () => app.card(`zone:${z}`) } }, name, gl ? h('span.mk-hap__areagl', ` — ${gl}`) : null), h('span.mk-muted', ` · ${n}`)), box);
             }) : [h('div.mk-empty', filter === 'all' ? 'Nothing in the order of the day at this hour. The fires on the altar burn on.' : 'Nothing here at this hour.')]));
-            nextBox.replaceChildren(...(next.length ? next.map((ev) => { const r = eventRow(app, ev); rows.push(r); return r.el; }) : [h('div.mk-empty', 'Nothing further scheduled for this date.')]));
+            nextBox.replaceChildren(...(next.length ? next.map((ev) => { const r = eventRow(app, ev, { gloss: seen }); rows.push(r); return r.el; }) : [h('div.mk-empty', 'Nothing further scheduled for this date.')]));
           }
           for (const r of rows) r.update(t);
         }

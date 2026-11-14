@@ -5,6 +5,7 @@
 import { h, setText } from '../../dom.js';
 import { renderCard } from '../card.js';
 import { eventRow, dynGroup } from '../eventrow.js';
+import { zoneGloss } from '../gloss.js';
 
 const OWN = new Set(['happening', 'next', 'things', 'nearby']); // rendered live here, not from the card data
 const NEAR_FIRST = 12; // Nearby's rows before "Show all n nearby ›"
@@ -45,7 +46,8 @@ export function hereSection(app) {
                 const k = `${list.map((e) => e.id).join()}`;
                 if (k !== key) {
                   key = k;
-                  rows = stat.slice(0, 3).map((ev) => eventRow(app, ev, { place: false }));
+                  const seen = new Set();
+                  rows = stat.slice(0, 3).map((ev) => eventRow(app, ev, { place: false, gloss: seen }));
                   if (dyn.length) rows.push(dynGroup(app, dyn, { key: `here-${zone}`, title: `${dyn.length} individual offering${dyn.length === 1 ? '' : 's'} here` }));
                   if (!rows.length) {
                     const next = data.nextAt(zone, t);
@@ -139,7 +141,8 @@ export function hereSection(app) {
             augment,
             pinned, sectionsFirst: true, now: false,
             // where you stand: the header names it already (it was named five times over); a pinned place keeps its title
-            titleSrOnly: zone === data.currentZoneId(), typeText: zone === data.currentZoneId() ? 'Where you are' : null,
+            // (its gloss beside it: on a phone the strip shows only the transliterated name)
+            titleSrOnly: zone === data.currentZoneId(), typeText: zone === data.currentZoneId() ? `Where you are${zoneGloss(app, zone) ? ` · ${zoneGloss(app, zone)}` : ''}` : null,
             onPin: () => { pinned = !pinned; if (!pinned) zone = data.currentZoneId(); render(); },
           });
           holder.replaceChildren(card.el);

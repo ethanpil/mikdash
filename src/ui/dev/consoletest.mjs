@@ -761,7 +761,9 @@ try {
           }
           return null;
         });
-        check('an open card\'s Show me follows the clock (the label says what will happen now)', !!stale && stale.before !== stale.after && stale.after === stale.want, JSON.stringify(stale));
+        // (the card words it "Show me: …" with the timing under it — ux-audit D — so the time the core names must be in it)
+        const wantAt = /≈\d{2}:\d{2}/.exec(stale?.want || '')?.[0];
+        check('an open card\'s Show me follows the clock (the label says what will happen now)', !!stale && stale.before !== stale.after && /^Show me/.test(stale.after || '') && (!wantAt || stale.after.includes(wantAt)), JSON.stringify(stale));
         // E inside the Menu does nothing (§2.3)
         await ev(() => __mikdash.ui.open('here'));
         await page.waitForTimeout(400);

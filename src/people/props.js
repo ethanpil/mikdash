@@ -1064,7 +1064,12 @@ function entrailsBazach(B, lod) {
 // --- baked animals (the live rigs posed and skinned on the CPU, palette baked into the vertex colours) ---------
 function bakeAnimal(B, kind, lod, poseFn, o = {}) {
   const def = ANIMALS[kind], rig = getRig(def.rig);
-  const g = buildAnimalGeometry(def, rig, Math.min(1, lod));
+  // perf-cpu: the animal's geometry is built once per kind and LOD (read here, never changed): a carcass, a dove in the
+  // hand or a cage of birds first drawn in play built it anew for every prop variant (and twice per cage) — 40–150 ms
+  // in the frame it appeared (CPU arrays only: nothing on the GPU to free)
+  const gk = `${kind}:${Math.min(1, lod)}`;
+  let g = _baked.get(gk);
+  if (!g) _baked.set(gk, (g = buildAnimalGeometry(def, rig, Math.min(1, lod))));
   const P = new PoseBuilder(rig);
   P.reset();
   poseFn(P, rig);
@@ -1109,9 +1114,9 @@ function bakeAnimal(B, kind, lod, poseFn, o = {}) {
     const a = idx[i], b = idx[i + 1], c = idx[i + 2];
     if (keep[a] && keep[b] && keep[c]) B.idx.push(base + a, base + b, base + c);
   }
-  g.dispose();
   return { rig, P };
 }
+const _baked = new Map();
 
 /** the lamb hung for flaying: pierced through the left hind hock and hung on the iron hook head-down (Tamid 4:2 —
  *  "he did not break the leg but pierced it through the hock and hung it"; the right hind leg is cut off while it
