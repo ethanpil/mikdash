@@ -72,15 +72,22 @@ float mkCloudCover( vec3 dir, float r0 ) {
 
 // The dome. Needs ATMO_GLSL (transmittanceUV, planetShadow), hgPhase, uTransmittance, uObsR, uSunDir, uMoonDir.
 // mkClouds composites the two layers over the sky radiance L (scene units) and returns the transmittance a disc behind
-// them keeps.
+// them keeps. Two cumulus paths, chosen by the tier's flags (env/index.js):
+//   CLOUD_MARCH  (high / ultra) the layer marched in slices along the ray: domes with height near the horizon;
+//   otherwise    (the weak tiers: low / medium, the HD 4600's) a flat layer, loop-free: two fetches (the point and one
+//                0.45 km toward the key light) shaded from the bake's smooth mass channel — three cloud fetches a sky pixel
+//                in all with the cirrus, no LUT fetch (the light at each layer is a CPU uniform).
 export const CLOUD_GLSL = /* glsl */`
 ${CLOUD_UNIFORMS_GLSL}
 uniform vec3 uCuSig;     // mean extinction (1/km) of the air between the observer and the cumulus layer
 uniform vec3 uCiSig;     // …and the cirrus layer
 uniform vec3 uCloudSunE; // the Sun's beam at the top of the atmosphere (lx, physical)
+uniform vec3 uCuSunE;    // the Sun's beam at the cumulus layer (its air path and the Earth's shadow included; lx, physical)
+uniform vec3 uCiSunE;    // …at the cirrus layer
 uniform vec3 uCloudMoonE;// the Moon's beam at the cloud (lx, physical, its own air path included)
 uniform vec3 uCloudAmb;  // sky radiance reaching a cloud from around (Esky / π, physical)
 uniform vec3 uCloudGnd;  // the lit ground below it (radiance, physical)
+uniform vec3 uCloudKey;  // the light that models the clouds (the Sun by day, the Moon at night), world direction
 float mkCloudSide( vec3 dir, vec3 L ) {
   // 1 when the viewer looks away from the light (sees the cloud's lit side), 0 toward it (the shaded side)
   vec2 a = dir.xz, b = L.xz;
@@ -88,101 +95,107 @@ float mkCloudSide( vec3 dir, vec3 L ) {
   return la > 1e-4 && lb > 1e-4 ? 0.5 - 0.5 * dot( a / la, b / lb ) : 0.5;
 }
 #ifndef CLOUD_SLICES
-#define CLOUD_SLICES 12
+#define CLOUD_SLICES 16
 #endif
 float mkClouds( vec3 dir, vec3 Tfull, float outScale, inout vec3 L ) {
   float r0 = uObsR;
   float mu = max( dir.y, 0.0 );
   float tB = mkShellDist( r0, mu, uCloudH.x ), tT = mkShellDist( r0, mu, uCloudH.y ), tC = mkShellDist( r0, mu, uCloudH.z );
-  // the fetches outside any flow control (implicit derivatives: ANGLE/D3D11)
+  float tm = mix( tB, tT, 0.35 );
+  // the fetches first, outside any flow control (implicit derivatives: ANGLE/D3D11)
   vec4 cC = texture( uCloudTex, MK_CI_ROT * dir.xz * tC * uCiUV.z + uCiUV.xy );
-  // the base toward the Sun (≈ half the layer's depth up the sunbeam, ≤ 2 km): cloud there shades this one
-  vec2 sh = uSunDir.xz / max( uSunDir.y, 0.2 ) * 0.6;
-  sh *= min( 1.0, 2.0 / max( length( sh ), 1e-3 ) );
-  vec4 cS = texture( uCloudTex, ( dir.xz * tB + sh ) * uCuUV.z + uCuUV.xy );
+  // 0.45 km toward the key light (horizontally), at the layer's middle: the cloud mass there shades this point
+  vec2 kh = uCloudKey.xz;
+  vec2 sh = kh / max( length( kh ), 1e-3 ) * 0.45;
+  vec2 uv0 = dir.xz * tm * uCuUV.z + uCuUV.xy;
+  vec4 cS = texture( uCloudTex, uv0 + sh * uCuUV.z );
+#ifndef CLOUD_MARCH
+  vec4 c0 = texture( uCloudTex, uv0 );
+  float fw0 = fwidth( c0.r );
+#endif
   vec3 Lsky = L;
-  // (the cumulus fade below ≈ 5°, where their slices would part and the haze takes them anyway)
-  float fade = uCloudH.w * smoothstep( 0.04, 0.1, dir.y );
-
-  // ---- cirrus (behind the cumulus): thin, fibrous; forward-scattering ice
-  float aC = 0.45 * smoothstep( 1.0 - uCiUV.w, 1.0 - uCiUV.w + 0.3, cC.g ) * smoothstep( 0.0, 0.03, dir.y ) * uCloudH.w;
-  vec3 PC = dir * tC; PC.y += r0;
-  float rC = length( PC );
-  float muSC = dot( PC / rC, uSunDir );
-  vec3 EsC = uCloudSunE * textureLod( uTransmittance, transmittanceUV( rC, muSC ), 0.0 ).rgb * planetShadow( rC, muSC );
+  float fade = uCloudH.w * smoothstep( 0.04, 0.12, dir.y );
   float cs = dot( dir, uSunDir ), cm = dot( dir, uMoonDir );
-  // (the forward peak capped: by the setting Sun the old cirrus blew out into a white fan)
+  float fwd = min( hgPhase( cs, 0.6 ) * 4.0 * PI, 8.0 );
+  float litM = 0.3 + 0.45 * mkCloudSide( dir, uMoonDir ) + 0.1 * min( hgPhase( cm, 0.6 ) * 4.0 * PI, 8.0 );
+
+  // ---- cirrus (behind the cumulus): thin, fibrous; forward-scattering ice. (The forward peak capped: by the setting Sun
+  // the old cirrus blew out into a white fan.) Thin ice, optical depth ≈ 0.3 at the fibres' cores: moonlit, a faint veil
+  float aC = 0.45 * smoothstep( 1.0 - uCiUV.w, 1.0 - uCiUV.w + 0.3, cC.g ) * smoothstep( 0.0, 0.03, dir.y ) * uCloudH.w;
   float phC = min( mix( hgPhase( cs, 0.75 ), hgPhase( cs, -0.2 ), 0.35 ) * 4.0 * PI, 2.2 );
   float phM = min( mix( hgPhase( cm, 0.75 ), hgPhase( cm, -0.2 ), 0.35 ) * 4.0 * PI, 3.0 );
-  // (thin ice: optical depth ≈ 0.3 at the fibres' cores — moonlit, a faint grey veil, not lit beams)
-  vec3 Lci = EsC * phC * 0.05 + uCloudMoonE * phM * 0.02 + uCloudAmb * 0.85;
+  vec3 Lci = uCiSunE * phC * 0.05 + uCloudMoonE * phM * 0.02 + uCloudAmb * 0.85;
   vec3 TfC = exp( - uCiSig * tC );
   vec3 frontC = clamp( ( 1.0 - TfC ) / max( 1.0 - Tfull, vec3( 1e-3 ) ), 0.0, 1.0 );
   L = mix( L, Lci * outScale * TfC + Lsky * frontC, aC );
 
-  // ---- cumulus: domes over the field. The ray crosses the layer from its base to its top; slices along that stretch (front
-  // to back) find the domes it meets — a dome's cross-section narrows with height (the threshold rises with z), so a
-  // distant cumulus shows a flat base and a rounded top, and the slices' heights shade it (grey bases, lit flanks and
-  // tops). The weather mask (on the cirrus tile) thickens or thins the fields.
+  // ---- cumulus. The weather mask (on the cirrus tile) thickens or thins the fields. Seen from below (high up the sky) a
+  // cumulus shows its flat base: grey, its thin margins brighter; seen far off (low) its sides and cauliflower tops: white
+  // on the side facing the Sun, grey on the far side. A Sun near the cloud's horizon lights the bases from the side (the
+  // warm undersides at dawn and dusk)
   float cov = clamp( uCuUV.w * ( 0.2 + 1.0 * cC.b ), 0.0, 0.4 );
   float thr = 1.0 - cov;
-  float tm = mix( tB, tT, 0.4 );
-  vec3 PM = dir * tm; PM.y += r0;
-  float rM = length( PM );
-  vec3 upM = PM / rM;
-  float muS = dot( upM, uSunDir ), muM = dot( upM, uMoonDir );
-  vec3 Es = uCloudSunE * textureLod( uTransmittance, transmittanceUV( rM, muS ), 0.0 ).rgb * planetShadow( rM, muS );
-  // a high Sun lights the domes' sides from above whatever the azimuth
-  float away = mix( mkCloudSide( dir, uSunDir ), 0.65, muS * muS ), awayM = mkCloudSide( dir, uMoonDir );
-  // a Sun near the cloud's own horizon lights its base and flanks from the side and below (the red undersides at dawn
-  // and dusk); higher, the base is lit only by what diffuses through the cloud — the thin margins most
+  float muS = uCloudKey.y;
   float low = smoothstep( 0.16, 0.0, muS );
-  float fwd = min( hgPhase( cs, 0.6 ) * 4.0 * PI, 8.0 );
-  // the cloud mass up the sunbeam shades the far side and the bases under thick cores
-  float shade = smoothstep( thr, thr + 0.35 * cov + 0.05, cS.r + ( cS.a - 0.5 ) * 0.10 ) * ( 1.0 - 0.6 * low );
-  float litM = 0.3 + 0.45 * awayM + 0.1 * min( hgPhase( cm, 0.6 ) * 4.0 * PI, 8.0 );
-  float span = 0.6 * cov;
-  float T = 1.0;
-  float sumLit = 0.0, sumZ = 0.0, sumA = 0.0;
-  // slices enough that their lenses join: a ray at elevation e crosses the 0.8 km layer over 0.8 / tan e km, and each cloud
-  // (≳ 1.5 km across) must take a few slices or they show as terraces — n ≈ 3 / tan e: 3 from ≈ 45° up, 17 at 10°, the
-  // tier's cap (CLOUD_SLICES 16 / 24) by 7–10°. A dynamic loop with explicit LODs (no derivative inside flow control:
-  // ANGLE/D3D11), the LOD from the pixel's footprint across the ray at the slice
+  float under = smoothstep( 0.22, 0.7, mu );
+  float away = mix( mkCloudSide( dir, uCloudKey ), 0.7, muS * muS );
+  float massS = clamp( ( cS.a - thr ) / max( cov, 0.03 ), 0.0, 1.0 );
+#ifdef CLOUD_MARCH
+  // slices along the ray through the layer, front to back: a dome's cross-section narrows with height (the threshold rises
+  // with z), so a distant cumulus shows a flat base and a rounded top. n ≈ 3 / tan e slices (3 from ≈ 45° up, the cap by
+  // 7–10°); explicit LODs (no derivative inside flow control: ANGLE/D3D11), the LOD from the pixel's footprint at the slice;
+  // the slices' heights jittered per pixel by a white hash (a structured dither showed as combed streaks)
   float pa = length( dFdx( dir ) ) + length( dFdy( dir ) );
-  // the cauliflower margin finer than the tile holds (≈ 60–120 m): one fetch of the detail channel at 7× the scale, at
-  // the layer's middle, eroding every slice alike (no parallax between slices: too fine to see)
-  vec2 uvD = ( dir.xz * tm * uCuUV.z + uCuUV.xy ) * 7.0 + vec2( 0.31, 0.77 ); // (an integer scale: the offset wraps)
-  float det = ( texture( uCloudTex, uvD ).a - 0.5 ) * 0.03;
-  // (none on a clear day: a uniform, so the branch is coherent)
   int n = uCuUV.w > 0.0 ? int( clamp( ceil( 3.0 * sqrt( max( 1.0 - mu * mu, 0.0 ) ) / max( mu, 0.04 ) ), 3.0, float( CLOUD_SLICES ) ) ) : 0;
-  // the slices' heights dithered per pixel (interleaved gradient noise): what is left of their terraces becomes a fine grain
-  float jit = ( fract( 52.9829189 * fract( dot( gl_FragCoord.xy, vec2( 0.06711056, 0.00583715 ) ) ) ) - 0.5 ) * 0.5;
-  float texKm = 1.0 / ( uCuUV.z * ${CLOUD_SIZE.toFixed(1)} );
+  float jit = ( fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) - 0.5 ) * 0.5;
+  float texKm = 1.0 / ( uCuUV.z * ${'${CLOUD_TEX_SIZE}'} );
+  float span = 0.6 * cov;
+  float T = 1.0, sumLit = 0.0, sumZ = 0.0, sumA = 0.0;
   for ( int k = 0; k < ${MAX_SLICES}; k ++ ) {
     if ( k >= n ) break;
     float z = clamp( ( float( k ) + 0.5 + jit ) / float( n ), 0.0, 1.0 );
     float tk = mix( tB, tT, z );
     float lod = log2( max( tk * pa / texKm, 1.0 ) );
     vec4 c = textureLod( uCloudTex, dir.xz * tk * uCuUV.z + uCuUV.xy, lod );
-    float h = c.r + ( c.a - 0.5 ) * 0.10 + det;
     float th = thr + span * z * sqrt( z );
-    float d = smoothstep( th, th + 0.08, h );
-    float core = smoothstep( th, th + 0.2 * cov + 0.02, h );   // 0 at the margin … 1 inside
+    float d = smoothstep( th, th + 0.06, c.r );
+    float core = smoothstep( th, th + 0.2 * cov + 0.02, c.a );
     float a = d * mix( 0.7, 1.0, core );
-    // the face seen at this height: the base (z ≈ 0) lit by what diffuses through, or by a low Sun from below; the flanks
-    // and tops by the Sun on the side facing it; thin margins glow when backlit
-    float baseLit = mix( 0.06 + 0.25 * ( 1.0 - core ), 0.12 + 0.75 * away, low );
-    float sideLit = mix( 0.2, 1.0, away ) * mix( 1.0, 0.85, low );
-    float lit = mix( baseLit, sideLit, smoothstep( 0.0, 0.5, z ) ) * mix( 1.0, 0.3, shade * ( 1.0 - z ) ) + 0.12 * fwd * ( 1.0 - core );
+    float relief = clamp( ( c.r - c.a ) / max( cov, 0.03 ) * 3.0, -1.0, 1.0 );
+    float sideLit = ( mix( 0.3, 1.1, away ) + 0.35 * relief ) * mix( 1.0, 0.4, massS * ( 1.0 - z ) ) * mix( 1.0, 0.85, low );
+    float baseLit = mix( 0.1 + 0.3 * ( 1.0 - core ), 0.35 + 0.55 * away, low );
+    float lit = mix( sideLit, baseLit, under * ( 1.0 - z ) ) + 0.15 * fwd * ( 1.0 - core );
     float w = T * a;
     sumLit += w * lit; sumZ += w * z; sumA += w;
     T *= 1.0 - a;
   }
   float aCu = ( 1.0 - T ) * fade;
-  float lit = sumLit / max( sumA, 1e-4 ), zs = sumZ / max( sumA, 1e-4 );
-  // albedo of the visible face ≈ 0.75; the ambient: the sky round it, and the lit ground below (bases see the ground)
-  vec3 amb = uCloudAmb * mix( 0.55, 0.8, zs ) + uCloudGnd * mix( 0.6, 0.2, zs );
-  vec3 Lcu = 0.75 * 0.3183 * ( Es * lit + uCloudMoonE * litM * step( 0.0, muM ) ) + amb;
+  float lit = sumLit / max( sumA, 1e-4 ), zs = sumZ / max( sumA, 1e-4 ), baseShare = under * ( 1.0 - zs );
+  vec3 PM = dir * tm; PM.y += r0;
+  float rM = length( PM );
+  float muSM = dot( PM / rM, uSunDir );
+  vec3 Es = uCloudSunE * textureLod( uTransmittance, transmittanceUV( rM, muSM ), 0.0 ).rgb * planetShadow( rM, muSM );
+#else
+  // the flat layer: R is the domes' height (with their lobes), A its smooth mass (bake: clouds-core.js). The edge as sharp as
+  // the pixel allows (soft by the field's own footprint, never smeared); the mass toward the light shades the far side; the
+  // relief R − A lights the lobes on the tops
+  float e = clamp( 1.5 * fw0, 0.012, 0.08 );
+  float d = smoothstep( thr, thr + e + 0.015, c0.r );
+  float mass = clamp( ( c0.a - thr ) / max( cov, 0.03 ), 0.0, 1.0 );
+  float core = smoothstep( thr, thr + 0.35 * cov + 0.02, c0.r );
+  float relief = clamp( ( c0.r - c0.a ) / max( cov, 0.03 ) * 3.0, -1.0, 1.0 );
+  // the light's side: mass rising toward the light hides it (the far side), falling away leaves this point lit
+  float sunFace = clamp( 0.65 - 1.8 * ( massS - mass ), 0.0, 1.0 );
+  float sideLit = ( mix( 0.25, 1.1, sunFace ) * mix( 0.75, 1.0, away ) + 0.35 * relief * sunFace ) * mix( 1.0, 0.85, low );
+  float baseLit = mix( 0.1 + 0.35 * ( 1.0 - mass ), 0.3 + 0.55 * sunFace, low );
+  float lit = mix( sideLit, baseLit, under ) + 0.15 * fwd * ( 1.0 - core );
+  float aCu = d * mix( 0.72, 1.0, core ) * fade;
+  float baseShare = under;
+  vec3 Es = uCuSunE;
+#endif
+  // albedo of the visible face ≈ 0.8; the ambient: the sky round it, and the lit ground below (bases see the ground)
+  vec3 amb = uCloudAmb * mix( 0.85, 0.6, baseShare ) + uCloudGnd * mix( 0.2, 0.6, baseShare );
+  vec3 Lcu = 0.8 * 0.3183 * ( Es * max( lit, 0.0 ) + uCloudMoonE * litM * step( 0.0, uMoonDir.y ) ) + amb;
   vec3 Tf = exp( - uCuSig * tm );
   vec3 front = clamp( ( 1.0 - Tf ) / max( 1.0 - Tfull, vec3( 1e-3 ) ), 0.0, 1.0 );
   L = mix( L, Lcu * outScale * Tf + Lsky * front, aCu );

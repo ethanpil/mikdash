@@ -4,18 +4,18 @@
 // a clear dome). Pure functions (no DOM, no three): the worker runs them, and a Node script can preview them.
 //
 // Channels (each tiles seamlessly; every noise is periodic over the tile):
-//   R  cumulus "dome height": an inverted cellular field (billows ≈ 1.7 km and ≈ 0.6 km over a 40 km tile) on a 10 km fbm
-//      (fields of cloud and clear air). RANK-EQUALISED: a fraction c of the texels lies above 1 − c, so the shader's
-//      threshold 1 − coverage covers exactly that share of the layer's base, and a dome's core (higher values) reaches
-//      the layer's top plane (the 2.5-D sampling in clouds.js).
-//   G  cirrus fibres (sampled on a 4× larger tile, ≈ 160 km): fine filaments stretched ≈ 12 : 1 down the upper wind,
-//      bent by a slow cross-wind warp and gathered in patches; rank-equalised over the whole tile (coverage as above).
-//   B  the "weather": a smooth fbm (≈ 40–80 km on the cirrus tile) that thickens and thins the cumulus fields, sampled
-//      with the cirrus coordinates, so it does not repeat with the cumulus tile and drifts at its own speed.
-//   A  detail: fbm ≈ 160–310 m on the cumulus tile, the cauliflower edge of a cumulus (erodes its margin).
+//   R  cumulus "dome height" over a 64 km tile: inverted cellular clouds (≈ 3.2 km), towers (≈ 1.3 km) and cauliflower lobes
+//      (≈ 0.6 km) on a fbm of fields. RANK-EQUALISED: a fraction c of the texels lies above 1 − c, so the shader's threshold
+//      1 − coverage covers exactly that share of the layer's base, and a dome's core (higher values) is its thick middle.
+//   G  cirrus fibres (sampled on a larger tile, 160 km): brush strokes broken into tufts, fibres inside, warped into hooks,
+//      in patches; rank-equalised over the whole tile (coverage as above).
+//   B  the "weather": a smooth fbm that thickens and thins the cumulus fields, sampled with the cirrus coordinates, so it
+//      does not repeat with the cumulus tile and drifts at its own speed.
+//   A  R blurred over ≈ 0.5 km: a cloud's smooth mass. The weak tiers' flat layer shades a cloud from it (its sun-ward
+//      slope, its thickness); R − A is the cauliflower relief lit on the tops.
 
 /** bump when the bake changes (the worker's IndexedDB cache key) */
-export const BAKE_VERSION = 1;
+export const BAKE_VERSION = 2;
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -76,7 +76,7 @@ function worley(c, rand) {
  * rank-equalise a Float32Array to bytes: value k / (n − 1) of its sorted order (a uniform distribution). A counting sort over
  * 2¹⁶ bins of the value range (ties within a bin keep their order) — a comparison sort of 1 M indices took ≈ 0.27 s
  */
-function equalise(src, out, channel, stride = 4) {
+function equalise(src, out, channel, stride = 4, rank = null) {
   const n = src.length, B = 65536;
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < n; i++) { const v = src[i]; if (v < lo) lo = v; if (v > hi) hi = v; }
@@ -85,19 +85,41 @@ function equalise(src, out, channel, stride = 4) {
   for (let i = 0; i < n; i++) { const b = Math.floor((src[i] - lo) * k); bin[i] = b; count[b + 1]++; }
   for (let b = 0; b < B; b++) count[b + 1] += count[b];
   const s = 255 / (n - 1);
-  for (let i = 0; i < n; i++) out[i * stride + channel] = Math.round(count[bin[i]]++ * s);
+  for (let i = 0; i < n; i++) { const r = count[bin[i]]++; out[i * stride + channel] = Math.round(r * s); if (rank) rank[i] = r / (n - 1); }
+}
+
+/** periodic box blur of a size² field, radius r texels, in place (two passes ≈ a Gaussian) */
+function blur(f, size, r) {
+  const tmp = new Float32Array(size), w = 1 / (2 * r + 1);
+  for (let pass = 0; pass < 2; pass++) {
+    for (let y = 0; y < size; y++) {            // rows
+      const o = y * size;
+      let acc = 0;
+      for (let k = -r; k <= r; k++) acc += f[o + ((k % size) + size) % size];
+      for (let x = 0; x < size; x++) { tmp[x] = acc * w; acc += f[o + (x + r + 1) % size] - f[o + ((x - r) % size + size) % size]; }
+      f.set(tmp, o);
+    }
+    for (let x = 0; x < size; x++) {            // columns
+      let acc = 0;
+      for (let k = -r; k <= r; k++) acc += f[(((k % size) + size) % size) * size + x];
+      for (let y = 0; y < size; y++) { tmp[y] = acc * w; acc += f[((y + r + 1) % size) * size + x] - f[(((y - r) % size + size) % size) * size + x]; }
+      for (let y = 0; y < size; y++) f[y * size + x] = tmp[y];
+    }
+  }
 }
 
 /**
  * Bake the cloud tile. size: texels per side (power of two). Returns a Uint8Array RGBA (size² × 4).
  * Deterministic for a seed: the same sky on every visit (the per-date variation is an offset and a coverage, clouds.js).
+ * The cumulus tile spans CU_TILE (64 km, clouds.js): cells below are per tile side.
  */
 export function bakeClouds(size = 1024, seed = 7411) {
   const rand = mulberry32(seed);
-  // cumulus tile: fields (4, 8 cells), billows (24, 64 cells), cauliflower detail (128, 256 cells)
+  // cumulus: fields where clusters form (4, 8, 16 cells: 16 / 8 / 4 km), the clouds (20 cells ≈ 3.2 km), their towers
+  // (48 ≈ 1.3 km), the cauliflower lobes (112 ≈ 0.6 km) and a fine fringe (perlin 256 ≈ 250 m)
   const f4 = perlin(4, 4, rand), f8 = perlin(8, 8, rand), f16 = perlin(16, 16, rand);
-  const w24 = worley(24, rand), w64 = worley(64, rand);
-  const d128 = perlin(128, 128, rand), d256 = perlin(256, 256, rand);
+  const w20 = worley(20, rand), w48 = worley(48, rand), w112 = worley(112, rand);
+  const d256 = perlin(256, 256, rand);
   // cirrus tile (sampled 4× larger): fibres stretched along u (the wind), warped across, in patches; the weather mask
   const cWarp = perlin(5, 5, rand), cWarp2 = perlin(11, 11, rand);
   const str1 = perlin(6, 40, rand), str2 = perlin(9, 70, rand), tuftN = perlin(7, 18, rand);
@@ -111,13 +133,11 @@ export function bakeClouds(size = 1024, seed = 7411) {
     const v = (y + 0.5) / size;
     for (let x = 0; x < size; x++) {
       const u = (x + 0.5) / size, i = y * size + x;
-      // cumulus: fields × billows (a cloud is a cluster of rounded towers; the fields decide where clusters form)
+      // cumulus: fields × clouds × towers × lobes — the domes' height over the layer; the fields decide the clusters and
+      // the cloud sizes vary with them (a cluster's cloud may be one cell or several merged)
       const field = 0.5 + 0.9 * (0.55 * f4(u, v) + 0.3 * f8(u, v) + 0.15 * f16(u, v));
-      const b1 = 1 - Math.min(1, w24(u, v)), b2 = 1 - Math.min(1, w64(u, v));
-      R[i] = field * 0.6 + b1 * b1 * 0.3 + b2 * 0.1;
-      // detail (A): the cauliflower margin, 0..1 around 0.5
-      const det = 0.5 + 0.75 * (0.65 * d128(u, v) + 0.35 * d256(u, v));
-      out[i * 4 + 3] = Math.max(0, Math.min(255, Math.round(det * 255)));
+      const b1 = 1 - Math.min(1, w20(u, v)), b2 = 1 - Math.min(1, w48(u, v)), b3 = 1 - Math.min(1, w112(u, v));
+      R[i] = field * 0.55 + b1 * b1 * 0.27 + b2 * 0.12 + b3 * 0.05 + 0.02 * d256(u, v);
       // cirrus: brush strokes (≈ 27 × 4 km, smooth, ridged) broken into tufts of uneven length and strength down the wind,
       // fibres inside them as texture; the cross coordinate bent by a slow warp that also varies along the wind (the
       // hooks of cirrus uncinus where it turns)
@@ -135,7 +155,12 @@ export function bakeClouds(size = 1024, seed = 7411) {
       out[i * 4 + 2] = Math.max(0, Math.min(255, Math.round(wm * 255)));
     }
   }
-  equalise(R, out, 0);
+  // R equalised; A: R blurred over ≈ 0.5 km — the cloud's smooth mass (its thickness, the sun-ward slope that shades it), so
+  // R − A is the cauliflower relief on its top
+  const rank = new Float32Array(N);
+  equalise(R, out, 0, 4, rank);
+  blur(rank, size, Math.max(1, Math.round(size / 128)));
+  for (let i = 0; i < N; i++) out[i * 4 + 3] = Math.max(0, Math.min(255, Math.round(rank[i] * 255)));
   equalise(G, out, 1);
   return out;
 }
