@@ -8,6 +8,9 @@
 //      roughness, so repeated tiles do not show the same stone twice (faded out when minified);
 //   3. close-range detail (medium+) — a shared micro-detail map (normal.xy, albedo, roughness) tiled at
 //      millimetre scale, blended in within a few meters of the camera.
+//   4. (materials-realism) analytic hairline joints — masonry / sheet keys with a SPEC `joint` (uniform mkJoint: low and
+//      medium; the steps on every tier, on vertical faces only): box-filtered joint lines drawn per pixel where the
+//      texture is magnified, from the course coordinate and the block-local distance in the albedo alpha (ALU only).
 // Per-material options:
 //   blend   — terrain_blend: three layer sets (rock, soil, vegetation) mixed by the vertex colour weights
 //             (r, g, b), with height-aware, world-noise-broken edges that widen with distance (materials-2-fix);

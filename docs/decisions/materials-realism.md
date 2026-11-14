@@ -41,7 +41,8 @@ the scratchpad), shot back to back with the "after".
   with screen derivatives (∂u0/∂u from the 2 × 2 Jacobian, so a course joint's vertical mix is not mistaken for one), and
   block starts lie on the layout's grid ((k + ½) q), so the joint is the nearest grid line; just right of a joint the small
   block-local distance confirms it too. The line is box-filtered over the pixel's footprint, so it never aliases and fades
-  to its true mean darkness as it recedes. — Alternatives: a hairline baked into the map (it cannot be thinner than a texel);
+  to its true mean darkness as it recedes. The baked soft joint stays under it (it is what reads from afar), at reduced
+  strength on the pavement (below). — Alternatives: a hairline baked into the map (it cannot be thinner than a texel);
   sampling the layout LUT in the patch (a new sampler and a dependent read on low: not allowed); a higher-resolution map
   (memory: same sizes per tier was a constraint).
 - **Widths per key (`JOINT` in index.js), the baked joints' own: Herodian 1.2 mm open joint + 4 mm rounded arris (laid
@@ -75,7 +76,8 @@ the scratchpad), shot back to back with the "after".
 - **On coarse textures (texel ≥ 11–16 mm: medium and low; `cz`, 0 on high) the mean of the unresolved dressing is baked:
   the pointed boss is darker under the sky than the smooth combed margin (micro-occlusion of its pits and ridges: occlusion
   −18 %, albedo −5 %, scaled by how much of the pitting the texture has faded), and the margin is shaded where it meets the
-  foot of the bevel (occlusion −30 % over ~1.3 texels).** Under the pre-dawn sky, where the light is nearly all indirect,
+  foot of the bevel (occlusion −30 % over ~1.3 texels).** Net effect: the Herodian courts ~2–3 % darker on average (mean
+  screen luminance, medium azarah-d3 148 → 144), the price of bosses that read as dressed stone. Under the pre-dawn sky, where the light is nearly all indirect,
   each stone now reads as a raised boss in a pale drafted frame instead of a flat rectangle. The previous logs warned against
   a pale margin drawn as an outline (materials-2) — this is not a drawn line but the boss's own mean darkening, and only where
   the boss's texture is not resolved; high (where the pits and the detail map carry it) is unchanged. — Alternatives:
@@ -93,7 +95,9 @@ the scratchpad), shot back to back with the "after".
 ## The pavement (problems 2 and 3)
 
 - **The joint's colour and occlusion are drawn at least ~1.2 texels across at the joint's mean darkness over that width
-  (but not under half: dust settles in a joint and along its arrises); the relief (normal) as before.** Every tier: high's
+  (but not under half — on low 0.6: dust settles in a joint and along its arrises, and on low the joints are the floor's
+  main cue at 5–20 m; 0.75 brought the grout band back up close, 0.35 lost the grid in the sunlit Ezrat Nashim); the relief
+  (normal) as before.** Every tier: high's
   Azarah joints go from point-sampled (drawn, half drawn or missing) to even at 58 % strength; the Mount's (10 mm with its
   worn arris) are unchanged on high. On low the 5–10 cm grout band is gone; up close the patch draws the hairline.
 - **Marble slabs carry soft grey drifts across the slab, stronger on some slabs than others (the clouded white marbles;
@@ -111,9 +115,22 @@ the scratchpad), shot back to back with the "after".
   roughness ± 0.05), burnished and duller zones of 10–30 cm (tone ± 9 %, roughness ∓ 0.07), the sheet's waviness twice as
   deep so its facets tilt a few degrees and break up the lamps' and the gate's highlights, and the 2.5 cm hammer dishes
   (a texel each: a noisy normal) mostly faded; the analytic seams show the sheets up close.** Floor region on low at d3:
-  luminance sd 2.7 → 3.2 (see the report for the final numbers); the plating now reads as fitted sheets, not paint. — It
+  luminance sd 2.76 → 3.17, mean unchanged (135, 102, 48); the plating now reads as fitted sheets, not paint. — It
   is a stand-in in the texture for reflections the tier does not compute; the real fix is env's (below). F0 not changed:
   the plating's grade was tuned against the sources and the other tiers (gate-world-materials).
+
+## Measured (this machine: SwiftShader, so no frame rates; before = the same tree with the materials of e4815ed)
+
+- Texture memory (baker formula, `ctx.mats.stats.MB`): low 24.2 → 24.2 MB (57 sets), medium 61.2 → 61.2 MB. Same sizes.
+- Programs (`renderer.info.programs` at capture): medium identical in all five views (90 / 91 / 91 / 89 / 90); low 74–77
+  per view on both sides, varying ±1 between two captures of the same build (deferred compiles still landing); a dedicated
+  pair at the default view, twice: 74 / 74 both times. No new define, variant or material.
+- Bake time: every baked low set (57) re-baked with a GPU sync (`baker.bench`), three passes per page, two cold pages per
+  side, interleaved: before 1943–2457 ms a pass (median ≈ 2165), after 1570–2366 (≈ 1920); `herodian_c` alone five times a
+  page: 182–329 ms vs 198–427 ms (medians 274 / 273). No growth measurable above the noise (±15 % run to run). The
+  generators gained one basis fetch (the marble's grain stand-in), one block hash and ~30 ALU ops in the Herodian kind, a
+  texelFetch in the stone kind.
+- Draw calls / triangles: unchanged in every view. Console: no errors or warnings from materials in any capture.
 
 ## Not changed
 

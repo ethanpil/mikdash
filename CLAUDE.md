@@ -35,6 +35,10 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - Materials are baked on the GPU at load (`src/world/materials/gen`). On ANGLE/D3D11 keep generator shaders
   loop-free, read noise from basis textures, single output: ALU noise or MRT costs 0.3–3 s per program on the
   HD 4600. Features narrower than a texel must be widened/faded or they alias. `?matfx=0`, `?mattex=0` debug.
+- Masonry/sheet keys draw their joints analytically on low/medium (patch.js `mkJoint`: course coordinate + the jump of
+  the block-local distance in the albedo alpha, box-filtered, ALU only, no new sampler or program); bake-side, coarse
+  textures (>= 11–16 mm a texel) bake the MEAN of what they cannot resolve (pits, pecking, cavities) and drop detail
+  above their Nyquist frequency instead of aliasing it (docs/decisions/materials-realism.md).
 - Nav is built in a Worker by rasterising collider triangles into a 0.5 m multi-level grid; a coarse block graph
   steers A*. Half-amah stairs need sub-step probes (|Δh| up to 0.8 m per cell when each rise ≤ 0.35 m).
 - Audio is synthesised in module Workers (`src/audio/worker.js`); `?debug=audio` opens an audition panel.
