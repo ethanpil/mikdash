@@ -94,14 +94,16 @@ Format: **choice** — why (source / reasoning) — alternative. ⚙ = staging (
   figure crosses a ring column. Three slaughter teams (slaughterer + receiver) at once, in the verse's order; a team's
   next cut waits for its receiver back from the corners.
 - **Holders:** two kneel for a lamb or the goat, three for the ram, four (two each side) for a bull.
-- **Bulls are flayed on the pavement where they fell, two men to each, ~19 min** (site.js: from a hook a bull would not
-  clear the pavement; how it was done is not recorded). **The bull figure lies bound until its parts are handed out; it
-  goes when the flanks are taken** — there are no bull carcass props (wish below).
+- **Bulls are flayed on the pavement where they fell, two men kneeling at each, ~19 min** (site.js: from a hook a bull
+  would not clear the pavement; how it was done is not recorded). **The bound figure gives way to the flayed carcass**
+  (bull-scale props, below): bound until 14 % of the flaying, `bull_flaying` to 72 %, then `bull_dressed` on its spread
+  hide until the last part is taken, the hide (`hide_bull`) left lying until the limbs window ends — the lamb's scheme of
+  hung states.
 - **Lambs, the ram and the goat hang from the dwarf pillars' hooks** (pillars 0–7; the goat on the first lamb's hook,
   free by then), with people-4's hung / flaying / dressed states by kind.
-- **The crews:** a bull 24, the ram 11, a lamb 8 (the tamid's nine less the chavitin); every man carries his own share
-  — the neck "by three" as three `limb_gerah` (props cannot be held by two figures), the innards, flour and wine as their
-  own vessels. Bull parts use the lamb's limb props (no bull-scale limbs: wish below).
+- **The crews:** a bull 24, the ram 11, a lamb 8 (the tamid's nine less the chavitin); a lamb's and the ram's men each
+  carry their own share; a bull's limbs that the Mishnah gives to two or three are carried WHOLE by them together (below),
+  the innards, flour and wine as their own vessels.
 - **Processions one at a time on the east walk** (each file reaches the top when the last one's flour men are done):
   lambs, the ram, then the bulls (their flaying is longest). On the top the file walks the south walk and the east walk
   to the north; each lays his parts on the walk's outer half, "between horn and horn", a breath for all to see, then
@@ -119,6 +121,69 @@ Format: **choice** — why (source / reasoning) — alternative. ⚙ = staging (
   only on the first Rosh Chodesh date the session reaches, spawned as each first shows — an ordinary boot carries none of
   them. Peak ~45 kohanim of the module at once (bull procession), within every tier's budget pass. Props share actors per
   name by their windows (≈ 30 actors for ≈ 150 placements).
+
+## Bull-scale props (bull-props) ⚙
+
+Sources read this session (Sefaria): Mishnah Yoma 2:6–7; Tamid 4:2–3; Tosafot Yom Tov on Yoma 2:7; Rambam Ma'aseh
+HaKorbanot 6:4, 6:15–19; Zevachim 12:2; Vayikra 1:6; Middot 3:4 and Bartenura there.
+
+- **A limb given to two or three is carried whole by them, side by side.** — Yoma 2:7 "וְהָרֶגֶל בִּשְׁנַיִם… וְהַגֵּרָה
+  בִּשְׁלשָׁה"; Rambam MK 6:18 "הַשֵּׁנִי וְהַשְּׁלִישִׁי מוֹלִיכִין הָרֶגֶל שֶׁל יָמִין", 6:19 "וְלָמָּה לֹא יְחַלְּקוּ הָאֵיבָר הַגָּדוֹל
+  שֶׁל שׁוֹר לַחֲלָקִים. שֶׁנֶּאֱמַר וְנִתַּח אֹתָהּ לִנְתָחֶיהָ וְלֹא נְתָחֶיהָ לִנְתָחִים"; Tosafot Yom Tov on Yoma 2:7 "לֹא
+  שֶׁהָיוּ מְחַלְּקִים הָאֵבֶר לִשְׁנַיִם… אֶלָּא הָאֵבֶר הַשָּׁלֵם הָיוּ מַקְרִיבִין אוֹתָהּ שְׁנֵי כֹּהֲנִים". So each of the 2–3 men
+  carrying "a portion" is ruled out by the sources. How they held it is not recorded: here two abreast 0.634 m apart
+  (shoulder to shoulder), the limb across their four palms at the waist (people clip `carry_heavy`); the neck's three
+  abreast, the middle man under the neck, the side men under the two ribs each side (Tamid 4:3 "שְׁתֵּי צְלָעוֹת מִכָּאן
+  וּשְׁתֵּי צְלָעוֹת מִכָּאן") ⚙. — Alternative: a prop shared by two rigs (a new rig feature); instead the part rides one
+  man's right palm (grip 'palm', seated level in `carry_heavy`) and reaches over his partners' palms, every man of a
+  group in the same clip and phase (in step) — exact because a bull's crews are pooled at scale 1.
+- **A group moves as one (g7/plan.js `bullFile`, rosh-chodesh-musaf.js `follow`).** One Script for the group's centre
+  (take, row, file, the top), its men placed dx amot to its left each frame, turning about the centre; each man's own
+  Script brings him to his place before the take and home after the toss and is hidden while the group carries. A pure
+  function of the clock like everything else (jump-safe).
+- **The parts' sizes are the bull's** (rig `bull`: withers 1.3 m, body 1.5 m ≈ 2 × the lamb): the hind leg from the hip
+  to below the hock ≈ 0.94 m (the lamb's leg × 2.3 in length, × 2.1 in girth); the head baked from the live bull (in its
+  hair, as the lamb's: the flaying ends at the breast before the head is cut, Tamid 4:2), the place of slaughter up with
+  the peder on it; the breast × 2.5; a fore leg × 2.6 lengthwise; a flank × 4.2 across; the neck 0.52 m with two ribs a
+  side reaching 0.55 m out and the windpipe, heart and lungs hanging from it; the innards in a 0.5 m silver basin, a third
+  in each, with the four lower legs (kera'ayim, from the knee, in their hide, Tamid 4:3) on them 2 + 1 + 1. Sizes are
+  reconstruction from the rig ⚙.
+- **The bull's oketz has no alyah.** — The fat tail is a sheep's (Tamid 4:3 "וְהָאַלְיָה… עִמּוֹ" is said of the
+  tamid lamb; Vayikra 3:9 of a sheep). A bull's tail-piece here is the rump with the sacrum's crest, the tail flayed to its
+  tip hanging from it, the two kidneys in their suet and the finger of the liver on it (Tamid 4:3 "וְאֶצְבַּע הַכָּבֵד
+  וּשְׁתֵּי כְלָיוֹת עִמּוֹ").
+- **The carcass stages are the lamb's scheme, on the ground:** the bound figure → `bull_flaying` (the up side flayed from
+  the belly to the backbone, its hide fallen back over the back onto the pavement flesh side up; the under side, head and
+  lower legs still in the hide: the live bull's own baked mesh cut along the hide's edge) → `bull_dressed` (head off, the
+  lower legs off at the knees and hocks, the belly opened and emptied — Tamid 4:2 "קְרָעוֹ וְנִמְצָא כֻלּוֹ גָלוּי לְפָנָיו") on
+  `hide_bull`. Built in the bull rig's rest space from its own body lines (animals.js quad) and skinned on the CPU to the
+  bound pose at phase 0, the pose the sim holds — so it lies exactly where the figure lay (the bulls' pool at scale 1).
+  The parts do not go one by one (as the lamb's hung carcass does not) ⚙.
+- **The hide stays where it was spread until the limbs window ends.** — An olah's hide is the kohanim's (Zevachim 12:2
+  "עוֹרוֹתֵיהֶן לַכֹּהֲנִים"); who took it away and when is not recorded ⚙.
+- **The bull's men take their parts at two points on its east side, alternately, 0.16 min apart; the row stands south of
+  the bulls' rings facing east, the head of the file at its east end; the file goes east of the altar, south of it and up
+  the ramp's east half.** — The lambs' and the ram's files keep the west route; two or three abreast do not pass between
+  the yesod and the amah's channel (1½ amot), so a bull's file takes the east of the court (2½ amot east of the line the
+  men go home on), then the ramp's east half as before (Zevachim 6:3) ⚙. On the top each group lays its part on the walk's
+  outer half facing east, two or three abreast along the walk, slots spaced by each group's reach.
+- **The ram's parts at the ram's size** (Yoma 2:6 "אַיִל קָרֵב בְּאַחַד עָשָׂר, הַבָּשָׂר בַּחֲמִשָּׁה"): the lamb's five
+  carriers' parts × 1.22 (CARCASS.ram), its head baked from the ram (its horns) — `limb_*_ram`.
+- **Flayers kneel** (people `flay_kneel`) at a bull on the pavement; the knife works at ≈ 0.35 m ⚙.
+- **Altar wiping (temple-duties):** people `wipe` — leaning over the yesod, a folded cloth (`wipe_cloth`) under the right
+  palm wiped in broad rounds on the wall ≈ 1.5 amot ahead, the left palm braced; the wipers stand 0.6 amah off the yesod
+  (was 0.8, out of reach). — Middot 3:4 "רַבִּי אוֹמֵר, כָּל עֶרֶב שַׁבָּת מְלַבְּנִים אוֹתוֹ בְמַפָּה מִפְּנֵי הַדָּמִים";
+  Bartenura "מְקַנְּחִים אוֹתָן בְּמַפָּה" (wiping, not whitewash). Was `tend_lamp` with the hanging sudar.
+- **Cost:** no new shader programs — every new prop is drawn by the people's existing prop batches with the PROP/FLESH
+  materials; LOD1 geometries are 0.2–3.7 k triangles. Six clips (152 frames) more in the atlas of the two serving rigs
+  (man, elder). Prop geometry is built on first draw (a Rosh Chodesh date only); the heavy grip is posed on first use.
+
+### Wish list (bull-props)
+- The parts do not burn: thrown on the pile they vanish (as every procession's); charred bull-scale twins for the pile.
+- The laid parts lie as the lead set them down; a part 1 m long on the outer half of the walk overhangs the edge's line
+  slightly at the singles' slots.
+- The flayed carcass's fixed coat tint (the bake's) may differ a little from the live bull's seeded coat at the moment
+  the figure gives way to `bull_flaying`.
 
 ## The song
 

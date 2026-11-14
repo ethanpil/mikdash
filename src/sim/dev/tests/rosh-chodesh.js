@@ -10,6 +10,8 @@
 //   4. sweep — every 0.5 min through the musaf: no figure of the module inside a solid at +1 m, off its floor (> 0.15 m;
 //      lying and carried aside), or within 0.3 m of another of its figures (a figure inside another); none in the
 //      altar's body below the sovev.
+//   3b. bull-scale props — a bull's carcass lies at its place from the cut until its last part is taken (the bound figure,
+//      then bull_flaying, bull_dressed), its hide after; its file carries 13 bull-size parts by 18 men (Yoma 2:7).
 //   5. determinism — the pose at six moments is the same after jumping away and back, and after a date round trip.
 // Run: node src/sim/dev/run.mjs --q low --timeout 900 --script src/sim/dev/tests/rosh-chodesh.js "date=2026-11-11&t=sunrise+100"
 const rt = ctx.schedule.runtime, time = ctx.time, ph = ctx.physics, S = ctx.schedule;
@@ -84,15 +86,49 @@ for (const p of P.procs) {
   time.set(p.top[1] + 0.05); await frames(2);
   const crew = { bullA: 'bullA', bullB: 'bullB', ram: 'ram' }[p.key] || 'lambs';
   let n = 0;
+  const bull = p.kind === 'bull';
   for (const s of st.crews[crew].slots) {
     if (!s.want || !s.actor) continue;
     const o = s.actor.object3D.position;
-    if (o.y / AM > 24.5 && Math.abs(o.x / AM - 229.3) < 0.8) n++;
+    // (a bull's groups lay their parts facing east from the walk's line, two or three abreast along it — bull-props)
+    if (o.y / AM > 24.5 && (bull ? Math.abs(o.x / AM - 229.1) < 0.8 : Math.abs(o.x / AM - 229.3) < 0.8)) n++;
   }
   onTop[p.key] = n;
   if (n !== p.flesh) fails.push(`${p.key}: ${n} carriers on the east walk at ${time.format(time.t)}, want ${p.flesh}`);
 }
 out.onTop = onTop;
+
+// ---------------------------------------------------------------------------------------------- 3b. bull-scale props
+// the bull's carcass never vanishes: from its cut until its last part is taken, the bound figure or its flayed carcass
+// (bull_flaying → bull_dressed) lies at its place, and its hide (hide_bull) after; on the ramp every carrier of a bull's
+// part holds or shares one: one prop per group (Yoma 2:7: 13 parts' groups for 18 men), bull-scale (bull_* / entrails_bull*)
+const propShown = (name, X, Y) => (st.props.byName.get(name) || []).some((q) => q.vis && Math.abs(q.X - X) < 0.5 && Math.abs(q.Y - Y) < 0.5);
+const bullCheck = {};
+for (const [bi, key] of [[0, 'bullA'], [1, 'bullB']]) {
+  const A = P.AN.find((x) => x.key === key), pr = P.procs.find((x) => x.key === key);
+  const t0b = P.t.cut[key] + 0.5, t1b = pr.rowEnd - 0.5;
+  const gaps = [];
+  for (let tt = t0b; tt <= t1b; tt += 1.5) {
+    time.set(tt); await frames(1);
+    const fig = st.animals.bulls.slot(bi);
+    const there = (fig.want && fig.actor) || propShown('bull_flaying', A.spot[0], A.spot[1]) || propShown('bull_dressed', A.spot[0], A.spot[1]);
+    if (!there) gaps.push(time.format(tt));
+  }
+  time.set(pr.rowEnd + 1); await frames(1);
+  const hideAfter = propShown('hide_bull', A.spot[0], A.spot[1]);
+  time.set(pr.top[0] - 0.4); await frames(2);
+  let men = 0, held = 0, small = 0;
+  for (const s of st.crews[key].slots) {
+    if (!s.want || !s.actor || !/carry_heavy/.test(s._pose || '')) continue;
+    men++;
+    if (s._g2r) { held++; if (!/^(bull_|entrails_bull)/.test(s._g2r)) small++; }
+  }
+  bullCheck[key] = { gaps: gaps.length, hideAfter, onRamp: `${men} men, ${held} parts${small ? `, ${small} not bull-scale` : ''} at ${time.format(time.t)}` };
+  if (gaps.length) fails.push(`${key}: no carcass at ${gaps.slice(0, 4)}`);
+  if (!hideAfter) fails.push(`${key}: no hide after its parts are taken`);
+  if (men !== 18 || held !== 13 || small) fails.push(`${key} file: ${bullCheck[key].onRamp}, want 18 men, 13 parts`);
+}
+out.bulls = bullCheck;
 
 // ---------------------------------------------------------------------------------------------- 4. sweep
 const everShown = Object.fromEntries(Object.keys(want).map((k) => [k, new Set()]));

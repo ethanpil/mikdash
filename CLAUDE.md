@@ -85,6 +85,11 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   with no lights but a shadow (warmup.js compileDepth); CSS animations of box-shadow/filter repaint every frame (the tag
   pulse cost 11 fps) — animate transform/opacity only; fps here is quantized by vsync, so A/B in-page, interleaved, in
   normal play.
+- Every scene light carries the depth pre-pass's layer (render/prepass.js `prepassLight`, called where a light is made:
+  env's key light, fx's fire-light pool, the cascades' SunLight). A light without it changes three's light state twice a
+  frame and every lit material is re-keyed in the main pass (getProgram for 70+ materials: ≈ 1 ms of JS and ≈ 250 KB of
+  garbage a frame); the pre-pass's warm-up compiles with `ctx.scene` as its light scene, because three keys even
+  MeshDepthMaterial by the light counts (docs/decisions/perf-cpu.md, round 2).
 - Tier features are capability flags in `src/core/quality.js` (shadows static/cached/cascaded, shadowFilter, aa, ao,
   interiors); code reads flags, never tier names. Low/medium take room sky visibility and AO from env's visibility volume
   (`env/visibility.js`): per-room bricks of each opening's solid-angle share × the live door weights in the uniform block

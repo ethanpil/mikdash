@@ -261,8 +261,9 @@ async function boot() {
   if (ctx.fx?.scene) warm.push(compileScene(engine.renderer, ctx.fx.scene, ctx.camera, null, off));
   if (ctx.people?.root) warm.push(compileDepth(engine.renderer, ctx.people.root, ctx.camera, ctx.scene));
   const pre = ctx.post?.pipeline?.prepass;
-  // (the pre-pass draws one layer, which holds no lights: three keys programs by light counts)
-  if (pre?.enabled) warm.push(compileScene(engine.renderer, pre.warmupObjects(), ctx.camera, null, off));
+  // (three keys every program by the light counts, the pre-pass's depth program too: compiled with the scene's lights,
+  // which carry the pre-pass layer — perf-cpu, render/prepass.js prepassLight)
+  if (pre?.enabled) warm.push(compileScene(engine.renderer, pre.warmupObjects(), ctx.camera, ctx.scene, off));
   const passes = ctx.post?.pipeline?.post?.warmupMaterials?.();
   if (passes?.length) warm.push(compilePasses(engine.renderer, passes, ctx.camera));
   try { if (ctx.env?.warmupMaterials) warm.push(ctx.env.warmupMaterials()); } catch (e) { console.warn('[boot] env warm-up failed', e); }

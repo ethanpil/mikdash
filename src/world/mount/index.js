@@ -6,6 +6,7 @@
 //   watch-post torches, anchors (posts.js).
 // Every dimension comes from ctx.el(...) (src/data/site.js); see docs/decisions/build-mount.md for the design choices.
 import { Group } from 'three';
+import { splitMeshes, sectorsOn, MOUNT_RINGS } from '../sectors.js';
 import { Kit } from './kit.js';
 import { buildWalls } from './walls.js';
 import { buildGates, buildShushanChamber } from './gates.js';
@@ -35,7 +36,11 @@ export async function build(ctx) {
   buildPosts(ctx, kit, detail, app.chuldah);
   registerAnchors(ctx, app);
 
-  group.add(kit.build());
+  // perf-cpu round 2: the Mount's big merged batches (its walls' ashlar, the stoas' roofs and floors) in cells round the
+  // Mount (world/sectors.js), so the parts behind the viewer are culled; colliders were registered whole by the kit
+  const kg = kit.build();
+  if (sectorsOn(ctx)) splitMeshes(kg.children.slice(), { rings: MOUNT_RINGS });
+  group.add(kg);
   group.userData.stats = {
     batchedTris: Math.round(kit.tris), columns: stoas.columns, gateBays: stoas.bays.length,
     causeway: { upperArches: app.cw.upper, lowerArches: app.cw.lower, arcadeEnd: Math.round(app.cw.arcadeEnd * 10) / 10 },

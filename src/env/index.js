@@ -10,6 +10,7 @@ import {
   PMREMGenerator, FogExp2, Color, Vector2, Vector3, Matrix3, MathUtils, ShaderChunk, BufferGeometry, Float32BufferAttribute,
 } from 'three';
 import { PRIORITY } from '../core/engine.js';
+import { prepassLight } from '../render/prepass.js';
 import { ATMO, mieCoefficients, transmittanceCPU, zenithOpticalDepth, luminance, nightFloorShape } from './atmosphere.js';
 import { AtmosphereLUTs, LUT_SCALE } from './luts.js';
 import { createSkyUniforms, createSkyMaterial, setSkyFeatures } from './sky.js';
@@ -372,6 +373,7 @@ export async function init(ctx) {
   // showed as scallops along the shadows of the proud lintels and courses; at 2–3 the taps sampled the lit faces' own
   // depth and grained them (shadow-ab.mjs mr1 / mr2 / mr3, lintel-close-d1). A tighter map (±64 m) only moved them.
   key.shadow.radius = KEY_PCF_RADIUS;
+  prepassLight(key);   // perf-cpu: lit in the depth pre-pass too, so three's light state is the same in both passes
   scene.add(key, key.target);
 
   // ---------------------------------------------------------------- fog

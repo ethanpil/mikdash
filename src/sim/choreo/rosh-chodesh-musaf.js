@@ -10,8 +10,10 @@
 // Figures: the eleven animals are pooled at boot (warmed: the bull's programs compile behind the loader); the 123 kohanim
 // (Yoma 2:5–7: 24 + 24 + 11 + 7 × 8, three slaughterers, three receivers, the goat's two) are pooled on the first Rosh
 // Chodesh date only and spawned as each first shows — an ordinary day's boot does not carry them. Props: one actor per
-// name and concurrent use, reused from procession to procession (the walk holds a bull's 18 parts at most).
-import { runScripts, phaseFn, evalScript, setLead, within } from './g2/lib.js';
+// name and concurrent use, reused from procession to procession (the walk holds a bull's 13 parts at most); a bull's
+// flayed carcass and hide are free props in the figure's place (the bulls at scale 1). A bull's groups — a limb carried
+// whole by two or three (Yoma 2:7; Rambam MK 6:18–19) — are placed across their centre's Script (follow below).
+import { runScripts, phaseFn, evalScript, setLead, within, applyFigure } from './g2/lib.js';
 import { rcPlan } from './g7/concert.js';
 import { PROCESSIONS } from './g7/plan.js';
 import { say } from './g6/common.js';
@@ -49,8 +51,9 @@ export default {
   init(ctx, events, sim) {
     sim.setBounds([150, 262, 0], [252, 426, 30]);
     const animals = {};
-    for (const [k, [kind, n, seed]] of Object.entries(ANIMAL_POOLS)) animals[k] = sim.pool({ name: `rc-${k}`, animal: kind, count: n, seed, importance: 3 });
-    return { animals, crews: null, props: new SharedProps(ctx), planGen: -1, plan: null, out: {}, fns: {}, afns: {}, fmt: (x) => ctx.time?.format?.(x) ?? '--' };
+    // (bull-props: the bulls at scale 1 — their flayed carcass, a free prop, takes the figure's place exactly)
+    for (const [k, [kind, n, seed]] of Object.entries(ANIMAL_POOLS)) animals[k] = sim.pool({ name: `rc-${k}`, animal: kind, count: n, seed, importance: 3, ...(kind === 'bull' ? { scale: 1 } : {}) });
+    return { animals, crews: null, props: new SharedProps(ctx), planGen: -1, plan: null, out: {}, fo: {}, fns: {}, afns: {}, ffns: [], fmt: (x) => ctx.time?.format?.(x) ?? '--' };
   },
 
   update(ctx, state, t, dt, sim) {
@@ -58,6 +61,7 @@ export default {
     if (!P) { state.props.hideAll(); return; }
     const S = state, out = S.out;
     for (const [k, list] of Object.entries(P.scripts)) runScripts(ctx, S.crews[k], list, t, out, S.fns[k] || (S.fns[k] = []));
+    follow(ctx, S, P, t);
     for (const [k, list] of Object.entries(P.animals)) {
       const pool = S.animals[k];
       const fns = S.afns[k] || (S.afns[k] = []);
@@ -94,9 +98,11 @@ function plan(ctx, sim, state) {
   state.planGen = sim.generation;
   const P = rcPlan(ctx, sim);
   state.plan = P;
+  state.ffns = [];
   if (P && !state.crews) {
     state.crews = {};
-    for (const [k, [name, seed]] of Object.entries(CREW_POOLS)) state.crews[k] = sim.pool({ name, role: 'kohen', count: SIZES[k], seed, importance: k === 'teams' ? 3 : 2 });
+    // (bull-props: a bull's crews at scale 1 — two or three carry one part between them, its geometry made for HEAVY.pair)
+    for (const [k, [name, seed]] of Object.entries(CREW_POOLS)) state.crews[k] = sim.pool({ name, role: 'kohen', count: SIZES[k], seed, importance: k === 'teams' ? 3 : 2, ...(k.startsWith('bull') ? { scale: 1 } : {}) });
   }
   state.props.setPlan(P ? P.items : []);
   if (!P) return null;
@@ -109,6 +115,29 @@ function plan(ctx, sim, state) {
   };
   void at;
   return P;
+}
+
+/**
+ * A bull's groups while they carry (g7/plan.js bullFile): the group's centre Script evaluated once, its men set across
+ * it — dx amot to the left of its heading — in its pose and phase (in step), the part in the lead's (the first's) hands.
+ * Their own Scripts are hidden over the window. A pure function of t, as everything here.
+ */
+function follow(ctx, S, P, t) {
+  const o = S.fo, F = P.follow || [];
+  for (let i = 0; i < F.length; i++) {
+    const f = F[i];
+    if (!within(t, f.t0, f.t1)) continue;
+    const pool = S.crews[f.crew];
+    if (!S.ffns[i]) S.ffns[i] = phaseFn(ctx, pool.slot(f.slots[0]));
+    evalScript(f.script, t, o, S.ffns[i]);
+    if (!o.vis) continue;
+    const X = o.X, Y = o.Y, pr = o.pr, pl = o.pl, r = (o.h * Math.PI) / 180, lx = -Math.cos(r), ly = Math.sin(r);
+    for (let m = 0; m < f.slots.length; m++) {
+      o.X = X + f.dx[m] * lx; o.Y = Y + f.dx[m] * ly;
+      o.pr = m ? null : pr; o.pl = m ? null : pl;
+      applyFigure(pool.slot(f.slots[m]), o);
+    }
+  }
 }
 
 function cues(ctx, S, sim, P) {

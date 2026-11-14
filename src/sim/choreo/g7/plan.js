@@ -13,10 +13,12 @@
 //              southern yesod (Zevachim 5:4); the goat's put with the finger on the four horns from the sovev, SE → NE →
 //              NW → SW, the rest on the southern yesod (Zevachim 5:3; Rambam MK 5:7, 5:10)
 //   flaying    lambs, ram and goat hung from a hook of the dwarf pillars by the man who led them (Tamid 4:2), the ram from
-//              the middle row as G5 hangs it; the bulls flayed on the pavement where they fell, two men to each ⚙ (a bull
-//              does not clear the pavement from a hook — site.js altar.nanasin)
+//              the middle row as G5 hangs it; the bulls flayed on the pavement where they fell, two men kneeling at each ⚙
+//              (a bull does not clear the pavement from a hook — site.js altar.nanasin): the bound figure, then the people
+//              props bull_flaying, bull_dressed on its spread hide (hide_bull), as the lamb's hung states
 //   the file   each animal's carriers (Yoma 2:5–7: a bull 24, the ram 11, a lamb 8 — the tamid's nine without the
-//              chavitin ⚙) come for their parts as they are cut, stand in a row with them, then go together (Tamid 4:3),
+//              chavitin ⚙) come for their parts as they are cut, stand in a row with them, then go together (Tamid 4:3);
+//              a bull's limbs given to two or three men are carried whole by them side by side (Rambam MK 6:18–19 — bullFile),
 //              by the west of the court and the south of the altar to the ramp, up its east half (Zevachim 6:3), to the
 //              walk of the kohanim's feet on the east side between the horns, where the parts are laid "to make it known
 //              that it is Rosh Chodesh" (Rambam TuM 6:3), salted there and thrown on the great pile ⚙ (when, not
@@ -27,9 +29,10 @@
 //   goat       its fats (eimurim_goat) up after the olot's limbs (Zevachim 10:2: "the limbs of an olah before the fats of a
 //              chatat"); its meat left hanging for the kohanim's meal (Zevachim 5:3 — not staged)
 // ⚙ = staging (docs/decisions/rosh-chodesh.md). Absolute minutes, unwrapped near sunrise; wrapped at the end.
-import { Script, SPEED, jit, walkMin } from '../g2/lib.js';
+import { Script, SPEED, jit, walkMin, headingOf } from '../g2/lib.js';
 import { places, rampDown } from '../g2/places.js';
 import { CARRIERS_FALLBACK } from '../g2/tamid.js';
+import { AMAH } from '../../../core/units.js';
 
 export const Z = 16;
 
@@ -52,22 +55,47 @@ export const PROCESSIONS = ['L1', 'L2', 'L3', 'ram', 'L4', 'L5', 'L6', 'L7', 'bu
 /** crew pools and their sizes (Yoma 2:5–7); 'teams' = three slaughterers and three receivers; 'goat' = its flayer and holder */
 export const CREWS = { bullA: 24, bullB: 24, ram: 11, lambs: 56, goat: 2, teams: 6 };
 
-const L = (right, left, role, part) => ({ right, left, pose: role === 'limb' ? 'carry_limbs' : 'carry', role, part });
+const L = (right, left, role, part, o = {}) => ({ right, left, pose: role === 'limb' ? 'carry_limbs' : 'carry', role, part, ...o });
 const CF = CARRIERS_FALLBACK;
 const flesh = (q) => L(CF[q].right, CF[q].left, 'limb', ['head and right leg', 'forelegs', 'tail and left leg', 'breast and neck', 'flanks'][q]);
+// the ram's flesh as the lamb's five, its parts at the ram's size (people props `<part>_ram`; Yoma 2:6)
+const ramPart = (n) => (n ? `${n}_ram` : n);
+const ramFlesh = (q) => ({ ...flesh(q), right: ramPart(CF[q].right), left: ramPart(CF[q].left) });
+// a bull's part on both palms (people clips carry_heavy; props bull_*); `with` = the crew index of the man who holds it,
+// for the second and third men of a limb that is carried whole by two or three (Rambam MK 6:18–19)
+const H = (prop, role, part, o = {}) => L(prop, null, role, part, { pose: 'carry_heavy', ...o });
 /** each carrier's hands, in the Mishnah's order (Yoma 2:5–7; Tamid 4:3) */
 export const CARRY = {
   lamb: [flesh(0), flesh(1), flesh(2), flesh(3), flesh(4), L('entrails_bazach', null, 'innards', 'innards'), L('solet', null, 'flour', 'flour'), L('wine_jug', null, 'wine', 'wine')],
-  ram: [flesh(0), flesh(1), flesh(2), flesh(3), flesh(4), L('entrails_bazach', null, 'innards', 'innards'), L('entrails_bazach', null, 'innards', 'innards'),
+  ram: [ramFlesh(0), ramFlesh(1), ramFlesh(2), ramFlesh(3), ramFlesh(4), L('entrails_bazach', null, 'innards', 'innards'), L('entrails_bazach', null, 'innards', 'innards'),
     L('solet', null, 'flour', 'flour'), L('solet', null, 'flour', 'flour'), L('wine_jug', null, 'wine', 'wine'), L('wine_jug', null, 'wine', 'wine')],
-  bull: [L('limb_head', null, 'limb', 'head'), L('limb', null, 'limb', 'right leg'), L('limb', null, 'limb', 'right leg'),
-    L('limb_oketz', null, 'limb', 'tail'), L('limb_oketz', null, 'limb', 'tail'), L('limb', null, 'limb', 'left leg'), L('limb', null, 'limb', 'left leg'),
-    L('limb_chazeh', null, 'limb', 'breast'), L('limb_gerah', null, 'limb', 'neck'), L('limb_gerah', null, 'limb', 'neck'), L('limb_gerah', null, 'limb', 'neck'),
-    L('limb_foreleg', null, 'limb', 'foreleg'), L('limb_foreleg', null, 'limb', 'foreleg'), L('limb_dofen', null, 'limb', 'flank'), L('limb_dofen', null, 'limb', 'flank'),
-    L('entrails_bazach', null, 'innards', 'innards'), L('entrails_bazach', null, 'innards', 'innards'), L('entrails_bazach', null, 'innards', 'innards'),
+  bull: [H('bull_head', 'limb', 'head'), H('bull_leg', 'limb', 'right leg'), H(null, 'limb', 'right leg', { with: 1 }),
+    H('bull_oketz', 'limb', 'tail'), H(null, 'limb', 'tail', { with: 3 }), H('bull_leg', 'limb', 'left leg'), H(null, 'limb', 'left leg', { with: 5 }),
+    H('bull_chazeh', 'limb', 'breast'), H('bull_neck', 'limb', 'neck'), H(null, 'limb', 'neck', { with: 8 }), H(null, 'limb', 'neck', { with: 8 }),
+    H('bull_foreleg', 'limb', 'foreleg'), H('bull_foreleg', 'limb', 'foreleg'), H('bull_dofen', 'limb', 'flank'), H('bull_dofen', 'limb', 'flank'),
+    H('entrails_bull', 'innards', 'innards'), H('entrails_bull1', 'innards', 'innards'), H('entrails_bull1', 'innards', 'innards'),
     L('solet', null, 'flour', 'flour'), L('solet', null, 'flour', 'flour'), L('solet', null, 'flour', 'flour'),
     L('wine_jug', null, 'wine', 'wine'), L('wine_jug', null, 'wine', 'wine'), L('wine_jug', null, 'wine', 'wine')],
 };
+/** the men of a bull's part HEAVY_PAIR m apart (people/clips.js HEAVY.pair), side by side across the load */
+export const HEAVY_PAIR = 0.634;
+/** a bull's carried parts as groups: { lead (crew index; he holds the prop), members [lead, …], dx [amot left of the
+ *  group's centre — facing his way], ext (max |dx|), c (the lead's CARRY entry) } — a pair's partner to the lead's left,
+ *  the neck's lead in the middle of three */
+export function bullGroups(spec = CARRY.bull) {
+  const G = HEAVY_PAIR / AMAH, gs = [];
+  spec.forEach((c, ci) => {
+    if (c.role !== 'limb' && c.role !== 'innards') return;
+    if (Number.isFinite(c.with)) { gs.find((g) => g.lead === c.with)?.members.push(ci); return; }
+    gs.push({ lead: ci, members: [ci], c });
+  });
+  for (const g of gs) {
+    const n = g.members.length;
+    g.dx = n === 1 ? [0] : n === 2 ? [-G / 2, G / 2] : [0, G, -G];
+    g.ext = Math.max(...g.dx.map(Math.abs));
+  }
+  return gs;
+}
 /** holders at the binding (crew indices) by kind ⚙ */
 const HOLD = { lamb: [0, 1], ram: [0, 1, 2], bull: [0, 1, 2, 3], goat: [0, 1] };
 /** half the body's length (amot): the animal lies north of its ring, the neck at it */
@@ -303,10 +331,14 @@ export function buildRC(ctx, sim) {
     const lb = animalScript[a.key];
     const s0 = crewOf(a, 0);
     if (a.kind === 'bull') {
-      // flayed where it fell: its first two carriers bend over it with knives ⚙ (no bull carcass props — the figure
-      // lies bound until its parts are taken)
-      lb.until(t.cut[a.key] + 0.8, { pose: 'bound', phase: 0, heading: 180 });
+      // flayed where it fell: its first two carriers kneel at its back with knives ⚙; the bound figure gives way to the
+      // flayed carcass (people props bull_flaying → bull_dressed on its spread hide, hide_bull) as the lamb's hung states
       a.flay0 = t.cut[a.key] + 1.0;
+      const F = FLAY.bull, at0 = [{ t: a.flay0, X: a.spot[0], Y: a.spot[1], Z, h: 180 }];
+      lb.until(a.flay0 + 0.14 * F, { pose: 'bound', phase: 0, heading: 180 });
+      items.push({ name: 'bull_flaying', show: [a.flay0 + 0.14 * F, a.flay0 + 0.72 * F], keys: at0 });
+      a.dressed = { name: 'bull_dressed', show: [a.flay0 + 0.72 * F, NaN], keys: at0 };
+      items.push(a.dressed, { name: 'hide_bull', show: [a.flay0 + 0.72 * F, win.limbs ? win.limbs[1] : a.flay0 + 50], keys: at0 });
       for (let c = 0; c < 2; c++) {
         const s = crewOf(a, c);
         const at = [a.spot[0] - 2.0, a.spot[1] + (c ? 1.1 : -0.9), Z];      // both on its west side; the parts are given east
@@ -349,127 +381,241 @@ export function buildRC(ctx, sim) {
   let eastFree = -Infinity, swFree = -Infinity;
   const procs = [];
   const walkTo = (pts, sp) => walkMin(pts[0], pts.slice(1), sp);
+  // ---------------------------------------------------------------------------------------------- a bull's file
+  // (people props bull_*, clips carry_heavy / lay_heavy / toss_heavy; docs/decisions/rosh-chodesh.md "Bull-scale props")
+  // Each part goes to its group: one man, or two or three side by side carrying the limb whole between them (Yoma 2:7;
+  // Rambam MK 6:18–19 "not its pieces into pieces"). A group's way is one Script of its centre (follow[]: rosh-chodesh-
+  // musaf.js places its men across it, HEAVY_PAIR apart, the part on the lead's right palm); each man's own Script brings
+  // him to his place at the take and home after the toss, and is hidden while the group carries. The takes alternate
+  // between two points on the bull's east side; the row stands south of the bulls' rings facing east, the head of the
+  // file at its east end; the file goes east of the altar (two abreast do not pass between the yesod and the amah's
+  // channel, 1½ amot), south of it and up the ramp's east half ⚙.
+  const follow = [];
+  const XE = P.way.eastLine + 2.5;                      // east of the men going home up the east line
+  const leftOf = (h) => { const r = (h * Math.PI) / 180; return [-Math.cos(r), Math.sin(r)]; };
+  const off = (c, h, dx) => { const [lx, ly] = leftOf(h); return [c[0] + dx * lx, c[1] + dx * ly, c[2] ?? Z]; };
+  function bullFile(a, spec, key) {
+    const gs = bullGroups(spec), ng = gs.length;
+    const tpS = [a.spot[0] + 2.7, a.spot[1] - 1.9, Z], tpN = [a.spot[0] + 2.7, a.spot[1] + 1.6, Z];
+    const tp = (g) => (g % 2 ? tpN : tpS);
+    const hT = (g) => headingOf(tp(g)[0], tp(g)[1], a.spot[0], a.spot[1]);
+    const laneX = a.spot[0] + 4.2;
+    // the row south of the rings, facing east, and the line south of it the groups walk to their places; groups apart by
+    // their reach (a turning group sweeps its ext)
+    const rowY = a.ring[1] - 2.6, yW = rowY - 3.4;
+    const gapTo = (g) => gs[g].ext + gs[g + 1].ext + 1.15;
+    const rowX = [laneX];
+    for (let g = 1; g < ng; g++) rowX[g] = rowX[g - 1] - gapTo(g - 1);
+    const slotY = [wk.N - 1.6 - gs[0].ext];
+    for (let g = 1; g < ng; g++) slotY[g] = slotY[g - 1] - gapTo(g - 1);
+    const yF = R.foot - 0.5;
+    const toFoot = [[XE, rowY, Z], [XE, 303.0, Z], [231.2, 303.0, Z], [231.2, yF, Z], [R.east, yF, Z]];
+    const onTop = (g) => [[wk.E - gs[g].ext, wk.S + gs[g].ext, ZT], [wk.E - 0.2 - gs[g].ext, slotY[g], ZT]];
+    const LAY_X = wk.E - 0.4;                            // the lead faces east here: his part goes on the walk's outer half
+    // timing: the takes 0.16 min apart, the row pushed so the file reaches the top when the east walk is free
+    const takeDur = 0.16 * ng + 0.45;
+    const toTop = walkTo([[rowX[0], rowY, Z], ...toFoot, ...upEast(R.east), ...onTop(0)], SP.file) + 0.2;
+    const row0 = Math.max(a.flay0 + FLAY.bull, eastFree - takeDur - toTop + 0.2);
+    t.row[key] = row0;
+    const tw = (g) => row0 + 0.16 * g;
+    const rowEnd = tw(ng - 1) + 0.45;
+    t.rowEnd[key] = rowEnd;
+    a.dressed.show[1] = tw(ng - 1);
+    // the centres: take, row, file, the top
+    const C = gs.map((gr, g) => Script.from(tw(g), tp(g), hT(g), `${key}-g${g}`));
+    const tTop = [];
+    gs.forEach((gr, g) => {
+      const s = C[g], props = [gr.c.right, null], h0 = hT(g);
+      s.act(0.1, { pose: 'lay_heavy', phase: [1, 0.5], heading: h0 });           // down to it …
+      s.act(0.12, { pose: 'lay_heavy', phase: [0.5, 0], heading: h0, props });   // … and up with it
+      // from the north take point east first, round the group at the south one
+      const via = g % 2 ? [[a.spot[0] + 5.6, tpN[1], Z], [a.spot[0] + 5.6, yW, Z]] : [[tpS[0], yW, Z]];
+      s.walk([...via, [rowX[g], yW, Z], [rowX[g], rowY, Z]], { speed: SPEED.slow, pose: 'carry_heavy_walk', props });
+      s.until(rowEnd + 0.03 * g, { pose: 'carry_heavy', heading: 90, props, sway: 2, seed: 0x7b20 + g });
+      s.walk(toFoot, { speed: SP.file, pose: 'carry_heavy_walk', props });
+      s.walk(upEast(R.east + jit(0x7b31, 0.15, key, g)), { speed: SP.ramp, pose: 'carry_heavy_walk', props });
+      s.walk(onTop(g), { speed: SP.ramp, pose: 'carry_heavy_walk', props, zExact: true });
+      tTop.push(s.now());
+    });
+    // laid between the horns on the walk's outer half, a breath for all to see, then picked up and thrown on the pile
+    const allLaid = Math.max(...tTop) + 0.45;
+    const tToss0 = allLaid + 0.5;
+    t.top[key] = [Math.min(...tTop), allLaid];
+    const tossAt = [];
+    gs.forEach((gr, g) => {
+      const s = C[g], props = [gr.c.right, null];
+      s.act(0.06, { pose: 'carry_heavy', heading: 90, props, zExact: true });
+      s.shift([LAY_X, s.cur[1], ZT], 0.04, { pose: 'carry_heavy_walk', heading: 90, props, zExact: true });
+      s.act(0.15, { pose: 'lay_heavy', phase: [0, 0.5], heading: 90, props, zExact: true });
+      const tl = s.now();
+      s.act(0.12, { pose: 'lay_heavy', phase: [0.5, 1], heading: 90, zExact: true });
+      const tToss = tToss0 + 0.1 * g;
+      s.until(tToss - 0.42, { pose: 'stand', heading: 90, sway: 3, seed: 0x7b50 + g, zExact: true });
+      s.act(0.12, { pose: 'lay_heavy', phase: [1, 0.5], heading: 90, zExact: true });
+      const tPick = s.now();
+      // the part's frame is its lead's: 1.08 amot before him at the floor (people HEAVY; lay_heavy at 0.5)
+      const la = off(s.cur, 90, gr.dx[0]);
+      items.push({ name: props[0], show: [tl, tPick], keys: [{ t: tl, X: la[0] + 1.08, Y: la[1], Z: ZT + 0.02, h: 90 }], part: [key, g] });
+      s.act(0.12, { pose: 'lay_heavy', phase: [0.5, 0], heading: 90, props, zExact: true });
+      s.act(0.07, { pose: 'carry_heavy', face: [224, 321.5], props, zExact: true });
+      s.act(0.18, { pose: 'toss_heavy', phase: [0, 0.55], face: [224, 321.5], props, zExact: true });
+      tossAt.push(s.now());
+      s.act(0.14, { pose: 'toss_heavy', phase: [0.55, 1], face: [224, 321.5], zExact: true });
+    });
+    t.toss[key] = [Math.min(...tossAt), Math.max(...tossAt)];
+    // the men: to their places at the take, hidden while the group carries, home after the toss
+    let lastDown = -Infinity, nf = 0;
+    gs.forEach((gr, g) => {
+      const c = C[g], h0 = hT(g), tEnd = c.now();
+      follow.push({ crew: a.crew, slots: gr.members.map((ci) => (a.c0 || 0) + ci), dx: gr.dx, script: c, t0: tw(g), t1: tEnd });
+      gr.members.forEach((ci, m) => {
+        nf++;
+        const side = off(tp(g), h0, gr.dx[m]);
+        let s = crewOf(a, ci);
+        if (ci < 2) {
+          // the flayers: kneeling at its back until each goes round its head to his take
+          const way = [[a.spot[0] - 2.4, a.spot[1] - 4.0, Z], [laneX, a.spot[1] - 4.0, Z], [laneX, side[1], Z], side];
+          const go = tw(g) - walkTo([s.cur, ...way], SPEED.slow) - 0.05;
+          s.until(go, { pose: 'flay_kneel', face: a.spot, props: KNR, sway: 3, seed: 0x7b00 + ci });
+          s.walk(way, { speed: SPEED.slow, props: KNR });
+        } else {
+          // out of the Gazit (a holder first back into it), by the north passage and down the lane east of the bull
+          if (s) s.walk([[laneNear(s.cur[0]), s.cur[1], Z], [laneNear(s.cur[0]), NP + 2.2, Z], [200, NP + 2.2, Z], ...backN], { speed: SPEED.walk });
+          const approach = [...north, [200, NP, Z], [laneX, NP, Z], [laneX, a.spot[1] + 4.5, Z], [laneX, side[1], Z], side];
+          // a group's men leave the Gazit one after another (≈ 2.5 m apart on the way), the later ones wait at the take
+          const go = tw(g) - walkTo([gz.inside, ...approach], SPEED.walk) - 0.05 - 0.035 * m;
+          if (s) {
+            if (s.now() > go - 0.1) warn.push(`${key} carrier ${ci} late from holding ${(s.now() - go).toFixed(2)}`);
+            s.hide(Math.max(go, s.now() + 0.05), gz.inside, 90);
+          } else s = Script.from(go, gz.inside, 90, `${key}-c${ci}`);
+          s.walk(approach, { speed: SPEED.walk });
+          setCrew(a, ci, s);
+        }
+        s.until(tw(g), { pose: 'stand', heading: h0, props: ci < 2 ? KNR : null });
+        s.hide(tEnd, off(c.cur, c.h, gr.dx[m]), c.h);
+        if (m) s.act(0.04 * m, { pose: 'stand', heading: c.h, zExact: true });   // the partners go down after him, not abreast
+        s.walk(exitTop(jit(0x7b60, 0.3, key, ci)), { speed: SPEED.walk });
+        s.walk(home(R.west + 1.6 + jit(0x7b61, 0.3, key, ci)), { speed: SPEED.walk });
+        lastDown = Math.max(lastDown, s.now());
+      });
+    });
+    for (const s of C) warn.push(...s.warn);
+    return { nf, lastDown };
+  }
+
   for (const key of PROCESSIONS) {
     const a = byKey[key];
     const spec = CARRY[a.kind];
     const n = spec.length;
     const isBull = a.kind === 'bull';
-    // take points (two, alternating) and the row (Tamid 4:3: "they stood in a row with the limbs in their hands")
-    const take = isBull
-      ? [[a.spot[0] + 2.4, a.spot[1] - 1.2, Z], [a.spot[0] + 2.4, a.spot[1] + 1.1, Z]]
-      : [[a.hook[0] + 1.0, a.hook[1] - 1.35, Z], [a.hook[0] + 0.2, a.hook[1] - 2.05, Z]];
-    const faceT = isBull ? a.spot : [a.hook[0], a.hook[1]];
-    const rowY = isBull ? a.ring[1] - 2.6 : a.hook[1] - 3.45;
-    const rowX0 = isBull ? a.spot[0] + 4.2 : a.hook[0] + 0.4;
-    const flesh = spec.map((c, i) => [c, i]).filter(([c]) => c.role === 'limb' || c.role === 'innards');
-    const nf = flesh.length;
-    const rowAt = (i) => [rowX0 - 1.2 * (nf - 1 - i), rowY, Z];     // the head of the file stands farthest west
-    const fromRowToTop = [...toRamp(rowY), rampFootE(), ...upEast(R.east)];
-    // the earliest the parts can be handed out, then pushed so the file reaches the top after eastFree
-    const ready = a.flay0 + FLAY[a.kind];
-    const takeDur = 0.11 * nf + 0.35;
-    const toTop = walkTo([rowAt(0), ...fromRowToTop], SP.file) + 0.2;
-    let row0 = Math.max(ready, eastFree - takeDur - toTop + 0.2);
-    t.row[key] = row0;
-    // the flayer(s) until then
-    for (let c = 0; c < (isBull ? 2 : 1); c++) {
-      const s = a[`flayer${c}`];
-      if (isBull) s.until(row0 - 0.1, { pose: 'bow', phase: 0.5, face: a.spot, props: KNR, sway: 4, seed: 0x7b00 + c });
-      else {
-        const F = FLAY[a.kind];
+    // a bull's parts go by groups (bullFile above); the lamb's, the ram's: each carrier his own, two take points
+    const { nf, lastDown: down0 } = isBull ? bullFile(a, spec, key) : (() => {
+      // take points (two, alternating) and the row (Tamid 4:3: "they stood in a row with the limbs in their hands")
+      const take = [[a.hook[0] + 1.0, a.hook[1] - 1.35, Z], [a.hook[0] + 0.2, a.hook[1] - 2.05, Z]];
+      const faceT = [a.hook[0], a.hook[1]];
+      const rowY = a.hook[1] - 3.45;
+      const rowX0 = a.hook[0] + 0.4;
+      const flesh = spec.map((c, i) => [c, i]).filter(([c]) => c.role === 'limb' || c.role === 'innards');
+      const nf = flesh.length;
+      const rowAt = (i) => [rowX0 - 1.2 * (nf - 1 - i), rowY, Z];     // the head of the file stands farthest west
+      const fromRowToTop = [...toRamp(rowY), rampFootE(), ...upEast(R.east)];
+      // the earliest the parts can be handed out, then pushed so the file reaches the top after eastFree
+      const ready = a.flay0 + FLAY[a.kind];
+      const takeDur = 0.11 * nf + 0.35;
+      const toTop = walkTo([rowAt(0), ...fromRowToTop], SP.file) + 0.2;
+      let row0 = Math.max(ready, eastFree - takeDur - toTop + 0.2);
+      t.row[key] = row0;
+      // the flayer until then
+      {
+        const s = a.flayer0, F = FLAY[a.kind];
         for (let q = 0; q < 6; q++) {
           s.until(a.flay0 + F * (0.12 + 0.15 * q), { pose: 'flay', heading: 36, props: KNR });
           s.act(0.16, { pose: 'flay', heading: 36 + (q % 2 ? -12 : 10), props: KNR });
         }
         s.until(row0 - 0.1, { pose: 'flay', heading: 36, props: KNR });
       }
-    }
-    if (!isBull) {
-      const [n0, n1, n2] = HUNG[a.kind], F = FLAY[a.kind];
-      const at = [{ t: a.flay0, X: a.hook[0], Y: a.hook[1], Z: a.hook[2], h: 0 }];
-      items.push({ name: n0, show: [a.flay0, a.flay0 + 0.14 * F], keys: at });
-      items.push({ name: n1, show: [a.flay0 + 0.14 * F, a.flay0 + 0.72 * F], keys: at });
-      a.dressed = { name: n2, show: [a.flay0 + 0.72 * F, NaN], keys: at };
-      items.push(a.dressed);
-    }
-    // the carriers: each takes his part in turn and goes to the row; then all go together
-    const takes = [];
-    const tw = (i) => row0 + 0.11 * i;
-    flesh.forEach(([c, ci], i) => {
-      let s = crewOf(a, ci);
-      const tp = take[i % 2];
-      if (!s || (isBull && ci > 1) || (!isBull && ci > 0)) {
-        // out of the Gazit (or back from holding, which ends in the Gazit), by the north passage and the lane east
-        // of the pillar / the bull
-        if (s) s.walk([[laneNear(s.cur[0]), s.cur[1], Z], [laneNear(s.cur[0]), NP + 2.2, Z], [200, NP + 2.2, Z], ...backN], { speed: SPEED.walk });
-        const laneX = isBull ? a.spot[0] + 4.2 : a.hook[0] + 2;
-        const approach = [...north, [200, NP, Z], [laneX, NP, Z], [laneX, isBull ? a.spot[1] + 2.6 : 382.2, Z], ...(isBull || i % 2 === 0 ? [] : [[laneX, tp[1], Z]]), tp];
-        const go = tw(i) - walkTo([gz.inside, ...approach], SPEED.walk) - 0.05;
-        if (s) {
-          if (s.now() > go - 0.1) warn.push(`${key} carrier ${ci} late from holding ${(s.now() - go).toFixed(2)}`);
-          s.hide(Math.max(go, s.now() + 0.05), gz.inside, 90);
-        } else s = Script.from(go, gz.inside, 90, `${key}-c${ci}`);
-        s.walk(approach, { speed: SPEED.walk });
-        setCrew(a, ci, s);
-      } else if (isBull) {
-        // round the bull's head (south) to the east side ⚙
-        s.walk([[a.spot[0] - 2.0, a.ring[1] - 0.9, Z], [a.spot[0] + 2.4, a.ring[1] - 0.9, Z], tp], { speed: SPEED.slow, props: KNR });
-      } else {
-        s.walk([tp], { speed: SPEED.slow, props: KNR });
+      {
+        const [n0, n1, n2] = HUNG[a.kind], F = FLAY[a.kind];
+        const at = [{ t: a.flay0, X: a.hook[0], Y: a.hook[1], Z: a.hook[2], h: 0 }];
+        items.push({ name: n0, show: [a.flay0, a.flay0 + 0.14 * F], keys: at });
+        items.push({ name: n1, show: [a.flay0 + 0.14 * F, a.flay0 + 0.72 * F], keys: at });
+        a.dressed = { name: n2, show: [a.flay0 + 0.72 * F, NaN], keys: at };
+        items.push(a.dressed);
       }
-      s.until(tw(i), { pose: 'stand', face: faceT, props: ci < (isBull ? 2 : 1) ? KNR : null });
-      s.act(0.08, { pose: 'bow', phase: [0, 0.45], face: faceT });
-      const props = [c.right, c.left];
-      s.act(0.08, { pose: 'bow', phase: [0.7, 1], face: faceT, props });
-      // off south to the row's line — from a bull's northern take point first a step east, clear of the southern one
-      s.walk([...(isBull && i % 2 ? [[tp[0] + 0.9, tp[1] - 0.4, Z], [tp[0] + 0.9, rowY, Z]] : [[tp[0], rowY, Z]]), rowAt(i)], { speed: SPEED.slow, pose: c.pose === 'carry' ? 'carry_walk' : 'carry_limbs_walk', props });
-      takes.push(s);
-    });
-    const rowEnd = tw(nf - 1) + 0.35;
-    t.rowEnd[key] = rowEnd;
-    // the carcass goes as its parts are taken: the bull figure at the flanks ⚙, the hung carcass at the last part
-    if (isBull) animalScript[a.key].until(tw(Math.min(nf - 1, 14)), { pose: 'bound', phase: 0, heading: 180 });
-    else a.dressed.show[1] = tw(nf - 1);
-    // the flayers who are not carriers of flesh go back in
-    if (isBull) for (let c = 0; c < 2; c++) if (!flesh.some(([, ci]) => ci === c)) a[`flayer${c}`].walk([[a.spot[0] - 2.0, 376, Z], [laneNear(a.spot[0] - 2.0), 376, Z], [laneNear(a.spot[0] - 2.0), NP + 2.2, Z], [200, NP + 2.2, Z], ...backN], { speed: SPEED.walk });
-    // the file: head first, 0.02 min apart (≈ 1.3 m) to the ramp, up its east half, along the south and east walk
-    const tTop = [];
-    flesh.forEach(([c, ci], i) => {
-      const s = takes[i];
-      const props = [c.right, c.left];
-      const wp = c.pose === 'carry' ? 'carry_walk' : 'carry_limbs_walk';
-      s.until(rowEnd + 0.03 * i, { pose: c.pose, heading: 270, props, sway: 3, seed: 0x7b20 + i });
-      s.walk([...toRamp(rowY), rampFootE(jit(0x7b30, 0.3, key, i))], { speed: SP.file, pose: wp, props });
-      s.walk(upEast(R.east + jit(0x7b31, 0.25, key, i)), { speed: SP.ramp, pose: wp, props });
-      const slotY = wk.N - 1.6 - 1.12 * i;
-      s.walk([[wk.E, wk.S, ZT], [wk.E - 0.2, slotY, ZT]], { speed: SP.ramp, pose: wp, props, zExact: true });
-      tTop.push(s.now());
-    });
-    // laid between the horns (east of them, on the walk's outer half ⚙), a breath for all to see, salted, then thrown on
-    // the great pile, the northernmost first, each going on round to the right and down the west half
-    const allLaid = Math.max(...tTop) + 0.25;
-    const tToss0 = allLaid + 0.45;
-    t.top[key] = [Math.min(...tTop), allLaid];
-    const tossAt = [];
-    flesh.forEach(([c, ci], i) => {
-      const s = takes[i];
-      const slotY = wk.N - 1.6 - 1.12 * i;
-      s.act(0.12, { pose: 'bow', phase: [0, 0.45], heading: 90, props: [c.right, c.left], zExact: true });
-      const tl = s.now();
-      s.act(0.1, { pose: 'bow', phase: [0.7, 1], heading: 90, zExact: true });
-      const names = [c.right, c.left].filter(Boolean);
-      const tToss = tToss0 + 0.07 * i;
-      names.forEach((nm, j) => items.push({ name: nm, show: [tl, tToss - 0.12], keys: [{ t: tl, X: wk.E + 0.45, Y: slotY + (names.length > 1 ? (j ? -0.28 : 0.28) : 0), Z: ZT + 0.06, h: 0 + jit(0x7b40, 14, key, i * 2 + j) }], part: [key, i] }));
-      s.until(tToss - 0.2, { pose: 'stand', heading: 90, sway: 4, seed: 0x7b50 + i, zExact: true });
-      s.act(0.08, { pose: 'bow', phase: [0.2, 0.6], heading: 90, props: [c.right, c.left], zExact: true });
-      s.act(0.3, { pose: 'toss', phase: [0, 1], face: [224, 321.5], props: [c.right, c.left], zExact: true });
-      tossAt.push(s.now());
-      s.act(0.08, { pose: 'stand', heading: 0, zExact: true });
-      s.walk(exitTop(jit(0x7b60, 0.3, key, i)), { speed: SPEED.walk });
-      s.walk(home(R.west + 1.6 + jit(0x7b61, 0.3, key, i)), { speed: SPEED.walk });
-    });
-    t.toss[key] = [Math.min(...tossAt), Math.max(...tossAt)];
-    let lastDown = Math.max(...takes.map((s) => s.now()));
+      // the carriers: each takes his part in turn and goes to the row; then all go together
+      const takes = [];
+      const tw = (i) => row0 + 0.11 * i;
+      flesh.forEach(([c, ci], i) => {
+        let s = crewOf(a, ci);
+        const tp = take[i % 2];
+        if (!s || ci > 0) {
+          // out of the Gazit (or back from holding, which ends in the Gazit), by the north passage and the lane east
+          // of the pillar
+          if (s) s.walk([[laneNear(s.cur[0]), s.cur[1], Z], [laneNear(s.cur[0]), NP + 2.2, Z], [200, NP + 2.2, Z], ...backN], { speed: SPEED.walk });
+          const laneX = a.hook[0] + 2;
+          const approach = [...north, [200, NP, Z], [laneX, NP, Z], [laneX, 382.2, Z], ...(i % 2 === 0 ? [] : [[laneX, tp[1], Z]]), tp];
+          const go = tw(i) - walkTo([gz.inside, ...approach], SPEED.walk) - 0.05;
+          if (s) {
+            if (s.now() > go - 0.1) warn.push(`${key} carrier ${ci} late from holding ${(s.now() - go).toFixed(2)}`);
+            s.hide(Math.max(go, s.now() + 0.05), gz.inside, 90);
+          } else s = Script.from(go, gz.inside, 90, `${key}-c${ci}`);
+          s.walk(approach, { speed: SPEED.walk });
+          setCrew(a, ci, s);
+        } else {
+          s.walk([tp], { speed: SPEED.slow, props: KNR });
+        }
+        s.until(tw(i), { pose: 'stand', face: faceT, props: ci < 1 ? KNR : null });
+        s.act(0.08, { pose: 'bow', phase: [0, 0.45], face: faceT });
+        const props = [c.right, c.left];
+        s.act(0.08, { pose: 'bow', phase: [0.7, 1], face: faceT, props });
+        // off south to the row's line
+        s.walk([[tp[0], rowY, Z], rowAt(i)], { speed: SPEED.slow, pose: c.pose === 'carry' ? 'carry_walk' : 'carry_limbs_walk', props });
+        takes.push(s);
+      });
+      const rowEnd = tw(nf - 1) + 0.35;
+      t.rowEnd[key] = rowEnd;
+      // the hung carcass goes with its last part
+      a.dressed.show[1] = tw(nf - 1);
+      // the file: head first, 0.02 min apart (≈ 1.3 m) to the ramp, up its east half, along the south and east walk
+      const tTop = [];
+      flesh.forEach(([c, ci], i) => {
+        const s = takes[i];
+        const props = [c.right, c.left];
+        const wp = c.pose === 'carry' ? 'carry_walk' : 'carry_limbs_walk';
+        s.until(rowEnd + 0.03 * i, { pose: c.pose, heading: 270, props, sway: 3, seed: 0x7b20 + i });
+        s.walk([...toRamp(rowY), rampFootE(jit(0x7b30, 0.3, key, i))], { speed: SP.file, pose: wp, props });
+        s.walk(upEast(R.east + jit(0x7b31, 0.25, key, i)), { speed: SP.ramp, pose: wp, props });
+        const slotY = wk.N - 1.6 - 1.12 * i;
+        s.walk([[wk.E, wk.S, ZT], [wk.E - 0.2, slotY, ZT]], { speed: SP.ramp, pose: wp, props, zExact: true });
+        tTop.push(s.now());
+      });
+      // laid between the horns (east of them, on the walk's outer half ⚙), a breath for all to see, salted, then thrown on
+      // the great pile, the northernmost first, each going on round to the right and down the west half
+      const allLaid = Math.max(...tTop) + 0.25;
+      const tToss0 = allLaid + 0.45;
+      t.top[key] = [Math.min(...tTop), allLaid];
+      const tossAt = [];
+      flesh.forEach(([c, ci], i) => {
+        const s = takes[i];
+        const slotY = wk.N - 1.6 - 1.12 * i;
+        s.act(0.12, { pose: 'bow', phase: [0, 0.45], heading: 90, props: [c.right, c.left], zExact: true });
+        const tl = s.now();
+        s.act(0.1, { pose: 'bow', phase: [0.7, 1], heading: 90, zExact: true });
+        const names = [c.right, c.left].filter(Boolean);
+        const tToss = tToss0 + 0.07 * i;
+        names.forEach((nm, j) => items.push({ name: nm, show: [tl, tToss - 0.12], keys: [{ t: tl, X: wk.E + 0.45, Y: slotY + (names.length > 1 ? (j ? -0.28 : 0.28) : 0), Z: ZT + 0.06, h: 0 + jit(0x7b40, 14, key, i * 2 + j) }], part: [key, i] }));
+        s.until(tToss - 0.2, { pose: 'stand', heading: 90, sway: 4, seed: 0x7b50 + i, zExact: true });
+        s.act(0.08, { pose: 'bow', phase: [0.2, 0.6], heading: 90, props: [c.right, c.left], zExact: true });
+        s.act(0.3, { pose: 'toss', phase: [0, 1], face: [224, 321.5], props: [c.right, c.left], zExact: true });
+        tossAt.push(s.now());
+        s.act(0.08, { pose: 'stand', heading: 0, zExact: true });
+        s.walk(exitTop(jit(0x7b60, 0.3, key, i)), { speed: SPEED.walk });
+        s.walk(home(R.west + 1.6 + jit(0x7b61, 0.3, key, i)), { speed: SPEED.walk });
+      });
+      t.toss[key] = [Math.min(...tossAt), Math.max(...tossAt)];
+      return { nf, lastDown: Math.max(...takes.map((s) => s.now())) };
+    })();
+    let lastDown = down0;
     // the flour men: from the chavitin makers' chamber by Nikanor (as g6/musaf.js ⚙) behind the file, up the east half;
     // they wait at the south-east corner until the limbs are on the fire, then throw the flour on the pile
     const fl = spec.map((c, i) => [c, i]).filter(([c]) => c.role === 'flour');
@@ -536,7 +682,7 @@ export function buildRC(ctx, sim) {
       swFree = s.now() + 0.05;
       s.walk([[R.west - 1.7, R.foot - 1.2, Z], ...home(R.west - 1.7)], { speed: SPEED.walk, props: ['wine_jug', null] });
     });
-    procs.push({ key, kind: a.kind, n, flesh: nf, flour: fl.length, wine: wn.length, row: row0, rowEnd, top: t.top[key], toss: t.toss[key], eastFree });
+    procs.push({ key, kind: a.kind, n, flesh: nf, flour: fl.length, wine: wn.length, row: t.row[key], rowEnd: t.rowEnd[key], top: t.top[key], toss: t.toss[key], eastFree });
   }
 
   // ---------------------------------------------------------------------------------------------- the goat's fats
@@ -596,6 +742,8 @@ export function buildRC(ctx, sim) {
   for (const it of items) { it.show = it.show.map((x) => wrap(Number.isFinite(x) ? x : (win.limbs?.[1] ?? M0 + 50))); it.keys = it.keys.map((k) => ({ ...k, t: wrap(k.t) })); }
   return {
     M0, win, scripts, animals, items, warn, t, procs, AN,
+    // a bull's groups: the centre's Script and the men placed across it while they carry (rosh-chodesh-musaf.js)
+    follow: follow.map((f) => ({ ...f, t0: wrap(f.t0), t1: wrap(f.t1) })),
     leads: leads.map(([a0, b0, pool, slot, crew, cs]) => [wrap(a0), wrap(Number.isFinite(b0) ? b0 : a0 + 1), pool, slot, crew, cs]),
     wine: { at: t.wineAt, laid: t.wineLaid, pick: t.pickW },
     at: { gate: KB.inside, rings: [221, 359.5, Z], hooks: [217, 381.0, Z], ramp: [217, 290, 20], walk: [wk.E, 321.5, ZT], sw: swAt, ne, swC, horns: [231.5, 307, 22], duchan: [243, 330.5, 16] },

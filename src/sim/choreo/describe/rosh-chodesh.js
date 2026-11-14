@@ -1,6 +1,6 @@
 // Inspect hooks for rosh-chodesh-musaf (G7): who each figure of the Rosh Chodesh musaf is and what he does, by pool and
 // slot (g7/plan.js CREWS and CARRY; the pools' names in rosh-chodesh-musaf.js CREW_POOLS). Texts follow Bamidbar
-// 28:11–15, Yoma 2:5–7, Zevachim 5:3–4, Rambam TuM 6:3, 7:1–2.
+// 28:11–15, Yoma 2:5–7, Zevachim 5:3–4, Rambam TuM 6:3, 7:1–2, Rambam MK 6:18–19 (a bull's limb carried whole).
 import { describeWith } from './index.js';
 import { CARRY } from '../g7/plan.js';
 
@@ -13,7 +13,11 @@ function task(kind, i) {
   if (!c) return 'one of its kohanim';
   if (c.role === 'flour') return 'he carries its fine flour mixed with oil, thrown on the fire after the limbs';
   if (c.role === 'wine') return 'he carries its wine, poured at the south-west horn';
-  if (c.role === 'innards') return 'he carries its innards';
+  if (c.role === 'innards') return kind === 'bull' ? 'he carries a third of its innards in a basin, with lower legs laid on them' : 'he carries its innards';
+  // a bull's limb given to two or three is carried whole by them together (Rambam MK 6:18–19)
+  const lead = Number.isFinite(c.with) ? c.with : i;
+  const n = (CARRY[kind] || []).filter((x, j) => j === lead || x.with === lead).length;
+  if (n > 1) return `he carries its ${c.part} with ${n === 2 ? 'another kohen' : 'two other kohanim'} — the limb whole between them, not cut into pieces`;
   return `he carries its ${c.part}`;
 }
 const carrierDoing = (kind, what) => ({

@@ -287,3 +287,138 @@ Calls and triangles are unchanged in every scene (the people's geometry and LODs
   every frame (getProgram for every lit material, ≈ 1 ms of JS and ≈ 250 KB of garbage per frame).
 - On SwiftShader measure the updaters with drawing off (`engine.drawing = false`): frames take seconds there, which runs
   every sim LOD every frame and gives the plan job one slice per frame.
+
+# Round 2 — the pre-pass's light state, cells round the Mount, the fog uniforms
+
+Same machine and limits (SwiftShader, no GPU timings). New measuring scripts, run through `src/sim/dev/run.mjs`:
+`tools/perf-cpu-glcount-init.js` (an `--init` script counting every WebGL2 call by method) with `tools/perf-cpu-prepass.js`
+(per drawn frame: GL calls by method, draws, framebuffer binds, `setRenderTarget`, getProgram calls by material; the
+renderer's programs and the pre-pass material's own), and `tools/perf-cpu-world.js` (per view: one frame's calls /
+triangles by pass and builder, each world mesh's triangles in the frustum, a screenshot, the collision soup's count /
+triangles / checksum). Base = a copy of HEAD 478bc94; each pair booted the same way, one browser at a time.
+
+## 1. The pre-pass no longer changes three's light state (render/prepass.js, env/index.js, render/fx/lights.js, render/shadows.js, main.js)
+
+- **Every scene light carries `PREPASS_LAYER` (`prepassLight(light)`, called where each light is made: env's key light —
+  the moon is the same object —, fx's fire-light pool in `FireLights.setMax`, the cascades' `SunLight`).** — the pre-pass
+  renders `ctx.scene` with the camera on layer 29; no light was on it, so three's light state for the scene's render state
+  changed twice a frame and every lit material was re-keyed in the main pass. A light made later (a tier change rebuilds
+  the fx pool through `setMax`) gets the layer where it is made. Alternative: toggle the lights' layer inside
+  `DepthPrepass.render()` (a loop over the scene per frame, and a light made elsewhere would be missed).
+- **The pre-pass's depth program is compiled with the scene's lights (main.js warm-up: `compileScene(…, ctx.scene, …)`
+  instead of `null`).** — three keys every program by the light counts, MeshDepthMaterial's too: with lights now in the
+  pre-pass, a warm-up without them would have keyed a program the frame never uses and compiled the real one in the first
+  frame. With the warm-up keyed like the frame, the pre-pass material holds 2 programs (plain, instanced) where it held 3.
+- Shadow maps are untouched: the pre-pass still renders with `shadowMap.autoUpdate` and `needsUpdate` false, so three's
+  `shadowMap.render` returns at once; its depth material reads no light uniform.
+
+Proof (Azarah d3, shot mode, 4 drawn frames, base → new):
+
+| per frame | low | medium |
+|---|---|---|
+| getProgram calls (material re-keys) | 71 → **0** | 78 → **0** |
+| draw calls (renderer.info, every frame) | 251 → 251 | 342 → 342 |
+| GL draws / bindFramebuffer / setRenderTarget / clear | 251 / 0 / 0 / 1 → same | 342 / 29 / 25 / 4 → same |
+| useProgram / uniform* calls | 56 / 550 → same | 67 / 630 → same |
+| programs (renderer) | 76 → 76 | 91 → 91 |
+| pre-pass material's programs | 3 → 2 | 3 → 2 |
+
+(Round 1's in-page experiment on medium: getProgram 0.6–1.1 → 0 ms of JS a frame, 556–603 → 316–334 KB of garbage a frame.)
+Without a pre-pass (`?prepass=0`, low): getProgram 0 → 0 per frame, draws, framebuffer binds and uniform uploads unchanged
+by this item (the layer is on the lights only; no camera without the pre-pass looks at layer 29). Images: see item 3 — the
+base vs final shots (items 1 and 3 together) at the dawn start, Azarah d3 and n3, low and medium, differ only in the
+real-time flames, smoke and breathing.
+
+## 3. Cells round the Mount for the landscape's batches (src/world/sectors.js new; terrain/index.js, terrain/features.js, terrain/trees.js, mount/index.js, mount/stoas.js)
+
+- **Cells, not plain sectors: a disc, then rings cut into 6 sectors (`world/sectors.js`; landscape rings at 250 / 800 /
+  2400 m, the Mount's own at 60 / 200 m).** — three culls an object by its bounding sphere, and the sphere of a wedge that
+  starts at the apex holds the apex: plain sectors round the Mount would all pass the test for a viewer on the Mount. A 60°
+  wedge of a ring whose inner radius is ≥ 0.3 × its outer has a sphere clear of the centre. 8 sectors × rings at 250 / 700 /
+  1600 m (the first try) cut 2 % more triangles for 22–35 more draw calls on low.
+- **What is split**: the terrain kit's merged batches of ≥ 8000 triangles (the city's rubble, ashlar and roofs, terraces,
+  streets: `splitMeshes` on the kit's output) and the Mount kit's (its walls' ashlar, the stoas' roofs and floors, on the
+  Mount's rings); the rocks (one instanced mesh per cell, `splitInstancedBySector`); the olive groves' FAR level (beyond
+  MID_R from the camera: one pair of instanced meshes per form and cell, each with a fixed sphere round every tree of its
+  form in its cell, since the camera reassigns trees between levels); the stoa columns (each LOD one instanced mesh per
+  cell of the Mount's rings — two to three cells per stoa — with a fixed sphere round its columns). Same geometry and
+  material instances; instancing kept; colliders untouched (the kits register them whole before the split, the columns'
+  and the ground's from their own soup).
+- **Not split, measured**: the ground grid on medium (cells instead of its 3 × 3 index tiles: +53 calls at the Azarah, the
+  pre-pass's terrain only 242 k → 204 k triangles); the groves' mid level (a ring 70–480 m round the camera: a pair of calls
+  per form per cell in view for little culling).
+- **`?sectors=0`** builds the batches whole, exactly as before (low dawn start: 259 calls / 683 312 triangles / 180 world
+  meshes, the base's numbers) — the A/B switch for the HD 4600.
+- Shadows: a shadow pass culls by the light's frustum, so a piece outside the shadow camera's volume — which could cast
+  nothing into the map — is skipped there too; the low 'static' and medium 'cached' maps' signatures list more casters but
+  stay static. Stoa columns and the groves' far level were `frustumCulled = false` and are now culled by fixed spheres.
+- gate-core's id pass and deferred reveal work per material (a material is shown when any of its meshes shows); the pieces
+  keep their batch's material instance, so the same materials are deferred and revealed; the program sets are identical
+  (below). The pre-pass marks pieces like the whole (radius ≥ 8 m); `singleInstance` treats them like any plain batch.
+
+Proof (shot mode, `tools/perf-cpu-world.js`, base HEAD → this tree; calls / triangles of one frame, all passes):
+
+| view | low | medium |
+|---|---|---|
+| a dawn start | 259 / 683 k → 321 / 488 k (+62 calls, −29 % tris) | 341 / 1.547 M → 476 / 1.196 M (+135, −23 %) |
+| b Azarah d3 | 251 / 674 k → 305 / 491 k (+54, −27 %) | 342 / 1.536 M → 442 / 1.192 M (+100, −22 %) |
+| d Azarah n3 | 243 / 639 k → 297 / 456 k (+54, −29 %) | 316 / 1.431 M → 416 / 1.087 M (+100, −24 %) |
+| aerial d3 (pos 430,40,240, look 315/−28, fly) | 278 / 715 k → 350 / 620 k (+72, −13 %) | 366 / 1.626 M → 515 / 1.438 M (+149, −12 %) |
+
+By pass and builder at b, low: terrain main 20 / 199 k → 45 / 101 k, terrain pre-pass 11 / 93 k → 23 / 84 k, Mount main
+19 / 97 k → 29 / 49 k, Mount pre-pass 13 / 41 k → 20 / 12 k; everything else identical. The aerial view looks north-west
+over the Mount from the south-east: the landscape behind it is culled (terrain main 201 k → 113 k), the Mount's batches are
+all in view (98 306 → 98 306 triangles).
+- Colliders: 17 / 134 074 triangles (low), 17 / 268 916 (medium), position checksums identical base vs new.
+- Programs: identical sets (`?prepass=0` low, program lists by name and key hash: 73 = 73; with the pre-pass 76 → 75 and
+  91 → 91, the one less being the pre-pass's stale variant of item 1).
+- Images (`shots/perf-cpu/r2/world-base/`, `world-new2/` low, `world-new3/` medium (final), diffs ×8 in `diff-low2/`,
+  `diff-medium3/`; mean abs / pixels over
+  8/255): low a 0.022 / 0.025 %, b 0.122 / 0.38 %, n3 0.503 / 0.38 %, aerial 0.006 / 0.004 %; medium a 0.045 / 0.033 %,
+  b 0.097 / 0.29 %, n3 0.339 / 0.42 %, aerial 0.008 / 0.020 % — the altar's flames and smoke and their light (real time),
+  nothing else; shadows included (medium's cached map, low's static map).
+
+**The GPU benefit is unmeasured here, and it is a trade**: −13 to −29 % of the frame's triangles for +54 to +72 draw calls
+on low (+21 to +26 %), −12 to −24 % for +100 to +149 calls on medium (+29 to +41 %). By pass and builder at b on
+medium: terrain main 34 / 544 k → 79 / 313 k, terrain pre-pass 19 / 242 k → 49 / 209 k, Mount main 25 / 135 k → 39 / 84 k,
+Mount pre-pass 18 / 60 k → 29 / 30 k. Most added calls are the city batches' pieces in BOTH passes (the pre-pass draws
+them too, and most of the city near the view is in it), so the cheapest next cut, if the A/B says the calls cost more than
+the triangles, is to keep the instanced landscape (rocks, far olives, stoa columns: few calls, large spheres of mostly
+off-screen instances) and leave the city's merged batches whole. On the HD 4600 measure, in one page, interleaved, normal play,
+`?sectors=0` against the default at the dawn start, the Azarah and an aerial: the GPU frame (render/dev/gpu-split.mjs),
+the main thread's frame (the added calls are ≈ 20 µs each of CPU submission on ANGLE, perf-1), fps at fixed resolution;
+and `tools/warmup-check.mjs` (first frame; no material with two programs). If the calls cost more than the triangles save
+on low, keep it for medium and up only (one line in each call site: `sectorsOn(ctx) && ctx.quality.detail >= 1`).
+
+## 2. The fog uniforms at fast clock speeds (env/fog.js) — not changed; what it would take
+
+`FogUniforms.apply` uploads the 11 aerial-perspective uniforms into every program that declares them whenever one changes:
+at 60× the Sun moves every frame, so every frame it binds every fogged program (75+ `useProgram`) and makes ≈ 800 uniform
+calls — env's update 0.95–1.41 ms/frame at 60× on low against 0.2 at 1× (round 1; 0.66 ms of it in `apply`).
+
+**The uniform-block route touches the globally replaced fog chunk, so per the brief it is reported, not forced:**
+1. `fog_pars_fragment` (env replaces it for every built-in and custom material with fog) would declare
+   `layout(std140) uniform MkFog { vec4 mkFogA0; … }` (std140 pads every vec3 to 16 bytes; the GLSL names can stay, the
+   declarations change): every fogged program's source changes — world, people, FX emitters (`mkFogTransmittance`), the
+   sky and stars — so every program compiles anew on the next visit (same count, cold GPU program cache once).
+2. Each program must be bound to the block: `getUniformBlockIndex` + `uniformBlockBinding` per program, a synchronous query
+   each (perf-fix-2: such queries on programs issued after the first view cost a 57–92 ms frame on medium). Folding it into
+   env's existing `UniformBlock` binder pass (env/uniforms.js) keeps it to the same moment as `MkInteriors`' binding, but
+   doubles the queries per program.
+3. `mkWBd` (white balance) is also read by render/tonemap.js's chunk: it stays a plain uniform or render's chunk moves too.
+4. Contained alternatives inside fog.js, neither identical frame by frame: upload only on frames where the change exceeds
+   a coarser threshold (the 1e-4 relative test fires every frame at 60×; at a still clock the final values are the same),
+   or upload per program lazily from `material.onBeforeRender` of what is drawn (every fogged material would need the hook).
+Recommendation for the env owner: the block (1–3), done with env's binder and verified with warmup-check (no new programs,
+first-frame gap) and goldens; expected −0.6 ms/frame at 60× on low, nothing at 1×.
+
+## Round 2 — proposed CLAUDE.md lines
+
+- Every scene light carries the depth pre-pass's layer (render/prepass.js `prepassLight`, called where a light is made: env's
+  key light, fx's fire-light pool, the cascades' SunLight). A light without it makes three re-key every lit material every
+  frame (getProgram for 70+ materials: ≈ 1 ms of JS and ≈ 250 KB of garbage a frame); the pre-pass's warm-up compiles with
+  `ctx.scene` as its light scene, because three keys even MeshDepthMaterial by the light counts.
+- World batches that span the landscape are split into cells round the Mount (world/sectors.js: a disc, then rings × 6
+  sectors — a wedge from the apex never culls for a viewer on the Mount, its sphere holds the apex); split after the kit
+  has registered its colliders; `?sectors=0` builds them whole (the A/B switch). Fewer triangles for more draw calls:
+  measure on the HD 4600 before widening it.

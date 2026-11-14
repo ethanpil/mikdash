@@ -3,7 +3,8 @@
 //   ramp-salt       salt cast over the ramp so the kohanim do not slip, even on Shabbat (Rambam TuM 6:3; Eruvin 10:14):
 //                   one kohen up the ramp's east half and down its west, casting it ⚙ who and when.
 //   altar-wiping    Friday: the altar's stones wiped with a cloth because of the blood (Middot 3:4, Rabbi; Bartenura):
-//                   three kohanim with cloths at the NE corner, along the north face and at the SW corner ⚙.
+//                   three kohanim with cloths at the NE corner, along the north face and at the SW corner ⚙, leaning over
+//                   the yesod and wiping the wall in broad rounds (people 'wipe').
 //   kanim-out       Friday: one kohen in the Heichal draws the kanim out of the showbread (Menachot 11:6);
 //   kanim-in        Sunday: he puts them back between the loaves (Rambam TuM 5:11). The reeds' state itself is
 //                   shabbat-showbread's (shulchan()), keyed on these events' windows.
@@ -117,11 +118,12 @@ function build(ctx, sim) {
   const ww = evWin(sim, 'altar-wiping', base);
   if (ww) {
     const y = A.yesod;
-    // each man's stretch: points along the wall (standing 0.8 amah off the yesod), facing it
+    // each man's stretch: points along the wall (standing 0.6 amah off the yesod, leaning over it: people's 'wipe' reaches
+    // the wall 1.5 amot ahead), facing it
     const runs = [
-      [[y.max[0] + 0.8, y.max[1] - 6, 270], [y.max[0] + 0.8, y.max[1] - 2.5, 270], [y.max[0] + 0.6, y.max[1] + 0.6, 225]],      // the east face to the NE corner
-      [[y.max[0] - 3, y.max[1] + 0.8, 180], [y.max[0] - 8, y.max[1] + 0.8, 180], [y.max[0] - 13, y.max[1] + 0.8, 180]],         // the north face
-      [[y.min[0] - 0.8, y.min[1] + 6, 90], [y.min[0] - 0.8, y.min[1] + 2.5, 90], [y.min[0] - 0.35, y.min[1] - 0.25, 45]],       // the west face to the SW corner
+      [[y.max[0] + 0.6, y.max[1] - 6, 270], [y.max[0] + 0.6, y.max[1] - 2.5, 270], [y.max[0] + 0.6, y.max[1] + 0.6, 225]],      // the east face to the NE corner
+      [[y.max[0] - 3, y.max[1] + 0.6, 180], [y.max[0] - 8, y.max[1] + 0.6, 180], [y.max[0] - 13, y.max[1] + 0.6, 180]],         // the north face
+      [[y.min[0] - 0.6, y.min[1] + 6, 90], [y.min[0] - 0.6, y.min[1] + 2.5, 90], [y.min[0] - 0.35, y.min[1] - 0.25, 45]],       // the west face to the SW corner
     ];
     runs.forEach((run, k) => {
       const s = Script.from(ww[0] - 1.8 + 0.25 * k, gz.inside, 90, `wiper${k}`);
@@ -131,7 +133,8 @@ function build(ctx, sim) {
       if (per < 1) warn.push(`wiper ${k}: ${per.toFixed(1)} min a stretch`);
       run.forEach(([X, Y, h], j) => {
         if (j) s.walk([[X, Y, Z]], { speed: SPEED.slow, props: ['sudar', null] });
-        s.until(s.now() + per - (j ? 0.1 : 0), { pose: 'tend_lamp', heading: h, props: ['sudar', null], sway: 6, seed: 0x7d10 + 3 * k + j });
+        // the cloth folded into a pad under the palm, wiped in broad rounds (people clip 'wipe', prop wipe_cloth)
+        s.until(s.now() + per - (j ? 0.1 : 0), { pose: 'wipe', heading: h, props: ['wipe_cloth', null], sway: 4, seed: 0x7d10 + 3 * k + j });
       });
       const back = k === 2 ? [[199.6, 312, Z], [G.apronX, 321, Z], [G.apronX, 340.2, Z]] : [[s.cur[0], 343.6, Z], [G.apronX + 1.2, 343.6, Z]];
       s.walk([...back, ...toGazit], { speed: SPEED.walk, props: ['sudar', null] });

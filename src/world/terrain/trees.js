@@ -7,6 +7,7 @@ import { AMAH, m2w } from '../../core/units.js';
 import { mergeGeometries, applyWorldUV } from '../geom.js';
 import { rng, smooth } from '../mount/kit.js';
 import { distToPolyline, rectDist, inRect } from './plan.js';
+import { cellOf, mountCentre, instancesSphere, sectorsOn } from '../sectors.js';
 
 // gate-world-materials: more trees (the QA gate: hundreds in the Mount of Olives views, ~10 seen from the crest), paid for
 // by a third, very cheap level of detail beyond MID_R
@@ -247,8 +248,37 @@ export function buildTrees(ctx, T, detail, feat = {}) {
     col.setRGB(base[0] * v + silver * base[0], base[1] * v * (0.96 + 0.08 * rand()) + silver * base[1], base[2] * v + silver * base[2] * 1.2);
     col.toArray(cols, i * 3);
   });
-  const all = [...far, ...near, ...vfar].flatMap((x) => [x.t, x.c]);
+  // perf-cpu round 2: the mid and far levels in one pair of meshes per form AND cell round the Mount (world/sectors.js),
+  // each culled by a fixed sphere round every tree of its form in its cell (any of them may be assigned to it as the camera
+  // moves); one pair per form spanned the whole landscape and was drawn from every view (1–2 % of the far crowns in the
+  // Azarah's view frustum). Same geometries and materials; the near level (round the camera) stays one pair per form.
+  const [mcx, mcz] = mountCentre();
+  const cellOfTree = list.map((_, i) => cellOf(wpos[i * 3], wpos[i * 3 + 2], mcx, mcz));
+  const byCell = (pairs) => pairs.map((pair, f) => {
+    const idx = new Map();
+    list.forEach((_, i) => { if (formOf[i] === f) { const c = cellOfTree[i]; if (!idx.has(c)) idx.set(c, []); idx.get(c).push(i); } });
+    const cells = new Map();
+    for (const [c, ids] of [...idx].sort((a, b) => a[0] - b[0])) {
+      const one = (src) => {
+        const im = new InstancedMesh(src.geometry, src.material, ids.length);
+        im.name = `${src.name}#c${c}`;
+        if (src.instanceColor) im.setColorAt(0, new Color(1, 1, 1));
+        im.boundingSphere = instancesSphere(src.geometry, mats, ids);
+        return im;
+      };
+      cells.set(c, { t: one(pair.t), c: one(pair.c) });
+    }
+    return cells;
+  });
+  // (only the far level, beyond MID_R: the landscape-wide one. The mid level surrounds the camera — a ring 70–480 m round
+  // it — and split into cells it added a pair of draw calls per form for every cell in view for little culling)
+  const cellsOn = sectorsOn(ctx);
+  const vfarC = cellsOn ? byCell(vfar) : vfar.map((pair) => new Map([[0, pair]]));
+  if (!cellsOn) for (const pair of vfar) { pair.t.frustumCulled = pair.c.frustumCulled = false; }
+  const cellPairs = vfarC.flatMap((m) => [...m.values()]);
+  const all = [...near.flatMap((x) => [x.t, x.c]), ...far.flatMap((x) => [x.t, x.c]), ...cellPairs.flatMap((x) => [x.t, x.c])];
   for (const im of all) { im.castShadow = false; im.receiveShadow = true; im.frustumCulled = false; }
+  if (cellsOn) for (const x of cellPairs) { x.t.frustumCulled = true; x.c.frustumCulled = true; }
   for (const x of near) { x.t.castShadow = detail >= 1; x.c.castShadow = detail >= 1; }
   // assign instances: near ones (closest to the camera, within NEAR_R) to the detailed meshes, the rest to the far ones
   const tmpC = new Color();
@@ -268,17 +298,18 @@ export function buildTrees(ctx, T, detail, feat = {}) {
       close.length = Math.min(close.length, NEAR_MAX);
     }
     const isNear = new Uint8Array(list.length);
-    const nk = new Array(NF).fill(0), fk = new Array(NF).fill(0), vk = new Array(NF).fill(0);
+    const nk = new Array(NF).fill(0), fk = new Array(NF).fill(0);
+    for (const x of cellPairs) x.k = 0;
     for (const [, i] of close) { isNear[i] = 1; put(near[formOf[i]], nk[formOf[i]]++, i); }
     for (let i = 0; i < list.length; i++) {
       if (isNear[i]) continue;
       const dx = wpos[i * 3] - cx2, dz = wpos[i * 3 + 2] - cz2;
-      if (dx * dx + dz * dz < MID_R * MID_R) put(far[formOf[i]], fk[formOf[i]]++, i);
-      else put(vfar[formOf[i]], vk[formOf[i]]++, i);
+      if (dx * dx + dz * dz < MID_R * MID_R) { put(far[formOf[i]], fk[formOf[i]]++, i); continue; }
+      const pair = vfarC[formOf[i]].get(cellsOn ? cellOfTree[i] : 0);
+      put(pair, pair.k++, i);
     }
+    for (const x of cellPairs) { x.t.count = x.c.count = x.k; x.t.visible = x.c.visible = x.k > 0; }
     for (let f = 0; f < NF; f++) {
-      vfar[f].t.count = vfar[f].c.count = vk[f];
-      vfar[f].t.visible = vfar[f].c.visible = vk[f] > 0;
       far[f].t.count = far[f].c.count = fk[f];
       far[f].t.visible = far[f].c.visible = fk[f] > 0;
       if (near[f]) { near[f].t.count = near[f].c.count = nk[f]; near[f].t.visible = near[f].c.visible = nk[f] > 0; }
@@ -286,7 +317,8 @@ export function buildTrees(ctx, T, detail, feat = {}) {
     for (const im of all) { im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true; }
   };
   assign(1e9, 1e9);
-  for (const im of all) im.computeBoundingSphere();
+  // (the cells' meshes keep their fixed spheres; the near and mid ones are never culled)
+  for (const x of [...near, ...far, ...(cellsOn ? [] : vfar)]) { x.t.computeBoundingSphere(); x.c.computeBoundingSphere(); }
   // (every tier now: the mid / far split follows the camera on low too)
   if (ctx.engine?.onUpdate) {
     ctx.engine.onUpdate(() => {
