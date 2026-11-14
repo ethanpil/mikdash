@@ -179,3 +179,111 @@ Not changed (measured, and why):
 | d n3 | 0.190 → 0.071 | 129 → 36 | 0.243 → 0.033 |
 
 (The sim runtime, unchanged, measured 0.09–0.67 ms/call in the same runs: the machine's noise for code that did not change.)
+
+## After (same runner, same scenes; the other agents' env / ui / render work changed between the runs)
+
+| scene | upd tick | sim | people | env | ui | busy | gc | KB/f | draw JS* | calls | tris |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| a start | 1.60 → 1.93 | 0.42 → 0.54 | 0.48 → 0.45 | 0.24 → 0.29 | 0.06 → 0.08 | 1.74 → 2.10 | 0.12 → 0.23 | 294 → 199 | 21.2 → 11.5 | 263 | 0.686M |
+| b Azarah d3 | 2.19 → 2.07 | 0.87 → 0.85 | 0.69 → 0.55 | 0.21 → 0.24 | 0.10 → 0.11 | 2.12 → 2.07 | 0.13 → 0.07 | 251 → 172 | 15.0 → 8.1 | 250 | 0.669M |
+| b60 (60×) | 5.31 → 4.54 | 1.41 → 1.38 | 1.80 → 1.30 | 1.41 → 0.95 | 0.16 → 0.41 | 5.06 → 4.01 | 0.34 → 0.21 | 345 → 208 | 22.4 → 11.3 | 255 | 0.691M |
+| c RC musaf | 2.20 → 2.95 | 0.91 → 1.40 | 0.71 → 0.76 | 0.18 → 0.29 | 0.08 → 0.11 | 2.01 → 2.93 | 0.14 → 0.01 | 245 → 181 | 18.4 → 16.4 | 249 | 0.659M |
+| d night n3 | 3.00 → 2.51 | 1.01 → 1.01 | 1.08 → 0.57 | 0.38 → 0.34 | 0.10 → 0.11 | 2.63 → 2.50 | 0.11 → 0.10 | 201 → 136 | 10.6 → 10.9 | 243 | 0.639M |
+| e walking | 4.25 → 4.83 | 1.48 → 2.04 | 1.56 → 1.10 | 0.31 → 0.33 | 0.25 → 0.63 | 4.27 → 5.16 | 0.34 → 0.27 | 286 → 203 | 15.4 → 16.4 | 251 | 0.665M |
+| f medium b | 2.82 → 2.34 | 1.10 → 0.97 | 0.86 → 0.62 | 0.29 → 0.26 | 0.13 → 0.10 | 2.67 → 2.34 | 0.16 → 0.15 | 297 → 233 | 15.1 → 38.0 | 339 | 1.499M |
+
+\* 8–13 frames of SwiftShader: one-off work in the window dominates (c and e built a prop / animal batch in theirs; the
+medium window had 9 frames of 10 s). Read the draw column for the order of magnitude only.
+
+Reading it: what this task changed (people) went down in every scene but c (0.71 → 0.76, inside the window noise) —
+by 0.03–0.51 ms/frame, 20–47 % — and allocations went down 21–40 % in every scene (the most robust figure: it does not
+depend on the machine's load). Columns this task did not touch moved by as much as ±50 % between the two runs (sim in c and
+e: unchanged code; ui and env: other agents' changes in between), which is the noise of 20 s windows on this shared
+machine; the interleaved micro-benchmark above is the reliable comparison for the people system (−44 to −68 % per call).
+Draw-side: three's scene matrix update no longer visits 1250+ actor groups (0.19–0.24 → 0.03–0.05 ms per call).
+Calls and triangles are unchanged in every scene (the people's geometry and LODs are the same).
+
+## Triangles and draw calls (findings; proposals, not changed)
+
+- **The world is 91–96 % of every frame's triangles and none of it is culled.** Its merged batches span the precinct, so
+  three's frustum test keeps all of them; the view frustum holds only a share (bench, low, triangles whose three vertices
+  are not all outside one frustum plane — an upper bound, occlusion ignored):
+
+  | builder | drawn (main pass, low) | in the frustum at b (Azarah, SW) | at a (start, W) |
+  |---|---|---|---|
+  | terrain | 207 k | 43 k (21 %) | 37 k (18 %) |
+  | mount | 99 k | 28 k (28 %) | 35 k (36 %) |
+  | courts | 61 k | 13 k (21 %) | 59 k (98 %) |
+  | altar | 41 k | 37 k (91 %) | 41 k (100 %) |
+  | heichal | 29 k | 28 k (97 %) | 29 k (100 %) |
+
+  The largest single offenders are instanced batches spread over the whole landscape: `olive-crowns-far` (2 × ≈ 540
+  instances, 32–33 k triangles each, 1–2 % in view), `rocks` (410 instances, 33 k, 2–5 %), the stoas' `stoa-columns`
+  (370 instances, 56 k, 34–43 %), and merged batches `ashlar_plain` (mount 36 k, 20 %), `house_rubble` (26 k, 30–35 %).
+  On medium the terrain alone is 544 k triangles of the main pass and 242 k of the pre-pass at b (52 % of the frame).
+  **Proposal (world builders, my paths, not done: its GPU effect cannot be measured here and it trades draw calls for
+  triangles):** split the landscape's instanced far batches (olive crowns, rocks) and the city's merged batches into 6–8
+  angular sectors around the Mount, and the stoa columns into their four stoas, so three's culling drops what is behind the
+  viewer: ≈ −90 k triangles at b on low (≈ −60 k main, ≈ −30 k pre-pass where they qualify), ≈ −250 k on medium, for ≈ +15–25
+  calls (≈ +0.3–0.5 ms of CPU submission on the HD 4600 at perf-1's ≈ 20 µs a call). Needs a GPU-timer A/B on the HD 4600
+  (render/dev/gpu-split.mjs) before it is worth doing; the low shadow map's static-caster signature would not change
+  (sectors do not move).
+- **The pre-pass doubles the world's triangles** (77 calls / 200 k low, 91 / 416 k medium): perf-1 measured it as a large
+  GPU win on the HD 4600 and it stays; noted here because it also costs ≈ 0.6 ms of JS per frame (below) beyond its draw
+  calls.
+- **People are cheap in geometry**: 2–10 % of the triangles (low: 20–70 k; medium: 64 k + 24 k shadow casters), 7–36 calls
+  (props are most of them: one call per distinct prop variant, capped 14 / 22 per tier). Far figures are at LOD3 (41–56 of
+  76–102 drawn at b and a), no figure is LOD0 on low in these views; animals cap at LOD1 beyond their hero distance.
+
+## Needs from others (measured; not my paths)
+
+- **render (prepass.js): every lit material is re-keyed every frame.** The pre-pass renders `ctx.scene` with the camera on
+  layer 29 only, which holds no light, so three's light state for the scene's render state changes twice a frame and every
+  lit material fails `lightsStateVersion === lights.state.version` in the main pass: `getProgram` (`getParameters` + the
+  program cache-key string) for 64–77 materials a frame on every tier with the pre-pass. Tried in the page without changing a
+  file (`tools/cpu-prof.mjs --exp lights29`, medium b, 4 interleaved windows): with every light also on layer 29, getProgram
+  calls 308 → 0 per 4 frames, its time 0.61 / 1.10 → 0 ms/frame, allocations 603 / 556 → 334 / 316 KB/frame, draw JS
+  15.1 / 12.3 → 7.0 / 7.1 ms/frame (SwiftShader; 8 frames a window). **Fix**: in `DepthPrepass` enable `PREPASS_LAYER` on the
+  scene's lights (env's key / moon / hemisphere lights, fx's fire-light pool — e.g. once at construction and on
+  `fx` light creation), or toggle it on them for the pre-pass's `render()`. The pre-pass then sees the main pass's light
+  counts (three keeps `lights.state.version`); its shadow maps stay suspended (`autoUpdate` / `needsUpdate` false), its depth
+  material needs no light uniforms. Programs and pixels are the same (the cache keys do not change); verify with
+  `tools/goldens.mjs` and `tools/warmup-check.mjs` (no material with two programs).
+- **env (fog.js `FogUniforms.apply`) at fast clock speeds**: whenever a fog uniform changes (every frame at 60×, the sun
+  moving), every program is bound and 11 uniforms uploaded into each — 75+ `useProgram` and ≈ 800 `uniform*` calls a frame:
+  env's update 1.41 ms/frame at 60× on low (0.2 ms at 1×), 0.66 ms of it in `apply` (uniform3fv 0.19, useProgram 0.10).
+  Put these in env's existing uniform block (one `bufferSubData` a frame), or upload them lazily per program in
+  `onBeforeRender` of what is drawn.
+- **fx**: `illuminanceAt`, `writeFire`, `lights.update` allocate 20–40 KB/frame (per-frame arrays / vectors); 0.24–0.40
+  ms/frame. Worth a pass with `tools/cpu-prof.mjs` (the heap section lists them by function).
+- **ui**: 0.06–0.25 ms/frame (0.4–0.6 while walking, `ui/console/markers.js place` and the minimap); no hotspot over
+  0.05 ms in the profiles, nothing proposed.
+- **sim (planners)**: the day's plan job ran single generator steps of 110–615 ms here (`chambers-daily` nazirites
+  `placeSet` → `scriptNazir` → `fitSub` / `hotOf` / `subFree`): each is a frame of that length on the visitor's machine
+  (≈ 1/3–1/2 of it on the HD 4600's CPU) once per boot and per date change. A candidate (not tried): yield inside `placeSet`'s shift loop.
+
+## Not done / not verified
+
+- No frame rates (no GPU here). The draw-window JS includes SwiftShader's GL submission; its absolute values are not the
+  HD 4600's.
+- The terrain / stoa sectoring above (needs a GPU A/B on the HD 4600).
+- Boot (brief item 5): this task changes nothing before the first frame (the actors' setters do the same matrix work as
+  before; `bootTimes` in the runs: low firstFrame 12.1–16.3 s, medium 13.3–18.4 s on the dev server, play mode, loaded
+  machine — not comparable to warmup-check's production numbers). `tools/boot-prof.mjs --cpu` was not run: no boot work was
+  in scope of a change here.
+- `tools/warmup-check.mjs` and `tools/goldens.mjs` not run (no shader, program or material change; the screenshots above
+  cover the pixels at two views on low).
+- Medium "after" is one run (no interleaved repeat).
+
+## Proposed CLAUDE.md lines
+
+- People: an actor's `object3D` hangs under `people.system.actorRoot`, outside the scene, with `matrixAutoUpdate` off — move
+  actors only through their setters (setSite / setPosition / setHeading); hidden actors are ticked lazily (`Actor._flush`
+  runs before any setter that changes how a figure advances), so read `actor.phase` only after a flush.
+- Per-frame code here often runs in Maglev, not TurboFan: a Set's `for…of`, closures, array literals, destructuring and
+  `subarray` in a frame loop allocate. Measure garbage with `tools/cpu-prof.mjs` (CDP heap sampling keeps what minor GCs
+  collected), not with heap snapshots.
+- The depth pre-pass draws the scene with no lights; unless the lights are on its layer, three re-keys every lit material
+  every frame (getProgram for every lit material, ≈ 1 ms of JS and ≈ 250 KB of garbage per frame).
+- On SwiftShader measure the updaters with drawing off (`engine.drawing = false`): frames take seconds there, which runs
+  every sim LOD every frame and gives the plan job one slice per frame.

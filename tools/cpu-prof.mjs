@@ -2,25 +2,28 @@
 // Main-thread CPU profiler for steady play (perf-cpu): JavaScript milliseconds per frame by system, by file and by
 // function, garbage per frame, and what the frame draws — measured, not frame rates (GPU time is not JS time).
 //
-//   node tools/cpu-prof.mjs [--q low] [--scenes scenes.json] [--secs 20] [--settle 15] [--interval 200]
-//                           [--out shots/perf-cpu/run] [--prod] [--nomin] [--timeout 1500] "<boot query>"
+//   node tools/cpu-prof.mjs [--q low] [--scenes scenes.json] [--only a-,b-] [--secs 20] [--dsecs 30] [--settle 15]
+//                           [--interval 200] [--noheap] [--exp lights29] [--out shots/perf-cpu/run] [--prod] [--nomin]
+//                           [--timeout 1500] "<boot query>"
 //
 // One browser, one boot (normal play: the UI and intro up, Enter pressed, then everything the boot defers is waited for
 // — bootTimes.drained), then each scene is applied through the app's own API (date, clock, speed, teleport, look; no
-// reboot) and, after `settle` s, measured for `secs` s:
-//   * the engine's updaters wrapped by priority (time sim people player env fx audio ui render-update) and the draw
-//     function → inclusive ms of JS per frame per system (performance.now() around each call);
-//   * the CDP sampling CPU profiler (Profiler.*, `--interval` µs) → self ms/frame by function and by source file, the
-//     garbage collector's own ms/frame, inclusive ms/frame of the heaviest functions;
-//   * the CDP sampling heap profiler with objects collected by minor and major GCs kept (HeapProfiler.startSampling)
-//     → bytes allocated per frame, by allocating function and file;
-//   * renderer.info per frame (calls / triangles, median), programs, people stats, and a breakdown of one frame's
-//     draws (median over 8 frames) by pass (main / pre-pass / shadow) and by what is drawn (world group, people batch
-//     by archetype and LOD, props, fx) — `renderBufferDirect` wrapped for those frames only.
-// Scenes file: [{ "name", "date"?, "t", "at": [X, Y] | "anchor", "look": [heading, pitch], "speed"?, "walk"?: seconds of
-// 'w' held during the window, "secs"?, "settle"? }]. Without --scenes the perf-cpu set below is used.
-// Writes <out>/<scene>.json (+ .cpuprofile and .heapprofile) and prints a summary. Dev server by default: readable names
-// and one URL per source file (the attribution); `--prod` measures the production bundle (add --nomin for names).
+// reboot); the day's plan job is waited for (drawing off meanwhile), then `settle` s, then two windows:
+//   * update (`secs`, drawing off: engine.drawing = false) — the updaters at the frame rate a GPU that keeps up gives, so
+//     the sim's LOD cadences (15 Hz / 4 Hz) are a real machine's: the engine's updaters wrapped by priority (time sim
+//     zones people player env world fx audio ui), the CDP sampling CPU profiler (`--interval` µs: self ms/frame by
+//     function and file, the GC's own ms/frame, inclusive ms/frame), the CDP sampling heap profiler keeping the objects
+//     minor and major GCs collected (bytes allocated per frame, by function and file);
+//   * draw (`dsecs`, drawing on) — the render JS (SwiftShader draws a frame in seconds: few frames, read it for the
+//     render side only);
+//   * then 6 drawn frames with renderBufferDirect wrapped: calls / triangles by pass (main / pre-pass / shadow) and by what
+//     is drawn (world builder, people archetype × LOD, props, fx), and the materials three re-keyed (getProgram) per frame.
+// --exp lights29: after the scenes, the pre-pass light-state experiment (docs/decisions/perf-cpu.md), off / on / off / on.
+// Scenes file: [{ "name", "date"?, "t", "at": [X, Y] | "anchor", "look": [heading, pitch], "speed"?, "walk"?: true (W held),
+// "secs"?, "dsecs"?, "settle"? }]. Without --scenes the perf-cpu set below is used.
+// Writes <out>/<scene>.json (+ .update/.draw .cpuprofile and .heapprofile) and prints a summary; tools/cpu-prof-table.mjs
+// makes tables of them. Dev server by default (readable names, one URL per source file: the attribution); `--prod`
+// measures the production bundle (add --nomin for names).
 import { build as viteBuild, preview as vitePreview, createServer } from 'vite';
 import { chromium } from 'playwright-core';
 import { launchBrowser, GPU_ARGS } from './browser.mjs';

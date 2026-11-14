@@ -59,6 +59,13 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   from `frequency.alone` with one seeded day quantile, never perDay plus sets.
 - People shaders: no dFdx/fwidth inside pattern branches (ANGLE/D3D11 flattens them; 10–18 s compiles); robes use
   a bake-time skirt cage + `clothSkin` flatten pass (MAX_BONES 36); people splice their own `lights_fragment_begin`.
+- People CPU: an actor's `object3D` hangs under `people.system.actorRoot`, outside the scene, with `matrixAutoUpdate`
+  off (1250+ pooled actors were 60 % of three's per-frame matrix update): move actors only through their setters; hidden
+  actors tick lazily (`Actor._flush` before any setter that changes how a figure advances), so read `actor.phase` only
+  after a flush. Per-frame code here often runs in Maglev, not TurboFan: a Set's `for…of`, closures, array literals,
+  destructuring and `subarray` in a frame loop allocate. Measure with `tools/cpu-prof.mjs` (CDP profile + heap sampling
+  that keeps what minor GCs collected); on SwiftShader measure the updaters with `engine.drawing = false`, since frames
+  that take seconds run every sim LOD every frame (docs/decisions/perf-cpu.md).
 - Curtains (the parochot, gate curtains, the lul's) and door leaves are movables, not colliders: a `ctx.physics.raycast`
   passes them. Anything that samples what the eye sees from a room must stop at the room's box unless the ray leaves
   through an open aperture (render/fx `roomExit`): fx's firelight adaptation saw past both parochot to the Azarah behind
