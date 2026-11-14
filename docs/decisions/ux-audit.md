@@ -382,3 +382,16 @@ Every fix is in `src/ui/**`, except one minimal change in `src/sim/inspect-show.
 - **Desktop Back after a Show me** — framing a picked figure during `showing` (fix B) is now limited to phone sheets: on the
   dock it could re-frame the card's subject after Back (consoletest "Back restores the clock and the view", dh 25°).
   Re-checked by hand: dh 0.
+
+## Round 3
+
+- **Phone strip: the clock is never overlapped** — the names' block clips (`overflow: hidden`), the About row keeps its
+  width (`flex: none`), so the Hebrew and English names ellipsize first ("…לשכת · Lishkat Osei Cha…  About ›  ≈04:36";
+  measured: About ends at 312 px, the clock starts at 322). `after/phone-12b-show-bakers.png`.
+- **A gloss is never cut, and never cuts the place** — `eventrow.js` measures each glossed row once when it is first laid
+  out; if the gloss or the place would be cut on the meta line, the gloss takes a line of its own (`.gloss-line`, as on
+  phones). Measured on desktop: every glossed row in Happening and Time's main rites is whole (no `scrollWidth >
+  clientWidth`), places whole ("Between the Ulam and the Mizbeach"); short pairs stay on one line ("Heichal: the
+  House · The Heichal"). Happening's area spacing tightened (4 px) so the dock still shows 5 rows.
+  `after/desk-05b-happening-gloss.png`, `after/desk-17b-time-main.png`.
+- consoletest verdicts: see the round-3 report (each remaining FAIL re-run by hand with long waits).
