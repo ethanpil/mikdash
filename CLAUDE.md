@@ -86,6 +86,12 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   `byOccasion` and are read through `eventsFor(dayType, time)`. Rosh Chodesh's limbs are laid on the altar top between
   the horns (TuM 6:3); its musaf psalm is not recorded (Ps 81 stands in, said so in the caption). Its 123 kohanim are
   pooled only on the first Rosh Chodesh date of a session (`src/sim/choreo/g7`), so an ordinary boot carries none.
+- Gates: the night watch's own Levites draw the bars and open/shut the Mount and Azarah gates (Rambam KhM 3:2; door
+  times from `gates.js gateTimes`, shared with night-watch.js); the kohanim still open the great gate (Tamid 3:7); Tadi
+  never opens (Middot 1:3). Events may carry `onWeekday` (0 = Sunday: the showbread's reeds come out on Friday and go
+  back on Sunday, Menachot 11:6, TuM 5:11). The musaf's limbs wait on the ramp's EAST lower half, the tamid's on the
+  west (TuM 6:3). The afternoon call is an unnamed Levite of the officer's men (KhM 7:2), not Gevini (Yoma 20b gives
+  his cry at dawn only). Staged gaps and their sources: docs/decisions/source-gaps-staged.md.
 - Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
   give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.
