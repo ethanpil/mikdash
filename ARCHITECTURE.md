@@ -130,6 +130,9 @@ ctx.time = {
   speed, paused,     // speed = sim-seconds per real-second (1 = real time)
   date: { y, m, d }, weekday /*0=Sun*/, hebrew: { day, month, monthName, year, he },
   dayType,           // 'weekday' | 'friday' | 'shabbat'  (festivals: future)
+  occasions,         // [] | ['rosh-chodesh'] — orthogonal to dayType (a Shabbat Rosh Chodesh is both); belongs to the
+                     // civil date's DAYTIME as dayType does. roshChodesh (bool), occasionsEvening, occasionsAt(t),
+                     // nextOccasion(id) -> 'YYYY-MM-DD'. Rosh Chodesh = the 1st of a month only, never 1 Tishrei.
   zmanim: { alot, sunrise, chatzot, minchaGedola, minchaKetana, plagHamincha, sunset, tzeit, midnight,
             shaahDay, shaahNight },   // minutes; GRA hours (sunrise→sunset; sunset→sunrise), alot = sun −16.1°
   set(t), setDate('YYYY-MM-DD'), setSpeed(n), pause(bool),
@@ -189,6 +192,9 @@ export const EVENTS = [{
   id: 'tamid-morning-slaughter',
   title: { en, he },
   dayTypes: ['weekday','friday','shabbat'],        // omit = all
+  occasion: 'rosh-chodesh',                        // optional: active only on a date carrying that occasion
+  byOccasion: { 'rosh-chodesh': { when, … } },     // optional overrides on such a date (as byDay per day type);
+                                                   // read through eventsFor(dayType, time)
   when: { start: <time spec>, end: <time spec> },  // see ctx.time.resolve; ordering is sourced, minutes are reconstruction
   timing: { confidence: 'explicit'|'ordering'|'reconstruction', note },
   zone: 'slaughter-zone',

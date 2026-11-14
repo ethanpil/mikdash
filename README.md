@@ -65,7 +65,7 @@ Add these parameters to the address to share a moment. All are optional.
 | Parameter | Meaning | Examples |
 |---|---|---|
 | `t=` | Time of day, Israel Standard Time. A clock time, a zman with an offset in minutes, or a seasonal hour (`d` day, `n` night). Default: 6 minutes before dawn (alot hashachar). | `t=05:30`, `t=sunrise+10`, `t=alot-6`, `t=d8.5`, `t=n11` |
-| `date=` | Civil date, which sets the sun, moon and day type. Default 2026-11-02, an ordinary Monday (22 Cheshvan 5787). | `date=2026-11-07` (Shabbat) |
+| `date=` | Civil date, which sets the sun, moon and day type. Default 2026-11-02, an ordinary Monday (22 Cheshvan 5787). | `date=2026-11-07` (Shabbat), `date=2026-11-11` (Rosh Chodesh) |
 | `at=` | Where you stand, in site amot: X east, Y north, measured from the south-west corner of the Mount's 500 x 500 amot. The floor is found for you; an optional third number picks the level on stacked floors. | `at=217.8,344.2`, `at=140,333,22` |
 | `look=` | Compass heading and pitch in degrees (0 north, 90 east; positive pitch looks up). | `look=270,5` |
 | `q=` | Graphics quality. Default `auto`. | `q=low`, `q=medium`, `q=high`, `q=ultra` |
@@ -104,8 +104,9 @@ Limits you should know about:
   sourced", "Order sourced · minutes reconstructed" or "Time reconstructed". Clock times are shown with ≈ because the
   Mishnah counts hours. Seasonal hours follow the Vilna Gaon (sunrise to sunset is twelve hours); dawn is the sun 16.1°
   below the horizon and nightfall 8.5°.
-- The calendar knows weekdays, Fridays and Shabbat only. Festivals, Rosh Chodesh, Yom Kippur and Pesach are not
-  simulated: a festival date shows an ordinary day of that weekday.
+- The calendar knows weekdays, Fridays, Shabbat and Rosh Chodesh (the first of a month, with its musaf; the Time
+  section has "Next Rosh Chodesh"). The festivals, Yom Kippur and Pesach are not simulated: a festival date shows an
+  ordinary day of that weekday.
 - Faces, clothing detail beyond what the sources describe, the melodies of the Levites' song, the fill of the city
   around the Mount and similar details are modest reconstructions. They are logged with their reasons in
   [docs/decisions/](docs/decisions/README.md).

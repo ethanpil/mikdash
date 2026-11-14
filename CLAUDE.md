@@ -77,6 +77,11 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - UI is the Luach console (docs/console-design.md): one always-on Menu beacon, Esc as the only key to remember,
   one card system for every subject, a module registry for new sections (narration mounts in Listen). Inspect is
   CPU picking (no GPU queries); its describer and content load after firstFrame so cold boot does not regress.
+- Occasions: `ctx.time.occasions` (Rosh Chodesh = the 1st of a month only, never 1 Tishrei: in the Temple the musaf
+  was offered on one day, Rambam Kiddush HaChodesh 3:5–6) are orthogonal to `dayType`; events take `occasion` /
+  `byOccasion` and are read through `eventsFor(dayType, time)`. Rosh Chodesh's limbs are laid on the altar top between
+  the horns (TuM 6:3); its musaf psalm is not recorded (Ps 81 stands in, said so in the caption). Its 123 kohanim are
+  pooled only on the first Rosh Chodesh date of a session (`src/sim/choreo/g7`), so an ordinary boot carries none.
 - Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
   give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.
