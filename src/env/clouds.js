@@ -18,9 +18,10 @@
 import { DataTexture, RGBAFormat, UnsignedByteType, RepeatWrapping, LinearFilter, LinearMipmapLinearFilter, Vector3, Vector4, MathUtils } from 'three';
 import { bakeClouds } from './clouds-core.js';
 
-export const CLOUD_SIZE = 1024;
+// the tile's size: 512² (1.4 MB with mips) on the weak tiers' flat layer, 1024² (5.6 MB) where the layer is marched
+export const CLOUD_SIZES = { flat: 512, march: 1024 };
 const MAX_SLICES = 24; // the loop's static bound (CLOUD_SLICES, per tier, caps it)
-const CU_TILE = 110;    // km: the cumulus tile (billows ≈ 4.6 km, clouds ≈ 1.5–3 km across)
+const CU_TILE = 64;     // km: the cumulus tile (clouds ≈ 1.5–3 km across, towers ≈ 1.3 km, lobes ≈ 0.6 km: clouds-core.js)
 const CI_TILE = 160;    // km: the cirrus tile (strokes ≈ 27 × 4 km)
 const CU_BASE = 1.8, CU_TOP = 2.6, CI_ALT = 9.0; // km above sea level (the observer is at ATMO.observerAltitude)
 // winds (km per minute, world x east, z south): low-level west-south-westerly ≈ 5 m/s; the upper westerlies ≈ 20 m/s ⚙
@@ -74,9 +75,11 @@ float mkCloudCover( vec3 dir, float r0 ) {
 // mkClouds composites the two layers over the sky radiance L (scene units) and returns the transmittance a disc behind
 // them keeps. Two cumulus paths, chosen by the tier's flags (env/index.js):
 //   CLOUD_MARCH  (high / ultra) the layer marched in slices along the ray: domes with height near the horizon;
-//   otherwise    (the weak tiers: low / medium, the HD 4600's) a flat layer, loop-free: two fetches (the point and one
-//                0.45 km toward the key light) shaded from the bake's smooth mass channel — three cloud fetches a sky pixel
-//                in all with the cirrus, no LUT fetch (the light at each layer is a CPU uniform).
+//   otherwise    (the weak tiers: low / medium, the HD 4600's) a flat layer, loop-free: two fetches (the point, and one
+//                0.5 km nearer the viewer that finds the cloud's lower rim low in the sky, or the field at 8× the scale —
+//                the lobes — high up) shaded from the bake's smooth mass channel and
+//                the light's azimuth — three cloud fetches a sky pixel in all with the cirrus, no LUT fetch (the light at
+//                each layer is a CPU uniform).
 export const CLOUD_GLSL = /* glsl */`
 ${CLOUD_UNIFORMS_GLSL}
 uniform vec3 uCuSig;     // mean extinction (1/km) of the air between the observer and the cumulus layer
@@ -88,6 +91,7 @@ uniform vec3 uCloudMoonE;// the Moon's beam at the cloud (lx, physical, its own 
 uniform vec3 uCloudAmb;  // sky radiance reaching a cloud from around (Esky / π, physical)
 uniform vec3 uCloudGnd;  // the lit ground below it (radiance, physical)
 uniform vec3 uCloudKey;  // the light that models the clouds (the Sun by day, the Moon at night), world direction
+uniform float uCloudTexKm; // km per cumulus texel
 float mkCloudSide( vec3 dir, vec3 L ) {
   // 1 when the viewer looks away from the light (sees the cloud's lit side), 0 toward it (the shaded side)
   vec2 a = dir.xz, b = L.xz;
@@ -104,17 +108,42 @@ float mkClouds( vec3 dir, vec3 Tfull, float outScale, inout vec3 L ) {
   float tm = mix( tB, tT, 0.35 );
   // the fetches first, outside any flow control (implicit derivatives: ANGLE/D3D11)
   vec4 cC = texture( uCloudTex, MK_CI_ROT * dir.xz * tC * uCiUV.z + uCiUV.xy );
-  // 0.45 km toward the key light (horizontally), at the layer's middle: the cloud mass there shades this point
-  vec2 kh = uCloudKey.xz;
-  vec2 sh = kh / max( length( kh ), 1e-3 ) * 0.45;
+#ifdef CLOUD_MARCH
   vec2 uv0 = dir.xz * tm * uCuUV.z + uCuUV.xy;
+#else
+  // the flat layer is mapped as a shallow sky dome (horizontal distance H·cos e / (sin e + 0.06), ≤ ≈ 22 km): near the
+  // horizon a cloud keeps ≈ 2× the height a flat plane would leave it (a sliver), the heaped look a layer without height
+  // cannot have, and appears ≈ 1.4× wider
+  vec2 uv0 = dir.xz * ( uCloudH.x + 0.35 * ( uCloudH.y - uCloudH.x ) ) / ( mu + 0.06 ) * uCuUV.z + uCuUV.xy;
+#endif
+#ifdef CLOUD_MARCH
+  // 0.45 km toward the key light (horizontally), at the layer's middle: the cloud mass there shades this point
+  vec2 sh = uCloudKey.xz / max( length( uCloudKey.xz ), 1e-3 ) * 0.45;
   vec4 cS = texture( uCloudTex, uv0 + sh * uCuUV.z );
-#ifndef CLOUD_MARCH
-  vec4 c0 = texture( uCloudTex, uv0 );
+#else
+  // explicit LODs from the pixel's footprint ACROSS the view ray (the implicit one takes the long axis along it: near the
+  // horizon the mips averaged the equalised field to its mean and the clouds vanished; the anisotropic taps keep it sharp)
+  float tEff = ( uCloudH.x + 0.35 * ( uCloudH.y - uCloudH.x ) ) / ( mu + 0.06 );
+  float lod0 = log2( max( tEff * ( length( dFdx( dir ) ) + length( dFdy( dir ) ) ) * 0.5 / uCloudTexKm, 1.0 ) );
+  // the second fetch 0.5 km nearer the viewer along the view's azimuth (lower on the screen): where the cloud does not go on
+  // there, this pixel is its lower rim seen from the side — the flat, grey base
+  vec2 rad = dir.xz / max( length( dir.xz ), 1e-3 );
+  // …or, high up the sky (above ≈ 16°: a cloud there is near, kilometres across the screen, and the tile's 125 m texels are
+  // tens of pixels), the same field at 8× the scale: the cauliflower lobes and fringes within the base. One fetch, its
+  // coordinates switched where neither use is weighted (nearW = 0 above 0.26, detW = 0 below 0.28)
+  float sel = step( 0.27, mu );
+  vec2 uvS = mix( uv0 - rad * ( 0.5 * uCuUV.z ), uv0 * 8.0 + vec2( 0.37, 0.11 ), sel );
+  vec4 cS = textureLod( uCloudTex, uvS, lod0 + 3.0 * sel );
+  float nearW = 1.0 - smoothstep( 0.12, 0.26, mu ), detW = smoothstep( 0.28, 0.45, mu );
+  vec4 c0 = textureLod( uCloudTex, uv0, lod0 );
   float fw0 = fwidth( c0.r );
 #endif
   vec3 Lsky = L;
+#ifdef CLOUD_MARCH
   float fade = uCloudH.w * smoothstep( 0.04, 0.12, dir.y );
+#else
+  float fade = uCloudH.w * smoothstep( 0.012, 0.05, dir.y );
+#endif
   float cs = dot( dir, uSunDir ), cm = dot( dir, uMoonDir );
   float fwd = min( hgPhase( cs, 0.6 ) * 4.0 * PI, 8.0 );
   float litM = 0.3 + 0.45 * mkCloudSide( dir, uMoonDir ) + 0.1 * min( hgPhase( cm, 0.6 ) * 4.0 * PI, 8.0 );
@@ -139,26 +168,27 @@ float mkClouds( vec3 dir, vec3 Tfull, float outScale, inout vec3 L ) {
   float low = smoothstep( 0.16, 0.0, muS );
   float under = smoothstep( 0.22, 0.7, mu );
   float away = mix( mkCloudSide( dir, uCloudKey ), 0.7, muS * muS );
-  float massS = clamp( ( cS.a - thr ) / max( cov, 0.03 ), 0.0, 1.0 );
 #ifdef CLOUD_MARCH
+  float massS = clamp( ( cS.a - thr ) / max( cov, 0.03 ), 0.0, 1.0 );
   // slices along the ray through the layer, front to back: a dome's cross-section narrows with height (the threshold rises
   // with z), so a distant cumulus shows a flat base and a rounded top. n ≈ 3 / tan e slices (3 from ≈ 45° up, the cap by
   // 7–10°); explicit LODs (no derivative inside flow control: ANGLE/D3D11), the LOD from the pixel's footprint at the slice;
   // the slices' heights jittered per pixel by a white hash (a structured dither showed as combed streaks)
   float pa = length( dFdx( dir ) ) + length( dFdy( dir ) );
   int n = uCuUV.w > 0.0 ? int( clamp( ceil( 3.0 * sqrt( max( 1.0 - mu * mu, 0.0 ) ) / max( mu, 0.04 ) ), 3.0, float( CLOUD_SLICES ) ) ) : 0;
-  float jit = ( fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) - 0.5 ) * 0.5;
-  float texKm = 1.0 / ( uCuUV.z * ${'${CLOUD_TEX_SIZE}'} );
-  float span = 0.6 * cov;
+  float jit = ( fract( sin( dot( gl_FragCoord.xy, vec2( 12.9898, 78.233 ) ) ) * 43758.5453 ) - 0.5 ) * 0.3;
+  float span = 0.4 * cov;
   float T = 1.0, sumLit = 0.0, sumZ = 0.0, sumA = 0.0;
   for ( int k = 0; k < ${MAX_SLICES}; k ++ ) {
     if ( k >= n ) break;
     float z = clamp( ( float( k ) + 0.5 + jit ) / float( n ), 0.0, 1.0 );
     float tk = mix( tB, tT, z );
-    float lod = log2( max( tk * pa / texKm, 1.0 ) );
+    float lod = log2( max( tk * pa / uCloudTexKm, 1.0 ) );
     vec4 c = textureLod( uCloudTex, dir.xz * tk * uCuUV.z + uCuUV.xy, lod );
     float th = thr + span * z * sqrt( z );
-    float d = smoothstep( th, th + 0.06, c.r );
+    // the upper slices follow the smooth mass more than the lobes: rounded tops, not spires (with the lobed bake v3+ the
+    // field's own peaks stood up as narrow towers)
+    float d = smoothstep( th, th + 0.06, mix( c.r, c.a + 0.02, 0.6 * z ) );
     float core = smoothstep( th, th + 0.2 * cov + 0.02, c.a );
     float a = d * mix( 0.7, 1.0, core );
     float relief = clamp( ( c.r - c.a ) / max( cov, 0.03 ) * 3.0, -1.0, 1.0 );
@@ -179,22 +209,37 @@ float mkClouds( vec3 dir, vec3 Tfull, float outScale, inout vec3 L ) {
   // the flat layer: R is the domes' height (with their lobes), A its smooth mass (bake: clouds-core.js). The edge as sharp as
   // the pixel allows (soft by the field's own footprint, never smeared); the mass toward the light shades the far side; the
   // relief R − A lights the lobes on the tops
-  float e = clamp( 1.5 * fw0, 0.012, 0.08 );
-  float d = smoothstep( thr, thr + e + 0.015, c0.r );
+  // (at least ≈ 2 texels' change of the field: a sharper edge showed the bilinear texels as a polygon close overhead)
+  float e = clamp( 1.5 * fw0, 0.035, 0.08 );
+  // fair-weather cumulus (humilis): wider than tall, a flat base under lobed tops. Seen from the side (low in the sky) the
+  // edge toward the viewer is the base: there the outline follows the smooth mass A (a straight, flat underside), the rest
+  // the lobed field R (the cauliflower tops)
+  float baseEdge = ( 1.0 - smoothstep( thr - 0.06, thr + 0.04, cS.a ) ) * nearW;
+  float dn = ( cS.r - 0.5 ) * detW;   // the fine lobes, overhead
+  float d = smoothstep( thr, thr + e + 0.015, mix( c0.r + 0.2 * dn * ( 1.0 - smoothstep( thr, thr + 0.25, c0.a ) ), c0.a + 0.03, baseEdge ) );
   float mass = clamp( ( c0.a - thr ) / max( cov, 0.03 ), 0.0, 1.0 );
   float core = smoothstep( thr, thr + 0.35 * cov + 0.02, c0.r );
-  float relief = clamp( ( c0.r - c0.a ) / max( cov, 0.03 ) * 3.0, -1.0, 1.0 );
-  // the light's side: mass rising toward the light hides it (the far side), falling away leaves this point lit
-  float sunFace = clamp( 0.65 - 1.8 * ( massS - mass ), 0.0, 1.0 );
-  float sideLit = ( mix( 0.25, 1.1, sunFace ) * mix( 0.75, 1.0, away ) + 0.35 * relief * sunFace ) * mix( 1.0, 0.85, low );
-  float baseLit = mix( 0.1 + 0.35 * ( 1.0 - mass ), 0.3 + 0.55 * sunFace, low );
-  float lit = mix( sideLit, baseLit, under ) + 0.15 * fwd * ( 1.0 - core );
+  float relief = clamp( ( c0.r - c0.a ) / max( cov, 0.03 ) * 3.0 + 2.4 * dn, -1.0, 1.0 );
+  // seen from the side (low in the sky): the rim with no cloud nearer the viewer is the base, flat and grey (lit from the
+  // side and warm when the Sun is low); above it the flanks and the lobed tops, white on the side facing the light, grey on
+  // the far side, the thick middle of a cloud darker there; seen from below (high up), the base: grey, its thin margins
+  // brighter
+  float near = smoothstep( thr, thr + 0.05, cS.r );
+  float rim = ( 1.0 - near ) * nearW;
+  float sideLit = ( mix( 0.4, 1.15, away ) + 0.45 * relief * ( 0.3 + 0.7 * away ) ) * mix( 1.0, 0.65, mass * ( 1.0 - away ) );
+  float baseSide = mix( 0.3, 0.45 + 0.4 * away, low );
+  // (overhead: the thick middle of a base grey, its thin margins and the lobes' undersides catching the light)
+  float baseLit = mix( 0.03 + 0.3 * ( 1.0 - mass ) * ( 1.0 - mass ), 0.3 + 0.55 * away, low ) * ( 1.0 + 0.6 * relief ) * mix( 1.0, 0.45 + 1.1 * cS.r, detW );
+  // (the forward peak only on the thin margins — a silver lining, not a glowing base near the Sun)
+  float lit = mix( mix( sideLit, baseSide, rim * smoothstep( 0.0, 0.6, mass + 0.3 ) ), baseLit, under ) + 0.15 * min( fwd, 3.0 ) * ( 1.0 - core ) * ( 1.0 - core );
   float aCu = d * mix( 0.72, 1.0, core ) * fade;
-  float baseShare = under;
+  float baseShare = max( under, 0.6 * rim );
   vec3 Es = uCuSunE;
 #endif
   // albedo of the visible face ≈ 0.8; the ambient: the sky round it, and the lit ground below (bases see the ground)
-  vec3 amb = uCloudAmb * mix( 0.85, 0.6, baseShare ) + uCloudGnd * mix( 0.2, 0.6, baseShare );
+  // (a base sees the sky only at grazing angles and the region's ground, albedo ≈ 0.25, not the courts' limestone: bases sit
+  // about at the blue sky's level, grey against the sunlit flanks — at 0.6 / 0.6 they glowed ≈ 3× the sky overhead)
+  vec3 amb = uCloudAmb * mix( 0.85, 0.35, baseShare ) + uCloudGnd * mix( 0.2, 0.3, baseShare );
   vec3 Lcu = 0.8 * 0.3183 * ( Es * max( lit, 0.0 ) + uCloudMoonE * litM * step( 0.0, uMoonDir.y ) ) + amb;
   vec3 Tf = exp( - uCuSig * tm );
   vec3 front = clamp( ( 1.0 - Tf ) / max( 1.0 - Tfull, vec3( 1e-3 ) ), 0.0, 1.0 );
@@ -215,16 +260,24 @@ export function createCloudUniforms() {
     uCiSig: { value: new Vector3() },
     uCloudSunE: { value: new Vector3() },
     uCloudMoonE: { value: new Vector3() },
+    uCuSunE: { value: new Vector3() },
+    uCiSunE: { value: new Vector3() },
+    uCloudKey: { value: new Vector3(0, 1, 0) },
+    uCloudTexKm: { value: CU_TILE / 1024 },
     uCloudAmb: { value: new Vector3() },
     uCloudGnd: { value: new Vector3() },
   };
 }
 
-let bake = null; // { promise, data }
-/** start the bake (env prewarm, before the world build: the Worker runs beside it). Idempotent. */
-export function startCloudBake() {
+let bake = null; // { promise, data, size }
+/**
+ * start the bake (a Worker; IndexedDB-cached). Idempotent: the first call's size stands (a later tier switch keeps it).
+ * Screenshots start it in env's prewarm, beside the world build, and wait for it; normal play after the first view.
+ */
+export function startCloudBake(size = CLOUD_SIZES.march) {
   if (bake) return bake.promise;
-  bake = { data: null };
+  const CLOUD_SIZE = size;
+  bake = { data: null, size };
   bake.promise = new Promise((resolve) => {
     const done = (d) => { bake.data = d; resolve(d); };
     let worker = null;
@@ -241,19 +294,21 @@ export function startCloudBake() {
  * The cloud state: the texture (a 1 × 1 empty one until the bake lands, then faded in), and the per-frame uniforms.
  * opts: { ATMO, mie } from env (the extinction of the air in front of each layer).
  */
-export function createClouds(ctx, U, { ATMO, mie }) {
+export function createClouds(ctx, U, { ATMO, mie, size = CLOUD_SIZES.march }) {
   const empty = new DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1, RGBAFormat, UnsignedByteType);
   empty.needsUpdate = true;
   U.uCloudTex.value = empty;
-  let tex = null, shownAt = -1, data = null;
+  let tex = null, shownAt = -1, data = null, N = size;
   const out = { sunT: 1 };
   const p = ctx.params?.raw;
   const urlCu = parseFloat(p?.get?.('cumulus')), urlCi = parseFloat(p?.get?.('cirrus'));
   const off = p?.get?.('clouds') === '0';
   const land = (d) => {
-    if (!d || tex) return;
+    if (!d || tex || off) return;
     data = d;
-    tex = new DataTexture(d, CLOUD_SIZE, CLOUD_SIZE, RGBAFormat, UnsignedByteType);
+    N = Math.round(Math.sqrt(d.length / 4));
+    U.uCloudTexKm.value = CU_TILE / N;
+    tex = new DataTexture(d, N, N, RGBAFormat, UnsignedByteType);
     tex.wrapS = tex.wrapT = RepeatWrapping;
     tex.magFilter = LinearFilter;
     tex.minFilter = LinearMipmapLinearFilter;
@@ -264,7 +319,13 @@ export function createClouds(ctx, U, { ATMO, mie }) {
     U.uCloudTex.value = tex;
     empty.dispose();
   };
-  const ready = startCloudBake().then(land);
+  // a screenshot waits for the clouds (deterministic frames; the bake was started in env's prewarm, beside the world build);
+  // normal play bakes and uploads after the first view (CLAUDE.md: non-view work after 'firstFrame') and fades them in
+  let ready = Promise.resolve();
+  if (!off) {
+    if (ctx.params?.shot) ready = startCloudBake(size).then(land);
+    else ctx.bus?.on?.('firstFrame', () => { setTimeout(() => { startCloudBake(size).then(land); }, 1000); });
+  }
 
   // the mean extinction of the air between the observer and a layer (exponential atmosphere, straight path): the path
   // length × the mean of σ(h) over the heights it crosses — the same for every elevation (flat-earth slant), 1/km
@@ -298,7 +359,7 @@ export function createClouds(ctx, U, { ATMO, mie }) {
   // the cover toward a direction, on the CPU from the baked tile (as the stars' mkCloudCover): the Sun's for render/'s sun
   // shafts (ultra), which a cumulus over the Sun should dim
   const texel = (u, v, c) => {
-    const N = CLOUD_SIZE, x = (u - Math.floor(u)) * N - 0.5, y = (v - Math.floor(v)) * N - 0.5;
+    const x = (u - Math.floor(u)) * N - 0.5, y = (v - Math.floor(v)) * N - 0.5;
     const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
     const at = (i, j) => data[((((j % N) + N) % N) * N + (((i % N) + N) % N)) * 4 + c] / 255;
     return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
@@ -319,7 +380,7 @@ export function createClouds(ctx, U, { ATMO, mie }) {
   }
 
   /** per frame: drift, coverage, light at the clouds. st: env's state (sunE0, Tmoon, moon illuminance, Esky, Eg). */
-  function update(time, { sunE0, sunDir, moonE, moonDirY, moonColor, sky, ground, transmittanceCPU, obsR }) {
+  function update(time, { sunE0, sunDir, moonDir, moonE, moonDirY, moonColor, sky, ground, transmittanceCPU, obsR }) {
     if (off || !time) { U.uCloudH.value.w = 0; return; }
     const d = dayWeather(time);
     const min = Number.isFinite(time.ms) ? time.ms / 60000 : (time.t || 0);
@@ -335,10 +396,22 @@ export function createClouds(ctx, U, { ATMO, mie }) {
     const ci = Number.isFinite(urlCi) ? MathUtils.clamp(urlCi, 0, 1) : Number.isFinite(ctx.env?.cirrus) ? MathUtils.clamp(ctx.env.cirrus, 0, 1) : d.ci;
     U.uCuUV.value.w = cu;
     U.uCiUV.value.w = ci;
-    // fade in over 1.5 s once the bake has landed (a late bake does not pop)
+    // fade in over 4 s once the bake has landed (after the first view; the start view's sky is dark before dawn)
     if (tex && shownAt < 0) shownAt = performance.now();
-    U.uCloudH.value.w = tex ? (ctx.params?.shot ? 1 : smooth(0, 1500, performance.now() - shownAt)) : 0;
+    const shown = tex ? (ctx.params?.shot ? 1 : smooth(0, 4000, performance.now() - shownAt)) : 0;
+    // a time-lapse: at 600× the cumulus cross the sky in seconds and step from frame to frame overhead (the cirrus faster
+    // still): their opacity is lowered with the clock's speed past 60× (to 30 % by 600×) — still a function of the time,
+    // the speed only sets how much shows
+    const sp = time.paused ? 0 : Math.abs(time.speed || 0);
+    U.uCloudH.value.w = shown * (1 - 0.7 * smooth(60, 600, sp));
     U.uCloudSunE.value.set(sunE0, sunE0, sunE0);
+    // the Sun's beam at each layer (its slant path from there; 0 once the layer is in the Earth's shadow), and the light
+    // that models them: the Sun, or the Moon once the Sun is well down
+    transmittanceCPU(obsR + (CU_BASE - h0), sunDir.y, ATMO, T, 24);
+    U.uCuSunE.value.set(sunE0 * T[0], sunE0 * T[1], sunE0 * T[2]);
+    transmittanceCPU(obsR + (CI_ALT - h0), sunDir.y, ATMO, T, 24);
+    U.uCiSunE.value.set(sunE0 * T[0], sunE0 * T[1], sunE0 * T[2]);
+    U.uCloudKey.value.copy(sunDir.y > -0.07 || !moonDir ? sunDir : moonDir);
     // the Moon's beam at the cumulus layer (its slant path from there; the cirrus see nearly the same)
     if (moonE > 0) {
       transmittanceCPU(obsR + (CU_BASE - h0), moonDirY, ATMO, T, 24);
@@ -359,7 +432,7 @@ export function createClouds(ctx, U, { ATMO, mie }) {
     get texture() { return tex; },
     /** the share of the Sun's light the clouds let through toward the viewer (1 = clear), for screen-space effects */
     get sunTransmittance() { return out.sunT; },
-    get bytes() { return tex ? Math.round(CLOUD_SIZE * CLOUD_SIZE * 4 * 4 / 3) : 0; },
+    get bytes() { return tex ? Math.round(N * N * 4 * 4 / 3) : 0; },
     dispose() { tex?.dispose(); empty.dispose(); },
   };
 }

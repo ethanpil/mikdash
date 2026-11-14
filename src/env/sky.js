@@ -278,14 +278,17 @@ export function createSkyUniforms() {
 }
 
 /**
- * opts: { envPass, milkyWay, clouds, cloudSlices, mwOctaves }. Uniform objects are shared, so one update
+ * opts: { envPass, milkyWay, clouds, cloudMarch, cloudSlices, mwOctaves }. Uniform objects are shared, so one update
  * drives both materials; the env material overrides uLutScale/uOutScale with its own copies.
  */
 export function skyDefines(opts = {}) {
   const defines = {};
   if (opts.envPass) defines.ENV_PASS = '';
   if (opts.milkyWay) { defines.MILKY_WAY = ''; defines.MW_OCT = opts.mwOctaves || 4; }
-  if (opts.clouds) { defines.CLOUDS = ''; defines.CLOUD_SLICES = opts.cloudSlices || 6; }
+  if (opts.clouds) {
+    defines.CLOUDS = '';
+    if (opts.cloudMarch) { defines.CLOUD_MARCH = ''; defines.CLOUD_SLICES = opts.cloudSlices || 16; }
+  }
   return defines;
 }
 

@@ -4,8 +4,8 @@
 // a clear dome). Pure functions (no DOM, no three): the worker runs them, and a Node script can preview them.
 //
 // Channels (each tiles seamlessly; every noise is periodic over the tile):
-//   R  cumulus "dome height" over a 64 km tile: inverted cellular clouds (≈ 3.2 km), towers (≈ 1.3 km) and cauliflower lobes
-//      (≈ 0.6 km) on a fbm of fields. RANK-EQUALISED: a fraction c of the texels lies above 1 − c, so the shader's threshold
+//   R  cumulus "dome height" over a 64 km tile: domain-warped inverted cellular clouds (≈ 3.2 km), gradient-noise towers
+//      (≈ 1.3 km) and cauliflower lobes (≈ 0.6 km) on a fbm of fields. RANK-EQUALISED: a fraction c of the texels lies above 1 − c, so the shader's threshold
 //      1 − coverage covers exactly that share of the layer's base, and a dome's core (higher values) is its thick middle.
 //   G  cirrus fibres (sampled on a larger tile, 160 km): brush strokes broken into tufts, fibres inside, warped into hooks,
 //      in patches; rank-equalised over the whole tile (coverage as above).
@@ -15,7 +15,7 @@
 //      slope, its thickness); R − A is the cauliflower relief lit on the tops.
 
 /** bump when the bake changes (the worker's IndexedDB cache key) */
-export const BAKE_VERSION = 2;
+export const BAKE_VERSION = 6;
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -118,7 +118,7 @@ export function bakeClouds(size = 1024, seed = 7411) {
   // cumulus: fields where clusters form (4, 8, 16 cells: 16 / 8 / 4 km), the clouds (20 cells ≈ 3.2 km), their towers
   // (48 ≈ 1.3 km), the cauliflower lobes (112 ≈ 0.6 km) and a fine fringe (perlin 256 ≈ 250 m)
   const f4 = perlin(4, 4, rand), f8 = perlin(8, 8, rand), f16 = perlin(16, 16, rand);
-  const w20 = worley(20, rand), w48 = worley(48, rand), w112 = worley(112, rand);
+  const w20 = worley(20, rand), w48 = worley(48, rand), w112 = worley(112, rand); // (w48 / w112 drawn to keep the stream)
   const d256 = perlin(256, 256, rand);
   // cirrus tile (sampled 4× larger): fibres stretched along u (the wind), warped across, in patches; the weather mask
   const cWarp = perlin(5, 5, rand), cWarp2 = perlin(11, 11, rand);
@@ -126,6 +126,12 @@ export function bakeClouds(size = 1024, seed = 7411) {
   const fib1 = perlin(16, 260, rand), fib2 = perlin(32, 520, rand);
   const patch = perlin(3, 3, rand), patch2 = perlin(7, 7, rand);
   const wx2 = perlin(2, 2, rand), wx4 = perlin(4, 4, rand);
+  // r2: the towers and lobes are gradient noise, not cells, and the clouds' cells are domain-warped — the cones of cellular
+  // noise meet along straight Voronoi ridges, and close overhead a threshold of them read as polygons. Their own random
+  // stream (the cirrus channels keep theirs)
+  const r2 = mulberry32(seed + 1);
+  const wa = perlin(24, 24, r2), wb = perlin(24, 24, r2), wc = perlin(64, 64, r2), wd = perlin(64, 64, r2);
+  const t48 = perlin(48, 48, r2), t112 = perlin(112, 112, r2);
   const N = size * size;
   const R = new Float32Array(N), G = new Float32Array(N);
   const out = new Uint8Array(N * 4);
@@ -136,8 +142,9 @@ export function bakeClouds(size = 1024, seed = 7411) {
       // cumulus: fields × clouds × towers × lobes — the domes' height over the layer; the fields decide the clusters and
       // the cloud sizes vary with them (a cluster's cloud may be one cell or several merged)
       const field = 0.5 + 0.9 * (0.55 * f4(u, v) + 0.3 * f8(u, v) + 0.15 * f16(u, v));
-      const b1 = 1 - Math.min(1, w20(u, v)), b2 = 1 - Math.min(1, w48(u, v)), b3 = 1 - Math.min(1, w112(u, v));
-      R[i] = field * 0.55 + b1 * b1 * 0.27 + b2 * 0.12 + b3 * 0.05 + 0.02 * d256(u, v);
+      const uw = u + 0.012 * wa(u, v) + 0.004 * wc(u, v), vw = v + 0.012 * wb(u, v) + 0.004 * wd(u, v);
+      const b1 = 1 - Math.min(1, w20(uw, vw));
+      R[i] = field * 0.45 + b1 * b1 * 0.26 + 0.2 * t48(uw, vw) + 0.12 * t112(u, v) + 0.05 * d256(u, v);
       // cirrus: brush strokes (≈ 27 × 4 km, smooth, ridged) broken into tufts of uneven length and strength down the wind,
       // fibres inside them as texture; the cross coordinate bent by a slow warp that also varies along the wind (the
       // hooks of cirrus uncinus where it turns)

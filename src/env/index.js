@@ -18,7 +18,7 @@ import { installFogChunks, FogUniforms } from './fog.js';
 import { createInteriors } from './interiors.js';
 import { setInteriorProbes } from './interiors-glsl.js';
 import { createProbes } from './probes.js';
-import { createClouds, startCloudBake } from './clouds.js';
+import { createClouds, startCloudBake, CLOUD_SIZES } from './clouds.js';
 
 const TIERS = {
   low: { skyW: 128, skyH: 64, steps: 18, envSize: 32, envInterval: 1.0, envAngle: 1.0, stars: 1200, magLimit: 5.6, milkyWay: false, twinkle: false },
@@ -126,10 +126,16 @@ function keyFor(log10La) {
 // perf-1: env's fixed passes (atmosphere LUTs, PMREM) are created and their programs issued at the start of the boot,
 // while the world is built (main.js) — compiled synchronously at init they held env's init for ≈ 2 s on the HD 4600
 let pre = null;
+// sky-smoke-fire: the weak tiers (the HD 4600's: the visibility volume's ambient occlusion, or no post-processing) draw
+// the cumulus as a flat, loop-free layer from a 512² tile; the others march it through its height (1024²)
+const cloudPath = (q) => (q?.ao === 'volume' || !q?.post ? 'flat' : 'march');
 export function prewarm(ctx) {
   if (pre) return;
-  // sky-smoke-fire: the cloud tile bakes in a Worker beside the world build (env/clouds.js)
-  try { startCloudBake(); } catch { /* baked at init */ }
+  // sky-smoke-fire: a screenshot's cloud tile bakes in a Worker beside the world build (env/clouds.js); play bakes it after
+  // the first view
+  if (ctx.params?.shot && ctx.params?.raw?.get?.('clouds') !== '0') {
+    try { startCloudBake(CLOUD_SIZES[cloudPath(ctx.quality)]); } catch { /* baked at init */ }
+  }
   const renderer = ctx.renderer;
   const qkey = ctx.quality?.key in TIERS ? ctx.quality.key : 'medium';
   const tier = TIERS[qkey];
@@ -225,10 +231,14 @@ export async function init(ctx) {
   skyU.uSunCos.value = Math.cos(ATMO.sunAngularRadius);
   // sky-smoke-fire: the clouds on every tier (a baked tile: env/clouds.js), on the visible dome only — not in the environment
   // map's sky (nor in the probes' captures, withoutDiscs): they change no light in the courts
-  // (the cumulus' most slices along the ray, low over the horizon: 16, or 24 where the tier draws detail — quality.detail ≥ 1)
-  const domeFeatures = (t) => ({ milkyWay: t.milkyWay, mwOctaves: t.mwOct, clouds: true, cloudSlices: (ctx.quality?.detail ?? 0) >= 1 ? 24 : 16 });
+  // the cumulus: a flat, loop-free layer on the weak tiers, marched on the others (cloudPath); the march's most slices low
+  // over the horizon: 16, or 24 where the tier draws detail ≥ 3 (ultra)
+  const domeFeatures = (t) => {
+    const march = cloudPath(ctx.quality) === 'march';
+    return { milkyWay: t.milkyWay, mwOctaves: t.mwOct, clouds: true, cloudMarch: march, cloudSlices: (ctx.quality?.detail ?? 0) >= 3 ? 24 : 16 };
+  };
   const envFeatures = () => ({});
-  const clouds = createClouds(ctx, skyU, { ATMO, mie });
+  const clouds = createClouds(ctx, skyU, { ATMO, mie, size: CLOUD_SIZES[cloudPath(ctx.quality)] });
   if (ctx.params?.shot) await clouds.ready; // a screenshot waits for the tile (in play it fades in if it is late)
   const skyMat = createSkyMaterial(skyU, domeFeatures(tier));
   const sky = new Mesh(new BoxGeometry(2, 2, 2), skyMat);
@@ -870,9 +880,10 @@ export async function init(ctx) {
       const fl = st.floorIrr;
       const Eg0 = st.keyE * Math.max(st.keyDir.y, 0) * vis + Esky;
       clouds.update(time, {
-        sunE0: st.sunE0, sunDir: sun.dir, moonE: moonE0, moonDirY: moon.dir.y, moonColor: MOON_COLOR, obsR, transmittanceCPU,
+        sunE0: st.sunE0, sunDir: sun.dir, moonDir: moon.dir, moonE: moonE0, moonDirY: moon.dir.y, moonColor: MOON_COLOR, obsR, transmittanceCPU,
         sky: [0, 1, 2].map((c) => st.skyIrrRGB[c] + fl * NIGHT_TINT[c]),
-        ground: LOCAL_ALBEDO.map((a) => (0.5 * a * Eg0) / Math.PI),
+        // what a cloud base sees below: the region's ground (ATMO.groundAlbedo, hills and fields), not the courts' limestone
+        ground: ATMO.groundAlbedo.map((a) => (0.6 * a * Eg0) / Math.PI),
       });
     }
 

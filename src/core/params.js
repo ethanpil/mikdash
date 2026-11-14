@@ -18,6 +18,7 @@
 //   debug=boxes,zones,nav,anchors,stats   comma list of debug overlays
 //   seed=N                         deterministic seed for procedural variation
 //   fov=N                          camera vertical field of view in degrees, clamped to the settings range 40–95
+//   clouds=0                       no cloud layer; cumulus=0..1 / cirrus=0..1 override the date's weather (read in env/)
 
 function num(v, d) {
   const n = parseFloat(v);

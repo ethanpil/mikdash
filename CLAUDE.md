@@ -39,6 +39,14 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   the block-local distance in the albedo alpha, box-filtered, ALU only, no new sampler or program); bake-side, coarse
   textures (>= 11–16 mm a texel) bake the MEAN of what they cannot resolve (pits, pecking, cavities) and drop detail
   above their Nyquist frequency instead of aliasing it (docs/decisions/materials-realism.md).
+- Clouds are one tile baked in a Worker (`src/env/clouds-core.js`, IndexedDB-cached), read only by the visible sky dome
+  and the stars: they never light the courts. Tiers with `ao: 'volume'` or no post draw the cumulus as a flat, loop-free
+  layer (512² tile, 3 fetches per sky pixel, sun colour from CPU uniforms); the others march it (1024²). In play the tile
+  is baked after 'firstFrame' and faded in; shot mode waits for it. Weather is a pure function of the date
+  (`?clouds=0`, `?cumulus=`, `?cirrus=`); opacity drops with clock speed above 60× so a scrubbed sky does not strobe.
+- The altar's smoke is one ribbon per plume, a straight column (Avot 5:5; Yoma 21b), lit by the key light at half
+  saturation; flames fade toward their card's sides and top (a torn tongue at a card edge tone-mapped to a pale flap on
+  low). Lamps use the `style: 'oil'` flame preset: one small steady teardrop, no sparks (docs/decisions/sky-smoke-fire.md).
 - Nav is built in a Worker by rasterising collider triangles into a 0.5 m multi-level grid; a coarse block graph
   steers A*. Half-amah stairs need sub-step probes (|Δh| up to 0.8 m per cell when each rise ≤ 0.35 m).
 - Audio is synthesised in module Workers (`src/audio/worker.js`); `?debug=audio` opens an audition panel.

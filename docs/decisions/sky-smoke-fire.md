@@ -141,3 +141,83 @@ probe-less gold path is partly metered away by env's room meter (it reads `roomG
   awaits the cloud bake there; normal play does not), first frame median 15.1 s → 17.4 s across the ten views. The before
   runs came from a copy of the tree taken at the start (other agents' files since then differ) under different load, so this
   is not a clean A/B: `tools/warmup-check.mjs` (cold production) was not run.
+
+## Round 2 (review): the weak tiers' cumulus, boot, look fixes
+
+- **The weak tiers draw the cumulus as a flat, loop-free layer; the march stays on the others.** Chosen by flags in env
+  (`cloudPath`): `ao === 'volume'` or no `post` → flat (low, medium), else march (high, ultra; `CLOUD_MARCH` define). The flat
+  layer is two explicit-LOD fetches (the point; and, low in the sky, one 0.5 km nearer the viewer along the view's azimuth —
+  above ≈ 16° the same fetch reads the field at 8× the scale, the lobes within a base; the switch lies where neither use is
+  weighted) plus the cirrus fetch:
+  three cloud fetches a sky pixel, no loop, no LUT fetch (the Sun's beam at each layer is now a CPU uniform, `uCuSunE` /
+  `uCiSunE`, from `transmittanceCPU`). Its shading is prepared at bake time: A is now R blurred over ≈ 0.5 km (the cloud's
+  smooth mass) — the outline toward the viewer follows A (a straight, flat underside, grey, warm and side-lit when the Sun is
+  low), the rest follows R (the lobed tops, lit by the relief R − A on the side facing the light, greyer on the far side and
+  over a cloud's thick middle); overhead the base: grey, thin margins brighter. The layer is mapped as a shallow dome
+  (horizontal distance ∝ 1 / (sin e + 0.06)) so a cloud near the horizon keeps some height. The explicit LOD is the footprint
+  ACROSS the ray (the implicit one took the along-ray axis near the horizon and averaged the clouds away). — Alternatives: a
+  baked normal / light-direction table (one more channel per light azimuth), the march with fewer slices (still a loop).
+- **The tile is 512² (1.4 MB with mips) on the flat tiers, 1024² (5.6 MB) where marched.** The IndexedDB entry is keyed by
+  the bake's version and size (one entry kept). A runtime tier switch keeps the first size (the shading adapts to it).
+- **The bake starts after the first view in play** (1 s after 'firstFrame', in the Worker; IndexedDB-cached) and the clouds
+  fade in over 4 s once uploaded (the start view's sky is dark before dawn). A screenshot starts it in env's prewarm and waits
+  for it (deterministic frames). The dome's program is the same before and after the upload (the 1 × 1 placeholder is the same
+  sampler type): no later variant, no hitch.
+- **New cumulus field** (bake v6, a 64 km tile): domain-warped cellular clouds ≈ 3.2 km, gradient-noise towers ≈ 1.3 km and
+  lobes ≈ 0.6 km, a 250 m fringe, on the fields; varied sizes come from the fields (clusters merge cells). Cellular towers
+  and lobes (v3–v5) met along straight Voronoi ridges: close overhead the clouds read as polygons. The cumulus noise has its
+  own random stream, so the accepted cirrus is unchanged. Brighter: albedo 0.8, sunward side up to
+  1.15 × the Lambert term plus the relief; the old "mid-grey under a noon Sun" came from the bases' share and the 0.75 albedo.
+  Bases darker: they see the sky only at grazing angles and the region's ground (`ATMO.groundAlbedo`, not the courts'
+  limestone), and the forward-scattering peak lights only the thin margins (silver lining) — near the Sun the base glowed.
+  The march (high / ultra) keeps the upper slices on the smooth mass (rounded tops; with the lobed field they stood up as
+  spires) and a smaller jitter (± 0.15 slice).
+- **The march's slice jitter is a white hash per pixel**, not interleaved gradient noise (whose structure showed as combed,
+  directional streaks).
+- **Time-lapse:** the clouds' opacity is lowered with the clock's speed past 60× (to 30 % at 600×). Their position stays a
+  function of the sim time; only how much shows depends on the speed. At 600× the cumulus move ≈ 9°/s at 15 km and overhead
+  would step from frame to frame; the cirrus faster still.
+- **Night smoke's "card edge"** (`after/05`, a pale flap above the flames on low): the low tier tone-maps a flame's colour per
+  unit of its coverage; once the cool margins stopped occluding (round 1), a torn-off tongue's coverage fell to the 0.15
+  floor and its colour, tone-mapped at ≈ 7× its radiance, washed out pale. The coverage is now the visible density (and
+  fringe), not the soot alone; and a flame card's tongue reaching the card's side or top is faded by a window on the card
+  (its light and cover, not its edge: shifting the edge cut the tongue along the window's own flat contour). Two straight
+  cuts were also possible over the flames — a flame card's tongue reaching the card's
+  border (cut along the quad's side or top), and the smoke ribbon's straight sides where the billow bulge (≤ 1.375 radii)
+  passed the ribbon's half-width (1.3). The bulge is now clamped to 1.3 inside a 1.45-radius ribbon.
+- **Sunset smoke**: the key light's colour is half desaturated on the smoke and the ambient 40 %: a sun on the horizon
+  scattered by grey particles, with the blue ambient in the shade, read as a magenta plume. Lit smoke at sunset is warm grey.
+- **Menorah, in the app** (`shots/skyfx/r2/{low,medium}/13-menorah-n3`, `14-menorah-d3`, crops `*-crop.png`): seven small
+  teardrop flames at night, by day the ner ma'aravi alone (second from the east) — no square, no clipping in the cups.
+
+### A/B of the boot (low, shot mode, start view, the same tree, `?clouds=0` vs default interleaved ×4)
+
+| run | env init (ms) A / B | first frame (ms) A / B |
+|---|---|---|
+| 0 | 1921 / 1482 | 18174 / 11543 |
+| 1 | 1410 / 1843 | 15358 / 13674 |
+| 2 | 2401 / 2432 | 17909 / 14696 |
+| 3 | 2229 / 1928 | 15580 / 15003 |
+| median | 2075 / 1886 | 16745 / 14185 |
+
+Default (clouds) is not slower than `?clouds=0`; the spread between runs (11.5–18.2 s) is the machine's load. Shot mode
+still waits for the bake in env's init (it overlaps the world build), so play — which bakes after the first view — cannot be
+slower than this.
+
+### Costs per tier (revised)
+
+| tier | cumulus path | cloud fetches / sky pixel | loops | texture | programs |
+|---|---|---|---|---|---|
+| low | flat | 3 (cirrus, cumulus point, near point) + 0 LUT | none | 512² RGBA8 + mips, 1.4 MB | 0 new |
+| medium | flat | 3 | none | 1.4 MB | 0 new |
+| high / ultra | march | 2 + 3…16 / 24 slices + 2 LUT | one dynamic loop, explicit LODs | 1024², 5.6 MB | 0 new |
+| all | stars: 2 vertex fetches per star (cover) | | | | |
+
+### Round 2 verification
+
+- Shots: `shots/skyfx/r2/low` and `r2/medium` (same queries as round 1's `after/` for 01, 02, 03, 04, 05, 07; cumulus on a
+  cloudy date 2026-11-06: 15 overhead / north, 17 the aerial looking west; Menorah 13 night / 14 day, with crops), the A/B
+  boot frames in `r2/ab`, crops of the night fire `r2/crop-*`. Lab pages' outputs are not evidence of the app.
+- `npm run build` passes. Console: no error in any r2 shot (the SwiftShader warnings as before).
+- Not run: `tools/warmup-check.mjs` (cold production, every tier) and an HD 4600 compile timing of the march (high / ultra
+  only now).

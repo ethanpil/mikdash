@@ -258,6 +258,12 @@ void main() {
   // erosion rising faster than the gas below it: tongues tear off and burn out
   float d = body * 1.15 - (er - 0.32) * (0.3 + 1.1 * y) * turb - 0.4 * y * y;
   d *= smoothstep(0.0, 0.1, y);
+  // sky-smoke-fire (r2): the card's own edges — a tongue's tip or flank reaching the card's border was cut there along a
+  // straight line (by night a pale rectangular flap over the flames, against the lit smoke): the flame tapers out inside
+  // the card's sides and top
+  // (a fade of the flame's light and cover, not a shift of its edge: shifting d cut a tongue reaching the top along the
+  // window's own straight contour — r2's night shot still showed the flap's flat top)
+  float win = smoothstep(0.0, 0.14, vUv.x) * smoothstep(1.0, 0.86, vUv.x) * smoothstep(1.0, 0.7, y);
   // sky-smoke-fire: a thin glowing fringe beyond the luminous edge (emission only, it hides nothing): the edge of a flame is
   // its hot gas thinning out, not a cut
   float fringe = smoothstep(-0.2, 0.0, d) * (1.0 - step(0.0, d));
@@ -291,7 +297,7 @@ void main() {
   col = capEmission((col + hot) * kE);
 #endif
   float softness = clamp(0.18 * vSize.x, 0.06, 0.45);
-  float fade = softFade(vViewZ, softness) * (1.0 - fogAmount()) * vGraze;
+  float fade = softFade(vViewZ, softness) * (1.0 - fogAmount()) * vGraze * win;
   col *= fade;
   // premultiplied: the sooty body also hides part of what is behind it (its emissivity), so overlapping cards converge
   // to the flame colour instead of summing to white, and the sky cannot tint the flame pink
@@ -312,7 +318,10 @@ void main() {
 #ifdef LOW_Q
   // low draws into the tone-mapped 8-bit canvas: tone-map the flame's own colour per unit of its coverage, then apply
   // the coverage again — tone-mapping the premultiplied colour darkened the thin margins into an inked outline
-  float cov = max(aOut, 0.15);
+  // sky-smoke-fire (r2): per unit of what is visibly there (the flame's density, its fringe), not of its soot alone — once the
+  // cool margins stopped occluding, a torn-off tongue's coverage fell to the old 0.15 floor and its colour, tone-mapped at
+  // ≈ 7× its radiance, washed out to a pale lilac flap over the night smoke
+  float cov = max(max(aOut, 0.8 * vis * fade + 0.25 * fringe * fade), 0.03);
   gl_FragColor = vec4(col / cov, 1.0);
   ${OUTPUT}
   vec3 bodyOut = gl_FragColor.rgb * cov;
@@ -741,7 +750,7 @@ void main() {
   vec3 dirC = lh > 1e-4 ? toCamH / lh : vec3(0.0, 0.0, 1.0);
   vec3 right = vec3(dirC.z, 0.0, -dirC.x);
   // the ribbon is a little wider than the column: the billows bulge past its mean radius
-  float x = position.x * 1.3;
+  float x = position.x * 1.45;
   vec3 wp = c + right * (x * r);
   vQ = vec2(x, h);
   // mass conserved: concentration ∝ 1/r², the chord ∝ r: τ across ∝ r0 / r
@@ -800,7 +809,9 @@ void main() {
   float n = n1 * 0.68 + n2 * 0.32;
 #endif
   // the column's edge bulges with the billows: the effective radius ±25 %
-  float xe = vQ.x / (1.0 + 0.5 * (n - 0.5) + 0.25 * (w.x));
+  // (the bulge ≤ 1.3: the ribbon reaches 1.45 radii, so the column never meets the ribbon's straight sides — r2: a bulge of
+  // 1.375 inside a 1.3 ribbon showed as a vertical cut)
+  float xe = vQ.x / clamp(1.0 + 0.5 * (n - 0.5) + 0.25 * (w.x), 0.75, 1.3);
   float chord = sqrt(max(1.0 - xe * xe, 0.0));
   if (chord <= 0.0 || diss <= 0.002) discard;
   // forming over the first metres above the flames (hot gas, little soot yet)
@@ -817,7 +828,11 @@ void main() {
   float tauL = tau * 0.5 * (1.0 - ndl) * (0.6 + 0.8 * n);
   float diff = exp(-tauL) * clamp(ndl * 0.5 + 0.5, 0.0, 1.0) + 0.22 * exp(-0.3 * tauL);
   float fwd = hg(dot(V, uSunDir), 0.6) * 12.566 * exp(-tauL * 0.6) * (1.0 - a * 0.6);
-  vec3 direct = uSunColor * (diff * 0.318 + fwd * 0.05);
+  // sky-smoke-fire (r2): the key light's colour half desaturated on the smoke — the deep red of a sun on the horizon, scattered
+  // by grey particles and seen with the ambient's blue in the shade, read as a magenta plume; lit smoke at sunset is warm
+  // grey-orange on its lit side
+  float sl = dot(uSunColor, vec3(0.2126, 0.7152, 0.0722));
+  vec3 direct = mix(vec3(sl), uSunColor, 0.5) * (diff * 0.318 + fwd * 0.05);
   // sky above, the lit ground below; the column's core sees less of either
   vec3 amb = mix(uGround, uSky, nrm.y * 0.5 + 0.5) * (0.55 + 0.45 * exp(-0.4 * tauP));
   // the fire beneath lights the column from below: inverse square from the flames (physical cd × uP), through at most a few
@@ -827,7 +842,8 @@ void main() {
   vec3 glow = vGlow * uP * exp(-tg) / (hb * hb) * 0.318 * (0.4 + 0.6 * clamp(0.3 - nrm.y, 0.0, 1.0));
   // wood smoke: fine grey particles (a little warm); incense paler
   vec3 albedo = mix(vec3(0.5, 0.49, 0.48), vec3(0.8, 0.81, 0.84), kind);
-  vec3 col = albedo * (direct + amb + glow);
+  vec3 ambD = mix(vec3(dot(amb, vec3(0.2126, 0.7152, 0.0722))), amb, 0.6);
+  vec3 col = albedo * (direct + ambD + glow);
   col = mix(col, uFogColor, fogAmount());
   a *= softFade(vViewZ, 1.5);
   gl_FragColor = vec4(col, 1.0);
