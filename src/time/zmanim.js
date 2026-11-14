@@ -91,6 +91,21 @@ export function gematria(n) {
   return s.length > 1 ? `${s.slice(0, -1)}״${s.slice(-1)}` : `${s}׳`;
 }
 
+/**
+ * The occasions of a Hebrew date (docs/decisions/rosh-chodesh.md), beside the weekday's day type: 'rosh-chodesh' on the
+ * 1st of a month only. While the court sanctified the month on sighting, Rosh Chodesh was one day — the 30th when it
+ * was sanctified, else the 31st — and its musaf was offered on that day alone (Rambam Kiddush HaChodesh 3:5–6: witnesses
+ * after minchah, "נוהגין אותו היום קדש ולמחר קדש ומקריבין מוסף למחר"); the fixed calendar's 30th of a full month (the
+ * first of today's two days) is a month not sanctified on its 30th, so an ordinary day in the Mikdash. 1 Tishrei is
+ * 'rosh-hashanah', a festival the model does not stage yet (its own musaf and song, the shofar, no individuals'
+ * offerings), so it is not shown as an ordinary Rosh Chodesh. The calendar is Intl's fixed 'hebrew' one.
+ */
+export function occasionsOf(h) {
+  if (!h || !h.day) return [];
+  if (h.month === 7 && h.day === 1) return ['rosh-hashanah'];
+  return h.day === 1 ? ['rosh-chodesh'] : [];
+}
+
 let fmtEn = null;
 let fmtHe = null;
 

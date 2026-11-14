@@ -7,9 +7,10 @@
 // NONE. Exit code 1 when any gap of
 // ACTIVE coverage is longer than --max minutes (default 10), including gaps that run across civil midnight between
 // consecutive day types of a real week, and when the Azarah itself has no ACTIVE event for longer than that between
-// sunrise and sunset.
+// sunrise and sunset. Rosh Chodesh (the occasion 'rosh-chodesh', src/time/zmanim.js occasionsOf) is checked on the real
+// Rosh Chodesh dates of RC_DATES — one each of a weekday, a Friday and a Shabbat — with the seams to the days around them.
 import { EVENTS, eventsFor, DAY_TYPES } from '../src/data/schedule.js';
-import { computeZmanim } from '../src/time/zmanim.js';
+import { computeZmanim, hebrewDate, occasionsOf } from '../src/time/zmanim.js';
 
 const args = process.argv.slice(2);
 const MAX = Number(args[args.indexOf('--max') + 1]) || 10;
@@ -56,9 +57,9 @@ const DATES = ['2026-11-02', '2026-03-20', '2026-06-21', '2026-09-22', '2026-12-
 const zFor = (ds) => { const [y, m, d] = ds.split('-').map(Number); return makeZ(computeZmanim({ y, m, d })); };
 
 // ---------------------------------------------------------------- per-minute coverage of one day type on one date
-function coverage(dayType, z) {
+function coverage(dayType, z, occasions = []) {
   const r = resolver(z);
-  const evs = eventsFor(dayType).map((e) => ({ e, lvl: level(e), t0: r(e.when.start), t1: r(e.when.end) }));
+  const evs = eventsFor(dayType, { occasions }).map((e) => ({ e, lvl: level(e), t0: r(e.when.start), t1: r(e.when.end) }));
   const on = (x, t) => { const len = wrap(x.t1 - x.t0); return wrap(t - x.t0) < len; };
   const minutes = [];
   for (let t = 0; t < 1440; t++) {
@@ -111,6 +112,36 @@ for (const ds of DATES) {
   }
 }
 
+// ---------------------------------------------------------------- Rosh Chodesh dates (their own day lists)
+// each date as its own day type with its occasions, the day before and after as theirs, and the seams across midnight
+const RC_DATES = ['2026-11-11', '2026-12-11', '2027-01-09'];
+const dayOf = (ds) => {
+  const [y, m, d] = ds.split('-').map(Number);
+  const wd = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return { dt: wd === 5 ? 'friday' : wd === 6 ? 'shabbat' : 'weekday', occ: occasionsOf(hebrewDate({ y, m, d })) };
+};
+const shiftDate = (ds, n) => { const [y, m, d] = ds.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+for (const ds of RC_DATES) {
+  const me = dayOf(ds);
+  if (!me.occ.includes('rosh-chodesh')) { rows.push(`RC_DATES: ${ds} is not Rosh Chodesh (${me.occ})`); fails++; continue; }
+  const cov = coverage(me.dt, zFor(ds), me.occ);
+  for (const g of gaps(cov)) {
+    worst = Math.max(worst, g.len);
+    const bad = g.len > MAX; if (bad) fails++;
+    if (bad || VERBOSE) rows.push(`${bad ? 'GAP ' : 'gap '} ${ds} ${me.dt} rosh-chodesh ${hm(g.from)}–${hm(g.to)} (${String(g.len).padStart(3)} min)  low: ${g.low.join(', ') || '—'}`);
+  }
+  for (const [da, db] of [[shiftDate(ds, -1), ds], [ds, shiftDate(ds, 1)]]) {
+    const A = dayOf(da), B = dayOf(db);
+    const seq = [...coverage(A.dt, zFor(da), A.occ), ...coverage(B.dt, zFor(db), B.occ)];
+    for (const g of gaps(seq, false)) {
+      if (!(g.from < 1440 && g.to > 1440)) continue;
+      worst = Math.max(worst, g.len);
+      const bad = g.len > MAX; if (bad) fails++;
+      if (bad || VERBOSE) rows.push(`${bad ? 'GAP ' : 'gap '} ${da}→${db} ${hm(g.from)}–${hm(g.to)} (${String(g.len).padStart(3)} min) across midnight (Rosh Chodesh)  low: ${g.low.join(', ') || '—'}`);
+    }
+  }
+}
+
 // ---------------------------------------------------------------- the court by day
 // Activity on the Mount or in Ezrat Nashim fills the clock above, but the Azarah itself (its open court, the altar, the
 // Ulam and the Heichal — not its chambers) must not stand empty while the gates are open: from sunrise to sunset on
@@ -121,11 +152,11 @@ const COURT = new Set(['azarah', 'ezrat-yisrael', 'ezrat-kohanim', 'mizbeach', '
 const GAZIT_HOLY = new Set(['second-lottery', 'gazit-shema', 'outgoing-blessing', 'third-fourth-lottery', 'afternoon-lottery', 'afternoon-lottery-shabbat']);
 const inCourt = (e) => COURT.has(e.zone) || (e.zone === 'gazit' && GAZIT_HOLY.has(e.id));
 for (const id of GAZIT_HOLY) if (!EVENTS.some((e) => e.id === id)) { console.log(`GAZIT_HOLY names unknown event ${id}`); fails++; }
-for (const ds of DATES) {
+for (const [ds, dts, occasions] of [...DATES.map((ds) => [ds, DAY_TYPES, []]), ...RC_DATES.map((ds) => [ds, [dayOf(ds).dt], ['rosh-chodesh']])]) {
   const z = zFor(ds);
   const r = resolver(z);
-  for (const dt of DAY_TYPES) {
-    const evs = eventsFor(dt).filter((e) => inCourt(e) && level(e) === 'active').map((e) => ({ t0: r(e.when.start), t1: r(e.when.end) }));
+  for (const dt of dts) {
+    const evs = eventsFor(dt, { occasions }).filter((e) => inCourt(e) && level(e) === 'active').map((e) => ({ t0: r(e.when.start), t1: r(e.when.end) }));
     const on = (x, t) => wrap(t - x.t0) < wrap(x.t1 - x.t0);
     const day = [];
     for (let t = Math.ceil(z.sunrise); t < Math.floor(z.sunset); t++) day.push({ active: evs.some((x) => on(x, t + 0.5)) ? ['court'] : [], low: [] });
@@ -133,7 +164,7 @@ for (const ds of DATES) {
       worst = Math.max(worst, g.len);
       const bad = g.len > MAX; if (bad) fails++;
       const a = Math.ceil(z.sunrise) + g.from, b = Math.ceil(z.sunrise) + g.to;
-      if (bad || VERBOSE) rows.push(`${bad ? 'GAP ' : 'gap '} ${ds} ${dt.padEnd(8)} ${hm(a)}–${hm(b)} (${String(g.len).padStart(3)} min) nobody at work in the Azarah by day`);
+      if (bad || VERBOSE) rows.push(`${bad ? 'GAP ' : 'gap '} ${ds} ${dt.padEnd(8)}${occasions.length ? ' rosh-chodesh' : ''} ${hm(a)}–${hm(b)} (${String(g.len).padStart(3)} min) nobody at work in the Azarah by day`);
     }
   }
 }
@@ -151,7 +182,7 @@ if (VERBOSE) {
   }
 }
 const counts = Object.fromEntries(['active', 'low', 'none'].map((k) => [k, EVENTS.filter((e) => level(e) === k).length]));
-console.log(`\nevents: ${EVENTS.length} (active ${counts.active}, low ${counts.low}, none ${counts.none}); dates ${DATES.length}; max allowed gap ${MAX} min`);
+console.log(`\nevents: ${EVENTS.length} (active ${counts.active}, low ${counts.low}, none ${counts.none}); dates ${DATES.length} + Rosh Chodesh ${RC_DATES.join(', ')}; max allowed gap ${MAX} min`);
 console.log(rows.length ? rows.join('\n') : 'no gaps');
 console.log(`longest gap without watchable activity: ${worst} min; gaps over ${MAX} min: ${fails}`);
 process.exitCode = fails ? 1 : 0;

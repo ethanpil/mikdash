@@ -572,6 +572,9 @@ export function musafPlan(ctx, sim, pourBySong = false) {
     if (M) {
       M.song = concert(ctx, M);
       M.claimed = !!pourBySong;
+      // Shabbat Rosh Chodesh: no song over this musaf — Rosh Chodesh's displaces Shabbat's, once, after both musafim's
+      // libations (Rambam TuM 6:10; Sukkah 55a with Rashi; g7/concert.js): this wine is poured by its own man, silent
+      M.noSong = !!ctx.time?.roshChodesh;
       const S = M.song, T = M.t;
       M.concert = {
         generation: gen, event: 'shabbat-musaf', claimed: !!pourBySong,
@@ -597,4 +600,4 @@ export function musafPlan(ctx, sim, pourBySong = false) {
  * libation-song's brother 12 (on Shabbat morning he hands it to the Kohen Gadol, Tamid 7:3); the jug on the ramp was
  * laid by the second lottery's wine man (MC.WN), as at the tamid.
  */
-export function musafConcert(ctx, sim) { return musafPlan(ctx, sim, true)?.concert || null; }
+export function musafConcert(ctx, sim) { return ctx.time?.roshChodesh ? null : musafPlan(ctx, sim, true)?.concert || null; }

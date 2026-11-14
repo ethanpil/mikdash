@@ -78,6 +78,12 @@
 //                     sections, each with a teki'ah and the crowd's full prostration.
 //   maamad            Israelites of the ma'amad standing in Ezrat Yisrael at both temidim (never seated).
 //   shabbat-musaf     two lambs slaughtered and offered after the tamid; its song (Ha'azinu) and nine blasts.
+//   rosh-chodesh-musaf (occasion 'rosh-chodesh') two bulls, a ram and seven lambs led in by Sha'ar HaKorban, slaughtered
+//                     at the rings, their blood thrown NE and SW; the goat's blood on the four horns from the sovev;
+//                     lambs, ram and goat hung and flayed at the nanasin, the bulls on the pavement; each animal's
+//                     carriers (24 / 11 / 8) in a file up the ramp, the limbs laid on the altar's walk between the horns,
+//                     then on the fire, the flour after them, the wine poured at the SW horn; the last jug left on the
+//                     ramp for libation-song's pourer, whose concert is the musaf's song (rc-musaf-song).
 //   shabbat-showbread eight kohanim exchanging the stacks and bazichin at the Shulchan (north brings in, south takes out);
 //                     old loaves to the gold table in the Ulam; bazichin burned on the incense pile by two of the
 //                     INCOMING mishmar (Sukkah 56b), after the musafim (Abaye, Yoma 33a–34a).
@@ -1336,12 +1342,20 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     choreo: 'shabbat-musaf',
     importance: 2,
     layer: 'ritual',
+    byOccasion: {
+      'rosh-chodesh': {
+        summary: `Shabbat Rosh Chodesh: the two Shabbat lambs go first; Ha'azinu is not sung today — the song of Rosh Chodesh displaces it, after both musafim.`,
+        description: `On Shabbat two more yearling lambs are offered as an olah, with their flour-offering and their wine (Bamidbar 28:9–10), by the outgoing mishmar, whoever won a task at the morning tamid doing it for the two lambs (Rambam TuM 4:9). When Rosh Chodesh falls on Shabbat both musafim are offered, Shabbat's first: "the more frequent comes first" (Zevachim 10:1; Rambam TuM 9:2).\n\nThe song of Rosh Chodesh displaces Shabbat's, to make it known that it is Rosh Chodesh (Rambam TuM 6:10; Sukkah 54b): Ha'azinu is not sung, and one set of nine blasts serves both musafim (Sukkah 55a). Rashi there has the one song after both libations; the Yerushalmi has the song of Rosh Chodesh said over the Shabbat musaf (Yerushalmi Shekalim 8:4). Shown: Rashi's order — this wine poured without song.`,
+        sounds: ['sheep'],
+      },
+    },
   },
   {
     id: 'showbread-swap',
     title: { en: 'The showbread is changed', he: 'סידור לחם הפנים' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(150), end: sunrise(160) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(212), end: sunrise(222) } } },
     timing: { confidence: 'ordering', note: 'The bazichin follow the musafim in Abaye\'s order (Yoma 33a), so the change is shown after musaf. A braita has the bazichin before the musafim; the Gemara calls it a dispute of Tannaim, and Abaye prefers the musafim first, which is shown (Yoma 34a). Minutes reconstruction.' },
     zone: 'heichal',
     pos: { el: 'heichal.shulchan' },
@@ -1360,6 +1374,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'The bread as warm as when it was set', he: 'סילוקו כסידורו' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(157), end: sunrise(162) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(219), end: sunrise(224) } } },
     timing: { confidence: 'ordering', note: 'At the removal of the old loaves (Menachot 11:7).' },
     zone: 'ulam',
     pos: { el: 'heichal.ulam.tables' },
@@ -1378,6 +1393,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'The frankincense of the showbread is burned', he: 'הקטרת הבזיכין' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(160), end: sunrise(166) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(222), end: sunrise(228) } } },
     timing: { confidence: 'ordering', note: 'After the change (Menachot 11:7); after the musafim and before the afternoon tamid in Abaye\'s order (Yoma 33a). A braita has the bazichin before the musafim; Abaye\'s order is shown (Yoma 34a). Minutes reconstruction.' },
     zone: 'mizbeach',
     pos: [206, 311.5, 25],
@@ -1396,6 +1412,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'The watches divide the bread, north and south', he: 'חילוק לחם הפנים' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(166), end: sunrise(190) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(228), end: sunrise(252) } } },
     timing: { confidence: 'ordering', note: 'After the bazichin (Menachot 11:7); minutes reconstruction.' },
     zone: 'ezrat-kohanim',
     pos: [236, 330.5, 16],
@@ -1414,6 +1431,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Shabbat: the Kohen Gadol\'s loaves eaten in the court', he: 'חלקו של כהן גדול בלחם הפנים' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(190), end: dayH(8.1) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(252), end: dayH(8.1) } } },
     timing: { confidence: 'reconstruction', note: 'Not before the frankincense is burned (Rambam TuM 4:10) and by midnight (Rambam MK 10:7–8). Whether the Kohen Gadol ate his loaves in the court that day, who ate with him and for how long are not recorded: shown from the division until the incoming watch gathers for the afternoon lottery.' },
     zone: 'ezrat-kohanim',
     pos: [236, 330.5, 16],
@@ -1435,6 +1453,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Shabbat day: the morning\'s limbs on the fire', he: 'אברי שבת על המערכה' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(166), end: dayH(8.3) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(228), end: dayH(8.3) } } },
     timing: { confidence: 'reconstruction', note: 'Shabbat\'s limbs burn in their day (Rambam MK 4:3); who tended the pile between the services, and how often, is not recorded. Shown from the bazichin until just before the afternoon tamid.' },
     zone: 'mizbeach',
     pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
@@ -1467,6 +1486,130 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     layer: 'ritual',
   },
 
+  // ======================================================================================== ROSH CHODESH, LATE MORNING
+  // occasion 'rosh-chodesh' (ctx.time.occasions — the 1st of a month, not 1 Tishrei): active only on such a day, of any
+  // day type. The musaf follows the morning tamid (Rambam TuM 7:1); on Shabbat after the Shabbat musaf, "the more
+  // frequent first" (Zevachim 10:1; Rambam TuM 9:2), so its windows move by 44 minutes (byDay.shabbat). Staged by
+  // rosh-chodesh-musaf (src/sim/choreo/g7/); its song by libation-song (docs/decisions/rosh-chodesh.md).
+  {
+    id: 'rc-musaf-slaughter',
+    title: { en: 'Rosh Chodesh musaf: two bulls, a ram and seven lambs slaughtered in the north', he: 'מוסף ראש חודש — שחיטה בצפון' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(106), end: sunrise(124) },
+    timing: { confidence: 'ordering', note: 'The musaf of Rosh Chodesh after the morning tamid (Rambam TuM 7:1), its libations and song done (Yoma 33a: the libations before the musafim). The animals one after another in the verse\'s order, three rings at once, and the minutes are reconstruction.' },
+    zone: 'slaughter-zone',
+    pos: [219, 359.5, 16],
+    view: { at: [236, 360, 16], heading: 268 },
+    summary: `"On your new moons": two young bulls, a ram and seven yearling lambs, all olot, are slaughtered at the rings north of the altar and their blood thrown at the corners.`,
+    description: `"On your new moons you shall offer an olah to the Lord: two young bulls, one ram, seven yearling lambs without blemish" (Bamidbar 28:11), after the morning tamid (Rambam TuM 7:1). Every olah is done as the tamid (Rambam TuM 7:2): slaughtered in the north and its blood received there in a vessel of service, then thrown at the north-east and south-west corners, "two gifts that are four" (Zevachim 5:4).\n\nThe verse lists the bulls, the ram and the lambs, then the goat (Bamidbar 28:11–15), and a baraita puts bulls before rams, rams before lambs and lambs before goats (Zevachim 90a); the Gemara leaves open whether it speaks of the festivals' musafim (Zevachim 90b). How many were slaughtered at once, at which rings and by whom is not recorded: the model shows three slaughterers at work, in the verse's order, with the animals led in by Sha'ar HaKorban.`,
+    participants: [
+      { role: 'kohen', count: 3, note: 'slaughterers — how many at once is not recorded' },
+      { role: 'kohen', count: 3, note: 'receiving the blood and throwing it' },
+      { role: 'kohen', count: 11, note: 'leading the animals in and holding them' },
+    ],
+    sources: ['Bamidbar 28:11', 'Rambam TuM 7:1–2', 'Zevachim 5:4', 'Zevachim 90a–b', 'Middot 1:5'],
+    sounds: ['sheep'],
+    choreo: 'rosh-chodesh-musaf',
+    importance: 3,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(150), end: sunrise(168) } } },
+  },
+  {
+    id: 'rc-goat-chatat',
+    title: { en: 'The goat of Rosh Chodesh: its blood on the four horns', he: 'שעיר ראש חודש — ארבע מתנות על ארבע קרנות' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(119), end: sunrise(129) },
+    timing: { confidence: 'reconstruction', note: 'After the olot in the verse\'s order (Bamidbar 28:15); the minutes are reconstruction.' },
+    zone: 'mizbeach',
+    pos: [231.5, 307, 22],
+    view: { at: [229.8, 288.6, 16], heading: 2 },
+    summary: `A male goat, a chatat for the public: its blood is put with the finger on the four horns, walking round the sovev from the south-east horn.`,
+    description: `"And one male goat as a chatat to the Lord" (Bamidbar 28:15). The goats of Rosh Chodesh are the public's chatat: slaughtered in the north, the blood received in a vessel of service, and put on the four horns. He goes up the ramp, turns to the sovev and comes to the south-east horn, then the north-east, north-west and south-west; the rest of the blood is poured on the southern yesod (Zevachim 5:3). He dips his right finger in the blood and draws it down against the point of each horn (Rambam MK 5:7, 5:10).\n\nIt is done as the chatat that is eaten (Rambam TuM 7:2): its fats are burned on the altar, and its meat is eaten inside the court by male kohanim, prepared in any way, that day and the night until midnight (Zevachim 5:3).`,
+    participants: [
+      { role: 'kohen', count: 1, note: 'slaughtering it' },
+      { role: 'kohen', count: 1, note: 'putting the blood on the horns' },
+      { role: 'kohen', count: 1, note: 'flaying it and taking up the fats' },
+    ],
+    sources: ['Bamidbar 28:15', 'Zevachim 5:3', 'Rambam MK 5:7', 'Rambam MK 5:10', 'Rambam TuM 7:2'],
+    sounds: [],
+    choreo: 'rosh-chodesh-musaf',
+    importance: 3,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(163), end: sunrise(173) } } },
+  },
+  {
+    id: 'rc-musaf-flaying',
+    title: { en: 'Rosh Chodesh: the musaf flayed and cut', he: 'הפשט ונתוח של מוסף ראש חודש' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(108), end: sunrise(150) },
+    timing: { confidence: 'reconstruction', note: 'Flayed as soon as each is slaughtered; the minutes are reconstruction.' },
+    zone: 'slaughter-zone',
+    pos: [213, 383.75, 16],
+    view: { at: V.flaying, heading: 350 },
+    summary: `The lambs, the ram and the goat hang from the hooks of the dwarf pillars to be flayed and cut; the two bulls are flayed where they lie.`,
+    description: `The flaying and cutting of public and private offerings is the same (Yoma 2:7); an olah "requires flaying and cutting, and is wholly for the fire" (Zevachim 5:4). The lambs, the ram and the goat are hung from the iron hooks of the dwarf pillars and flayed (Middot 3:5; Tamid 4:2).\n\nHow a bull was handled is not recorded: hung from a pillar's hooks it would not clear the pavement. The model shows the bulls flayed on the pavement by the rings, two men to each, and each animal's carriers coming in a file for their parts as they are cut, as at the tamid (Tamid 4:3).`,
+    participants: [{ role: 'kohen', count: 13, note: 'one flayer to each animal, two to each bull ⚙' }],
+    sources: ['Yoma 2:7', 'Zevachim 5:4', 'Middot 3:5', 'Tamid 4:2–3'],
+    sounds: [],
+    choreo: 'rosh-chodesh-musaf',
+    importance: 2,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(152), end: sunrise(194) } } },
+  },
+  {
+    id: 'rc-musaf-limbs',
+    title: { en: 'Rosh Chodesh: the limbs laid on the altar between the horns', he: 'אברי ראש חודש על המזבח בין קרן לקרן' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(118), end: sunrise(156) },
+    timing: { confidence: 'reconstruction', note: 'After the flaying of each animal; the minutes are reconstruction.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.walkway', f: [0.97, 0.5, 1] },
+    view: { at: [238.5, 290, 16], heading: 300 },
+    summary: `Each animal's parts go up the ramp in a file — twenty-four kohanim to a bull, eleven to the ram — and are laid on the altar itself, between horn and horn, so that all may know it is Rosh Chodesh.`,
+    description: `A bull is offered by twenty-four kohanim: the head by one and the right leg by two, the tail by two and the left leg by two, the breast by one and the neck by three, the two forelegs by two, the two flanks by two, the innards, the flour and the wine by three each. A ram by eleven: the flesh by five, the innards, the flour and the wine by two each (Yoma 2:6–7); a lamb as the tamid (Yoma 2:5; Rambam TuM 7:2). With them their flour mixed with oil — three tenths of an ephah for a bull, two for the ram, one for a lamb — and wine, half a hin, a third and a quarter (Bamidbar 28:12–14).\n\nThe limbs of the tamid were laid on the lower half of the ramp; those of Rosh Chodesh were laid on the altar above, between horn and horn, on the walk of the kohanim's feet, "to make it known that it is Rosh Chodesh" (Rambam TuM 6:3; Yerushalmi Shekalim 8:4; Mishnah Shekalim 8:8 reads "below the karkov", Rashi on Sukkah 54b the top of the ramp). They are salted there and burned (Rambam TuM 6:3). Shown: laid along the walk on the east side ⚙, salted, then thrown on the great pile; the flour thrown on the fire after them, and the wine poured at the south-west horn, one carrier after another ⚙.`,
+    participants: [
+      { role: 'kohen', count: 48, note: 'twenty-four to each bull (Yoma 2:7)' },
+      { role: 'kohen', count: 11, note: 'the ram (Yoma 2:6)' },
+      { role: 'kohen', count: 56, note: 'eight to each lamb: as the tamid, without the chavitin (Yoma 2:5) ⚙' },
+    ],
+    sources: ['Yoma 2:5–7', 'Bamidbar 28:12–14', 'Rambam TuM 6:3', 'Rambam TuM 7:2', 'Yerushalmi Shekalim 8:4', 'Shekalim 8:8', 'Rashi Sukkah 54b'],
+    sounds: [],
+    choreo: 'rosh-chodesh-musaf',
+    importance: 3,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(162), end: sunrise(200) } } },
+  },
+  {
+    id: 'rc-musaf-song',
+    title: { en: 'Rosh Chodesh: the musaf\'s wine, nine more blasts and the song', he: 'שיר של ראש חודש' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(156), end: sunrise(168) },
+    timing: { confidence: 'ordering', note: 'The song with the pouring of the wine (Rambam TuM 6:5); on Shabbat one song after both musafim\'s libations (Rashi on Sukkah 55a). The minutes are reconstruction.' },
+    zone: 'ezrat-kohanim',
+    pos: [243, 330.5, 15],
+    view: { at: V.duchan, heading: 90 },
+    summary: `"On your new moons you shall blow the trumpets over your olot": the musaf's wine is poured, the trumpets add nine blasts, and the Levites sing.`,
+    description: `"And on your days of joy, your festivals and your new moons you shall blow the trumpets over your olot" (Bamidbar 10:10). Twenty-one blasts were blown each day, and on a day with musafim nine more (Sukkah 5:5): at the pouring of the wine the Levites sing and the trumpets sound at each section (Rambam TuM 6:5–7). Song is said only over the public's obligatory offerings (Rambam TuM 6:8).\n\nWhen Rosh Chodesh falls on Shabbat the song of Rosh Chodesh displaces Shabbat's, "to make it known that it is Rosh Chodesh" (Rambam TuM 6:10; Sukkah 54b–55a), with one set of nine blasts (Sukkah 55a; Rashi: one song, after both libations). Which psalm the Levites sang for Rosh Chodesh is not recorded: the model sings Psalm 81 — "Blow the shofar at the new moon" (v. 4) — as a stand-in (reconstruction).`,
+    participants: [
+      { role: 'levi', count: 12, note: 'at least twelve on the duchan (Arachin 2:6)' },
+      { role: 'levi_boy', count: 4, note: 'below the platform — number not given' },
+      { role: 'kohen', count: 2, note: 'trumpeters' },
+      { role: 'kohen', count: 1, note: 'pouring the wine' },
+      { role: 'israelite', count: 60, note: 'the people in the court, prostrating at each teki\'ah' },
+    ],
+    sources: ['Bamidbar 10:10', 'Sukkah 5:5', 'Rambam TuM 6:5–8', 'Rambam TuM 6:10', 'Sukkah 54b', 'Sukkah 55a'],
+    sounds: ['trumpet-tekiah', 'trumpet-teruah', 'cymbal', 'choir-psalm', 'kinnor', 'nevel', 'crowd-prostrate'],
+    choreo: 'libation-song',
+    importance: 3,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(200), end: sunrise(212) } } },
+  },
+
   // ======================================================================================== THE DAY
   {
     id: 'sanhedrin',
@@ -1491,6 +1634,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Individuals\' offerings: leaning, confession, slaughter', he: 'קרבנות יחיד — סמיכה, וידוי ושחיטה' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(106), end: dayH(8.3) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(168), end: dayH(8.3) }, timing: { confidence: 'reconstruction', note: 'On Rosh Chodesh the public\'s musaf comes first, after the morning tamid (Rambam TuM 7:1); that the individuals\' offerings waited for it to be done is reconstruction.' } } },
     timing: { confidence: 'ordering', note: 'Between the two temidim: nothing before the morning tamid, nothing slaughtered after the afternoon one — "on it complete all the offerings" (Pesachim 58b–59a; Rambam TuM 1:3). The minutes are reconstruction.' },
     zone: 'slaughter-zone',
     pos: [221, 359.5, 16],
@@ -1569,6 +1713,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'A healed metzora at Sha\'ar Nikanor', he: 'טהרת המצורע' },
     dayTypes: WEEKDAYS,
     when: { start: dayH(3), end: dayH(4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(177), end: sunrise(237) } } },
     timing: { confidence: 'reconstruction', note: 'Only when a healed metzora comes on his eighth day; no hour is given.' },
     zone: 'nikanor',
     pos: [257.5, 330.5, 13.5],
@@ -1747,6 +1892,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Hooks and marble tables: flaying and rinsing', he: 'הפשט וניתוח' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(110), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(172), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'Flaying follows the blood (Rambam MK 5:18), so it trails the slaughter by a few minutes and ends before the afternoon tamid takes the hooks. The minutes are reconstruction.' },
     zone: 'slaughter-zone',
     pos: [217, 383.75, 16],
@@ -1769,6 +1915,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Blood on the altar: four horns, or two that are four', he: 'מתן דמים' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(107), end: dayH(8.35) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(169), end: dayH(8.35) } } },
     timing: { confidence: 'ordering', note: 'Each blood is thrown a minute or two after its slaughter, and the last before the afternoon tamid (Pesachim 59a). The minutes are reconstruction.' },
     zone: 'mizbeach',
     pos: [232, 336, 16],
@@ -1788,6 +1935,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Salt, ramp and fire: limbs, fats and wine', he: 'הקטרת אברים ואימורים' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(120), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(182), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'After the flaying; the fats ought to be on the fire before the afternoon tamid — "on it complete all the offerings" (Pesachim 58b–59b). The minutes are reconstruction.' },
     zone: 'mizbeach',
     pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
@@ -1807,6 +1955,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Birds at the corners of the altar', he: 'קרבנות העוף' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(110), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(172), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'Between the temidim, like every individual offering (Pesachim 59a); the minutes are reconstruction.' },
     zone: 'mizbeach',
     pos: { el: 'altar.keren.se' },
@@ -1826,6 +1975,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Meal-offerings: the handful', he: 'מנחות — קמיצה' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(115), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(177), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'By day, between the temidim (Rambam MK 4:6; Pesachim 59a); the minutes are reconstruction.' },
     zone: 'azarah',
     pos: [203, 290, 16],
@@ -1848,6 +1998,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Waving: the owner\'s hands, the kohen\'s beneath', he: 'תנופה' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(125), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(187), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'After the blood and the flaying, before the fats go up (Rambam MK 9:6, 9:16); the minutes are reconstruction.' },
     zone: 'ezrat-kohanim',
     pos: [237.5, 321.5, 16],
@@ -1870,6 +2021,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Mothers and the healed at the eastern gate', he: 'טהרת יולדות וזבים' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(115), end: dayH(8.3) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(177), end: dayH(8.3) } } },
     timing: { confidence: 'ordering', note: 'Between the temidim, like every individual offering (Pesachim 59a); the minutes are reconstruction.' },
     zone: 'nikanor',
     pos: [257.5, 330.5, 13.5],
@@ -1893,6 +2045,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Yesterday\'s leftovers burned', he: 'שריפת נותר' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(106), end: sunrise(136) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(168), end: sunrise(198) } } },
     timing: { confidence: 'reconstruction', note: 'Leftovers are burned by day only (Rambam Pesulei HaMukdashin 19:4–5); the hour is not given — shown after the morning tamid.' },
     zone: 'kevesh',
     pos: { el: 'altar.beit-hadeshen' },
@@ -2193,17 +2346,32 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
 // spilled coals are covered, not swept). eventsFor(dayType) returns, for such an event, one stable copy per day type
 // with those fields replaced; every other event is the data's own object. A byDay text must be true of the WHOLE civil
 // date of that day type: a window that wraps midnight holds two nights (a 'friday' date's small hours are Thursday night).
+//
+// OCCASIONS (docs/decisions/rosh-chodesh.md): ctx.time.occasions lists what the civil date's daytime is besides its day
+// type — ['rosh-chodesh'] on the 1st of a month (not 1 Tishrei). An event with `occasion: 'rosh-chodesh'` runs only on
+// such a day; an ordinary event may carry `byOccasion: { 'rosh-chodesh': { when?, timing?, summary?, description?,
+// sounds? } }` — what changes on it that day (the individuals' offerings wait for the musaf; on Shabbat the showbread
+// follows both musafim). A byDay text of an occasion event may also give its `when` (the Shabbat Rosh Chodesh windows).
+// eventsFor(dayType, time) reads time.occasions (none when no time is given: the ordinary day, as before); on an
+// ordinary day every event is returned exactly as before.
+export const OCCASIONS = ['rosh-chodesh'];
 const DAY_COPIES = new Map();
-function onDay(ev, dayType) {
+function onDay(ev, dayType, occ) {
   const o = ev.byDay?.[dayType];
-  if (!o) return ev;
-  const k = `${ev.id}|${dayType}`;
+  const oo = occ.length && ev.byOccasion ? occ.map((k) => ev.byOccasion[k]).filter(Boolean) : [];
+  if (!o && !oo.length) return ev;
+  const k = `${ev.id}|${dayType}|${oo.length ? occ.join(',') : ''}`;
   let c = DAY_COPIES.get(k);
-  if (!c) DAY_COPIES.set(k, (c = { ...ev, ...o }));
+  if (!c) DAY_COPIES.set(k, (c = Object.assign({ ...ev }, o || {}, ...oo)));
   return c;
 }
 
-/** Events of a day type ('weekday' | 'friday' | 'shabbat'; 'occasional' lists the reference-only events). */
-export function eventsFor(dayType) {
-  return EVENTS.filter((e) => !e.dayTypes || e.dayTypes.includes(dayType)).map((e) => onDay(e, dayType));
+/**
+ * Events of a day type ('weekday' | 'friday' | 'shabbat'; 'occasional' lists the reference-only events) on a date with
+ * the occasions of `time` (ctx.time, or any { occasions }).
+ */
+export function eventsFor(dayType, time) {
+  const occ = Array.isArray(time?.occasions) ? time.occasions.filter((k) => OCCASIONS.includes(k)) : [];
+  return EVENTS.filter((e) => (!e.dayTypes || e.dayTypes.includes(dayType)) && (!e.occasion || occ.includes(e.occasion)))
+    .map((e) => onDay(e, dayType, occ));
 }

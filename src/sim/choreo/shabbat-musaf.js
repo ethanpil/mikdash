@@ -89,9 +89,12 @@ export default {
     }
     S.props.update(t);
     const song = P.song;
-    if (!songClaimed(sim)) {
+    if (!P.claimed) {
       S.pourers[0] = P.pourer;
       runScripts(ctx, S.pourer, S.pourers, t, out, S.fns.pr);
+    }
+    // the fallback concert: when libation-song does not stage it — and never on Shabbat Rosh Chodesh (P.noSong)
+    if (!P.claimed && !P.noSong) {
       runScripts(ctx, S.trumpeters, song.trumpeters, t, out, S.fns.tr);
       if (crossed(S, song.L0)) {
         cueAt(S, `musaf-concert:${Math.round(song.L0 * 10)}`, song.L0, () => {
@@ -120,8 +123,9 @@ function songClaimed(sim) {
 }
 
 function plan(ctx, sim, state) {
-  // rebuilt per date, and when libation-song's claim on the concert is first seen (the runtime is not yet on ctx at init)
-  const claimed = songClaimed(sim);
+  // rebuilt per date, and when libation-song's claim on the concert is first seen (the runtime is not yet on ctx at init);
+  // on Shabbat Rosh Chodesh libation-song sings Rosh Chodesh's song only, so this module's own pourer pours (no concert)
+  const claimed = songClaimed(sim) && !ctx.time?.roshChodesh;
   if (state.planGen === sim.generation && state.claimed === claimed) return state.plan;
   state.claimed = claimed;
   state.planGen = sim.generation;
@@ -150,7 +154,10 @@ function cues(ctx, S, sim, P) {
   {
     const h = HAAZINU[P.song.section];
     // when libation-song stages the concert, the audio's own heading names the section — say only the pour and blasts
-    say(ctx, S, sim, 'mu-song', c.song, at.sw, P.claimed ? {
+    say(ctx, S, sim, 'mu-song', c.song, at.sw, P.noSong ? {
+      en: 'The Shabbat musaf\'s wine is poured without song: on Rosh Chodesh that falls on Shabbat the song of Rosh Chodesh displaces Shabbat\'s, to make it known (Rambam TuM 6:10) — sung once, after both musafim (Sukkah 55a, Rashi)',
+      he: 'שִׁירָה שֶׁל רֹאשׁ חֹדֶשׁ דּוֹחָה אֶת שִׁירָה שֶׁל שַׁבָּת',
+    } : P.claimed ? {
       en: 'The musaf wine is poured; nine more blasts for the musaf (Sukkah 5:5)',
       he: 'נִסּוּךְ הַיַּיִן שֶׁל מוּסָף',
     } : {

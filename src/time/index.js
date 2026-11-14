@@ -11,7 +11,7 @@ import { PRIORITY } from '../core/engine.js';
 import {
   solarPosition, moonPosition, moonIlluminanceTOA, localSiderealTime, planetPositions, SITE_GEO,
 } from './astro.js';
-import { computeZmanim, hebrewDate, localMidnightUTC, utcDayMs, addDays, formatDate } from './zmanim.js';
+import { computeZmanim, hebrewDate, localMidnightUTC, utcDayMs, addDays, formatDate, occasionsOf } from './zmanim.js';
 
 export const DEFAULT_DATE = '2026-11-02'; // Monday, 22 Cheshvan 5787 — an ordinary weekday
 export const DEFAULT_OFFSET_FROM_ALOT = -6; // "slightly before dawn"
@@ -61,6 +61,11 @@ export function createTime(bus, opts = {}) {
     frameDelta: 0,
     date: null, dateString: '', weekday: 0, dayType: 'weekday',
     hebrew: null, hebrewEvening: null,
+    // the occasions of the civil date's DAYTIME Hebrew date (zmanim.js occasionsOf), orthogonal to dayType:
+    // ['rosh-chodesh'] on the 30th / 1st (not 1 Tishrei). Like dayType they belong to the civil date — its small hours
+    // are the night before, its evening after sunset already the next Hebrew date (occasionsEvening; hebrewAt(t)). The
+    // services that make a day Rosh Chodesh in the Mikdash (the musaf) are all by day (docs/decisions/rosh-chodesh.md).
+    occasions: [], occasionsEvening: [], roshChodesh: false,
     zmanim: null,
     /** UTC milliseconds of the current simulated instant */
     ms: 0,
@@ -152,6 +157,20 @@ export function createTime(bus, opts = {}) {
     },
     /** Hebrew date in force at time t (the Hebrew day begins at sunset). */
     hebrewAt(t = time.t) { return wrap(t) >= time.zmanim.sunset ? time.hebrewEvening : time.hebrew; },
+    /** the occasions of the Hebrew date in force at t (from sunset, the next one's) */
+    occasionsAt(t = time.t) { return wrap(t) >= time.zmanim.sunset ? time.occasionsEvening : time.occasions; },
+    /**
+     * The next civil date after `from` (default: the current date) whose daytime has occasion `id` ('rosh-chodesh'),
+     * as 'YYYY-MM-DD' (within 400 days), or null.
+     */
+    nextOccasion(id = 'rosh-chodesh', from = time.date) {
+      if (!from) return null;
+      for (let i = 1; i <= 400; i++) {
+        const d = addDays(from, i);
+        if (occasionsOf(hebrewDate(d)).includes(id)) return formatDate(d);
+      }
+      return null;
+    },
     /** advance the clock by dt real seconds (called by the engine loop) */
     tick(dt) {
       if (time.paused || !dt) { time.frameDelta = 0; return; }
@@ -182,6 +201,9 @@ export function createTime(bus, opts = {}) {
     time.zmanim = computeZmanim(d, time.geo);
     time.hebrew = hebrewDate(d);
     time.hebrewEvening = hebrewDate(addDays(d, 1));
+    time.occasions = occasionsOf(time.hebrew);
+    time.occasionsEvening = occasionsOf(time.hebrewEvening);
+    time.roshChodesh = time.occasions.includes('rosh-chodesh');
     lastPlanetMs = -Infinity;
   }
 

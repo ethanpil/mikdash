@@ -84,10 +84,13 @@ The thirteen choices with the largest effect on accuracy, on what a visitor sees
    which is not published (K5). *sourced reading* (the errata) / *reconstruction* (the builders' readings). *Change:*
    report-errata.md and the entries named; for the lottery `src/data/schedule.js` `first-lottery` and
    `src/sim/choreo/g1/`.
-9. **Only weekdays, Fridays and Shabbat are simulated.** Pesach, Shavuot, Sukkot (the water libation, Simchat Beit
-   HaShoevah on the gezuztra), Rosh HaShanah, Yom Kippur and Rosh Chodesh are not; a festival date shows an ordinary day
-   of its weekday. *Alt:* add day types with their musafim and crowds (`ctx.audio.ambience.setPopulation` exists for
-   crowds). *engineering* (scope). *Change:* `dayType` in `src/time/`, `dayTypes` in `schedule.js`, new choreographies.
+9. **Weekdays, Fridays and Shabbat are simulated, and Rosh Chodesh on any of them (H8); no festival yet.** Pesach,
+   Shavuot, Sukkot (the water libation, Simchat Beit HaShoevah on the gezuztra), Rosh HaShanah and Yom Kippur are not; a
+   festival date shows an ordinary day of its weekday. Rosh Chodesh is an *occasion* beside the day type
+   (`ctx.time.occasions`), not a fourth day type: events with `occasion` run only on it, others change by `byOccasion`.
+   *Alt:* add each festival the same way, as an occasion with its musafim and crowds (`ctx.audio.ambience.setPopulation`
+   exists for crowds). *engineering* (scope). *Change:* `occasionsOf` in `src/time/zmanim.js`, `occasion` / `byOccasion`
+   in `schedule.js`, new choreographies (`src/sim/choreo/g7/` for Rosh Chodesh).
 10. **The observer may walk anywhere, including the Azarah, the Heichal and the Kodesh HaKodashim.** Entering rung 7
     or higher from a lower rung shows a notice with the place's access rule and its Mishnah; inside the Heichal and the
     KhK it adds "you see it here as an observer". Shut doors and curtains do not stop him either (door leaves are not
@@ -626,6 +629,15 @@ of a public history (K2), and fonts loaded from Google Fonts (K3).
 - **H5. Playing past midnight moves to the next civil date** (Friday 23:59 → Shabbat 00:00); `set(t)` keeps the date.
   time-env.md still describes the earlier wrap to 00:00 of the same date. *engineering.* *Change:* `src/time/index.js`.
 - **H6. Day type comes from the weekday only (Top 9).** Seasons enter only through the offerings (bikkurim). *engineering.*
+- **H8. Rosh Chodesh is the 1st of a month only; 1 Tishrei is Rosh HaShanah, not staged.** While the month was sanctified
+  on sighting, Rosh Chodesh was one day and its musaf was offered on it alone (Rambam Kiddush HaChodesh 3:5–6); the fixed
+  calendar's 30th of a full month is an ordinary day in the Mikdash. Its musaf (two bulls, a ram, seven lambs, a goat:
+  Bamidbar 28:11–15) follows the morning tamid (TuM 7:1); its limbs are laid on the altar between the horns (TuM 6:3 —
+  the Mishnah, Rashi and Bartenura place them elsewhere); the individuals' offerings wait for it (reconstruction); on
+  Shabbat it follows Shabbat's musaf and its song displaces Ha'azinu (TuM 6:10, 9:2). Which psalm the Levites sang is not
+  recorded: Psalm 81 stands in. *Alt:* both days of today's two-day Rosh Chodesh; run the individuals' offerings beside
+  the musaf; Psalm 104 (needs the audio). *sourced reading* / *reconstruction.* *Change:* `src/time/zmanim.js`
+  `occasionsOf`; `src/data/schedule.js` (`rc-*`, `byOccasion`); `src/sim/choreo/g7/`; docs/decisions/rosh-chodesh.md.
 - **H7. Quality defaults to `auto` (J3).** *engineering.* *Change:* `?q=`, Settings.
 
 ## I. Interaction and UI

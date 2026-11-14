@@ -112,6 +112,13 @@ export function civilShort(time) {
 
 export const DAY_TYPE_LABEL ={ weekday: 'Weekday', friday: 'Erev Shabbat', shabbat: 'Shabbat' };
 
+/** is the Hebrew date in force at t Rosh Chodesh? (ctx.time.occasionsAt — from sunset the next date's; the 1st of a
+ *  month, not 1 Tishrei: src/time/zmanim.js occasionsOf) */
+export function isRoshChodesh(time, t = time?.t) {
+  const o = time?.occasionsAt ? time.occasionsAt(t) : time?.occasions;
+  return Array.isArray(o) && o.includes('rosh-chodesh');
+}
+
 /**
  * The day in words, by the halachic day, which begins at sunset: "slightly before dawn on an ordinary Monday",
  * "dusk on Monday evening, as Tuesday begins", "Monday evening, the night of Tuesday", "Shabbat night (Friday
@@ -125,12 +132,13 @@ export function dayPhrase(time, t = time?.t, when = '') {
   const tt = wrap(t);
   const civil = WEEKDAYS[wd], next = WEEKDAYS[(wd + 1) % 7];
   const civilEn = wd === 6 ? 'Saturday' : civil;
-  if (tt < z.sunset) return `${when || 'daytime'} on ${time.dayType === 'weekday' ? 'an ordinary ' : ''}${civil}`;
+  const rc = isRoshChodesh(time, tt) ? ', Rosh Chodesh' : '';
+  if (tt < z.sunset) return `${when || 'daytime'} on ${rc ? 'Rosh Chodesh, ' : time.dayType === 'weekday' ? 'an ordinary ' : ''}${civil}`;
   const dusk = tt < z.tzeit;
-  if (wd === 5) return dusk ? 'dusk as Shabbat begins (Friday evening)' : 'Shabbat night (Friday evening)';
-  if (wd === 6) return dusk ? 'dusk as Shabbat ends (Saturday evening)' : 'motza\'ei Shabbat (Saturday night)';
+  if (wd === 5) return `${dusk ? 'dusk as Shabbat begins (Friday evening)' : 'Shabbat night (Friday evening)'}${rc}`;
+  if (wd === 6) return `${dusk ? 'dusk as Shabbat ends (Saturday evening)' : 'motza\'ei Shabbat (Saturday night)'}${rc}`;
   // not "Tuesday night (Monday evening)": in English "Tuesday night" is the night after Tuesday
-  return dusk ? `dusk on ${civilEn} evening, as ${next} begins` : `${civilEn} evening, the night of ${next}`;
+  return `${dusk ? `dusk on ${civilEn} evening, as ${next} begins` : `${civilEn} evening, the night of ${next}`}${rc}`;
 }
 
 /** the day-type badge by the halachic day: Friday after sunset is Shabbat; Saturday after nightfall is motza'ei Shabbat */

@@ -8,7 +8,9 @@ import { LEVITES } from '../g3/song.js';
 const SONGS = ['song-weekday', 'song-friday', 'song-shabbat', 'afternoon-song', 'afternoon-song-shabbat', 'libation'];
 const BLESS = 'On the steps of the Ulam, blessing the people with one blessing — the Name said as it is written, hands raised above their heads';
 const SING = 'Singing the psalm of the day on the duchan, in three sections; at each break the trumpets sound and the people prostrate';
-const G3 = ['inner-clearing', 'coal-pan', 'magrefah', 'into-heichal', 'ketoret-morning', 'birkat-kohanim', 'ketoret-afternoon', 'menorah-lighting', ...SONGS, 'maamad-morning', 'maamad-afternoon'];
+// rc-musaf-song: the Rosh Chodesh musaf's concert, which this module stages from g7/concert.js (only on such a day)
+const RC_SING = 'Rosh Chodesh: singing over the musaf on the duchan — which psalm is not recorded (the model\'s stand-in is Psalm 81); at each section the trumpets sound and the people prostrate';
+const G3 = ['inner-clearing', 'coal-pan', 'magrefah', 'into-heichal', 'ketoret-morning', 'birkat-kohanim', 'ketoret-afternoon', 'menorah-lighting', ...SONGS, 'rc-musaf-song', 'maamad-morning', 'maamad-afternoon'];
 
 const srv = (i) => Object.keys(SRV).find((k) => SRV[k] === i) || 'X';
 
@@ -54,6 +56,7 @@ export const ketoret = describeWith({
         libation: { T1: 'On the table of the fats with a silver trumpet: teki\'ah, teru\'ah, teki\'ah; then to the side of the Levite with the cymbal', T2: 'On the table of the fats with a silver trumpet: teki\'ah, teru\'ah, teki\'ah; then to the side of the Levite with the cymbal', _: 'At the libation' },
         'afternoon-song': { T1: 'Sounding the trumpets at the afternoon libation', T2: 'Sounding the trumpets at the afternoon libation', W2: 'Pouring the afternoon wine at the south-west horn', _: 'At the afternoon libation' },
         'afternoon-song-shabbat': { T1: 'Sounding the trumpets at the afternoon libation', T2: 'Sounding the trumpets at the afternoon libation', W2: 'Pouring the afternoon wine at the south-west horn', _: 'At the afternoon libation' },
+        'rc-musaf-song': { T1: '"On your new moons you shall blow the trumpets over your olot": nine more blasts at the musaf\'s song', T2: '"On your new moons you shall blow the trumpets over your olot": nine more blasts at the musaf\'s song', _: 'At the musaf of Rosh Chodesh' },
         'birkat-kohanim': BLESS,
         _: 'At the service of the incense',
       },
@@ -71,11 +74,12 @@ export const ketoret = describeWith({
         'song-weekday': { WINE: 'The wine poured; the Levites sing', B: 'Prostrating at each blast of the song' },
         'song-friday': { WINE: 'The wine poured; the Levites sing', B: 'Prostrating at each blast of the song' },
         'song-shabbat': { WINE: 'The wine poured; the Levites sing', B: 'Prostrating at each blast of the song' },
+        'rc-musaf-song': { WINE: 'Pouring the wine of the Rosh Chodesh musaf at the south-west horn; the song begins', B: 'At the musaf of Rosh Chodesh' },
       },
     },
     segan: {
       phrase: 'the segan, deputy of the Kohen Gadol', events: G3,
-      doing: { libation: 'Standing on the horn of the altar with the flags in his hand; as the wine is poured he waves them', 'afternoon-song': 'On the horn of the altar with the flags', 'afternoon-song-shabbat': 'On the horn of the altar with the flags', 'ketoret-morning': (ctx) => (ctx.time?.dayType === 'shabbat' ? 'With the Kohen Gadol as he goes in to prostrate' : 'Waiting for the libation'), _: 'Waiting for the libation, when he stands on the horn of the altar with the flags' },
+      doing: { libation: 'Standing on the horn of the altar with the flags in his hand; as the wine is poured he waves them', 'rc-musaf-song': 'On the horn of the altar with the flags, for the wine of the Rosh Chodesh musaf', 'afternoon-song': 'On the horn of the altar with the flags', 'afternoon-song-shabbat': 'On the horn of the altar with the flags', 'ketoret-morning': (ctx) => (ctx.time?.dayType === 'shabbat' ? 'With the Kohen Gadol as he goes in to prostrate' : 'Waiting for the libation'), _: 'Waiting for the libation, when he stands on the horn of the altar with the flags' },
     },
     kg: {
       phrase: 'the Kohen Gadol', events: G3,
@@ -88,6 +92,7 @@ export const ketoret = describeWith({
         libation: { cymbal: 'Striking the cymbal as the segan waves the flags — and the Levites begin the song', _: 'On the duchan, ready for the song' },
         'song-weekday': SING, 'song-friday': SING, 'song-shabbat': SING,
         'afternoon-song': SING, 'afternoon-song-shabbat': 'Shabbat afternoon: singing the Song at the Sea on the duchan', magrefah: 'Running to the duchan at the magrefah\'s crash',
+        'rc-musaf-song': { cymbal: 'Striking the cymbal as the musaf\'s wine is poured — and the Levites begin', _: RC_SING },
         _: (ctx, state, who) => (/walk|run/.test(who.slot?.actor?.poseName || '') ? 'Coming to the duchan from the chambers of the instruments' : 'On the duchan, waiting for the libation'),
       },
     },

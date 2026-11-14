@@ -113,8 +113,8 @@ export function riteDocs({ events = [], EVENTS = [], SITE = null, ZONE_CONTENT =
   const make = (ev, occasional) => {
     const d = {
       id: `event:${ev.id}`, kind: 'rite', title: { en: ev.title?.en || ev.id, he: ev.title?.he },
-      keywords: [zoneName(ZONE_CONTENT, ev.zone), ev.zone, ev.choreo, occasional ? 'occasional' : null].filter(Boolean),
-      subtitle: { en: occasional ? 'Occasional' : zoneName(ZONE_CONTENT, ev.zone) },
+      keywords: [zoneName(ZONE_CONTENT, ev.zone), ev.zone, ev.choreo, occasional ? 'occasional' : null, ev.occasion === 'rosh-chodesh' ? 'rosh chodesh' : null, ev.occasion === 'rosh-chodesh' ? 'new moon' : null].filter(Boolean),
+      subtitle: { en: occasional ? (ev.occasion === 'rosh-chodesh' ? 'On Rosh Chodesh' : 'Occasional') : zoneName(ZONE_CONTENT, ev.zone) },
       at: eventAt(SITE, ev), zone: ev.zone, weight: occasional ? 0.9 : 1,
     };
     if (occasional) d.occasional = true;
@@ -123,8 +123,9 @@ export function riteDocs({ events = [], EVENTS = [], SITE = null, ZONE_CONTENT =
     return d;
   };
   for (const ev of events) { if (ev?.id == null || seen.has(ev.id)) continue; seen.add(ev.id); out.push(make(ev, false)); }
+  // (an occasion's events — Rosh Chodesh's musaf — are found on other days too, flagged as occasional)
   for (const ev of EVENTS) {
-    if (ev?.id == null || seen.has(ev.id) || !(ev.dayTypes || []).includes('occasional')) continue;
+    if (ev?.id == null || seen.has(ev.id) || !((ev.dayTypes || []).includes('occasional') || ev.occasion)) continue;
     seen.add(ev.id);
     out.push(make(ev, true));
   }
