@@ -157,6 +157,9 @@ Default date **2026-11-02** (Monday, 22 Cheshvan — ordinary weekday, psalm 48)
   (`quality.maxFireLights`, nearest to camera win); also `ctx.fx.attachTorch(object3D) -> handle`,
   `ctx.fx.smokeColumn({pos, …})` (altar & incense smoke rise **straight up** — Avot 5:5),
   `ctx.fx.setFire(id, intensity)`. Optional **Photo mode** (path-traced still) may be added later.
+* **Clouds** (`env/clouds*.js`): one cloud tile baked in a Worker and cached in IndexedDB, drawn only by the sky dome
+  (stars hide behind it); weather is a pure function of the date (`?clouds=0`, `?cumulus=`, `?cirrus=`). The cumulus is a
+  flat loop-free layer where `ao === 'volume'` or there is no post, marched elsewhere. Baked after 'firstFrame' in play.
 * **Tier capabilities** (lowend-visuals): what each tier draws is chosen by flags in `ctx.quality` — `shadows`
   (`'static'` low: the static world only, re-rendered when it changes; `'cached'` medium; `'cascaded'` high/ultra),
   `shadowFilter` (`'pcf1'` low, `'pcf5'`), `aa` (`'fxaa'` low, `'smaa'`), `ao` (`'volume'` low/medium, `'n8ao'` high/ultra),
@@ -193,6 +196,7 @@ export const EVENTS = [{
   title: { en, he },
   dayTypes: ['weekday','friday','shabbat'],        // omit = all
   occasion: 'rosh-chodesh',                        // optional: active only on a date carrying that occasion
+  onWeekday: 0,                                    // optional: only on that weekday (0 = Sunday … 6 = Shabbat)
   byOccasion: { 'rosh-chodesh': { when, … } },     // optional overrides on such a date (as byDay per day type);
                                                    // read through eventsFor(dayType, time)
   when: { start: <time spec>, end: <time spec> },  // see ctx.time.resolve; ordering is sourced, minutes are reconstruction
@@ -225,6 +229,10 @@ re-poses every actor instantly (no accumulated state). Sound cues fire only when
 during continuous play. Choreography modules: `src/sim/choreo/<id>.js` exporting
 `{ id, init(ctx, events) -> state, update(ctx, state, t, dt) }`. `ctx.schedule = { events, active(t),
 upcoming(t, n), at(zoneId, t), resolveTimes() }`.
+Day-specific and standing duties added later live beside the daily service: `choreo/g7/` (Rosh Chodesh: the musaf's
+pool, plan and concert), `choreo/temple-duties.js` (salting the ramp, wiping the altar, the showbread's reeds, the
+afternoon call) and `gates.js gateTimes()` (door times shared with `night-watch.js`). Sources and what is staged without
+one: `docs/decisions/rosh-chodesh.md`, `docs/decisions/source-gaps-staged.md`.
 
 ## 10. People — `src/people/` (people task)
 
