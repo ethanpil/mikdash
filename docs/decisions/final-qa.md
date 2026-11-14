@@ -35,4 +35,24 @@ Shots: `shots/final/` (`pairs/` = before / after of the baseline views, `sunset/
   the images on purpose, so the goldens need regenerating on real hardware). High was run once for program variants
   (perf-cpu round 2c); ultra was not run.
 - `src/ui/dev/consoletest.mjs`: timing checks fail at this machine's 0.5–2 fps; each was re-run by hand with longer waits
-  (ux-audit.md, round 3).
+  (ux-audit.md, round 3). The final run, alone on the machine (0.7–1 fps): desk 152 passed / 24 failed, map + phone +
+  landscape 86 / 6, console clean. The set of failures differs from run to run on the same UI code (`src/ui` unchanged
+  between them). The ten that were new in the final run (Esc and focus back to the beacon, wake on a mouse move, the M /
+  Esc / G / P keys, Stop on a walk, a place named once in 60 s, an open card's Show me following the clock, Nearby's
+  count at the Gazit) were repeated in one session with 4–15 s waits in place of the suite's 0.3–1.8 s: all ten behave
+  as specified. The IME-composition check (phone) is still only covered by a plain search for the same letters. A clean
+  suite run needs a machine with a GPU.
+
+## Final test runs (low, this machine)
+
+- `npm run build`; `tools/validate-schedule.mjs` (0 errors, 0 warnings); `tools/coverage.mjs` (no gaps, longest 7 min);
+  `src/search/dev/searchtest.mjs`; `src/sim/dev/tests/objects-check.mjs` (props 120): pass.
+- `src/sim/dev/tests/jumps.js` on a weekday, a Friday, Shabbat and Rosh Chodesh: deterministic, no console errors.
+- `rosh-chodesh.js`: ok. `source-gaps.js`: ok after its wipers check was moved from the old `tend_lamp` pose to `wipe`.
+  `inspect.js` (with `&inspect=1`): ok.
+- `inspect-show.js`: 51 failures, none a defect that could be shown here. 36 are wall-clock budgets (a warp is given
+  6 s; it takes 83–105 s at 0.7 fps), 8 are the 30 s cap ending a show mid-warp, 2 are the overlap test's 20 s cap, and
+  5 are "framed off", four of them measured on a show the cap had cut short. Those five (ramp-salt, golah-levites 0 and
+  1, afternoon-song, nazirites 1) were repeated with a 10 min cap: each reached `showing` with the subject at yaw 0
+  (pitch 0, ramp-salt 8° under the director's clamp) and Back restored the view. The budgets themselves can only be
+  judged on a GPU.
