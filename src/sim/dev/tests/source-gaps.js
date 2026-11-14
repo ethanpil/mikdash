@@ -7,8 +7,12 @@
 //   5. the afternoon call — the caller at the head of the fifteen steps, in 'call'.
 //   6. the officer over the song on the duchan during the song (13 Levites).
 //   7. Shabbat — the musaf's limbs on the ramp's EAST lower half (Rambam TuM 6:3).
-//   8. sweep — the new figures (temple-duties, the gate Levites) not inside a solid, not off the floor, not inside
-//      another figure; re-pose after jumps identical.
+//   8. sweep — the new figures (temple-duties, the gate Levites, the seals' buyers, kohanim and officers) not inside a
+//      solid, not off the floor, not inside another figure; re-pose after jumps identical.
+//   9. the seals by day (Shekalim 5:3–4) — a buyer for each libation the day stages, the right seal for its animal (a ram
+//      "male", the rest of the flock "kid", the nazir "kid" and "male", the metzora "sinner"); at the desk: the money held
+//      out to Yochanan, the seal to Achiyah, the wine received; the kohen with it at the silver table before its bearer
+//      takes it up; the jug waiting on the table; none on Shabbat; the evening reckoning still staged.
 // Run: node src/sim/dev/run.mjs --q low --timeout 900 --script src/sim/dev/tests/source-gaps.js "date=2026-11-06&t=sunrise"
 const rt = ctx.schedule.runtime, time = ctx.time, ph = ctx.physics, S = ctx.schedule;
 const { AMAH: AM } = await import('/src/core/units.js');
@@ -26,7 +30,7 @@ const note = (k, m) => { const l = sweepBad.get(k) || { n: 0, ex: [] }; l.n++; i
 function sweep(label) {
   const figs = [];
   for (const e of rt.entries) for (const p of e.pools) for (const s of p.slots) if (s.want && s.actor) figs.push({ e: e.id, p: p.name, s, o: s.actor.object3D.position, animal: !!p.spec.animal });
-  const mine = figs.filter((f) => f.e === 'temple-duties' || (f.e === 'night-watch' && f.p === 'guards'));
+  const mine = figs.filter((f) => f.e === 'temple-duties' || (f.e === 'night-watch' && f.p === 'guards') || (f.e === 'chambers-daily' && /^seal/.test(f.p)));
   for (const f of mine) {
     const pose = f.s._pose || '';
     if (/^(sleep|lie)/.test(pose)) continue;
@@ -97,6 +101,71 @@ await at((sw[0] + sw[1]) / 2);
 out.duchan = shown('ketoret-morning', 'levites').length;
 if (out.duchan !== 13) fails.push(`${out.duchan} Levites on the duchan during the song, want 13 (12 and the officer)`);
 
+// the seals by day (Shekalim 5:3–4)
+{
+  const cd = rt.choreo('chambers-daily');
+  await at(win('seals-sale')[0] + 1);
+  const P4 = cd?.state?.plan, SD = P4?.sealsDay;
+  const P5 = ctx.schedule.runtime.choreo('private-offerings')?.state?.plan;
+  out.seals = SD ? { n: SD.n, of: SD.of, dropped: SD.dropped, span: SD.span?.map((x) => time.format(x)), window: win('seals-sale').map((x) => time.format(x)) } : null;
+  if (!SD || !SD.n) fails.push(`no seals sold on a weekday: ${JSON.stringify(out.seals)}`);
+  else {
+    if (SD.dropped > Math.max(2, 0.15 * SD.of)) fails.push(`seals: ${SD.dropped} of ${SD.of} libations without a buyer`);
+    // the seal for each animal (Shekalim 5:3)
+    const bad = [];
+    for (const b of SD.buyers) {
+      if (b.key.startsWith('set:nazir')) { if (b.seals.join() !== 'gedi,zachar') bad.push(`${b.key}:${b.seals}`); continue; }
+      if (b.key.startsWith('set:metzora')) { if (b.seals.join() !== 'chotei') bad.push(`${b.key}:${b.seals}`); continue; }
+      const inst = P5?.insts?.find((x) => x.id === b.key);
+      if (!inst) { bad.push(`${b.key}: no offering`); continue; }
+      if (!['olah', 'shelamim', 'todah'].includes(inst.type)) bad.push(`${b.key}: a ${inst.type} has no libations (Menachot 9:6)`);
+      const want = inst.species === 'ram' ? 'zachar' : 'gedi';
+      if (b.seals.join() !== want) bad.push(`${b.key} ${inst.species}: ${b.seals} want ${want}`);
+      if (!(b.tSet < b.tPick)) bad.push(`${b.key}: on the table ${time.format(b.tSet)} after its bearer takes it ${time.format(b.tPick)}`);
+    }
+    // every staged libation of an olah, shelamim or todah has its buyer (but the kayitz olot, the public's)
+    const libs = (P5?.insts || []).filter((x) => ['olah', 'shelamim', 'todah'].includes(x.type) && !x.job?.kayitz && x.tracks.some((tr) => /^N2b?$/.test(tr.role) && tr.slot >= 0));
+    out.seals.g5Libations = libs.length;
+    out.seals.kinds = SD.buyers.reduce((m, b) => { const k = b.seals.join('+'); m[k] = (m[k] || 0) + 1; return m; }, {});
+    if (bad.length) fails.push(`seals: ${bad.slice(0, 5).join(' · ')}`);
+    // one buyer through the desk: the money, the seal, the wine; the kohen at the line and at the table
+    const b = SD.buyers[Math.floor(SD.buyers.length / 2)];
+    const buyer = () => shown('chambers-daily', 'seal-buyers').find((s) => { const [X, Y] = siteOf(s); return X > 203 && X < 216 && Y > 400 && Y < 411; });
+    const steps = {};
+    for (let t = b.mark - 1.6; t <= b.mark + 0.1; t += 0.04) {
+      await at(t);
+      const s = buyer();
+      if (!s) continue;
+      if (s._pose === 'carry_limbs' && s._prop === 'coins') steps.money = steps.money || time.format(t);
+      if (s._pose === 'point') steps.seal = steps.seal || time.format(t);
+      if (/^carry/.test(s._pose) && s._prop === 'wine_jug') steps.wine = steps.wine || time.format(t);
+      const off = shown('chambers-daily', 'seals');
+      if (off.some((o) => o._pose === 'carry_limbs' && o._prop === 'coins')) steps.yochanan = steps.yochanan || time.format(t);
+      if (off.some((o) => /^carry/.test(o._pose) && o._prop === 'wine_jug')) steps.achiyah = steps.achiyah || time.format(t);
+      if (Math.round(t / 0.04) % 6 === 0) sweep(`seals ${time.format(t)}`);
+    }
+    out.seals.desk = steps;
+    for (const k of ['money', 'seal', 'wine', 'yochanan', 'achiyah']) if (!steps[k]) fails.push(`seals: no "${k}" at the desk (${JSON.stringify(steps)})`);
+    await at(b.mark + 0.2);
+    const kh = shown('chambers-daily', 'seal-kohanim').filter((s) => s._prop === 'wine_jug');
+    if (!kh.length) fails.push('seals: no kohen with the wine after the hand-over');
+    await at(b.tSet - 0.05);
+    const kt = shown('chambers-daily', 'seal-kohanim').map((s) => siteOf(s).map(r2));
+    out.seals.kohenAtTable = kt;
+    if (!kt.some(([X, Y]) => X > 204 && X < 209 && Y > 278 && Y < 284)) fails.push(`seals: no kohen at the silver table at ${time.format(b.tSet)}: ${JSON.stringify(kt)}`);
+    await at((b.tSet + b.tPick) / 2);
+    const jugs = (cd.state.free || []).filter((f) => f?.on && f.name === 'wine_jug').length;
+    out.seals.jugsOnTable = jugs;
+    if (!jugs) fails.push('seals: no wine waiting on the silver table');
+    sweep('seals-table');
+  }
+  // the evening reckoning: the two officers
+  const we = win('seals');
+  await at((we[0] + we[1]) / 2);
+  out.seals = { ...out.seals, evening: shown('chambers-daily', 'seals').length };
+  if (out.seals.evening !== 2) fails.push(`the evening reckoning: ${out.seals.evening} officers, want 2`);
+}
+
 // ---------------------------------------------------------------------------------------------- Friday 2026-11-06
 time.setDate('2026-11-06'); await frames(3);
 const ww = win('altar-wiping');
@@ -122,6 +191,8 @@ if (S.byId('kanim-in')) fails.push('kanim-in on a Monday');
 
 // ---------------------------------------------------------------------------------------------- Shabbat 2026-11-07
 time.setDate('2026-11-07'); await frames(3);
+if (S.byId('seals-sale')) fails.push('seals-sale on Shabbat');
+{ await at(time.zmanim.chatzot); const p = rt.choreo('chambers-daily')?.state?.plan; if (p?.sealsDay?.n) fails.push(`${p.sealsDay.n} seals sold on Shabbat`); if (shown('chambers-daily', 'seal-buyers').length) fails.push('a seal buyer on Shabbat'); }
 { const w = win('shabbat-musaf'); await at(w[0] + 20); }          // (the module plans when it becomes relevant)
 const sm = rt.choreo('shabbat-musaf');
 const M = sm?.state?.plan;
@@ -137,8 +208,9 @@ else {
 
 // ---------------------------------------------------------------------------------------------- determinism
 time.setDate('2026-11-06'); await frames(3);
-const snap = () => { const o = []; for (const e of rt.entries) if (e.id === 'temple-duties' || e.id === 'night-watch') for (const p of e.pools) for (const s of p.slots) if (s.want && s.actor) { const q = s.actor.object3D.position; o.push(`${p.name}${s.index}:${q.x.toFixed(3)},${q.y.toFixed(3)},${q.z.toFixed(3)}:${s._pose}`); } return o.sort().join('|'); };
-const moments = [win('gates-opened')[0] + 1, win('ramp-salt')[0] + 1.5, win('altar-wiping')[0] + 5, win('kanim-out')[0] + 0.1, win('gates-shut')[0] + 1, win('afternoon-call')[0] + 0.4];
+const snap = () => { const o = []; for (const e of rt.entries) if (e.id === 'temple-duties' || e.id === 'night-watch' || e.id === 'chambers-daily') for (const p of e.pools) for (const s of p.slots) if (s.want && s.actor && (e.id !== 'chambers-daily' || /^seal/.test(p.name))) { const q = s.actor.object3D.position; o.push(`${p.name}${s.index}:${q.x.toFixed(3)},${q.y.toFixed(3)},${q.z.toFixed(3)}:${s._pose}`); } return o.sort().join('|'); };
+const moments = [win('gates-opened')[0] + 1, win('ramp-salt')[0] + 1.5, win('altar-wiping')[0] + 5, win('kanim-out')[0] + 0.1, win('gates-shut')[0] + 1, win('afternoon-call')[0] + 0.4,
+  ...(() => { const b = rt.choreo('chambers-daily')?.state?.plan?.sealsDay?.buyers || []; return b.length ? [b[0].mark - 0.5, b[Math.floor(b.length / 2)].mark + 0.1, b[b.length - 1].tSet - 0.1] : []; })()];
 const first = [];
 for (const m of moments) { await at(m); first.push(snap()); }
 time.setDate('2026-11-02'); await frames(3); time.setDate('2026-11-06'); await frames(3);

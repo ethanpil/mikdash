@@ -47,7 +47,12 @@ for (const [date, t, at, look] of MOMENTS) {
     rows.sort();
     batches[b.name] = rows;
   }
+  // the torch flames' anchors (fx follows their world matrices)
+  const anchors = [];
+  sys.root.updateMatrixWorld();
+  for (const o of sys.root.children) if (o.name === 'people:torch-anchor') { const e = o.matrixWorld.elements; anchors.push(`${r3(e[12])},${r3(e[13])},${r3(e[14])}`); }
+  anchors.sort();
   const st = sys.stats;
-  out[`${date} ${t}`] = { figs: figs.sort(), crowds: crowds.sort(), batches, lod: [...st.lod], props: st.props, drawn: st.drawn, sim: rt.stats.figures };
+  out[`${date} ${t}`] = { figs: figs.sort(), crowds: crowds.sort(), batches, anchors, lod: [...st.lod], props: st.props, drawn: st.drawn, sim: rt.stats.figures };
 }
 return out;

@@ -68,6 +68,19 @@ function nazirAnimal(state, who, t, what) {
   };
 }
 const tkey = (id) => (who, state, sim, t) => troupeKey(id, state, who, t);
+/** a troupe figure's current episode (its data: e.d), read from the troupe's episode lists */
+function troupeEp(state, who, t) {
+  for (const tr of state.troupes || []) {
+    if (tr.pool?.name !== who.poolName) continue;
+    const st = tr.starts?.[who.index], eps = tr.eps?.[who.index];
+    if (!st?.length) continue;
+    let lo = 0, hi = st.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (st[m] <= t) lo = m + 1; else hi = m; }
+    const e = lo > 0 ? eps[lo - 1] : null;
+    return e && t <= e.t0 + e.T ? e : null;
+  }
+  return null;
+}
 const castFirst = (id, castKey, fallback) => (ctx, state, who, t) => describeSet(state, who, t, castKey) ?? fallback;
 export const chambers = describeWith({
   id: 'chambers-daily', prefixes: ['chambers-daily:', 'set:nazir'],
@@ -86,8 +99,37 @@ export const chambers = describeWith({
     'beit-garmu': { phrase: 'one of the house of Garmu, over the making of the showbread', key: tkey('chambers-daily'), doing: { 'beit-garmu': 'Friday: making the showbread — kneaded one loaf at a time and baked two at a time' } },
     seals: {
       sub: (who) => who.index, key: tkey('chambers-daily'),
-      phrase: { 0: 'the officer over the seals', 1: 'the officer over the libations' },
-      doing: { seals: 'The evening reckoning: the seals brought out and counted against the money — a surplus goes to the Temple, and a shortfall the officer of the seals pays from his own house' },
+      // slot 0 is Achiyah, slot 1 Yochanan ben Pinchas (chambers-daily SEALS / SEAL_DAY)
+      phrase: { 0: 'Achiyah, the officer over the libations', 1: 'Yochanan ben Pinchas, the officer over the seals' },
+      doing: {
+        'seals-sale': {
+          0: 'Over the libations: for each seal he gives the libations it names — wine, and fine flour mixed with oil — prepared in purity, so that no one bringing an offering need look for them (Shekalim 5:4; Bartenura)',
+          1: 'Over the seals: for the money he gives a seal marked with what the buyer\u2019s animal needs — “calf”, “male”, “kid” or “sinner” — and the day\u2019s name, against cheats (Shekalim 5:3–5)',
+        },
+        seals: 'The evening reckoning: the seals brought out and counted against the money — a surplus goes to the Temple, and a shortfall the officer of the seals pays from his own house',
+      },
+    },
+    'seal-buyers': {
+      key: tkey('chambers-daily'),
+      phrase: (ctx, state, who, t) => { const d = troupeEp(state, who, t)?.d; return `a man buying the libations for an offering of today${d ? ` — ${d.what.en}` : ''} (whether the owner went himself or sent someone is not stated)`; },
+      doing: {
+        'seals-sale': (ctx, state, who, t) => {
+          const d = troupeEp(state, who, t)?.d;
+          if (!d) return 'Buying libations with a seal (Shekalim 5:4)';
+          if (t > d.mark + 0.15) return `On his way home: the wine for ${d.what.en} is with the kohanim`;
+          return `Buying the libations for ${d.what.en}: money to Yochanan for the seal ${d.sealText} (${d.sealNote}), the seal to Achiyah for the wine (Shekalim 5:3–4)`;
+        },
+      },
+    },
+    'seal-kohanim': {
+      key: tkey('chambers-daily'),
+      phrase: 'a kohen taking the libations in (who did is not recorded: a reconstruction)',
+      doing: {
+        'seals-sale': (ctx, state, who, t) => {
+          const d = troupeEp(state, who, t)?.d;
+          return `Taking the wine${d ? ` of ${d.what.en}` : ''} across the kodesh line to the silver table west of the ramp, where it waits until its bearer pours it at the south-west horn (Shekalim 6:4 — the waiting there is the model's)`;
+        },
+      },
     },
   },
 });

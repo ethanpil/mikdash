@@ -103,8 +103,10 @@
 //                     corner and the handful taken; waving east of the altar; owners carrying meat out; yesterday's
 //                     leftovers burned east of the ramp in the morning. Kayitz hamizbeach olot in idle hours.
 //   chambers-daily    chavitin bakers; blemished kohanim sorting wood; nazirites cooking and shaving; the Golah wheel;
-//                     hides salted at the Parvah; Beit Garmu baking (Friday); Yochanan and Achiyah reckoning the
-//                     seals against the coins at the NE chamber of Beit HaMoked (evening).
+//                     hides salted at the Parvah; Beit Garmu baking (Friday); by day the libations bought with a
+//                     seal at Yochanan's and Achiyah's desk in Beit HaMoked's chol half, the wine taken in by a kohen
+//                     to the silver table (`seals-sale`); Yochanan and Achiyah reckoning the seals against the coins
+//                     at the NE chamber of Beit HaMoked (evening).
 //   beit-avtinas      (occasional only) the compounding: mortars, the grinder's chant.
 //   courts-daily      Levite gatekeepers at Nikanor; women in the Ezrat Nashim; kohanim eating the most-holy portions in
 //                     the court, standing (by day and again in the evening until midnight), then scouring the copper
@@ -2410,11 +2412,34 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     layer: 'ritual',
   },
   {
+    id: 'seals-sale',
+    title: { en: 'Libations bought with a seal', he: 'החותמות והנסכים' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(108), end: dayH(8.3) },
+    timing: { confidence: 'reconstruction', note: 'The Mishnah gives the order — money to Yochanan for a seal, the seal to Achiyah for the libations, the reckoning "in the evening" (Shekalim 5:4) — not the hours. Shown while the individuals\' offerings run (none on Shabbat, Temurah 2:1), each buyer a few minutes before his offering\'s wine is poured; the listed window is the staged one (chambers-daily retimes it).' },
+    zone: 'beit-hamoked',
+    pos: [205.8, 404.6, 16],
+    view: { at: [209.0, 399.8, 16], heading: 320 },
+    summary: `A man pays Yochanan ben Pinchas and receives a seal marked with what his animal's libations need; he gives it to Achiyah and receives the wine.`,
+    description: `"Whoever wants libations goes to Yochanan, who is over the seals, gives him money and receives a seal from him; he comes to Achiyah, who is over the libations, gives him the seal and receives the libations from him" (Shekalim 5:4). The seal names the libations: "calf" for cattle, large and small, male and female; "kid" for the flock, large and small, male and female, except rams; "male" for rams only; "sinner" for the three animals of a metzora (Shekalim 5:3). Ben Azzai says there were five, written in Aramaic, with a poor sinner and a rich one; the halachah follows the first tanna, and a poor metzora's one lamb takes "kid" (Bartenura). The day's name was written on each seal against cheats, who might keep a seal bought cheap until the libations grew dear (Shekalim 5:5; Rambam KhM 7:12). Achiyah sold libations prepared in purity so that no one bringing an offering need go looking for them (Bartenura on Shekalim 5:4).\n\nOnly olot and shelamim of cattle and flock take libations, and of the sin- and guilt-offerings only a metzora's (Menachot 9:6; Rambam MK 2:2): a buyer is shown for each such offering staged today. Where the two officers sat, what a seal was made of, who carried the libations in and where they waited are not recorded. The model seats them in the west of Beit HaMoked's chol half, the hall where Tamid 3:3 places a chamber of seals; a kohen takes the wine across the kodesh line and sets it on the silver table west of the ramp, "on which the service vessels" stood (Shekalim 6:4), until its bearer takes it up (all reconstruction).`,
+    participants: [
+      { role: 'israelite', count: 1, note: 'Yochanan ben Pinchas, over the seals (Shekalim 5:1) — lineage not stated' },
+      { role: 'israelite', count: 1, note: 'Achiyah, over the libations (Shekalim 5:1) — lineage not stated' },
+      { role: 'israelite', count: 1, note: 'one buyer at the desks at a time; one for each offering whose libations are staged — whether the owner went himself or sent someone is not stated' },
+      { role: 'kohen', count: 1, note: 'takes the wine in to the silver table — who did is not recorded' },
+    ],
+    sources: ['Shekalim 5:1', 'Shekalim 5:3', 'Shekalim 5:4', 'Shekalim 5:5', 'Rambam KhM 7:10–12', 'Bartenura on Shekalim 5:3–4', 'Menachot 9:6', 'Rambam MK 2:2', 'Tamid 3:3', 'Shekalim 6:4', 'Reconstruction (model)'],
+    sounds: [],
+    choreo: 'chambers-daily',
+    importance: 1,
+    layer: 'ritual',
+  },
+  {
     id: 'seals',
     title: { en: 'The evening reckoning of the seals', he: 'חשבון החותמות' },
     dayTypes: WEEKDAYS,
     when: { start: dayH(10.2), end: dayH(10.7) },
-    timing: { confidence: 'reconstruction', note: '"In the evening" (Shekalim 5:4); shown after the afternoon libation, the day\'s last. The hour is reconstruction.' },
+    timing: { confidence: 'ordering', note: '"In the evening the two come to each other" (Shekalim 5:4; Rambam KhM 7:12): after the day\'s sale, which ends with the private offerings. Shown after the afternoon libation, the day\'s last; the hour is reconstruction.' },
     zone: 'beit-hamoked',
     pos: [217, 409, 16],
     view: { at: [208.5, 399, 16], heading: 50 },

@@ -89,3 +89,62 @@ figures wanted by the sim.
 The world is 91–96 % of every view's triangles; the people (figures and props) 2–10 %. The world's merged batches are one
 mesh per material over the whole precinct, so three's frustum culling cannot drop any part of them: the same ≈ 422 k
 triangles are drawn whichever way one looks (and ≈ 200 k again in the pre-pass).
+
+### Medium (f: scene b, same method)
+
+| scene | upd tick | sim | people | env | fx+world(50) | ui | busy | gc | KB/f | draw JS | calls | tris | programs | figures drawn (L0/1/2/3) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| b Azarah d3, medium | 2.82 | 1.10 | 0.86 | 0.29 | 0.30 | 0.13 | 2.67 | 0.16 | 297 | 15.08 | 339 | 1.498M | 91 | 114 (0/1/18/54) |
+
+One frame on medium at b: world 184 calls / 990 k triangles in the main pass and 91 / 416 k in the pre-pass (94 % of the
+triangles), people and props 36 / 64 k, their shadow casters 7 / 24 k.
+
+## Changes (phase 2)
+
+The profile has no single dominant item on the update side: at speed 1 the updaters cost ≈ 1.6–3 ms per frame here, the
+people system being the largest (0.5–1.6 ms) and the sim (0.4–1.5 ms) a long tail of 24 choreographies, none above
+≈ 0.25 ms. The render side (three's per-draw work, ≈ 8–15 ms of JS per frame on SwiftShader) is larger but not mine. So the
+changes are where the people system spends on figures that are not drawn, and where it makes garbage.
+
+- **The people system ticks only the figures it may draw; a hidden actor catches up in one step when it is next needed
+  (`Actor._flush`, `PeopleSystem._clock`).** — `update()` ticked all 1190–1258 actors every frame (every pooled figure of
+  every choreography), though 69–218 were visible; `_tick` was the system's top self-time function and allocated 7–45
+  KB/frame. A hidden actor is flushed (the summed real time applied at once) before anything that changes how it advances —
+  `setPose`, `setSpeed`, `setScale`, `setVisible` — and visible or still cross-fading / scratch-holding actors are flushed
+  every frame as before. One step of the summed time gives the same phase and fade as many small ones (a loop wraps, a
+  one-shot clamps or wraps by `% 1`, a fade floors at 0), so the poses are the same. Verified (`tools/perf-cpu-tick.js`):
+  991 actors (835 hidden), each mirrored by a copy ticked every frame with the system's own clamped dt, 600 frames: worst
+  phase difference 2.2e-15, fade 0. Alternative: tick hidden actors round-robin (an approximation; this is exact).
+- **Actors' transforms hang outside the scene (`sys.actorRoot`) and set their matrices by hand (`matrixAutoUpdate` off,
+  `Actor._placed`).** — three's `updateMatrixWorld` and `projectObject` visited every actor group every frame: 1255–1340
+  objects under `people.root` of 1450–1530 in the scene, ≈ 60 % of the scene's matrix update (`people.root.updateMatrixWorld`
+  0.15–0.28 ms of a 0.20–0.45 ms `scene.updateMatrixWorld()`). The groups draw nothing (the batches under `people.root` do);
+  every setter (`setSite`, `setPosition`, `setHeading`, `_refloor`) already updated the world matrix, which `update()`
+  reads (its per-actor `updateWorldMatrix(true, false)` is gone). A hidden `people.root` still hides every figure (checked
+  once a frame). Nothing outside people/ reads an actor's place in the graph (inspect-pick reads `position`, player/goto
+  `updateWorldMatrix(true, false)`, both unaffected). The torch anchors stay under `people.root` (fx follows them) with
+  their matrices set by hand too.
+- **No garbage in the frame loop's own code** — arrays mirroring the actor / crowd Sets in insertion order (rebuilt only
+  when one comes or goes: a Set's `for…of` allocated an iterator result per element where Maglev, not TurboFan, ran the
+  loop — `%GetOptimizationStatus` showed `update`, `_tick`, `push`, `end` Maglev-optimised with deopts), the per-figure
+  `showP` and per-frame `propBatch` closures as functions, the props of a figure in one reused array, the crowd tint read in
+  place (was a `subarray` view per member per frame), `flames.find(closure)` → a loop, `Batch.end` without array literals,
+  the distance sort's comparator made once and returning −1 / 0 / 1 (same order; a boxed double per comparison before),
+  the sleeper's automatic prop object kept (`shownProp`), the lead ropes' temporaries at module level.
+- **props.js caches what it recomputed per drawn prop per frame** — `gripClass` (gripOf built arrays and a matrix each
+  call), `propTip` (a vector and four matrices per torch per frame: now one shared, read-only vector per prop × grip × side),
+  `propAttach` and `propVariant` (nested Maps instead of a key string per call).
+- **A baked animal's source geometry is built once per kind and LOD (`bakeAnimal`)** — a carcass, a dove in the hand or a
+  cage of birds first drawn in play rebuilt the live animal's geometry for every prop variant (twice per cage): 40–150 ms in
+  the frame the prop appeared (`buildAnimalGeometry` 145 ms + `buildPropGeometry` 162 ms in one 20 s walking window). CPU
+  arrays only, read and never changed.
+
+Not changed (measured, and why):
+- **The sim.** No function above ≈ 0.04 ms/frame of self time; the cost is the sum of the choreographies' own posing
+  (g4 Troupes 0.24–0.36 ms inclusive, courts-daily 0.20–0.28, private-offerings 0.14–0.30, the runtime's loops and budget
+  pass ≈ 0.16–0.38). The obvious candidates (skipping idle pools in `budgetPass`, cached track bounds instead of
+  `Track.t0` getters in `trackAt`, sorted cue windows) are 0.01–0.04 ms each and touch the determinism-critical paths; not
+  worth their risk. Its allocations (25–75 KB per update) are mostly boxed doubles returned from small helpers (`wrap`,
+  getters) and per-frame object literals in cue checks (`rosh-chodesh-musaf` `Object.entries` + `say(…, {…})`).
+- **The day's plan job** (1.1–1.9 s of CPU after the boot and after a date change, slices up to 130–615 ms here): not
+  per-frame; its long slices are single generator steps. Splitting them is a sim-planner task.

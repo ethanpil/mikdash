@@ -21,6 +21,12 @@
 //                    Lishkat HaMelach next door.
 //   beit-garmu       Friday: the house of Garmu bakes the showbread (Shekalim 5:1; Menachot 11:2, 11:9) — kneaded and
 //                    shaped in Beit HaMoked's chol half, baked in the showbread chamber in its kodesh half (Middot 1:6).
+//   seals-sale       by day, between the temidim: whoever needs libations pays Yochanan ben Pinchas and receives a seal
+//                    ("kid", "male", "calf", "sinner" — the one his animal's libations need), gives it to Achiyah and
+//                    receives the libations (Shekalim 5:3–4; Rambam KhM 7:10–12), at a desk in the west of Beit
+//                    HaMoked's chol half ⚙; a kohen takes the wine at the kodesh line and sets it on the silver table
+//                    west of the ramp (Shekalim 6:4 ⚙), where private-offerings' (and the nazir's and the metzora's)
+//                    libation-bearers take it up. One buyer for each offering of the day whose libations G4/G5 stage.
 //   seals            evening: Achiyah brings out the day's seals and Yochanan ben Pinchas pays coin for each
 //                    (Shekalim 5:4), before the chamber of seals in Beit HaMoked (Tamid 3:3).
 // Who comes from where: Israelites and the blemished kohanim in their own clothes up from the city over the Mount
@@ -117,6 +123,30 @@ const GARMU = {
 // from Pinchas' door over the duchan, north along Ezrat Kohanim and through the Moked gate into the hall ⚙
 const TO_MOKED = [[251.5, 341.5, 13.5], [246.6, 341.5, 13.5], [245.0, 338.8, 13.5], [244.4, 337.6, 13.5], [241.6, 335.8, 16], [240.6, 352, 16], [240.6, 387.4, 16], [216, 387.6, 16], [210.75, 388.6, 16], [210.75, 395.5, 16]];
 const SEALS = { door: [217.0, 405.2, 16], achiyah: { at: [213.7, 403.2, 16], face: 75 }, yochanan: { at: [215.5, 403.6, 16], face: 255 }, inside: [217.0, 408.2, 16] };
+// The seals by day (Shekalim 5:4 — where the two sat is not recorded): a desk in the west of the hall's chol half
+// (north of the kodesh line, Y 402), before the west rovadin — clear of the Friday baking in the east of the hall (GARMU),
+// of the kohanim's way MOK_X–gate (X 210.75), the hearth (210.75, 407) and the NW chamber's door (204.5, 406.25) ⚙.
+// Buyers come in by the moked spur (its end 214.5, 409), north of the hearth to the desk, and leave by its out way
+// (207.5, 409). Achiyah's stock of libations stands on the lowest ledge of the west rovadin (top 16.5) ⚙; a kohen takes
+// the wine at the kodesh line and carries it to the silver table west of the ramp ("on the silver one the service
+// vessels", Shekalim 6:4 — the libations set there to wait is reconstruction), where the libation-bearers of
+// private-offerings (g5/plan.js: N2, N2b) and of the G4 sets (g4/sets.js nesachim) take it up.
+const SEAL_DAY = {
+  yochanan: { at: [205.2, 405.4, 16], face: 90 }, achiyah: { at: [205.2, 403.8, 16], face: 90 }, stock: { at: [204.3, 403.95, 16], face: 270 },
+  buyY: [206.5, 405.4, 16], buyA: [206.5, 403.8, 16], hand: [207.4, 402.65, 16], kohen: [207.4, 401.35, 16],
+  in: [[214.5, 409, 16], [213.2, 409.9, 16], [208.4, 409.9, 16], [207.0, 407.0, 16]], out: [[207.7, 405.6, 16], [207.5, 409, 16]],
+  shelf: [['wine_jug', [203.25, 403.35, 16.5]], ['wine_jug', [203.25, 403.95, 16.5]], ['oil_flask', [203.25, 404.55, 16.5]], ['solet', [203.25, 405.2, 16.5]]],
+  table: { stand: [206.9, 281.0, 16], face: 270, x: 205.5, z: 17.44, ys: [280.3, 280.85, 281.4, 281.95] },
+};
+// the seal each offering's libations need (Shekalim 5:3; Rambam KhM 7:11–12; Bartenura: a poor metzora's one lamb takes
+// "kid", as the first tanna, the halachah)
+export const SEAL_OF = {
+  gedi: { en: '“kid” (gedi)', he: 'גדי', note: 'for the libations of the flock, large and small, male and female, except rams' },
+  zachar: { en: '“male” (zachar)', he: 'זכר', note: 'for the libations of rams only' },
+  egel: { en: '“calf” (egel)', he: 'עגל', note: 'for the libations of cattle, large and small, male and female' },
+  chotei: { en: '“sinner” (chotei)', he: 'חוטא', note: 'for the libations of the three animals of a metzora' },
+};
+const LIB_TYPES = { olah: 'an olah', shelamim: 'a shelamim', todah: 'a todah (thanksgiving)' };
 // the shaven nazir: the same man (the nazir pool's slot) with people's setShaven('head') from the moment the razor has
 // done (Bamidbar 6:18; Nazir 6:8) — P.shaven windows, applied every update (a pure function of t)
 
@@ -151,6 +181,10 @@ export default {
       parvah: P('hide-salters', 'kohen', 3, 8),
       garmu: P('beit-garmu', 'kohen', 4, 9),
       seals: P('seals', 'israelite', 2, 10),
+      // by day: those who buy libations with a seal (over the Mount, one at a time at the desk) and the kohanim who take
+      // the wine in to the silver table
+      sealBuyers: P('seal-buyers', 'israelite', 5, 14),
+      sealKohanim: P('seal-kohanim', 'kohen', 3, 15),
       nazLevel: 0,
       chav: null, chavLevel: 0,
       wheel: ctx.movables?.get?.(WHEEL) || null, wheelA: NaN,
@@ -172,6 +206,15 @@ export default {
         return P.nazSpan.none ? [t0, t0] : P.nazSpan.w;
       });
     } catch (e) { console.warn('[sim:g4] nazirites retime failed', e); }
+    // the sale of the seals: listed from the officers' coming to the desk to their leaving it (the first and the last
+    // buyer); none today (no libations staged) — an empty window. Until this date's plan is built, the data's window ⚙
+    try {
+      sim.schedule?.retime?.('seals-sale', (t0, t1, o) => {
+        const P = state.plan;
+        if (o?.nextDay || !P || state.planDate !== ctx.time?.dateString || !P.sealsDay) return [t0, t1];
+        return P.sealsDay.span ? [wrap(P.sealsDay.span[0]), wrap(P.sealsDay.span[1])] : [t0, t0];
+      });
+    } catch (e) { console.warn('[sim:g4] seals-sale retime failed', e); }
     return state;
   },
 
@@ -250,7 +293,7 @@ function* planSteps(ctx, state, sim) {
   const seed = daySeed(ctx, SEED);
   const W = {
     chav: win(sim, 'chavitin-bakers'), wood: win(sim, 'wood-chamber'), naz: winPlan(sim, 'nazirites'), golah: win(sim, 'golah-wheel'),
-    parvah: win(sim, 'parvah'), garmu: win(sim, 'beit-garmu'), seals: win(sim, 'seals'),
+    parvah: win(sim, 'parvah'), garmu: win(sim, 'beit-garmu'), seals: win(sim, 'seals'), sealsDay: winPlan(sim, 'seals-sale'),
   };
   const P = { W, seed, naz: [], cues: [], chelPass: [], nazFire: null, wheelAngle: () => 0, sets: [], free: [], shaven: [], lamps: [], ctx };
   state.troupes = [];
@@ -263,11 +306,12 @@ function* planSteps(ctx, state, sim) {
   if (W.golah) golah(state, P, seed, sim, book);
   if (W.parvah) parvah(state, P, seed, sim, ctx);
   if (W.garmu) garmu(state, P, seed, sim);
-  if (W.seals) seals(state, P, seed, sim, book);
+  if (W.seals || W.sealsDay) seals(state, P, seed, sim, book, ctx);
   for (const tr of state.troupes) tr.replan(sim.generation);
   state.plan = P;
   state.planGen = sim.generation;
   state.planDate = ctx.time?.dateString;
+  if (W.sealsDay) { const ev = sim.event('seals-sale'); if (ev) ctx.schedule?.resolveEvent?.(ev); }
   // the nazirites' staged window (the retime in init), published now that this date's sets are placed
   if (W.naz) {
     P.nazSpan = P.naz.length ? { w: [wrap(Math.min(...P.naz.map((n) => n.span[0]))), wrap(Math.max(...P.naz.map((n) => n.span[1])))] } : { none: true };
@@ -805,40 +849,248 @@ function doorCross(it, from) {
 }
 
 // ------------------------------------------------------------------------------------------------ the seals
-function seals(state, P, seed, sim, book) {
-  const [w0, w1] = P.W.seals;
-  const eps = [0, 1].map((k) => {
-    const S = k === 0 ? SEALS.achiyah : SEALS.yochanan;
+function seals(state, P, seed, sim, book, ctx) {
+  const eps = [[], []];
+  // ---- by day: the sale (sealsDay below), the two officers at their desk through it
+  if (P.W.sealsDay) {
+    const day = sealsDay(state, P, seed, sim, book, ctx);
+    if (day) { eps[0].push(day.achiyah); eps[1].push(day.yochanan); }
+  }
+  // ---- the evening reckoning
+  if (P.W.seals) {
+    const [w0, w1] = P.W.seals;
+    [0, 1].forEach((k) => {
+      const S = k === 0 ? SEALS.achiyah : SEALS.yochanan;
+      let passIn = 0, passOut = 0;
+      const e = booked(book, w0 + 0.5 + 0.3 * k, (it) => visit(it, {
+        gate: 'ce', spur: 'moked', v: 1.15,
+        build: (it) => {
+          passIn = it.T - 0.05;
+          it.walkTo([[214.5, 409, 16], [S.at[0], S.at[1] + 1.4, 16], S.at], 1.0);
+          it.mark = it.T;
+          const min = w1 - w0 - 1.2 - 0.3 * k;
+          if (k === 0) {
+            // Achiyah brings out the seals from the chamber (Tamid 3:3 — the chamber of seals) ⚙
+            it.stand(0.4, S.face);
+            it.walkTo([S.at, SEALS.door, SEALS.inside], 0.8);
+            it.stand(0.7, 20, { pose: 'stand' });
+            it.walkTo([SEALS.inside, SEALS.door, S.at], 0.8, { prop: 'bowl', pose: 'carry_walk' });
+            workAt(it, Math.max(1, min - 2.6), S.at, S.face, [['carry', 'bowl', 3], ['point', 'bowl', 1], ['stand', 'bowl', 1]], seed, 'ac');
+          } else {
+            // Yochanan counts out coin for each seal; a surplus to the Temple, a shortfall from his own (Shekalim 5:4) —
+            // people's coins, on his open palm and in his fist
+            workAt(it, min, S.at, S.face, [['carry_limbs', 'coins', 3], ['kemitzah', null, 2], ['stand', 'coins', 1]], seed, 'yo');
+          }
+          passOut = it.T;
+          it.walkTo([S.at, [S.at[0] - 1.2, S.at[1] + 2.2, 16], [207.5, 409, 16]], 1.0);
+        },
+      }));
+      P.chelPass.push(e.t0 + passIn, e.t0 + passOut + doorCross(e.it, passOut));
+      // (the day's episode ends long before: the sale stops with the private offerings, dayHour 8.3)
+      if (!eps[k].length || eps[k][eps[k].length - 1].t0 + eps[k][eps[k].length - 1].T < e.t0) eps[k].push(e);
+    });
+    P.cues.push({ key: `seals:${Math.round(w0)}`, at: w0 + 4, pos: SEALS.door,
+      text: { en: 'In the evening Achiyah brings out the day\'s seals and receives coin to match from Yochanan ben Pinchas; a surplus goes to the Temple, a shortfall Yochanan pays from his own house (Shekalim 5:4)', he: 'וְלָעֶרֶב בָּאִין זֶה אֵצֶל זֶה' } });
+  }
+  state.troupes.push(new Troupe(state.seals, { plan: (k) => eps[k], legs: (e) => e.it }));
+}
+
+/**
+ * The libations of the day's offerings that the sim stages, each with the moment its wine-bearer takes the wine up at
+ * the silver table (his first leg with the jug): private-offerings' olot, shelamim and todot (Menachot 9:6; Rambam MK
+ * 2:2 — not the chatat, asham, firstling or tithe; the kayitz olot are the public's, bought from the libations' own
+ * surplus, Rambam KhM 7:13: no seal), the nazir's set (his olah lamb and his ram) and the metzora's (his three lambs).
+ * → [{ key, tPick, jugs, seals: [SEAL_OF ids], what: { en } }]
+ */
+export function libationDeliveries(P5, sets) {
+  const out = [];
+  const pickOf = (tr) => { const g = tr.segs.find((x) => x.prop === 'wine_jug'); return g ? g.t0 : NaN; };
+  if (P5?.ok) {
+    for (const inst of P5.insts || []) {
+      if (!LIB_TYPES[inst.type] || inst.job?.kayitz || inst.kayitz) continue;
+      const picks = inst.tracks.filter((tr) => /^N2b?$/.test(tr.role) && tr.slot >= 0).map(pickOf).filter(Number.isFinite);
+      if (!picks.length) continue;
+      const sp = inst.species === 'goat' ? 'a goat' : inst.species === 'ram' ? 'a ram' : 'a lamb';
+      const mother = inst.job?.set === 'yoledet' ? ' — a mother\'s, after childbirth' : '';
+      out.push({ key: inst.id, tPick: Math.min(...picks), jugs: picks.length, seals: [inst.species === 'ram' ? 'zachar' : 'gedi'], what: { en: `${LIB_TYPES[inst.type]}, ${sp}${mother}` } });
+    }
+  }
+  for (const B of sets || []) {
+    if (B.type !== 'nazir' && B.type !== 'metzora') continue;
+    const picks = B.tracks.filter((tr) => /N2$/.test(tr.role)).map(pickOf).filter(Number.isFinite);
+    if (!picks.length) continue;
+    out.push(B.type === 'nazir'
+      ? { key: `set:nazir:${B.role}`, tPick: Math.min(...picks), jugs: 1, seals: ['gedi', 'zachar'], what: { en: 'a nazir\'s olah (a lamb) and his ram' } }
+      : { key: `set:metzora:${B.role}`, tPick: Math.min(...picks), jugs: 1, seals: ['chotei'], what: { en: 'a healed metzora\'s three lambs' } });
+  }
+  for (const d of out) { d.sealText = d.seals.map((k) => SEAL_OF[k].en).join(' and '); d.sealNote = d.seals.map((k) => SEAL_OF[k].note).join('; '); }
+  return out.sort((a, b) => a.tPick - b.tPick);
+}
+
+/**
+ * The sale of the seals by day (Shekalim 5:4; Rambam KhM 7:12): for each libation the sim stages (libationDeliveries),
+ * one man over the Mount into Beit HaMoked's chol half, at Yochanan's desk (the money held out, the seal received), at
+ * Achiyah's (the seal held out, the wine received), at the kodesh line where a kohen takes it; the kohen carries it to
+ * the silver table, where it waits until its bearer takes it up. One buyer at the desks at a time ⚙. Returns the two
+ * officers' day episodes { achiyah, yochanan } (null when nothing is sold today).
+ */
+function sealsDay(state, P, seed, sim, book, ctx) {
+  const [w0] = P.W.sealsDay;
+  const D = SEAL_DAY;
+  const G = geoOf(ctx);
+  const P5 = g5PlanOf(ctx, sim);
+  const n4 = sim.planOf?.('nikanor-stations');
+  const dels = libationDeliveries(P5, [...P.sets, ...(n4?.sets || [])]);
+  P.sealsDay = { n: 0, of: dels.length, buyers: [], dropped: 0 };
+  if (!dels.length) return null;
+  const jugProps = (d) => ({ prop: 'wine_jug', left: d.jugs > 1 ? 'wine_jug' : null });
+
+  // ---- the buyer inside the hall, from the spur's end to the kodesh line and out to the spur's way out (minute 0 at
+  // the spur's end); `marks` collects the moments of his exchanges, relative to it.mark (his arrival at the kodesh line)
+  const inside = (it, d, marks) => {
+    const t0 = it.T;
+    const jp = jugProps(d);
+    it.walkTo([...D.in, D.buyY], 1.1);
+    it.stand(0.1, 270);
+    const pay = it.T;
+    it.stand(0.3, 270, { pose: 'carry_limbs', prop: 'coins' });             // the money held out on his palm
+    it.stand(0.12, 270);                                                      // the seal put into his hand
+    it.stand(0.15, 270, { pose: 'kemitzah' });                                // his hand closed on it
+    it.walkTo([D.buyY, D.buyA], 0.8);
+    it.stand(0.06, 270);
+    const give = it.T;
+    it.stand(0.25, 270, { pose: 'point' });                                   // the seal held out to Achiyah
+    const take = it.T;
+    it.stand(0.18, 270, { pose: 'carry', ...jp });                            // the wine received
+    it.walkTo([D.buyA, D.hand], 0.8, { pose: 'carry_walk', ...jp });
+    it.mark = it.T;
+    it.stand(0.15, 180, { pose: 'carry', ...jp });                            // to the kohen across the line
+    it.stand(0.1, 180);
+    it.walkTo([D.hand, ...D.out], 1.05);
+    if (marks) Object.assign(marks, { in: t0 - it.mark, pay: pay - it.mark, give: give - it.mark, take: take - it.mark, out: it.T - it.mark });
+    return it;
+  };
+  const OFF = {};
+  inside(new Itin(), { jugs: 1 }, OFF);
+  // the kohen's walk to the silver table and back (the G5 graph, as its libation-bearers walk it)
+  const toTable = [D.kohen, ...graphPts(G, 'MOK_X', D.table.stand, { to: 'K_FW' }).slice(1)];
+  const back = graphPts(G, D.table.stand, 'MOK_X', { from: 'K_FW' });
+  const walkMin = (pts, v) => { const it = new Itin(); it.walkTo(pts, v); return it.T; };
+  const MX = G.N?.MOK_X ? [G.N.MOK_X.X, G.N.MOK_X.Y, G.N.MOK_X.Z] : [210.75, 404.5, 16];   // where G5's kohanim come and go
+  const tTable = walkMin(toTable, 1.05), tFromX = walkMin([MX, D.kohen], 1.0);
+
+  // ---- when: the latest first, each one's wine on the table a few minutes before its bearer takes it, and one buyer
+  // at the desks at a time (an earlier one goes earlier) ⚙
+  const order = [...dels].sort((a, b) => b.tPick - a.tPick);
+  let nextIn = Infinity;
+  for (const d of order) {
+    const lead = 1.5 + 6.5 * rand(seed, 'seal-lead', d.key);
+    let mark = d.tPick - lead - (0.25 + tTable + 0.12);
+    mark = Math.min(mark, nextIn - 0.12 - OFF.out);
+    if (mark + OFF.in < w0 - 20) { d.skip = true; P.sealsDay.dropped++; continue; }
+    d.mark = mark;
+    d.tSet = mark + 0.25 + tTable + 0.12;
+    nextIn = mark + OFF.in;
+  }
+  const live = dels.filter((d) => !d.skip).sort((a, b) => a.mark - b.mark);
+  if (!live.length) return null;
+
+  // ---- the buyers: over the Mount, booked in the G4 register, his arrival at the kodesh line on d.mark
+  const gate = bestEntry('moked');
+  const bEps = Array.from({ length: state.sealBuyers.count }, () => []);
+  const freeSlot = (list, a, b) => list.findIndex((L) => !L.some((e) => a < e.t0 + e.T + 0.05 && b > e.t0 - 0.05));
+  const kEps = Array.from({ length: state.sealKohanim.count }, () => []);
+  for (const d of live) {
     let passIn = 0, passOut = 0;
-    const e = booked(book, w0 + 0.5 + 0.3 * k, (it) => visit(it, {
-      gate: 'ce', spur: 'moked', v: 1.15,
+    const e = booked(book, d.mark, (it) => visit(it, {
+      gate, spur: 'moked', v: 1.15,
+      build: (it) => { passIn = it.T - 0.05; inside(it, d); passOut = it.T; },
+    }));
+    // the kohen: from where G5's kohanim come and go in the hall to the line, the wine taken, to the silver table and
+    // back (his own figure: who took the libations in is not recorded ⚙)
+    const kT0 = d.mark - 0.05 - tFromX;
+    const jp = jugProps(d);
+    const it = new Itin();
+    it.walkTo([MX, D.kohen], 1.0);
+    it.stand(d.mark + 0.15 - (kT0 + it.T), 0);
+    it.stand(0.1, 0, { pose: 'carry', ...jp });
+    it.walkTo(toTable, 1.05, { pose: 'carry_walk', ...jp });
+    it.stand(0.12, D.table.face, { pose: 'carry', ...jp });
+    const tDown = kT0 + it.T;
+    it.stand(0.1, D.table.face);
+    it.walkTo(back, 1.2);
+    it.done();
+    const kb = freeSlot(kEps, kT0, kT0 + it.T);
+    const bb = freeSlot(bEps, e.t0, e.t0 + e.T);
+    if (bb < 0 || kb < 0) { release(e.it.mp); d.skip = true; P.sealsDay.dropped++; continue; }
+    e.d = d;
+    bEps[bb].push(e);
+    P.chelPass.push(e.t0 + passIn, e.t0 + passOut + doorCross(e.it, passOut));
+    kEps[kb].push({ t0: kT0, T: it.T, it, d });
+    d.tSet = tDown;
+    P.sealsDay.n++;
+    P.sealsDay.buyers.push({ key: d.key, mark: d.mark, tSet: d.tSet, tPick: d.tPick, seals: d.seals });
+  }
+  const sold = live.filter((d) => !d.skip);
+  if (!sold.length) return null;
+  // the wine waiting on the silver table (four places along it; a ram's two jugs side by side) until its bearer
+  const ys = D.table.ys, busyTo = ys.map(() => -Infinity);
+  for (const d of [...sold].sort((a, b) => a.tSet - b.tSet)) {
+    let j = -1;
+    for (let i = 0; i + d.jugs <= ys.length && j < 0; i++) { let ok = true; for (let q = 0; q < d.jugs; q++) if (busyTo[i + q] > d.tSet) ok = false; if (ok) j = i; }
+    if (j < 0) continue;
+    for (let q = 0; q < d.jugs; q++) { busyTo[j + q] = d.tPick + 0.1; P.free.push({ name: 'wine_jug', t0: d.tSet, t1: d.tPick, at: [D.table.x, ys[j + q], D.table.z], h: 90 }); }
+  }
+  state.troupes.push(new Troupe(state.sealBuyers, { plan: (k) => bEps[k], legs: (e) => e.it }));
+  state.troupes.push(new Troupe(state.sealKohanim, { plan: (k) => kEps[k], legs: (e) => e.it }));
+
+  // ---- the two officers: at the desk from before the first buyer to after the last, answering each one ⚙
+  const first = sold[0].mark + OFF.in - 3, last = sold[sold.length - 1].mark + OFF.out + 1.5;
+  for (const [name, at] of D.shelf) P.free.push({ name, t0: first, t1: last, at, h: 90 });
+  const officer = (k) => {
+    const S = k === 0 ? D.achiyah : D.yochanan;
+    let passIn = 0, passOut = 0;
+    const e = booked(book, first + 0.3 * k, (it) => visit(it, {
+      gate, spur: 'moked', v: 1.1,
       build: (it) => {
         passIn = it.T - 0.05;
-        it.walkTo([[214.5, 409, 16], [S.at[0], S.at[1] + 1.4, 16], S.at], 1.0);
+        it.walkTo([...D.in, [S.at[0] + 1.3, S.at[1], 16], S.at], 1.0);
         it.mark = it.T;
-        const min = w1 - w0 - 1.2 - 0.3 * k;
-        if (k === 0) {
-          // Achiyah brings out the seals from the chamber (Tamid 3:3 — the chamber of seals) ⚙
-          it.stand(0.4, S.face);
-          it.walkTo([S.at, SEALS.door, SEALS.inside], 0.8);
-          it.stand(0.7, 20, { pose: 'stand' });
-          it.walkTo([SEALS.inside, SEALS.door, S.at], 0.8, { prop: 'bowl', pose: 'carry_walk' });
-          workAt(it, Math.max(1, min - 2.6), S.at, S.face, [['carry', 'bowl', 3], ['point', 'bowl', 1], ['stand', 'bowl', 1]], seed, 'ac');
-        } else {
-          // Yochanan counts out coin for each seal; a surplus to the Temple, a shortfall from his own (Shekalim 5:4) —
-          // people's coins, on his open palm and in his fist
-          workAt(it, min, S.at, S.face, [['carry_limbs', 'coins', 3], ['kemitzah', null, 2], ['stand', 'coins', 1]], seed, 'yo');
+        const abs0 = first + 0.3 * k - it.mark;              // clock minute of it.T = 0
+        const until = (t, h, o) => { const dt = t - (abs0 + it.T); if (dt > 0.005) it.stand(dt, h, o); };
+        let prevTake = -Infinity;
+        for (const d of sold) {
+          const pay = d.mark + OFF.pay, take = d.mark + OFF.take;
+          if (k === 1) {
+            // Yochanan: reaches for the money, takes it, puts the seal into the buyer's hand (Shekalim 5:4)
+            until(pay - 0.08, S.face);
+            until(pay + 0.16, S.face, { pose: 'point' });
+            until(pay + 0.3, S.face, { pose: 'carry_limbs', prop: 'coins' });
+            until(pay + 0.42, S.face, { pose: 'point' });
+          } else {
+            // Achiyah: one of the libations from the ledge, held ready, given for the seal (Shekalim 5:4) ⚙
+            const jp = jugProps(d);
+            const tFetch = Math.max(prevTake + 0.3, pay - 0.35);
+            until(tFetch, S.face);
+            it.walkTo([S.at, D.stock.at], 0.7);
+            it.stand(0.15, D.stock.face);
+            it.walkTo([D.stock.at, S.at], 0.7, { pose: 'carry_walk', ...jp });
+            until(take, S.face, { pose: 'carry', ...jp });
+            until(take + 0.22, S.face, { pose: 'kemitzah' });          // the seal in his hand
+            prevTake = take;
+          }
         }
+        until(last, S.face);
         passOut = it.T;
-        it.walkTo([S.at, [S.at[0] - 1.2, S.at[1] + 2.2, 16], [207.5, 409, 16]], 1.0);
+        it.walkTo([S.at, [207.7, S.at[1] + 0.2, 16], ...D.out.slice(-1)], 1.0);
       },
     }));
     P.chelPass.push(e.t0 + passIn, e.t0 + passOut + doorCross(e.it, passOut));
-    return [e];
-  });
-  state.troupes.push(new Troupe(state.seals, { plan: (k) => eps[k], legs: (e) => e.it }));
-  P.cues.push({ key: `seals:${Math.round(w0)}`, at: w0 + 4, pos: SEALS.door,
-    text: { en: 'In the evening Achiyah brings out the day\'s seals and receives coin to match from Yochanan ben Pinchas; a surplus goes to the Temple, a shortfall Yochanan pays from his own house (Shekalim 5:4)', he: 'וְלָעֶרֶב בָּאִין זֶה אֵצֶל זֶה' } });
+    e.day = true;
+    return e;
+  };
+  P.sealsDay.span = [first, last];
+  return { achiyah: officer(0), yochanan: officer(1) };
 }
 
 // ------------------------------------------------------------------------------------------------ cues

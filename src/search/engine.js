@@ -49,6 +49,7 @@ export const SYNONYMS = {
   wash: ['kiyor', 'tevilah'], washing: ['kiyor', 'tevilah'], bath: ['tevilah', 'mikveh'], slaughter: ['shechitah', 'slaughter'], kill: ['slaughter', 'shechitah'],
   lamb: ['keves', 'tamid'], sheep: ['lamb', 'keves'], cow: ['bull', 'parah'], prayer: ['shema', 'blessing'], blessing: ['birkat kohanim'],
   guard: ['watch', 'levites'], new: ['rosh chodesh'], moon: ['rosh chodesh'], salt: ['melach'], wood: ['etzim', 'wood'],
+  seal: ['chotam', 'chotamot'], token: ['chotam', 'seal'], receipt: ['chotam', 'seal'], voucher: ['chotam', 'seal'],
 };
 const SYN = 0.85;
 /** words a question is phrased with that no document needs ("where do women stand" → women stand) */
