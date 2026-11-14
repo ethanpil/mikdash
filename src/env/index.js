@@ -18,12 +18,13 @@ import { installFogChunks, FogUniforms } from './fog.js';
 import { createInteriors } from './interiors.js';
 import { setInteriorProbes } from './interiors-glsl.js';
 import { createProbes } from './probes.js';
+import { createClouds, startCloudBake } from './clouds.js';
 
 const TIERS = {
-  low: { skyW: 128, skyH: 64, steps: 18, envSize: 32, envInterval: 1.0, envAngle: 1.0, stars: 1200, magLimit: 5.6, milkyWay: false, clouds: false, twinkle: false },
-  medium: { skyW: 192, skyH: 96, steps: 26, envSize: 64, envInterval: 0.3, envAngle: 0.5, stars: 3000, magLimit: 6.2, milkyWay: false, clouds: false, twinkle: false },
-  high: { skyW: 256, skyH: 128, steps: 34, envSize: 128, envInterval: 0.15, envAngle: 0.35, stars: 5500, magLimit: 6.5, milkyWay: true, mwOct: 4, clouds: true, cloudOct: 4, twinkle: true },
-  ultra: { skyW: 320, skyH: 160, steps: 44, envSize: 128, envInterval: 0.1, envAngle: 0.25, stars: 8000, magLimit: 6.8, milkyWay: true, mwOct: 5, clouds: true, cloudOct: 5, twinkle: true },
+  low: { skyW: 128, skyH: 64, steps: 18, envSize: 32, envInterval: 1.0, envAngle: 1.0, stars: 1200, magLimit: 5.6, milkyWay: false, twinkle: false },
+  medium: { skyW: 192, skyH: 96, steps: 26, envSize: 64, envInterval: 0.3, envAngle: 0.5, stars: 3000, magLimit: 6.2, milkyWay: false, twinkle: false },
+  high: { skyW: 256, skyH: 128, steps: 34, envSize: 128, envInterval: 0.15, envAngle: 0.35, stars: 5500, magLimit: 6.5, milkyWay: true, mwOct: 4, twinkle: true },
+  ultra: { skyW: 320, skyH: 160, steps: 44, envSize: 128, envInterval: 0.1, envAngle: 0.25, stars: 8000, magLimit: 6.8, milkyWay: true, mwOct: 5, twinkle: true },
 };
 
 // Exposure key: displayed "average" value (pre-tone-map) vs adaptation luminance La (cd/m², log10).
@@ -98,9 +99,6 @@ const WB_CLOSED = 0.9;
 // (−12° → −16°): twilight and moonless nights are unchanged. Art direction, not a measured quantity (the measured sky is
 // ≈ 16 % of the moonlight at 67°, as by day)
 const NIGHT_AMBIENT_CUT = 0.5;
-// gate-env-render: the season's least cirrus cover (high / ultra): the early rains (yoreh, Cheshvan–Kislev) bring thin high
-// cloud on most days; summer skies stay clear. Index = month − 1; the per-date draw can only add to it
-const CIRRUS_FLOOR = [0.3, 0.28, 0.24, 0.16, 0.06, 0, 0, 0, 0, 0.15, 0.28, 0.3];
 const lum3 = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 
 const DEG = Math.PI / 180;
@@ -125,17 +123,13 @@ function keyFor(log10La) {
   return KEY[KEY.length - 1][1];
 }
 
-function hash01(str) {
-  let h = 2166136261;
-  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return ((h >>> 0) % 10000) / 10000;
-}
-
 // perf-1: env's fixed passes (atmosphere LUTs, PMREM) are created and their programs issued at the start of the boot,
 // while the world is built (main.js) — compiled synchronously at init they held env's init for ≈ 2 s on the HD 4600
 let pre = null;
 export function prewarm(ctx) {
   if (pre) return;
+  // sky-smoke-fire: the cloud tile bakes in a Worker beside the world build (env/clouds.js)
+  try { startCloudBake(); } catch { /* baked at init */ }
   const renderer = ctx.renderer;
   const qkey = ctx.quality?.key in TIERS ? ctx.quality.key : 'medium';
   const tier = TIERS[qkey];
@@ -229,8 +223,13 @@ export async function init(ctx) {
   skyU.uSkyLUT.value = luts.skyRT.texture;
   skyU.uObsR.value = obsR;
   skyU.uSunCos.value = Math.cos(ATMO.sunAngularRadius);
-  const domeFeatures = (t) => ({ milkyWay: t.milkyWay, mwOctaves: t.mwOct, clouds: t.clouds, cloudOctaves: t.cloudOct });
-  const envFeatures = (t) => ({ clouds: t.clouds, cloudOctaves: Math.min(3, t.cloudOct || 3) });
+  // sky-smoke-fire: the clouds on every tier (a baked tile: env/clouds.js), on the visible dome only — not in the environment
+  // map's sky (nor in the probes' captures, withoutDiscs): they change no light in the courts
+  // (the cumulus' most slices along the ray, low over the horizon: 16, or 24 where the tier draws detail — quality.detail ≥ 1)
+  const domeFeatures = (t) => ({ milkyWay: t.milkyWay, mwOctaves: t.mwOct, clouds: true, cloudSlices: (ctx.quality?.detail ?? 0) >= 1 ? 24 : 16 });
+  const envFeatures = () => ({});
+  const clouds = createClouds(ctx, skyU, { ATMO, mie });
+  if (ctx.params?.shot) await clouds.ready; // a screenshot waits for the tile (in play it fades in if it is late)
   const skyMat = createSkyMaterial(skyU, domeFeatures(tier));
   const sky = new Mesh(new BoxGeometry(2, 2, 2), skyMat);
   sky.name = 'env.sky';
@@ -288,7 +287,10 @@ export async function init(ctx) {
     skyU.uSunDiscScale.value = 0; skyU.uMoonRadiance.value.set(0, 0, 0); skyU.uEarthshine.value.set(0, 0, 0);
     skyU.uLutScale.value = ls * gain; skyU.uOutScale.value = os * gain;
     field.stars.visible = false; field.planets.visible = false;
+    const cw = skyU.uCloudH.value.w;
+    skyU.uCloudH.value.w = 0;
     try { return fn(); } finally {
+      skyU.uCloudH.value.w = cw;
       skyU.uSunDiscScale.value = sd; skyU.uMoonRadiance.value.copy(mr); skyU.uEarthshine.value.copy(es);
       skyU.uLutScale.value = ls; skyU.uOutScale.value = os;
       field.stars.visible = sv; field.planets.visible = pv;
@@ -328,7 +330,8 @@ export async function init(ctx) {
   };
 
   // ---------------------------------------------------------------- stars & planets
-  const field = createStarfield({ count: tier.stars, magLimit: tier.magLimit, seed: 5786 });
+  // the stars read the clouds' cover (sky-smoke-fire): the same uniform objects as the dome
+  const field = createStarfield({ count: tier.stars, magLimit: tier.magLimit, seed: 5786, clouds: skyU });
   field.uniforms.uTau.value.fromArray(tauZenith);
   field.uniforms.uSkyLUT.value = luts.skyRT.texture;
   field.uniforms.uLutPhys.value = LUT_SCALE;
@@ -402,14 +405,6 @@ export async function init(ctx) {
   const hazeFar = ctx.params?.raw?.get?.('farhaze') === '0' ? 0 : drawDistance;
   const roomCol = [1, 1, 1];          // the light the eye adapts to in the camera's room (luminance 1)
   const intEnv = [0, 0, 0];            // what rooms' openings show, per unit sky irradiance
-  // thin cirrus coverage: a property of the chosen date (deterministic), or forced via ctx.env.cirrus / ?cirrus=
-  const urlCirrus = parseFloat(ctx.params.raw?.get?.('cirrus'));
-  const cloudCoverage = () => {
-    if (Number.isFinite(api.cirrus)) return MathUtils.clamp(api.cirrus, 0, 1);
-    const h = hash01(ctx.time?.dateString || '');
-    const floor = CIRRUS_FLOOR[((ctx.time?.date?.m ?? 1) - 1 + 12) % 12] ?? 0;
-    return Math.max(floor * (0.75 + 0.5 * hash01(`${ctx.time?.dateString || ''}#c`)), h < 0.45 ? 0 : (h - 0.45) / 0.55 * 0.5);
-  };
 
   // ---------------------------------------------------------------- terrain horizon (sun behind Har HaMishchah)
   function horizonAngle(azDeg, camY) {
@@ -870,10 +865,16 @@ export async function init(ctx) {
     ncp.set(0, Math.sin(time.geo.lat * DEG), -Math.cos(time.geo.lat * DEG));
     skyU.uMoonNorth.value.copy(ncp).addScaledVector(moon.dir, -ncp.dot(moon.dir)).normalize();
 
-    // cirrus (high+): coverage seeded per date, drifting with sim time
-    skyU.uCloudParams.value.set(cloudCoverage(), 0.55, time.t);
-    skyU.uCloudSun.value.set(st.sunE0, st.sunE0, st.sunE0);
-    skyU.uCloudSky.value.set(Esky / Math.PI, Esky / Math.PI, Esky / Math.PI);
+    // clouds (sky-smoke-fire): coverage and offset per date, drift with the sim's absolute time, the light at the clouds
+    {
+      const fl = st.floorIrr;
+      const Eg0 = st.keyE * Math.max(st.keyDir.y, 0) * vis + Esky;
+      clouds.update(time, {
+        sunE0: st.sunE0, sunDir: sun.dir, moonE: moonE0, moonDirY: moon.dir.y, moonColor: MOON_COLOR, obsR, transmittanceCPU,
+        sky: [0, 1, 2].map((c) => st.skyIrrRGB[c] + fl * NIGHT_TINT[c]),
+        ground: LOCAL_ALBEDO.map((a) => (0.5 * a * Eg0) / Math.PI),
+      });
+    }
 
     // local ground seen by the env probe below the horizon
     const Eg = st.keyE * Math.max(st.keyDir.y, 0) * vis + Esky;
@@ -1030,8 +1031,10 @@ export async function init(ctx) {
      * `density` is the FogExp2-equivalent (also scene.fog.density), `extinction` the green-channel σ (1/m).
      */
     fog: { values: fogU.values, density: 0, extinction: 0 },
-    /** cirrus coverage 0..1 (high/ultra only); null = per-date deterministic weather */
-    cirrus: Number.isFinite(urlCirrus) ? urlCirrus : null,
+    /** cirrus coverage 0..1; null = per-date deterministic weather (?cirrus= / ?cumulus= / ?clouds=0 in the URL) */
+    cirrus: null,
+    /** the cloud layers (env/clouds.js): uniforms, texture, hidden(fn) */
+    get clouds() { return clouds; },
     atmosphere: ATMO,
     get shadowsManaged() { return st.shadowsManaged; },
     /** false: the render task drives sunLight.shadow (e.g. CSM); env stops moving the shadow camera */
@@ -1089,7 +1092,7 @@ export async function init(ctx) {
     dispose() {
       probes?.dispose();
       luts.dispose(); pmrem.dispose(); cubeRT.dispose(); pmremRT?.dispose();
-      skyMat.dispose(); envMat.dispose();
+      skyMat.dispose(); envMat.dispose(); clouds.dispose();
     },
   };
   ctx.env = api;

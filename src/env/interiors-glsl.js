@@ -652,8 +652,22 @@ void mkIBL( vec3 geoPos, vec3 viewDir, vec3 normal, float roughness ) {
       vec3 tf = max( ( mkBoxHi - Pw ) * inv, ( mkBoxLo - Pw ) * inv );
       float tH = max( min( tf.x, min( tf.y, tf.z ) ), 0.0 );
       float fc = mod( mkMainAp.z, 8.0 );
-      float vH = mkAperture( mkDm - Rw * tH, mkMainAp.xy, mkApFrame( fc ), ( mkMainAp.z - fc ) * 0.125 ) + 0.4 * mkV;
-      inRad *= mix( clamp( vH / max( mkV, 1e-4 ), 0.0, 4.0 ), 1.0, smoothstep( 0.5, 1.0, roughness ) );
+      MkApF Fm = mkApFrame( fc );
+      float vH = mkAperture( mkDm - Rw * tH, mkMainAp.xy, Fm, ( mkMainAp.z - fc ) * 0.125 ) + 0.4 * mkV;
+      // sky-smoke-fire: …and the surface met is no even box either (low's gold read as flat mustard paint: the walls' and the
+      // floor's reflections varied by ≈ 1.3 : 1 where medium's probe shows 1.5–2.5 : 1). Which face of the room's box the ray
+      // meets (the axis whose exit comes first) and where on it: the corners and edges where faces meet are darker (each
+      // sees less of the room); walls are brighter low down (the floor's bounce, the patch the gate lets in) than up under
+      // the ceiling, the ceiling dimmest, the floor bright; the face opposite the main opening (the Kodesh's parochet, dark
+      // wool) mirrors darkly ⚙. ALU only: the box and main opening the shader already holds
+      vec3 Ph = Pw + Rw * tH;
+      vec3 fa = step( tf, vec3( tH + 1e-3 ) );                       // 1 on the axis of the face met
+      vec3 dE = min( Ph - mkBoxLo, mkBoxHi - Ph ) + fa * 1e3;        // distances to that face's edges (m)
+      float corner = mix( 0.5, 1.0, smoothstep( 0.0, 2.5, min( dE.x, min( dE.y, dE.z ) ) ) );
+      float hq = clamp( ( Ph.y - mkBoxLo.y ) / max( mkBoxHi.y - mkBoxLo.y, 1e-3 ), 0.0, 1.0 );
+      float face = fa.y > 0.5 ? ( Rw.y > 0.0 ? 0.55 : 1.15 ) : mix( 1.2, 0.65, hq );
+      float farEnd = dot( fa * sign( Rw ), - Fm.n ) > 0.5 ? 0.45 : 1.0;
+      inRad *= mix( clamp( vH / max( mkV, 1e-4 ), 0.0, 4.0 ) * corner * face * farEnd, 1.0, smoothstep( 0.5, 1.0, roughness ) );
     }
     mkRad += g * ( hit * ( goldRoom ? mix( rad, LbO, mkS ) : rad ) + ( 1.0 - hit ) * mix( rad, inRad, mkS ) );
   }

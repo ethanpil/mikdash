@@ -280,7 +280,7 @@ export function createMapPanel(app) {
       // the headline rite of the place names it on the plan (ux-audit H: a bare count said that, not what)
       const top = evs?.length ? evs.reduce((a, e) => ((e.importance || 1) > (a.importance || 1) ? e : a), evs[0]) : null;
       items.push({
-        id: z.id, tier: z.tier, level: z.level, stacked: z.stacked, name: z.name, anchor: z.anchor, room: z.room, main: z.main,
+        id: z.id, tier: z.tier, level: z.level, stacked: z.stacked, name: z.name, anchor: z.anchor, room: z.room, main: z.main, area: z.area,
         slide: z.id !== 'outside' && z.area <= 1e6, // the city and the valleys are named at their observer spots only
         active: evs ? evs.length : 0, soon: evs ? null : (activity.soon.get(z.id) ?? null),
         callout: top ? shortTitle(top.title?.en || top.id) : null,

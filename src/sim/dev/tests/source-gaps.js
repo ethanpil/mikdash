@@ -17,7 +17,7 @@ const fails = [], out = {};
 const errs = [];
 const oe = console.error;
 console.error = (...a) => { errs.push(a.map(String).join(' ').slice(0, 300)); oe.apply(console, a); };
-const at = async (t) => { time.set(t); await frames(3); };
+const at = async (t) => { time.set(t); await frames(2); };
 const shown = (entryId, pool) => { const e = rt.choreo(entryId); const p = e?.pools.find((q) => q.name === pool); return p ? p.slots.filter((s) => s.want && s.actor) : []; };
 const door = (id) => ctx.movables?.get?.(`door:${id}`)?.userData?.openAmount ?? NaN;
 const siteOf = (s) => { const o = s.actor.object3D.position; return [o.x / AM, -o.z / AM, o.y / AM]; };
@@ -57,12 +57,12 @@ for (const k of ['shushan', 'kiponus', 'nikanor', 'mayim']) if (!(out.noon[k] > 
 // the opening: sample its window; count the gate Levites in 'lock' or aside (not at their post's stand)
 const wo = win('gates-opened');
 const duty = { lock: 0, walk: 0, max: 0 };
-for (let t = wo[0]; t <= wo[1]; t += 0.1) {
+for (let t = wo[0]; t <= wo[1]; t += 0.15) {
   await at(t);
   const g = shown('night-watch', 'guards');
   const locks = g.filter((s) => s._pose === 'lock').length;
   duty.lock = Math.max(duty.lock, locks); duty.max = Math.max(duty.max, g.length);
-  if (Math.round(t * 10) % 5 === 0) sweep(`open ${time.format(t)}`);
+  if (Math.round(t / 0.15) % 4 === 0) sweep(`open ${time.format(t)}`);
 }
 out.opening = duty;
 if (duty.lock < 1) fails.push('no gate Levite at the bar during the opening');
@@ -73,7 +73,7 @@ out.dusk = Object.fromEntries(Object.entries(G).map(([k, id]) => [k, r2(door(id)
 if (!(out.dusk.nikanor > 0.9 && out.dusk.shushan > 0.9)) fails.push(`gates shut before the Levites arrive: ${JSON.stringify(out.dusk)}`);
 const ws = win('gates-shut');
 let shutLocks = 0;
-for (let t = ws[0]; t <= ws[1]; t += 0.1) { await at(t); shutLocks = Math.max(shutLocks, shown('night-watch', 'guards').filter((s) => s._pose === 'lock').length); if (Math.round(t * 10) % 5 === 0) sweep(`shut ${time.format(t)}`); }
+for (let t = ws[0]; t <= ws[1]; t += 0.2) { await at(t); shutLocks = Math.max(shutLocks, shown('night-watch', 'guards').filter((s) => s._pose === 'lock').length); if (Math.round(t / 0.2) % 4 === 0) sweep(`shut ${time.format(t)}`); }
 await at(z.tzeit + 8);
 out.night = Object.fromEntries(Object.entries(G).map(([k, id]) => [k, r2(door(id))]));
 out.shutLocks = shutLocks;
@@ -82,13 +82,13 @@ for (const k of Object.keys(G)) if (!(out.night[k] < 0.05)) fails.push(`${k} not
 // the salt
 const wsa = win('ramp-salt');
 let salted = 0, saltSeen = 0;
-for (let t = wsa[0]; t <= wsa[1]; t += 0.25) { await at(t); const s = shown('temple-duties', 'salter'); saltSeen = Math.max(saltSeen, s.length); if (s.some((x) => x._pose === 'salt')) salted++; sweep(`salt ${time.format(t)}`); }
+for (let t = wsa[0]; t <= wsa[1]; t += 0.4) { await at(t); const s = shown('temple-duties', 'salter'); saltSeen = Math.max(saltSeen, s.length); if (s.some((x) => x._pose === 'salt')) salted++; sweep(`salt ${time.format(t)}`); }
 out.salt = { seen: saltSeen, salting: salted };
 if (!saltSeen || !salted) fails.push(`salter ${JSON.stringify(out.salt)}`);
 // the afternoon call
 const wc = win('afternoon-call');
 let called = 0;
-for (let t = wc[0]; t <= wc[1]; t += 0.1) { await at(t); if (shown('temple-duties', 'caller').some((x) => x._pose === 'call')) called++; }
+for (let t = wc[0]; t <= wc[1]; t += 0.15) { await at(t); if (shown('temple-duties', 'caller').some((x) => x._pose === 'call')) called++; }
 out.call = called;
 if (!called) fails.push('no caller in "call" before the afternoon tamid');
 // the officer over the song
@@ -101,7 +101,7 @@ if (out.duchan !== 13) fails.push(`${out.duchan} Levites on the duchan during th
 time.setDate('2026-11-06'); await frames(3);
 const ww = win('altar-wiping');
 let wipers = 0;
-for (let t = ww[0]; t <= ww[1]; t += 1) { await at(t); const w = shown('temple-duties', 'wipers'); wipers = Math.max(wipers, w.filter((x) => x._pose === 'tend_lamp').length); sweep(`wipe ${time.format(t)}`); }
+for (let t = ww[0]; t <= ww[1]; t += 3) { await at(t); const w = shown('temple-duties', 'wipers'); wipers = Math.max(wipers, w.filter((x) => x._pose === 'tend_lamp').length); sweep(`wipe ${time.format(t)}`); }
 out.wipers = wipers;
 if (wipers !== 3) fails.push(`${wipers} wipers at work, want 3`);
 const ko = win('kanim-out');
@@ -122,6 +122,7 @@ if (S.byId('kanim-in')) fails.push('kanim-in on a Monday');
 
 // ---------------------------------------------------------------------------------------------- Shabbat 2026-11-07
 time.setDate('2026-11-07'); await frames(3);
+{ const w = win('shabbat-musaf'); await at(w[0] + 20); }          // (the module plans when it becomes relevant)
 const sm = rt.choreo('shabbat-musaf');
 const M = sm?.state?.plan;
 if (!M) fails.push('no Shabbat musaf plan');

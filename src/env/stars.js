@@ -8,6 +8,7 @@ import {
   Points, BufferGeometry, Float32BufferAttribute, ShaderMaterial, AdditiveBlending, Matrix3, Vector3,
 } from 'three';
 import { NIGHT_FLOOR_GLSL } from './atmosphere.js';
+import { CLOUD_UNIFORMS_GLSL, CLOUD_COVER_GLSL } from './clouds.js';
 
 // [RA hours, Dec deg, V mag, B-V] — J2000.
 const BRIGHT = [
@@ -161,6 +162,10 @@ uniform float uSizeScale;
 uniform float uDynamic;      // 1: position is already a world direction (planets)
 varying vec3 vColor;
 ${NIGHT_FLOOR_GLSL}
+#ifdef STAR_CLOUDS
+${CLOUD_UNIFORMS_GLSL}
+${CLOUD_COVER_GLSL}
+#endif
 vec2 skyUV( vec3 dir ) {
   float horizon = - acos( clamp( RG / uObsR, -1.0, 1.0 ) );
   float el = asin( clamp( dir.y, -1.0, 1.0 ) );
@@ -190,6 +195,10 @@ void main() {
   // contrast over the background: ~1 at the limiting magnitude (a faint but sure dot on a display),
   // x2.5 per magnitude brighter — a 2nd-magnitude star at night reads near white, Venus dazzles
   float c = exp2( -1.3287712 * ( m - mlim ) ) * tw;
+#ifdef STAR_CLOUDS
+  // sky-smoke-fire: behind a cloud a star is hidden (the cirrus dims it)
+  c *= 1.0 - mkCloudCover( dir, uObsR );
+#endif
   float size = clamp( 2.0 + 1.0 * log2( max( c, 1e-3 ) ) * 0.30103, 2.0, 6.0 ) * uSizeScale;
   vColor = aColor * ( T / Tl ) * Lbg * c * uOut;
   if ( c < 0.1 ) { gl_Position = vec4( 2.0, 2.0, 2.0, 1.0 ); gl_PointSize = 0.0; return; }
@@ -210,9 +219,10 @@ void main() {
 }
 `;
 
-function starMaterial(shared) {
+function starMaterial(shared, clouds) {
   return new ShaderMaterial({
     name: 'env.stars',
+    defines: clouds ? { STAR_CLOUDS: '' } : {},
     uniforms: { ...shared, uDynamic: { value: 0 } },
     vertexShader: STAR_VERT,
     fragmentShader: STAR_FRAG,
@@ -261,7 +271,7 @@ function buildStarGeometry(count, magLimit, seed) {
  * Builds the star field (count procedural stars by tier) and the planets.
  * Returns { stars, planets, uniforms, setCelestial(lst, lat), updatePlanets(list), rebuild({count, magLimit}) }.
  */
-export function createStarfield({ count = 3000, magLimit = 6.5, seed = 5786 } = {}) {
+export function createStarfield({ count = 3000, magLimit = 6.5, seed = 5786, clouds = null } = {}) {
   const uniforms = {
     uCelestial: { value: new Matrix3() },
     uSkyLUT: { value: null },
@@ -274,8 +284,10 @@ export function createStarfield({ count = 3000, magLimit = 6.5, seed = 5786 } = 
     uTwinkle: { value: 0 },
     uSizeScale: { value: 1 },
   };
+  // sky-smoke-fire: the cloud uniforms of the dome (the same objects), when given
+  if (clouds) for (const k of ['uCloudTex', 'uCuUV', 'uCiUV', 'uCloudH']) uniforms[k] = clouds[k];
 
-  const stars = new Points(buildStarGeometry(count, magLimit, seed), starMaterial(uniforms));
+  const stars = new Points(buildStarGeometry(count, magLimit, seed), starMaterial(uniforms, !!clouds));
   stars.name = 'env.stars';
   stars.frustumCulled = false;
   stars.renderOrder = -1000; // first among transparents: smoke & flames blend over the stars
@@ -285,7 +297,7 @@ export function createStarfield({ count = 3000, magLimit = 6.5, seed = 5786 } = 
   pg.setAttribute('aMag', new Float32BufferAttribute(new Float32Array(5).fill(30), 1));
   pg.setAttribute('aColor', new Float32BufferAttribute(Object.values(PLANET_COLOR).flat(), 3));
   pg.setAttribute('aSeed', new Float32BufferAttribute([0.11, 0.37, 0.59, 0.73, 0.91], 1));
-  const pmat = starMaterial(uniforms);
+  const pmat = starMaterial(uniforms, !!clouds);
   pmat.uniforms.uDynamic.value = 1;
   const planets = new Points(pg, pmat);
   planets.name = 'env.planets';

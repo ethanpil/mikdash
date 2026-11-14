@@ -219,7 +219,9 @@ function updateShafts(ctx, out, ex) {
   screenUv(camera, _sun, _disc);
   const onScreen = _disc.z > 0 && Math.abs(_disc.x - 0.5) < 0.9 && Math.abs(_disc.y - 0.5) < 0.9;
   // strongest with a low sun (long hazy light path at dawn/dusk), weaker toward noon, none at night
-  const k = MathUtils.clamp((alt + 1.5) / 3, 0, 1) * (1 - 0.6 * MathUtils.clamp((alt - 10) / 35, 0, 1));
+  let k = MathUtils.clamp((alt + 1.5) / 3, 0, 1) * (1 - 0.6 * MathUtils.clamp((alt - 10) / 35, 0, 1));
+  // sky-smoke-fire: a cloud over the Sun dims its shafts (env/clouds.js: the cover toward the Sun)
+  k *= ctx.env?.clouds?.sunTransmittance ?? 1;
   out.shaftPass.enabled = onScreen && k > 0.01;
   if (!out.shaftPass.enabled) return;
   out.shafts.sunUv.set(_disc.x, _disc.y);

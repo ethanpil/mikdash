@@ -159,6 +159,9 @@ export function layoutLabels(g, items, tf, blocked, scale = 1, owns = null) {
         const cx = Math.max(V.w / 2 + 8, Math.min(W - V.w / 2 - 8, x)), cy = Math.max(V.h / 2 + 6, Math.min(H - V.h / 2 - 6, y));
         if ((cx !== x || cy !== y) && it.slide !== false && cx >= sx0 && cx <= sx1 && cy >= sy0 && cy <= sy1
           && (!owns || [0, -0.35, 0.35].every((f) => owns(it.id, tf.X(cx + f * V.w), tf.Y(cy))))) { x = cx; y = cy; }
+        // a big place moved off its anchor (nudged clear of a marker or of a neighbour's callout) still stands on its own
+        // ground: a click on its label must select it
+        if (owns && it.area >= 20000 && (x !== ax || y !== ay) && !owns(it.id, tf.X(x), tf.Y(y))) continue;
         const r = { l: x - V.w / 2 - 3, r: x + V.w / 2 + 3, t: y - V.h / 2 - 1, b: y + V.h / 2 + 1 };
         // a label never covers where another place is named from: a click there must select that place
         if (free(r) && (exempt || !coversMark(r, it.id))) { done = { x, y, w: V.w, h: V.h, rot: 0, lines: V.lines, rect: r }; break; }

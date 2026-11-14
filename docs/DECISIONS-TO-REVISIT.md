@@ -380,6 +380,15 @@ of a public history (K2), and fonts loaded from Google Fonts (K3).
 - **C13. Headline sounds and captions come at least half a minute after their event starts**, because "jump to the
   event" lands a quarter minute in and jumps never fire cues. *engineering.* *Change:* `src/sim/lib/cue.js`
   `CUE_LEAD`.
+- **C14. Small duties staged from the source gaps** (docs/decisions/source-gaps-staged.md): the Shabbat musaf's limbs
+  on the ramp's east lower half (Rambam TuM 6:3; the printed Shekalim 8:8 has them west); salt strewn on the ramp each
+  morning (TuM 6:3; Eruvin 10:14); Tadi never opened (Middot 1:3); the night watch's Levites open and shut the gates
+  (Rambam KhM 3:2, 7:3), so the gates now shut after nightfall; the Friday wiping of the altar (Middot 3:4, Rabbi); the
+  kanim out on Friday and back on Sunday by day (Menachot 11:6; Rambam TuM 5:11); a call before the afternoon tamid on
+  the Rambam's general rule (KhM 7:2), unnamed; the officer over the song on the duchan (Shekalim 5:1; KhM 7:5).
+  Hours, places and the number of men are *reconstruction*. *Alt:* the kanim back at Saturday nightfall; the
+  afternoon call left out (no text describes it). *Change:* `src/sim/choreo/temple-duties.js`, `gates.js`,
+  `night-watch.js`, `g6/musaf.js`, `g3/song.js`, `src/data/schedule.js`.
 
 ## D. Offerings and daily life
 

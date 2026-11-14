@@ -2202,7 +2202,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     timing: { confidence: 'reconstruction', note: 'The Rambam\'s rule: "when the time of the offering comes he cries out" (KhM 7:2). No text describes the afternoon call itself; its hour and place are reconstruction.' },
     zone: 'fifteen-steps',
     pos: [263, 330.5, 13.5],
-    view: { at: V.enNikanor, heading: 270 },
+    view: { at: V.nikanorLanding, heading: 305 },        // the caller at the head of the steps, from the landing's south side
     summary: `"Arise, kohanim, to the service; Levites, to the platform; Israel, to the ma'amad!" — the time of the afternoon offering is cried out.`,
     description: `"The officer over the times and his men keep the times: when the time of the offering comes, he or one of his men with his leave cries out and says: Arise, kohanim, to the service, Levites to the platform, and Israel to the ma'amad — and when his voice is heard each one comes to his work" (Rambam KhM 7:2). The Mishnah names Gevini the crier among the officers (Shekalim 5:1), and the Gemara gives his cry at the dawn service (Yoma 20b).\n\nThe Rambam states a rule for every offering; no text describes the call before the afternoon tamid in itself. The model applies the rule: a Levite of the officer's men cries it from the head of the fifteen steps, where the dawn call is shown — the place and the hour are reconstruction, and he is not named.`,
     participants: [{ role: 'levi', count: 1, note: 'one of the men of the officer over the times — not named' }],

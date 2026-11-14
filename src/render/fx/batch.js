@@ -10,8 +10,9 @@ export class InstanceBatch {
    * @param {string} name
    * @param {Record<string, number>} layout attribute name -> itemSize
    * @param {number} capacity max instances
-   * @param {{ x0:number, x1:number, y0:number, y1:number } | 'box'} quad local quad extents (shader interprets them),
-   *   or 'box': a cube [-1, 1]³ with outward faces (the coal-bed decal)
+   * @param {{ x0:number, x1:number, y0:number, y1:number } | 'box' | { ribbon: number }} quad local quad extents (shader
+   *   interprets them), or 'box': a cube [-1, 1]³ with outward faces (the coal-bed decal), or { ribbon: n }: a strip of n
+   *   quads, x −1 … 1, y 0 … 1 (sky-smoke-fire: a smoke column, its width shaped per height in the vertex shader)
    */
   constructor(name, layout, capacity, quad = { x0: -0.5, x1: 0.5, y0: 0, y1: 1 }) {
     const g = new InstancedBufferGeometry();
@@ -20,6 +21,13 @@ export class InstanceBatch {
       g.setAttribute('position', b.getAttribute('position'));
       g.setIndex(b.getIndex());
       b.dispose();
+    } else if (quad?.ribbon > 0) {
+      const n = quad.ribbon, pos = [], uv = [], idx = [];
+      for (let k = 0; k <= n; k++) { pos.push(-1, k / n, 0, 1, k / n, 0); uv.push(0, k / n, 1, k / n); }
+      for (let k = 0; k < n; k++) { const a = 2 * k; idx.push(a, a + 1, a + 3, a, a + 3, a + 2); }
+      g.setAttribute('position', new Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
     } else {
       const { x0, x1, y0, y1 } = quad;
       g.setAttribute('position', new Float32BufferAttribute([x0, y0, 0, x1, y0, 0, x1, y1, 0, x0, y1, 0], 3));
