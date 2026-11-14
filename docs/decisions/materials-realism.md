@@ -149,3 +149,31 @@ the scratchpad), shot back to back with the "after".
   saturated and ~1.5× brighter than medium's probe-lit room (lowend-visuals summary, kodesh-d3).
 - **orchestrator (docs):** CLAUDE.md non-obvious choices — see the report's proposed line; docs/API.md materials: SPEC `joint`,
   uniforms `mkJoint` / `mkJoint2`, the steps' layout (`ctx.mats.tile('steps_stone').courses` = 12 rows of 0.24 m).
+
+## Round 2 — calmer masonry at a distance (orchestrator's review of the sky pass shots)
+
+Review: on low and medium the court walls read as a patchwork of coloured bricks at 20–40 m (low plaza at sunset; medium
+Ezrat Nashim looking west), every block framed by its margin, and the joints dark lines of equal weight everywhere.
+
+- **Every stone-to-stone difference halved where textures are coarse (medium, low; `cz` / SPEC `calm: 0.5` for the
+  Herodian keys and ashlar_plain): in the bake the marbles' base tones are pulled halfway to the shayish, and the tone
+  spread (±3.5 → ±1.75 %), hue cast, the odd grey (−6 → −3 %) and cream stones and the per-stone share of the dust film
+  are halved; in the patch the per-block value and hue (BLOCK_HERODIAN ±3.5 → ±1.75 %, ashlar ±7 → ±3.5 %).** One
+  quarry's stone differs by a few percent block to block; the stones on these tiers carry no texture of their own to
+  read beside the step, so it read as tint. High keeps round 1's spread (its stones have texture). The three marbles
+  stay distinct per stone (qa-r1's choice, kept), at half the contrast. — Alternative: fading the
+  variation with distance only (the near walls were also too patchy).
+- **The baked joint lighter on coarse textures (albedo ×0.85 → ×0.92, occlusion 0.8 → 0.88).** Up close the patch's
+  analytic hairline draws the joint (round 1), so the baked one only has to read from afar — as a faint coursing.
+- **From ~8 m to 32 m the Herodian walls' baked occlusion (the boss's pecking, the bevel's foot, the joints) eases to the
+  wall's mean, 0.87 (patch.js FOOT_AO, strength `mkFootG.y`: 1 on medium / low, 0 on high).** A far wall becomes a calm
+  surface with a faint coursing; near, where margins and hairlines resolve, nothing changes. Cost: one smoothstep, one
+  division, one mix per fragment of the four Herodian keys, reusing the occlusion already sampled by three's
+  aomap_fragment — no fetch, no sampler, no program (the uniform was there, its y unused).
+- Not touched: the steps, the pavement, the close range (the analytic joints, the margins' bake), high.
+- Measured (luminance sd over a wall region, same view / tier / time; before = the sky pass's r2 shots): low plaza at sunset,
+  the shaded Ezrat Nashim wall 4.99 → 3.53; medium Ezrat Nashim looking west, the left court walls 9.16 → 8.15; medium
+  azarah-d3, the left walls 10.36 → 9.29. Close range unchanged: low steps-close differs from round 1 by 0.57 / 255 mean.
+  Programs (90 / 91 medium, 74–75 low), texture memory and draw calls as round 1. Shots: `shots/matreal/r2/`.
+- Still framed: the near court walls at 8–20 m in side light keep their margins — that part is the bevel's normal under
+  direct light and the boss's 5 % albedo, which round 2 left alone (the close look was not to go flat).

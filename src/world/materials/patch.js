@@ -95,7 +95,7 @@ uniform vec2 mkCourse;     // x tile height (m), y entries (cm)
 uniform sampler2D mkFootMap; // per 0.5 m cell: (lowest, highest) walkable floor, world y (m); 9999 = none
 uniform vec4 mkFoot;       // xy world origin (x, z) of the map, zw 1 / its extent (m)
 uniform vec4 mkFootK;      // x fade-in (0 until the map exists), y grime band height (m), z contact-AO height (m), w AO depth
-uniform vec2 mkFootG;      // x grime amount
+uniform vec2 mkFootG;      // x grime amount, y (materials-realism r2) the far fade of the baked occlusion (1 low / medium, 0 high)
 #endif
 #ifdef MK_ALTAR
 uniform vec4 mkAlt0;       // xy altar centre (world x, z), z half-width of the 28-square (m), w its top (world y)
@@ -497,6 +497,15 @@ const METAL_IBL = /* glsl */`
 `;
 const FOOT_AO = /* glsl */`
 #ifdef MK_FOOT
+#ifdef USE_AOMAP
+// materials-realism r2 (the Herodian walls, low / medium): from ~8 m to 32 m the baked occlusion — the boss's pecking,
+// the bevel's foot, the joints — eases to the wall's mean (0.87), so a far wall reads as a calm surface with a faint
+// coursing instead of every block framed; near, where the margins and the patch's hairline joints resolve, it is whole
+{
+  float mkAf = mkFootG.y * smoothstep( 8.0, 32.0, length( vViewPosition ) );
+  reflectedLight.indirectDiffuse *= mix( 1.0, 0.87 / max( ambientOcclusion, 0.05 ), mkAf );
+}
+#endif
 reflectedLight.indirectDiffuse *= mkFootAO;
 reflectedLight.indirectSpecular *= mkFootAO;
 #endif

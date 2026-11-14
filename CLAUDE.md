@@ -38,7 +38,9 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - Masonry/sheet keys draw their joints analytically on low/medium (patch.js `mkJoint`: course coordinate + the jump of
   the block-local distance in the albedo alpha, box-filtered, ALU only, no new sampler or program); bake-side, coarse
   textures (>= 11–16 mm a texel) bake the MEAN of what they cannot resolve (pits, pecking, cavities) and drop detail
-  above their Nyquist frequency instead of aliasing it (docs/decisions/materials-realism.md).
+  above their Nyquist frequency instead of aliasing it; there the wall masonry's stone-to-stone variation is halved
+  (`calm`) and the Herodian walls' baked AO eases to its mean between 8 and 32 m (`FOOT_AO`), or far walls read as a
+  patchwork of bricks (docs/decisions/materials-realism.md).
 - Clouds are one tile baked in a Worker (`src/env/clouds-core.js`, IndexedDB-cached), read only by the visible sky dome
   and the stars: they never light the courts. Tiers with `ao: 'volume'` or no post draw the cumulus as a flat, loop-free
   layer (512² tile, 3 fetches per sky pixel, sun colour from CPU uniforms); the others march it (1024²). In play the tile

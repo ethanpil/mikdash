@@ -200,7 +200,7 @@ const LATER_GROUPS = [
 export const SPEC = {
   // ----------------------------------------------------------------- stone
   herodian_wall: {
-    set: 'herodian', macro: MAC.wall, block: BLOCK_HERODIAN, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
+    set: 'herodian', macro: MAC.wall, block: BLOCK_HERODIAN, calm: 0.5, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
     info: {
       en: 'Herodian marble ashlar — stones of white, blue-green and veined marble, each stone its own ("the stones differ in appearance one from another", Rashi), one course set out and one drawn in, left unplastered ("like the waves of the sea"); drafted, comb-dressed margins and a raised, pointed boss',
       sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi', 'Part VII §21 #1, §25', 'Part V §13.11'],
@@ -208,7 +208,7 @@ export const SPEC = {
     },
   },
   herodian_wall_inner: {
-    set: 'herodian_inner', macro: MAC.wall, block: BLOCK_HERODIAN, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
+    set: 'herodian_inner', macro: MAC.wall, block: BLOCK_HERODIAN, calm: 0.5, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
     info: {
       en: 'The same marble ashlar on the inner / court faces — drafted, combed margins round a lower, finer boss',
       sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi'], confidence: 'reconstruction', note: 'face finish of inner faces unattested',
@@ -231,7 +231,7 @@ export const SPEC = {
     info: { en: 'Marmara — veined marble', sources: ['Bava Batra 4a', 'Part VII §21 #1'], confidence: 'derived' },
   },
   ashlar_plain: {
-    set: 'ashlar', macro: MAC.wall, block: [0.07, 0.05, 0.03], joint: JOINT.ashlar, detail: DET.stone, flat: ['#d9cfbb', 0.75, 0],
+    set: 'ashlar', macro: MAC.wall, block: [0.07, 0.05, 0.03], calm: 0.5, joint: JOINT.ashlar, detail: DET.stone, flat: ['#d9cfbb', 0.75, 0],
     info: {
       en: 'Large whole dressed stones (chambers, inner faces) — hewn off-site, no iron on site',
       sources: ['Rambam BhB 1:8–9', 'Part V §13.11'], confidence: 'derived', note: 'limestone colour, 0.96 m courses: reconstruction',
@@ -546,14 +546,14 @@ export const SPEC = {
   // the same Herodian walls with course heights of 1.00–1.20 m from a course table: builders that model the set-out
   // courses from ctx.mats.courseAt(key, y) switch to these keys (the 1.1 m keys stay for the current geometry)
   herodian_wall_courses: {
-    set: 'herodian_c', macro: MAC.wall, block: BLOCK_HERODIAN, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
+    set: 'herodian_c', macro: MAC.wall, block: BLOCK_HERODIAN, calm: 0.5, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
     info: {
       en: 'herodian_wall with course heights varying 1.00–1.20 m (a course table: ctx.mats.courseAt(key, y)), the marble chosen stone by stone',
       sources: ['Bava Batra 4a', 'Part V §13.11'], confidence: 'reconstruction', note: 'course heights: reconstruction',
     },
   },
   herodian_wall_inner_courses: {
-    set: 'herodian_inner_c', macro: MAC.wall, block: BLOCK_HERODIAN, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
+    set: 'herodian_inner_c', macro: MAC.wall, block: BLOCK_HERODIAN, calm: 0.5, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
     info: { en: 'herodian_wall_inner on the same course table as herodian_wall_courses', sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi'], confidence: 'reconstruction' },
   },
   // bark of one species per log (Tamid 2:3: fig, walnut and oil-tree, never olive or vine) and the olive groves' trunks
@@ -654,7 +654,8 @@ export function createMaterialLibrary(ctx) {
     mkFootMap: { value: null },
     mkFoot: { value: new Vector4(0, 0, 1, 1) },
     mkFootK: { value: new Vector4(0, FOOT[0], FOOT[1], FOOT[2]) },
-    mkFootG: { value: new Vector2(FOOT[3], 0) },
+    // (y, materials-realism r2: the far fade of the walls' baked occlusion on the tiers with coarse textures)
+    mkFootG: { value: new Vector2(FOOT[3], (q.textureSize || 1024) <= 1024 ? 1 : 0) },
   };
   let altarU = null;
   const t0Lib = performance.now();
@@ -770,7 +771,9 @@ export function createMaterialLibrary(ctx) {
     const mac = s.macro || MAC.none;
     const det = s.detail;
     const blk = (set?.layout && s.block) || null;
-    const blkA = blk ? blk[0] * lowOf(s, 'block', 1) : 0;
+    // materials-realism r2: the wall masonry's per-stone value / hue spread halved where textures are coarse (calm)
+    const calm = s.calm && (q.textureSize || 1024) <= 1024 ? s.calm : 1;
+    const blkA = blk ? blk[0] * lowOf(s, 'block', 1) * calm : 0;
     const ibl = iblOf(s);
     const dtex = det && patchState.detail ? detailTex(det[0]) : null;
     const ctex = s.comb && patchState.detail ? detailTex(COMB[0]) : null;
@@ -783,7 +786,7 @@ export function createMaterialLibrary(ctx) {
       mkTint: { value: new Color(mac[4]) },
       // (the layout's quantum and dMax also when the key has no per-block variation: the analytic joints read them)
       mkBlock: { value: lay ? new Vector4(lay.q, lay.rowH, lay.dMax, blk ? blkA : 0) : new Vector4(1, 1, 1, 0) },
-      mkBlockR: { value: new Vector2(blk ? blk[1] : 0, blk ? blk[2] || 0 : 0) },
+      mkBlockR: { value: new Vector2(blk ? blk[1] : 0, blk ? (blk[2] || 0) * calm : 0) },
       mkDetailMap: { value: dtex },
       mkDetail: { value: dtex ? new Vector4(det[1], det[2], det[3], det[4]) : new Vector4(0, 0, 0, 0) },
       mkDetailFade: { value: new Vector2(2.5, 12) },
@@ -1234,6 +1237,7 @@ export function createMaterialLibrary(ctx) {
       if (failed || !baker) return;
       Object.assign(q, nq);
       baker.rebake(nq.textureSize || 1024, nq.anisotropy || 4);
+      footU.mkFootG.value.y = (nq.textureSize || 1024) <= 1024 ? 1 : 0;
       shared.details.clear();
       for (const [id, r] of baker.baked) if (id.startsWith('d_')) shared.details.set(id, r);
       const detailWas = patchState.detail;

@@ -98,9 +98,14 @@ void surf(vec2 p, inout S s) {
   // stone-to-stone variation: each block from its own part of the bed — value, and a warm cream .. cool grey cast
   // (kochla stones vary more: paler and deeper blocks break the course into a shimmer, not a stripe)
   // (qa-r2: from warm cream to neutral only — the cool half of the old range drew blue-grey tiles in shade)
-  float tone = 1.0 + uP3.y * (ct == 1 ? 1.5 : 1.0) * (bh.x - 0.5) * 2.0;
+  // materials-realism r2: on coarse textures (medium, low: cz) every stone-to-stone difference is halved (calm) — the
+  // marbles' base tones pulled halfway to the shayish, the tone / hue spread, the odd grey and cream stones, the per-stone
+  // share of the film: there the stones carry no texture of their own to read beside it, and a wall of them read as a
+  // patchwork of coloured bricks at 20-40 m (orchestrator's review); high is unchanged
+  float calm = mix(1.0, 0.5, cz);
+  float tone = 1.0 + uP3.y * calm * (ct == 1 ? 1.5 : 1.0) * (bh.x - 0.5) * 2.0;
   vec3 hue = mix(vec3(1.025, 1.0, 0.96), vec3(0.99, 1.0, 1.01), bk.x);
-  vec3 base = (ct == 0 ? uC0 : (ct == 1 ? uC1 : uC2)) * tone * mix(vec3(1.0), hue, uP3.z);
+  vec3 base = mix(uC0, ct == 0 ? uC0 : (ct == 1 ? uC1 : uC2), calm) * tone * mix(vec3(1.0), hue, uP3.z * calm);
   vec3 vein = ct == 0 ? uC3 : (ct == 1 ? uC4 : uC5);
   float vm;
   // veins at a slant of their own in every stone; kochla's bedding stays near the course line
@@ -109,13 +114,15 @@ void surf(vec2 p, inout S s) {
   // kochla: some blocks nearly grey, about a third of them pale — close to the shayish in value with only a hint
   // of green: the course shimmers instead of reading as a painted band
   if (ct == 1) {
-    col = mix(col, vec3(lum(col)) * vec3(1.02, 1.0, 0.97), 0.5 * bk.z * bk.z);
+    col = mix(col, vec3(lum(col)) * vec3(1.02, 1.0, 0.97), 0.5 * calm * bk.z * bk.z);
     col = mix(col, mix(uC0 * tone, col, 0.35), smoothstep(0.6, 0.78, fract(bk.z * 3.7 + bh.y)) * 0.4);
   }
   // the pointed boss reads a touch stippled where its pits resolve; the smoother margin is NOT lighter (a pale margin
   // drew a grout-like outline round every block from 20 m); the hairline joint only mildly dark
   col *= 1.0 - 0.025 * pitA - 0.01 * marg;
-  col = mix(col * 0.85, col, face);
+  // (r2: lighter where the patch draws the hairline up close — medium, low — so from 20-40 m the joints are a faint
+  // coursing, not dark lines of equal weight everywhere)
+  col = mix(col * mix(0.85, 0.92, cz), col, face);
   col *= 1.0 + 0.012 * nC.y * fC;
   col = mix(col, col * vec3(1.04, 1.035, 1.025), wear * 0.75);
   // materials-realism: what a coarse texture cannot draw, in the mean. The point-dressed boss is a field of pits and
@@ -135,9 +142,9 @@ void surf(vec2 p, inout S s) {
   vec3 bq = blkHash(b, 191);
   float grey = smoothstep(0.84, 0.97, bq.x);
   float cream = smoothstep(0.87, 0.99, bq.y) * (1.0 - grey);
-  col = mix(col * 0.94, col, 1.0 - grey);
-  col = mix(col, col * vec3(1.025, 1.0, 0.95), cream * 0.8);
-  float film = smoothstep(0.1, 0.9, 0.55 * nB.y + 0.45 * nD.z + 0.6 * (bq.z - 0.5)) * (0.5 + 0.5 * (1.0 - b.ly / rh));
+  col *= 1.0 - 0.06 * calm * grey;
+  col = mix(col, col * vec3(1.025, 1.0, 0.95), cream * 0.8 * calm);
+  float film = smoothstep(0.1, 0.9, 0.55 * nB.y + 0.45 * nD.z + 0.6 * calm * (bq.z - 0.5)) * (0.5 + 0.5 * (1.0 - b.ly / rh));
   col = mix(col, col * vec3(0.935, 0.92, 0.895), film * 0.65 * uP1.z);
   float shel = (1.0 - outF) * (1.0 - smoothstep(0.0, 0.18, rh - b.ly + 0.02 * nB.y));
   col = mix(col, col * vec3(0.955, 0.94, 0.91), uP1.z * shel);
@@ -154,7 +161,7 @@ void surf(vec2 p, inout S s) {
   float rP = 0.65 + 0.02 * nC.w * fC;
   float rF = mix(rP, mix(rM, rB, boss), mOn);
   s.rough = mix(0.86, rF + (ct == 1 ? 0.015 : 0.0) - 0.03 * vm + 0.02 * shel + 0.02 * streak + 0.07 * wear, face);
-  s.ao = mix(0.8, 1.0, face) * (1.0 - uP2.w * band) * (1.0 - 0.06 * pit) * (1.0 - 0.18 * peck) * (1.0 - 0.3 * bfoot);
+  s.ao = mix(mix(0.8, 0.88, cz), 1.0, face) * (1.0 - uP2.w * band) * (1.0 - 0.06 * pit) * (1.0 - 0.18 * peck) * (1.0 - 0.3 * bfoot);
   s.a = b.lx / uDMax;
 }`,
   },
