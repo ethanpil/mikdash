@@ -334,61 +334,74 @@ real-time flames, smoke and breathing.
 - **Cells, not plain sectors: a disc, then rings cut into 6 sectors (`world/sectors.js`; landscape rings at 250 / 800 /
   2400 m, the Mount's own at 60 / 200 m).** — three culls an object by its bounding sphere, and the sphere of a wedge that
   starts at the apex holds the apex: plain sectors round the Mount would all pass the test for a viewer on the Mount. A 60°
-  wedge of a ring whose inner radius is ≥ 0.3 × its outer has a sphere clear of the centre. 8 sectors × rings at 250 / 700 /
-  1600 m (the first try) cut 2 % more triangles for 22–35 more draw calls on low.
-- **What is split**: the terrain kit's merged batches of ≥ 8000 triangles (the city's rubble, ashlar and roofs, terraces,
-  streets: `splitMeshes` on the kit's output) and the Mount kit's (its walls' ashlar, the stoas' roofs and floors, on the
-  Mount's rings); the rocks (one instanced mesh per cell, `splitInstancedBySector`); the olive groves' FAR level (beyond
-  MID_R from the camera: one pair of instanced meshes per form and cell, each with a fixed sphere round every tree of its
-  form in its cell, since the camera reassigns trees between levels); the stoa columns (each LOD one instanced mesh per
-  cell of the Mount's rings — two to three cells per stoa — with a fixed sphere round its columns). Same geometry and
-  material instances; instancing kept; colliders untouched (the kits register them whole before the split, the columns'
-  and the ground's from their own soup).
-- **Not split, measured**: the ground grid on medium (cells instead of its 3 × 3 index tiles: +53 calls at the Azarah, the
-  pre-pass's terrain only 242 k → 204 k triangles); the groves' mid level (a ring 70–480 m round the camera: a pair of calls
-  per form per cell in view for little culling).
-- **`?sectors=0`** builds the batches whole, exactly as before (low dawn start: 259 calls / 683 312 triangles / 180 world
-  meshes, the base's numbers) — the A/B switch for the HD 4600.
+  wedge of a ring whose inner radius is ≥ 0.3 × its outer has a sphere clear of the centre.
+- **A piece must be worth its draw call (round 2b, `groupCells`).** — a cell holding fewer than `SECTOR_MIN` = 4000
+  triangles (instances × the geometry's triangles for instanced batches; trunk + crown for the groves) goes into ONE
+  remainder piece per batch, which keeps a big sphere and is nearly always drawn — one call, as the whole batch was; a
+  batch left with fewer than two pieces besides the remainder, or with more than 70 % of its triangles in the remainder,
+  stays whole. Chosen from the numbers at the Azarah d3 (low, calls / triangles vs base 251 / 674 k): 4000 → +20 /
+  −25 %, 8000 → +3 / −9 %, 16000 → nothing split. Medium at 4000: +33 / −20 %. `?sectorMin=N` overrides it (measuring).
+- **What is split**: the terrain kit's merged batches (the city's rubble, ashlar and roofs, terraces, streets) and the
+  Mount kit's (its walls' ashlar, the stoas' roofs and floors, on the Mount's rings), after each kit registered its
+  colliders whole; the rocks; the olive groves' FAR level (beyond MID_R of the camera; one pair of instanced meshes per
+  form and piece, each with a fixed sphere round every tree of its form in its piece, since the camera moves trees between
+  levels); the stoa columns (each LOD one instanced mesh per piece, fixed spheres). In practice: 8 batches → 36 pieces on
+  low, 11 → 54 on medium. Same geometry and material instances; instancing kept; pieces keep their batch's typed arrays,
+  normalisation, usage and gpuType (no world mesh has a non-float or normalized attribute today: checked on low and
+  medium).
+- **Tried and dropped**: every cell its own piece (8 sectors × rings at 250 / 700 / 1600 m, then 6 × 250 / 800 / 2400 m):
+  +54 to +72 calls on low, +100 to +149 on medium; the ground grid on medium in cells (+53 calls at the Azarah, the
+  pre-pass's terrain only 242 k → 204 k triangles); the groves' mid level (a ring round the camera: a pair of calls per form
+  per cell in view for little culling).
+- **`?sectors=0`** builds the batches whole, exactly as before (low, all four views: 259 / 683 312, 251 / 674 160,
+  243 / 638 706, 278 / 714 776 — the base's numbers, 180 world meshes) — the A/B switch for the HD 4600.
+- **Build cost**: the splits take 57 ms on low and 90 ms on medium of this machine's main thread at boot (`ctx.sectorStats`;
+  part of the world build, before the first frame). The split writes each triangle once per attribute to its piece's
+  cursor (prefix counts, element copies). Node, a synthetic 100 k-triangle batch: the round-2 version (a rescan of every
+  triangle per cell and attribute) 64 ms, this one ≈ 31–36 ms; 30 k triangles 13 → ≈ 3 ms (the in-page round-2 time was
+  not recorded).
 - Shadows: a shadow pass culls by the light's frustum, so a piece outside the shadow camera's volume — which could cast
   nothing into the map — is skipped there too; the low 'static' and medium 'cached' maps' signatures list more casters but
-  stay static. Stoa columns and the groves' far level were `frustumCulled = false` and are now culled by fixed spheres.
+  stay static. Stoa columns and the groves' far level were `frustumCulled = false` and are now culled by fixed spheres (a
+  batch left whole keeps `false`).
 - gate-core's id pass and deferred reveal work per material (a material is shown when any of its meshes shows); the pieces
-  keep their batch's material instance, so the same materials are deferred and revealed; the program sets are identical
-  (below). The pre-pass marks pieces like the whole (radius ≥ 8 m); `singleInstance` treats them like any plain batch.
+  keep their batch's material instance. Checked live in play mode (below). The pre-pass marks pieces like the whole
+  (radius ≥ 8 m); `singleInstance` treats them like any plain batch.
 
-Proof (shot mode, `tools/perf-cpu-world.js`, base HEAD → this tree; calls / triangles of one frame, all passes):
+Proof (shot mode, `tools/perf-cpu-world.js`, base HEAD 478bc94 → this tree; calls / triangles of one frame, all passes):
 
 | view | low | medium |
 |---|---|---|
-| a dawn start | 259 / 683 k → 321 / 488 k (+62 calls, −29 % tris) | 341 / 1.547 M → 476 / 1.196 M (+135, −23 %) |
-| b Azarah d3 | 251 / 674 k → 305 / 491 k (+54, −27 %) | 342 / 1.536 M → 442 / 1.192 M (+100, −22 %) |
-| d Azarah n3 | 243 / 639 k → 297 / 456 k (+54, −29 %) | 316 / 1.431 M → 416 / 1.087 M (+100, −24 %) |
-| aerial d3 (pos 430,40,240, look 315/−28, fly) | 278 / 715 k → 350 / 620 k (+72, −13 %) | 366 / 1.626 M → 515 / 1.438 M (+149, −12 %) |
+| a dawn start | 259 / 683 k → 275 / 496 k (+16 calls, −27 % tris) | 341 / 1.547 M → 372 / 1.226 M (+31, −21 %) |
+| b Azarah d3 | 251 / 674 k → 271 / 503 k (+20, −25 %) | 342 / 1.536 M → 375 / 1.232 M (+33, −20 %) |
+| d Azarah n3 | 243 / 639 k → 263 / 468 k (+20, −27 %) | 316 / 1.431 M → 349 / 1.127 M (+33, −21 %) |
+| aerial d3 (pos 430,40,240, look 315/−28, fly) | 278 / 715 k → 306 / 627 k (+28, −12 %) | 366 / 1.626 M → 415 / 1.463 M (+49, −10 %) |
 
-By pass and builder at b, low: terrain main 20 / 199 k → 45 / 101 k, terrain pre-pass 11 / 93 k → 23 / 84 k, Mount main
-19 / 97 k → 29 / 49 k, Mount pre-pass 13 / 41 k → 20 / 12 k; everything else identical. The aerial view looks north-west
-over the Mount from the south-east: the landscape behind it is culled (terrain main 201 k → 113 k), the Mount's batches are
-all in view (98 306 → 98 306 triangles).
+By pass and builder at the Azarah d3 (everything else identical):
+
+| | low | medium |
+|---|---|---|
+| terrain, main pass | 20 / 199 k → 29 / 109 k | 34 / 544 k → 50 / 334 k |
+| terrain, pre-pass | 11 / 93 k → 19 / 88 k | 19 / 242 k → 33 / 224 k |
+| Mount, main pass | 19 / 97 k → 22 / 49 k | 25 / 135 k → 28 / 86 k |
+| Mount, pre-pass | 13 / 41 k → 13 / 12 k | 18 / 60 k → 18 / 31 k |
+
+The aerial view looks north-west over the Mount from the south-east: the landscape behind it is culled, the Mount's
+batches are all in view (98 306 → 98 306 triangles on low). The terrain's pre-pass is the weak part (+8 / +14 calls for
+−5 / −18 k triangles): its city pieces are mostly in view from the Azarah.
 - Colliders: 17 / 134 074 triangles (low), 17 / 268 916 (medium), position checksums identical base vs new.
-- Programs: identical sets (`?prepass=0` low, program lists by name and key hash: 73 = 73; with the pre-pass 76 → 75 and
-  91 → 91, the one less being the pre-pass's stale variant of item 1).
-- Images (`shots/perf-cpu/r2/world-base/`, `world-new2/` low, `world-new3/` medium (final), diffs ×8 in `diff-low2/`,
-  `diff-medium3/`; mean abs / pixels over
-  8/255): low a 0.022 / 0.025 %, b 0.122 / 0.38 %, n3 0.503 / 0.38 %, aerial 0.006 / 0.004 %; medium a 0.045 / 0.033 %,
-  b 0.097 / 0.29 %, n3 0.339 / 0.42 %, aerial 0.008 / 0.020 % — the altar's flames and smoke and their light (real time),
+- Programs: the same counts (low 74 / 76, medium 90 / 91; ±1 between runs of one build, seen with and without the split);
+  program lists by name and key hash identical (`?prepass=0`, low: 73 = 73).
+- Images (`shots/perf-cpu/r2/world-base/` vs `shots/perf-cpu/r2b/world-final/`, ×8 diffs in `r2b/diff/`; mean abs / pixels
+  over 8/255): low a 0.021 / 0.02 %, b 0.102 / 0.35 %, n3 0.453 / 0.34 %, aerial 0.006 / 0.004 %; medium a 0.022 / 0.03 %,
+  b 0.079 / 0.27 %, n3 0.290 / 0.34 %, aerial 0.006 / 0.008 % — the altar's flames and smoke and their real-time light,
   nothing else; shadows included (medium's cached map, low's static map).
+- gate-core in play (low, default boot, intro up; base vs new, 4 s after 'shown' and at 'drained'): GATECORE_LINE
 
-**The GPU benefit is unmeasured here, and it is a trade**: −13 to −29 % of the frame's triangles for +54 to +72 draw calls
-on low (+21 to +26 %), −12 to −24 % for +100 to +149 calls on medium (+29 to +41 %). By pass and builder at b on
-medium: terrain main 34 / 544 k → 79 / 313 k, terrain pre-pass 19 / 242 k → 49 / 209 k, Mount main 25 / 135 k → 39 / 84 k,
-Mount pre-pass 18 / 60 k → 29 / 30 k. Most added calls are the city batches' pieces in BOTH passes (the pre-pass draws
-them too, and most of the city near the view is in it), so the cheapest next cut, if the A/B says the calls cost more than
-the triangles, is to keep the instanced landscape (rocks, far olives, stoa columns: few calls, large spheres of mostly
-off-screen instances) and leave the city's merged batches whole. On the HD 4600 measure, in one page, interleaved, normal play,
-`?sectors=0` against the default at the dawn start, the Azarah and an aerial: the GPU frame (render/dev/gpu-split.mjs),
-the main thread's frame (the added calls are ≈ 20 µs each of CPU submission on ANGLE, perf-1), fps at fixed resolution;
-and `tools/warmup-check.mjs` (first frame; no material with two programs). If the calls cost more than the triangles save
-on low, keep it for medium and up only (one line in each call site: `sectorsOn(ctx) && ctx.quality.detail >= 1`).
+**The GPU benefit is unmeasured here.** On the HD 4600 measure, in one page, interleaved, normal play, `?sectors=0`
+against the default at the dawn start, the Azarah and an aerial: the GPU frame (render/dev/gpu-split.mjs), the main
+thread's frame (each added call ≈ 20 µs of CPU submission on ANGLE, perf-1: +16 to +28 calls on low ≈ 0.3–0.6 ms), fps at
+fixed resolution; and `tools/warmup-check.mjs` (first frame; no material with two programs).
 
 ## 2. The fog uniforms at fast clock speeds (env/fog.js) — not changed; what it would take
 
@@ -418,7 +431,8 @@ first-frame gap) and goldens; expected −0.6 ms/frame at 60× on low, nothing a
   key light, fx's fire-light pool, the cascades' SunLight). A light without it makes three re-key every lit material every
   frame (getProgram for 70+ materials: ≈ 1 ms of JS and ≈ 250 KB of garbage a frame); the pre-pass's warm-up compiles with
   `ctx.scene` as its light scene, because three keys even MeshDepthMaterial by the light counts.
-- World batches that span the landscape are split into cells round the Mount (world/sectors.js: a disc, then rings × 6
-  sectors — a wedge from the apex never culls for a viewer on the Mount, its sphere holds the apex); split after the kit
-  has registered its colliders; `?sectors=0` builds them whole (the A/B switch). Fewer triangles for more draw calls:
-  measure on the HD 4600 before widening it.
+- Landscape batches (the kits' city / Mount batches, rocks, the groves' far level, stoa columns) are split into cells round
+  the Mount (world/sectors.js: a disc, then rings × 6 sectors — a wedge from the apex never culls for a viewer on the Mount,
+  its sphere holds the apex); a cell under 4000 triangles joins one remainder piece per batch, and a batch that would be
+  mostly remainder stays whole (−20 to −27 % of the frame's triangles for +16 to +33 calls). Split after the kit has
+  registered its colliders; `?sectors=0` builds them whole (the A/B switch).

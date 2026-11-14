@@ -241,6 +241,10 @@ export function inSight(ctx, x, y, z, heights = [0.5, 1.5]) {
  * 5 s of frozen frames on medium when the first one did, with the compiler threads busy. With a shadow-casting point
  * light in `lightRoot` (the fires' cube shadows, high / ultra) the customDistanceMaterial too (16 s on high). Returns
  * the Set of materials.
+ * perf-cpu round 2: the shadow pass now sees the frame's lights — it keys its programs with the light state of the render
+ * state's previous setupLights, the depth pre-pass's, which since the lights carry its layer (render/prepass.js
+ * prepassLight) counts them all. With `lightRoot` (the scene: main.js) the programs are compiled with its lights, inside
+ * the frame's light state (withFrameLights); without it, as before (no lights, one bare casting Light).
  */
 const SHADOW_SIDE = { [FrontSide]: BackSide, [BackSide]: FrontSide, [DoubleSide]: DoubleSide };
 let _shadowOnly = null;
@@ -275,7 +279,8 @@ export function compileDepth(renderer, root, camera, lightRoot = null) {
       dm.side = om?.shadowSide ?? SHADOW_SIDE[om?.side ?? FrontSide];
       _target ||= new WebGLRenderTarget(1, 1, { type: HalfFloatType, depthBuffer: true });
       renderer.setRenderTarget(_target);
-      for (const x of renderer.compile(o, camera, _shadowOnly)) if (x === dm) out.add(x);
+      const lit = withFrameLights(() => renderer.compile(o, camera, lightRoot || _shadowOnly));
+      for (const x of lit) if (x === dm) out.add(x);
     } catch (e) {
       console.warn('[warmup] depth compile failed', e);
     } finally {
