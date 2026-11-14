@@ -115,6 +115,10 @@ against the Mishnaic chains (Middot 5:1–2, 4:6–7, 2:5–6, 3:1, 3:6 …) and
   instancing for repeated elements (columns, rings, steps).
 * Budgets (whole world, MAIN VIEW PASS — shadow, cube-shadow and depth pre-passes are measured separately and must not
   stall frames): ≤ 350 draw calls at detail 0, ≤ 900 at 3; ≤ 1.5 M triangles at detail 0, ≤ 6 M at 3.
+* Landscape-wide batches are split into **cells round the Mount** after the kit has built them and registered their
+  colliders (`src/world/sectors.js`: `splitMeshes` for merged batches, `splitInstancedBySector` for instanced ones; same
+  material instances, a cell under 4000 triangles joins one remainder piece), so three's frustum test can drop what lies
+  behind the viewer. `?sectors=0` builds them whole (docs/decisions/perf-cpu.md, round 2).
 * Register **anchors** for important points (`ctx.addAnchor('altar.top', { pos: [X,Y,Z], heading, label })`)
   and **fires/lamps** (`ctx.addFire({ id, kind, pos, size, schedule })`) — the render task turns fires into
   flames + lights. Movable parts the sim animates (gates' doors, curtains, the kiyor rising on the muchni,
@@ -157,6 +161,13 @@ Default date **2026-11-02** (Monday, 22 Cheshvan — ordinary weekday, psalm 48)
   (`quality.maxFireLights`, nearest to camera win); also `ctx.fx.attachTorch(object3D) -> handle`,
   `ctx.fx.smokeColumn({pos, …})` (altar & incense smoke rise **straight up** — Avot 5:5),
   `ctx.fx.setFire(id, intensity)`. Optional **Photo mode** (path-traced still) may be added later.
+* **Lights and the depth pre-pass**: every scene light is made through `prepassLight` (render/prepass.js) so it is on
+  the pre-pass's layer too; otherwise three re-keys every lit material each frame. Warm-ups of the pre-pass and of shadow
+  depth programs pass `ctx.scene` as the light scene (render/warmup.js).
+* **Exposure in and beside rooms** (`env/interiors.js`, `env/index.js`): `interiors.at(p)` gives a point's room and sky
+  visibility; on an opening's plane and in the room's margin beyond it the opening is read as from the plane. Volumes
+  flagged `colonnade` (the Mount's stoas) meter the part of the view that leaves between the columns at the outdoor
+  level (`interiors.viewOut`, docs/decisions/final-qa.md).
 * **Clouds** (`env/clouds*.js`): one cloud tile baked in a Worker and cached in IndexedDB, drawn only by the sky dome
   (stars hide behind it); weather is a pure function of the date (`?clouds=0`, `?cumulus=`, `?cirrus=`). The cumulus is a
   flat loop-free layer where `ao === 'volume'` or there is no post, marched elsewhere. Baked after 'firstFrame' in play.
