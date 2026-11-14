@@ -19,6 +19,15 @@ void surf(vec2 p, inout S s) {
   vec4 n = nL(lp, vec2(4.0), vec2(0.3, 0.3));
   vec4 wv = nL(lp, vec2(3.0), vec2(0.61, 0.17));   // beaten sheet over carved wood: waviness over 20-40 cm
   float burn = nL(lp, vec2(9.0, 54.0), vec2(0.1, 0.7)).y;
+  // materials-realism (low only: 2.6 cm texels): the dishes (2.5 cm) are not drawn at all there, and low's gilded room
+  // mirrors an almost even light, so the sheets read as flat mustard paint. What the texture can carry is baked: each
+  // sheet beaten a little differently (tone ± 6 %, roughness ± 0.05) with burnished and duller zones of 10-30 cm
+  // (tone ± 9 %, roughness ∓ 0.07), and the beaten sheet's waviness twice as deep so its facets tilt by a few degrees
+  // and catch the gate's light in patches. Unchanged on medium and high (lo = 0)
+  float tex = max(uTile.x / uRes.x, uTile.y / uRes.y);
+  float lo = smoothstep(0.015, 0.024, tex);
+  vec4 zn = nL(lp, vec2(2.2), vec2(0.47, 0.83));
+  float zone = smoothstep(-0.5, 0.5, zn.x + 0.4 * zn.y) * 2.0 - 1.0;
   float ex0 = b.lx;
   float ex1 = b.len - b.lx;
   float ey0 = b.ly;
@@ -26,14 +35,15 @@ void surf(vec2 p, inout S s) {
   float e = min(min(ex0, ex1), min(ey0, ey1));
   float seam = 1.0 - smoothstep(uP0.x * 0.5, uP0.x * 1.5, e);
   float lip = 1.0 - smoothstep(0.0, 0.006, min(ex0, ey1));
-  float dish = uP0.z * (dv.x * dv.x - 0.3) * (0.6 + 0.8 * dv.z);
-  float wav = uP1.z * (wv.x + 0.4 * wv.y) * smoothstep(0.0, 0.04, e);   // held flat along the seams
+  // (on low the 2.5 cm dishes are a texel each: point-sampled, they only aliased into a noisy normal — mostly faded)
+  float dish = uP0.z * (dv.x * dv.x - 0.3) * (0.6 + 0.8 * dv.z) * (1.0 - 0.8 * lo);
+  float wav = uP1.z * (1.0 + lo) * (wv.x + 0.4 * wv.y) * smoothstep(0.0, 0.04, e);   // held flat along the seams
   s.h = wav + n.x * 0.0002 + dish + lip * uP0.y - seam * 0.0007;
-  float tone = 0.97 + uP2.x * (bh.y - 0.5) * 2.0 + 0.01 * burn;
+  float tone = 0.97 + uP2.x * (bh.y - 0.5) * 2.0 + 0.01 * burn + lo * (0.06 * (bh.y - 0.5) * 2.0 + 0.09 * zone);
   vec3 col = vec3(tone) * mix(vec3(1.0), vec3(1.0, 0.994, 0.985), bh.x);
   s.alb = mix(col, col * 0.4, seam);
   float r = uP1.x + uP1.y * (bh.z - 0.5) * 2.0 + 0.03 * burn * uP1.w + uP2.y * (dv.z - 0.5) * 2.0
-          + uP2.z * smoothstep(0.3, 0.7, dv.x);
+          + uP2.z * smoothstep(0.3, 0.7, dv.x) + lo * (0.05 * (bh.z - 0.5) * 2.0 - 0.07 * zone);
   s.rough = mix(r, 0.6, seam);
   s.metal = mix(1.0, 0.5, seam);
   s.ao = 1.0 - 0.5 * seam;

@@ -173,10 +173,15 @@ vec3 marble(vec2 q, bool local, int type, vec3 base, vec3 vein, vec3 alt, out fl
   vec4 kb = nM(q, vec2(0.7, 2.0), vec2(0.5, 0.3), local);
   float sn = nM(wq, vec2(0.6, 3.0), vec2(0.21, 0.83), local).z;
   vec4 gr = nM(q, vec2(26.0), vec2(0.43, 0.19), local);     // crystalline grain (all three marbles)
+  vec4 gm = nM(q, vec2(6.5), vec2(0.29, 0.67), local);      // materials-realism: its stand-in where the texture is coarse
   float on = smoothstep(-0.25, 0.35, gate);
   // texel size (m): features narrower than a texel would alias into dashes on the low tiers — widen or fade them
   float tex = max(uTile.x / uRes.x, uTile.y / uRes.y);
-  float grain = 0.022 * gr.w + 0.01 * gr.y;
+  // materials-realism: the 26 / m grain is above a coarse texture's Nyquist frequency (medium, low): it aliased into
+  // texel-sized speckle that magnified into a blur; there the same energy goes into a mottle the texture can carry
+  // (≈ 8 cm), so the stone is not a flat plane up close. Unchanged where texels are under ~11 mm (high)
+  float grF = mix(1.0, smoothstep(0.8, 1.6, 1.0 / (52.0 * tex)), smoothstep(0.011, 0.016, tex));
+  float grain = (0.022 * gr.w + 0.01 * gr.y) * grF + (1.0 - grF) * (0.022 * gm.x + 0.01 * gm.w);
   // soft clouds of tone (and, here and there, a faint grey veil) — the stone is never a flat plane of colour
   vec3 col = base * (1.0 + 0.035 * c.x + 0.04 * cl.y + grain - 0.035 * smoothstep(0.2, 0.8, cl.w))
            * mix(vec3(1.0), vec3(1.012, 1.0, 0.982), smoothstep(-0.3, 0.4, c.w));

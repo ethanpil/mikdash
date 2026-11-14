@@ -44,7 +44,13 @@ void surf(vec2 p, inout S s) {
   vec4 sw = nT(p, vec2(9.0, 0.35), vec2(0.37, 0.13));
   float tex = max(uTile.x / uRes.x, uTile.y / uRes.y);
   // the drafted margin needs ~1.5 texels across its narrowest side to read as a band, not a printed outline
-  float mOn = uP1.x * smoothstep(1.5, 2.5, uP0.x * 0.75 / tex);
+  // (materials-realism: 1.2–2.0, so the court walls' inner faces keep their margins on low, at 4 cm texels)
+  float mOn = uP1.x * smoothstep(1.2, 2.0, uP0.x * 0.75 / tex);
+  // materials-realism: a coarse texture (medium, low: 15–40 mm texels; 0 on high) cannot draw the millimetre dressing —
+  // the boss's pits, the comb strokes, the cavity at the foot of the bevel — so their mean effect is baked instead
+  float cz = smoothstep(0.011, 0.016, tex);
+  // detail above the texture's Nyquist frequency is dropped (it aliased into texel-sized speckle, a blur up close)
+  float fC = mix(1.0, smoothstep(0.8, 1.6, 1.0 / (76.0 * tex)), cz);
   // dry hairline joints: arrises rounded a few mm, chipped here and there (more at block corners)
   float corner = 1.0 - smoothstep(0.0, 0.15, max(ex, ey));
   float chip = 0.004 * smoothstep(0.6, 0.9, nA.z) + 0.006 * corner * smoothstep(0.35, 0.8, nA.w);
@@ -57,7 +63,8 @@ void surf(vec2 p, inout S s) {
   vec4 mws = uP0.x * (0.8 + 0.4 * vec4(bh.z, bm.x, bm.y, bm.z));
   float wob = 0.005 * nD.x + 0.0025 * nA.y + 0.0012 * nC.z;
   float em = min(min(b.lx - mws.x, b.len - b.lx - mws.y), min(b.ly - mws.z, rh - b.ly - mws.w)) + wob - chip * 0.5;
-  float bw = uP3.x * (0.8 + 0.45 * bk.z);
+  // (at least ~2 texels wide: a narrower bevel stair-stepped into a broken line on low)
+  float bw = max(uP3.x * (0.8 + 0.45 * bk.z), tex * 2.2);
   float bev = clamp(em / bw, 0.0, 1.0);
   // a chamfer: nearly straight, its two arrises only slightly rounded (a uniform lit / shaded band, not a line)
   float boss = mOn * mix(bev, bev * bev * (3.0 - 2.0 * bev), 0.35);
@@ -81,8 +88,8 @@ void surf(vec2 p, inout S s) {
   float plane = outF * uP0.w;
   // the boss face is hand-dressed, not a plane: a few mm of undulation; the margin is flat to a fraction of a mm
   float hBoss = uP0.y * (0.75 + 0.5 * bh.x) + 0.0025 * nD.y + 0.0015 * nB.z - pit * uP1.y;
-  float hFace = plane + boss * hBoss + nB.x * 0.0012 * (0.4 + fine) + marg * 0.0004 * nC.y
-              + (1.0 - mOn) * (nC.w * 0.0002 + nD.y * 0.001);
+  float hFace = plane + boss * hBoss + nB.x * 0.0012 * (0.4 + fine) + marg * 0.0004 * nC.y * fC
+              + (1.0 - mOn) * (nC.w * 0.0002 * fC + nD.y * 0.001);
   // worn arrises (qa-r1): a 2-3 cm band along the joint, gated along its length, heavier toward the corners
   float wearW = max(0.022, tex * 2.0);
   float wear = (1.0 - smoothstep(uP0.z, uP0.z + wearW, e)) * smoothstep(0.05, 0.45, nA.w + 0.45 * corner + 0.25 * nB.y) * face;
@@ -109,11 +116,29 @@ void surf(vec2 p, inout S s) {
   // drew a grout-like outline round every block from 20 m); the hairline joint only mildly dark
   col *= 1.0 - 0.025 * pitA - 0.01 * marg;
   col = mix(col * 0.85, col, face);
-  col *= 1.0 + 0.012 * nC.y;
+  col *= 1.0 + 0.012 * nC.y * fC;
   col = mix(col, col * vec3(1.04, 1.035, 1.025), wear * 0.75);
+  // materials-realism: what a coarse texture cannot draw, in the mean. The point-dressed boss is a field of pits and
+  // ridges that shadow one another (micro-occlusion): rougher and a little darker under the sky than the smooth combed
+  // margin round it; the margin is shaded where it meets the foot of the bevel (a 1-1.5 cm step); the pits themselves
+  // fade on these tiers (vis1, vis2), so this is their missing mean, not an outline drawn on top
+  float peck = boss * mOn * (1.0 - vis1) * cz;
+  float bfoot = mOn * cz * (1.0 - smoothstep(0.0, max(0.015, tex * 1.3), abs(em)));
+  col *= 1.0 - 0.05 * peck;
   // restrained weathering (the building was new): a set-out course sheds rain over its foot, so the drawn-in course
   // below is sheltered along its top (a faint warm dust patina); dust washed off each set-out course's ledge runs
   // down its face in a few faint streaks
+  // materials-realism: stones from different beds of the quarry — most close in tone, about one in eight a little
+  // greyer (−6 %) and one in ten creamier (warm, never blue: qa-r2) — and a light film of dust bound by dew in patches,
+  // heavier toward each stone's foot and on some stones than others (≤ 4 % with uP1.z): eighty years of weather on a
+  // kept building, not a ruin
+  vec3 bq = blkHash(b, 191);
+  float grey = smoothstep(0.84, 0.97, bq.x);
+  float cream = smoothstep(0.87, 0.99, bq.y) * (1.0 - grey);
+  col = mix(col * 0.94, col, 1.0 - grey);
+  col = mix(col, col * vec3(1.025, 1.0, 0.95), cream * 0.8);
+  float film = smoothstep(0.1, 0.9, 0.55 * nB.y + 0.45 * nD.z + 0.6 * (bq.z - 0.5)) * (0.5 + 0.5 * (1.0 - b.ly / rh));
+  col = mix(col, col * vec3(0.935, 0.92, 0.895), film * 0.65 * uP1.z);
   float shel = (1.0 - outF) * (1.0 - smoothstep(0.0, 0.18, rh - b.ly + 0.02 * nB.y));
   col = mix(col, col * vec3(0.955, 0.94, 0.91), uP1.z * shel);
   float streak = outF * smoothstep(0.25, 0.7, sw.x) * (1.0 - smoothstep(0.0, 0.5, rh - b.ly)) * uP1.z;
@@ -124,12 +149,12 @@ void surf(vec2 p, inout S s) {
   s.alb = col;
   // roughness: pointed boss 0.78-0.84, combed margin 0.52-0.58 (this step is also the detail layer's margin mask),
   // a plain fine-dressed face 0.65 (world-4: the top of fine-dressed ashlar's 0.5-0.65, render-env-2-fix)
-  float rB = 0.8 + 0.035 * nC.w + 0.03 * pit;
-  float rM = 0.55 + 0.025 * nC.w;
-  float rP = 0.65 + 0.02 * nC.w;
+  float rB = 0.8 + 0.035 * nC.w * fC + 0.03 * pit;
+  float rM = 0.55 + 0.025 * nC.w * fC;
+  float rP = 0.65 + 0.02 * nC.w * fC;
   float rF = mix(rP, mix(rM, rB, boss), mOn);
   s.rough = mix(0.86, rF + (ct == 1 ? 0.015 : 0.0) - 0.03 * vm + 0.02 * shel + 0.02 * streak + 0.07 * wear, face);
-  s.ao = mix(0.8, 1.0, face) * (1.0 - uP2.w * band) * (1.0 - 0.06 * pit);
+  s.ao = mix(0.8, 1.0, face) * (1.0 - uP2.w * band) * (1.0 - 0.06 * pit) * (1.0 - 0.18 * peck) * (1.0 - 0.3 * bfoot);
   s.a = b.lx / uDMax;
 }`,
   },
@@ -214,6 +239,14 @@ void surf(vec2 p, inout S s) {
   float lowRes = smoothstep(0.03, 0.045, texP);
   float jw = mix(uP0.x, max(uP0.x, texP * 0.25), lowRes);
   float face = smoothstep(jw, jw + mix(uP0.z, max(uP0.z, texP * 0.6), lowRes), e);
+  // materials-realism: the joint's colour and occlusion are drawn at least ~1.2 texels across, at the joint's MEAN
+  // darkness over that width (jK = its share): a 3-7 mm joint under a 12-24 mm texel (high, medium) hit or missed the
+  // texel centres row by row — joints broken into dashes or missing — and on low a full-strength band 5-10 cm wide
+  // (and its 0.45 occlusion) drew a dark grout line round every slab; up close the patch draws the hairline itself
+  float jR = uP0.x + 0.5 * uP0.z;
+  float jE = max(jR, texP * 0.6);
+  float jK = max(jR / jE, 0.5);   // (not under a half: dust settles in the joint and along its arrises)
+  float faceC = mix(1.0, smoothstep(jE * 0.4, jE * 1.4, e), jK);
   float tilt = ((b.lx / b.len - 0.5) * (bh.x - 0.5) + (b.ly / uRowH - 0.5) * (bh.y - 0.5)) * 2.0 * uP1.z;
   // weathering: worn hollows, pitting, half-worn tooling
   float pit = uP0.w * smoothstep(0.55, 0.8, -nM2.w + 0.4 * g.y);
@@ -223,12 +256,16 @@ void surf(vec2 p, inout S s) {
   // qa-r1: where the texture is too coarse to carry the mottling inside a slab (the low tier's ~4.8 cm texels), the
   // slab-to-slab tint alone read as a high-contrast checkerboard: halve the palette and value spread there (lowRes)
   vec3 base = bh.z < 0.45 ? uC0 : (bh.z < 0.8 ? uC1 : uC2);
-  base = mix(base, (uC0 + uC1 + uC2) / 3.0, 0.5 * lowRes);
+  base = mix(base, (uC0 + uC1 + uC2) / 3.0, 0.3 * lowRes);   // (materials-realism: 0.5 → 0.3, the slabs now have texture of their own)
   float spread = uP3.x > 0.0 ? uP3.x : 0.09;
-  base *= 0.99 + spread * (bh.x - 0.5) * 2.0 * (1.0 - 0.5 * lowRes);
+  base *= 0.99 + spread * (bh.x - 0.5) * 2.0 * (1.0 - 0.3 * lowRes);
   base = mix(base, base * vec3(1.03, 1.0, 0.95), smoothstep(0.5, 1.0, fract(bh.y * 7.7)) * (uP3.y > 0.0 ? uP3.y : 1.0));
   float vm;
   vec3 mcol = marble(lp, true, bh.y < 0.8 ? 0 : 2, base, uC4, base, vm);
+  // materials-realism: marble slabs carry soft grey drifts across the slab (the clouded white marbles), stronger on some
+  // slabs than others, so a court of them is not one flat sheet; amount uP3.z
+  float drift = uP3.z * smoothstep(-0.15, 0.7, nB.z + 0.45 * nM2.w + 0.3 * (bh.x - 0.5)) * (0.4 + 0.6 * fract(bh.z * 5.3));
+  mcol = mix(mcol, mcol * vec3(0.84, 0.84, 0.865), drift);
   vec3 lcol = base * (1.0 + 0.08 * nB.y + 0.05 * g.x);
   vec3 col = uP1.x > 0.5 ? mix(base, mcol, uP2.x) : lcol;
   vm *= uP1.x * uP2.x;
@@ -240,32 +277,43 @@ void surf(vec2 p, inout S s) {
   col *= 1.0 - uP2.z * smoothstep(0.15, 0.75, nB.w);
   float edgeDirt = (1.0 - smoothstep(uP0.x, uP0.x + 0.04, e)) * 0.18;
   col = mix(col, uC3, edgeDirt);
-  col = mix(mix(mix(uC3, col * 0.85, 0.35), col * 0.9, 0.85 * lowRes), col, face);
+  col = mix(mix(uC3, col * 0.85, 0.35), col, faceC);
   s.alb = col;
-  s.rough = mix(0.95, uP1.y + uP2.y * (bh.y - 0.5) * 2.0 + 0.06 * g.x - 0.08 * vm + 0.12 * pit + 0.05 * nB.w + 0.05 * low - 0.06 * wear * (1.0 - low), face);
-  s.ao = mix(0.45, 1.0, face) * (1.0 - 0.25 * pit);
+  s.rough = mix(0.95, uP1.y + uP2.y * (bh.y - 0.5) * 2.0 + 0.06 * g.x - 0.08 * vm + 0.12 * pit + 0.05 * nB.w + 0.05 * low - 0.06 * wear * (1.0 - low), faceC);
+  s.ao = mix(0.45, 1.0, faceC) * (1.0 - 0.25 * pit);
   s.a = b.lx / uDMax;
 }`,
   },
 
   // Monolithic dressed hard limestone (steps): fine claw/comb tooling across u, sparse pits.
+  // materials-realism: with a layout (uP1.x = 1, the steps) the stone is laid in blocks — one stone per riser course and
+  // length — and the albedo alpha carries the block-local distance, so the shader patch draws the joints and varies the
+  // stones on the risers only (the material cannot tell a riser's u from a tread's, whose world UVs run the other way);
+  // nothing of the blocks is baked. On a coarse texture (medium, low) the tooling and pits above its Nyquist frequency
+  // (they aliased into texel speckle, a flat blur up close) give way to a mottle of 5-20 cm the texture can carry.
   stone: {
     hRange: 0.006, ao: [0.01, 0.0015, 0.5],
     src: /* glsl */`
 // uP0: x tooling amp (m), y pit amount, z rough base, w rough variation
+// uP1: x masonry layout (0 monolithic, 1 blocks: alpha = block-local distance)
 // uC0 base, uC1 alternate (warmer) patches
 void surf(vec2 p, inout S s) {
   vec4 n = nT(p, vec2(1.2), vec2(0.0));
   vec4 g = nT(p, vec2(30.0), vec2(0.3, 0.7));
   float strokes = nT(p, vec2(3.0, 40.0), vec2(0.5, 0.2)).y;
   vec4 v = vT(p, vec2(0.018), vec2(0.0));
-  float pit = uP0.y * (1.0 - smoothstep(0.0, 0.3, v.x)) * step(0.85, v.z);
-  s.h = strokes * uP0.x + g.x * uP0.x * 0.4 + n.x * 0.001 - pit * 0.0015;
+  vec4 mm = nT(p, vec2(5.0), vec2(0.61, 0.13));
+  float tex = max(uTile.x / uRes.x, uTile.y / uRes.y);
+  float fN = mix(1.0, smoothstep(0.8, 1.6, 1.0 / (80.0 * tex)), smoothstep(0.011, 0.016, tex));
+  float pit = uP0.y * (1.0 - smoothstep(0.0, 0.3, v.x)) * step(0.85, v.z) * fN;
+  s.h = (strokes * uP0.x + g.x * uP0.x * 0.4) * fN + n.x * 0.001 - pit * 0.0015 + (1.0 - fN) * mm.x * 0.0006;
   vec3 col = mix(uC0, uC1, 0.5 * smoothstep(0.0, 0.7, nT(p, vec2(0.8), vec2(0.3, 0.3)).z));
-  col *= 1.0 + 0.07 * n.y + 0.04 * g.x;
+  col *= 1.0 + 0.07 * n.y + 0.04 * g.x * fN + (1.0 - fN) * (0.035 * mm.y + 0.02 * mm.z);
   col = mix(col, col * 0.8, pit);
   s.alb = col;
-  s.rough = uP0.z + uP0.w * n.w + 0.05 * strokes + 0.1 * pit;
+  s.rough = uP0.z + uP0.w * n.w + 0.05 * strokes * fN + 0.1 * pit;
+  Blk b = blk(p);
+  s.a = uP1.x > 0.5 ? clamp(b.lx / uDMax, 0.0, 1.0) : 1.0;
 }`,
   },
 
