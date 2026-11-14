@@ -49,7 +49,8 @@ await server.listen();
 const base = server.resolvedUrls.local[0];
 const { browser } = await launchBrowser(chromium, {
   headless: true,
-  args: [...GPU_ARGS, '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
+  // (perf-cpu: JSFLAGS=… passes V8 flags, e.g. --allow-natives-syntax for %GetOptimizationStatus in a script)
+  args: [...GPU_ARGS, '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required', ...(process.env.JSFLAGS ? [`--js-flags=${process.env.JSFLAGS}`] : [])],
 });
 mkdirSync(resolve(root, opt.out), { recursive: true });
 let code = 0;

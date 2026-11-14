@@ -468,7 +468,9 @@ try {
       check('area names off: no ordinary banner; the restricted notice still (its own setting, 90 s rule)', !bnOff.some((b) => b.zone === 'nikanor'), JSON.stringify(bnOff));
       await ev(() => __mikdash.settings.set('areaNames', 'always'));
       await tp('gazit');
-      await page.click('.mk-banner__main');
+      // (the banner lives 3.2 s: a loaded machine's actionability wait outlasts it, so the click is dispatched directly)
+      await page.waitForFunction(() => !document.querySelector('.mk-banner').hidden && /Gazit/.test(document.querySelector('.mk-banner').textContent), null, { timeout: 15000 }).catch(() => {});
+      await ev(() => document.querySelector('.mk-banner__main').click());
       await page.waitForTimeout(500);
       check('a click on the banner opens that place (Here)', await ev(() => __mikdash.ui.panel === 'here' && /Gazit/.test(document.querySelector('.mk-menu .mk-card__en').textContent)));
       check('Lishkat HaGazit (half kodesh, half chol) is not given one rung in the header', await ev(() => /Half kodesh, half chol/.test(document.querySelector('.mk-head__sancttxt').textContent) && /Sanhedrin/.test(document.querySelector('.mk-head__sanct').title)),
@@ -595,7 +597,8 @@ try {
           await page.waitForFunction(() => ['showing', 'done', 'failed', 'cancelled'].includes(__mikdash.inspect.show?.phase), null, { timeout: 12000 }).catch(() => {});
           const sh = await ev(() => ({ phase: __mikdash.inspect.show?.phase, chip: !document.querySelector('.mk-showchip').hidden, txt: document.querySelector('.mk-showchip').textContent, back: __mikdash.inspect.canBack }));
           check('Show me reaches "showing"; the chip reads "Showing: X · Back to …"', sh.phase === 'showing' && sh.chip && /^Showing: /.test(sh.txt) && /Back/.test(sh.txt) && !/Showing: Showing/.test(sh.txt), JSON.stringify(sh));
-          await page.waitForTimeout(500); // (the header repaints at 4 Hz)
+          await page.waitForTimeout(500); // (the header repaints at 4 Hz — a loaded machine may take a few seconds)
+          await page.waitForFunction(() => !document.querySelector('.mk-head__back').hidden, null, { timeout: 15000 }).catch(() => {});
           const hb = await ev(() => { const b = document.querySelector('.mk-head__back'); return { shown: !b.hidden, txt: b.textContent.trim(), card: document.querySelector('.mk-cardview .mk-card__back')?.textContent.trim() }; });
           check('the header\'s Back says what it undoes ("Back to 08:51"), unlike the card\'s own Back', hb.shown && /^Back to \d{2}:\d{2}$/.test(hb.txt), JSON.stringify(hb));
           await ev(() => __mikdash.bus.emit('caption', { text: 'A caption beside the Show chip, long enough to need its lane', duration: 4 }));
@@ -603,7 +606,8 @@ try {
           const capR = await ev(() => { const c = [...document.querySelectorAll('.mk-cap')].pop()?.getBoundingClientRect(), k = document.querySelector('.mk-showchip').getBoundingClientRect(); return c && { cap: Math.round(c.bottom), chip: Math.round(k.top) }; });
           check('captions ride above the Show chip', !!capR && capR.cap <= capR.chip + 1, JSON.stringify(capR));
           await shot(page, 'int-showing');
-          await page.click('.mk-showchip .mk-hbtn');
+          // (the chip lives 30 s; a loaded machine's screenshot can outlast it: Back through the chip if shown, else the header's)
+          await ev(() => { const c = document.querySelector('.mk-showchip'); (c.hidden ? document.querySelector('.mk-head__back') : c.querySelector('.mk-hbtn')).click(); });
           await page.waitForTimeout(1500);
           const bk = await ev((s) => ({ dt: Math.abs(__mikdash.time.t - s.t), dh: Math.abs(((__mikdash.player.heading - s.h + 540) % 360) - 180) }), snap);
           check('Back restores the clock and the view', bk.dt < 0.6 && bk.dh < 2, JSON.stringify(bk));

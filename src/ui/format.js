@@ -37,6 +37,18 @@ export function quarters(x) {
 }
 
 /**
+ * "10¾ hours since sunset"; at the turn of the half "at sunrise" / "at sunset", and under a quarter of an hour "just after
+ * sunrise" — never "0 hour since sunrise" (ux-audit bug 6). half: 'day' | 'night'; elapsed in seasonal hours.
+ */
+export function elapsedPhrase(half, elapsed) {
+  const edge = half === 'day' ? 'sunrise' : 'sunset';
+  if (elapsed < 0.04) return `at ${edge}`;
+  if (elapsed < 0.125) return `just after ${edge}`;
+  const q = quarters(elapsed);
+  return `${q} ${elapsed < 0.875 || q === '1' ? 'hour' : 'hours'} since ${edge}`;
+}
+
+/**
  * Seasonal position of t. s ∈ [0, 24): 0 = sunrise, 6 = midday, 12 = sunset, 18 = midnight.
  * Returns { half, elapsed (hours since sunrise/sunset), hour (1..12, the current hour), frac (within it), s, lenMin }.
  */

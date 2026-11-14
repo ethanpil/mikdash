@@ -337,3 +337,25 @@ Every fix is in `src/ui/**`, except one minimal change in `src/sim/inspect-show.
   Slower/Faster (touch keeps the pills).
 - **Not done** (brief): findings 10 (the dial's "11") and 16 / the "0 hour" bug — they live in `timepanel.js` /
   `format.js`, which another agent owns now. Glosses for transliterated names on map labels/rows were not added.
+- **Map labels: a big place nudged off its anchor must still stand on its own ground** (`map/labels.js`, `area` passed by
+  `mappanel.js`): the callouts took room and pushed "Azarah" onto the Heichal's ground (consoletest "big places are named
+  only on their own ground" caught it).
+
+### consoletest changes (src/ui/dev/consoletest.mjs)
+
+- `context.setDefaultTimeout(180000)` — Playwright's "stable" wait could not be met in 30 s here (the brief's instruction).
+- Changed because the behaviour changed: the Welcome's rail-tab check → "the Welcome stands alone" + a section opened
+  during it (I); the row's Go menu → "event rows: Show me is gold, Go has no menu" and the Go menu tested on a card (E);
+  the map double-click → "the Menu returns to the dock and the travel bar shows" + "the Map opened during the walk shows
+  the bar and the route" (F).
+- Waits made conditional (no check weakened): the dock's slide-in, the afternoon-tamid row, the instant arrival banner,
+  the header Back chip, the gazit banner click and the Show chip's Back (dispatched directly: the 3.2 s banner and 30 s
+  chip expired under Playwright's actionability waits), Stop before the screenshots, W held 1.5 s instead of 0.5–0.6 s.
+
+### Verification (this machine: load 12–14 from other agents, the page ran at ≈ 0.5 fps)
+
+- `npm run build` (vite build) passes. Console clean in every session (only SwiftShader's ReadPixels notice and the
+  KHR_parallel_shader_compile notice).
+- consoletest: see the final report; a baseline run of the desktop profile with the pre-change `src/ui` (scratch copy)
+  failed the same load-timing checks (W A S D 0.09 m, the on-foot banner dwell, the restricted banner) and stopped at the
+  same banner click.

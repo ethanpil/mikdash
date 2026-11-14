@@ -4,7 +4,7 @@
 // Enter opens that event's card under the dial (onArc).
 import { h, he, icon, setText, clear, append } from './dom.js';
 import {
-  seasonal, seasonalLabelHe, fromDial, clock, ordinal, quarters, hebrewAt, civilDate, civilShort, addDays,
+  seasonal, seasonalLabelHe, fromDial, clock, ordinal, quarters, elapsedPhrase, hebrewAt, civilDate, civilShort, addDays,
   dayBadge, isRoshChodesh, PSALM_OF_DAY, WEEKDAYS,
 } from './format.js';
 import { ZMAN_ANGLES } from '../time/zmanim.js';
@@ -412,7 +412,7 @@ export function createTimeControl(app, opts = {}) {
     }
     setText(roHalf, info.half === 'day' ? 'Day' : 'Night');
     setText(roHour, String(info.hour));
-    setText(roOf, `${quarters(info.elapsed)} ${info.elapsed < 0.875 ? 'hour' : 'hours'} since ${info.half === 'day' ? 'sunrise' : 'sunset'}`);
+    setText(roOf, elapsedPhrase(info.half, info.elapsed));
     setText(roHe, seasonalLabelHe(info));
     setText(roCivilT, `≈ ${clock(t)}`);
     ring.setAttribute('aria-valuenow', info.s.toFixed(2));

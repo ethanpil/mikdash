@@ -283,9 +283,10 @@ export function mountUi(ctx) {
       frameFreeKey = freeKey();
       if (!ref || !ctx.inspect?.frame || app.cardRef() !== ref || menu.fullScreen()) return;
       const sh = ctx.inspect.show;
-      // the director frames its own subject while it places and sets the clock; once it is showing, a figure picked
-      // beside it is framed too (a phone's tap during a Show me: the card's sheet covered the figure — ux-audit B)
-      if (sh && !['done', 'cancelled', 'failed', 'showing'].includes(sh.phase)) return;
+      // the director frames its own subject while it places, sets the clock and shows it; on a phone sheet, once it is
+      // showing, a figure picked beside it is framed too (the card's sheet covered the figure — ux-audit B). The dock
+      // keeps the old rule (a desktop Back must restore the view the director took, not one framed after it)
+      if (sh && !['done', 'cancelled', 'failed'].includes(sh.phase) && !(sh.phase === 'showing' && app.layout.isSheet)) return;
       const f = app.layout.free, m = 20;
       const inside = (q) => q.x >= f.l + m && q.x <= innerWidth - f.r - m && q.y >= f.t + m && q.y <= innerHeight - f.b - m;
       // the tap point, and on a phone sheet the subject's chest too: a tap on a head just above the sheet left the body

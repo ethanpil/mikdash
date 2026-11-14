@@ -2359,7 +2359,27 @@ function gripOf(name, cls) {
 }
 
 /** resolve the grip class actually available for a prop (tray/shoulder/pillow fall back to the fist) */
-export function gripClass(name, cls) { return gripOf(name, cls) ? cls : 'fist'; }
+export function gripClass(name, cls) {
+  // perf-cpu: cached per prop and class — gripOf builds fresh arrays and a matrix on every call, and the people system asks
+  // for every drawn prop and torch every frame (PROPS' grips and VESSELS are fixed once this module has loaded)
+  let m = _gripClass.get(name);
+  if (!m) _gripClass.set(name, (m = new Map()));
+  let r = m.get(cls);
+  if (r === undefined) { r = gripOf(name, cls) ? cls : 'fist'; m.set(cls, r); }
+  return r;
+}
+const _gripClass = new Map();
+/** perf-cpu: a value cached under three keys in nested Maps (no key string built per call) */
+function cached3(map, a, b, c, make) {
+  let m1 = map.get(a);
+  if (!m1) map.set(a, (m1 = new Map()));
+  let m2 = m1.get(b);
+  if (!m2) m1.set(b, (m2 = new Map()));
+  if (m2.has(c)) return m2.get(c);
+  const v = make();
+  m2.set(c, v);
+  return v;
+}
 
 function placementMatrix(name, cls, side) {
   const g = gripOf(name, cls) || gripOf(name, 'fist');
@@ -2412,13 +2432,15 @@ function* prewarmJob() {
   }
 }
 
-/** flame/tip point (geometry frame) of a prop, or null */
+/** flame/tip point (geometry frame) of a prop, or null. perf-cpu: cached and shared — read it, never change it (the
+ *  people system places every torch's flame from it every frame; each call built a vector and four matrices) */
 export function propTip(name, cls, side) {
   const p = PROPS[name];
   if (!p?.tip) return null;
   const real = cls === 'free' ? 'free' : gripClass(name, cls);
-  return new Vector3(...p.tip).applyMatrix4(placementMatrix(name, real, side));
+  return cached3(_tips, name, real, side, () => new Vector3(...p.tip).applyMatrix4(placementMatrix(name, real, side)));
 }
+const _tips = new Map();
 
 /** floor point under the head of a figure in a lying clip, in the root bone's frame */
 function pillowPoint(rig, clipName) {
@@ -2439,8 +2461,10 @@ const _attach = new Map();
  */
 export function propAttach(name, cls, side, rig) {
   const real = gripClass(name, cls);
-  const key = `${rig.key}:${real}:${side}`;
-  if (_attach.has(key)) return _attach.get(key);
+  // perf-cpu: nested Maps, not a key string per call (asked for every drawn prop every frame)
+  return cached3(_attach, rig.key, real, side, () => attachOf(real, side, rig));
+}
+function attachOf(real, side, rig) {
   let out = null;
   if (rig.kind === 'human') {
     const d = rig.dims, k = d.H / 1.67, sgn = side === 'l' ? -1 : 1;
@@ -2463,7 +2487,6 @@ export function propAttach(name, cls, side, rig) {
     // animals carry nothing; birds/beasts with props are unsupported
     out = null;
   }
-  _attach.set(key, out);
   return out;
 }
 

@@ -118,6 +118,7 @@ const _m = new Matrix4();
 const _m2 = new Matrix4();
 const _v = new Vector3();
 const _v2 = new Vector3();
+const _v3 = new Vector3();
 const _sph = new Sphere();
 const _fa = [0, 0, 0];
 const _fb = [0, 0, 0];
@@ -220,17 +221,22 @@ class Batch {
     this.mesh.count = n;
     this.mesh.visible = n > 0;
     if (!n) return;
-    for (const [attr, s] of [[this.mesh.instanceMatrix, 16], [this.aA, 4], [this.aB, 4], [this.aT, 4]]) {
-      attr.clearUpdateRanges();
-      attr.addUpdateRange(0, n * s);
-      attr.needsUpdate = true;
-    }
+    // (four calls, not a loop over array literals made every frame — perf-cpu)
+    markRange(this.mesh.instanceMatrix, n * 16);
+    markRange(this.aA, n * 4); markRange(this.aB, n * 4); markRange(this.aT, n * 4);
   }
   dispose() {
     if (!this.mesh) return;
     this._release(this.mesh);
     this.mesh = null;
   }
+}
+
+/** upload the first `count` floats of an instance attribute this frame */
+function markRange(attr, count) {
+  attr.clearUpdateRanges();
+  attr.addUpdateRange(0, count);
+  attr.needsUpdate = true;
 }
 
 // --------------------------------------------------------------------------------------------- archetypes
@@ -369,7 +375,13 @@ export class Actor {
     this.object3D = new Group();
     this.object3D.name = `actor:${opts.role || opts.kind || 'figure'}`;
     this.object3D.userData.actor = this;
-    sys.root.add(this.object3D);
+    // perf-cpu: its matrix is set by the setters below (setSite / setPosition / setHeading, _refloor), and it hangs under
+    // sys.actorRoot, outside the scene: three's per-frame traversals (updateMatrixWorld, projectObject) no longer visit
+    // every pooled figure (1200+ empty groups, most hidden; ≈ 60 % of the scene's matrix update). It draws nothing itself:
+    // the batches under sys.root do (update reads its matrixWorld)
+    this.object3D.matrixAutoUpdate = false;
+    sys.actorRoot.add(this.object3D);
+    sys._listsDirty = true;
     const seed = opts.seed ?? hashStr(`${opts.role}:${sys.spawnCount++}`);
     const R = rng(seed);
     const roleDef = ROLES[opts.role] || null;
@@ -402,6 +414,7 @@ export class Actor {
     this.flames = [];
     this.disposed = false;
     this._floor = null;
+    this._t = sys._clock;   // the people clock at its last _tick (perf-cpu: a hidden figure is ticked when it is next needed)
     if (roleDef?.prop) this.setProp(roleDef.prop, 'right');
     if (roleDef?.pose) this.setPose(roleDef.pose);
   }
@@ -420,19 +433,22 @@ export class Actor {
       w.y = this.sys.resolveFloor(this._floor);
     } else this._floor = null;
     this.object3D.position.copy(w);
-    this.object3D.updateMatrixWorld();
+    this._placed();
     return this;
   }
-  setPosition(v) { this._floor = null; this.object3D.position.copy(v); this.object3D.updateMatrixWorld(); return this; }
+  setPosition(v) { this._floor = null; this.object3D.position.copy(v); this._placed(); return this; }
   setHeading(deg) {
     this.heading = deg;
     this.object3D.rotation.set(0, headingToYaw(deg), 0);
-    this.object3D.updateMatrixWorld();
+    this._placed();
     return this;
   }
+  /** its position / rotation changed: matrix and world matrix now (matrixAutoUpdate is off) */
+  _placed() { this.object3D.updateMatrix(); this.object3D.updateMatrixWorld(); }
   /** name: a pose (ARCHITECTURE §10); phase: 0..1 (omit → auto-advance at the clip's natural rate) */
   setPose(name, phase) {
     if (!this.arch) return this;
+    this._flush();
     let n = CLIP_ALIASES[name] || name;
     if ((n === 'raise_hands') && this.roleDef?.lowBlessing) n = 'raise_hands_low';
     // kohanim never sleep in the holy garments: they fold them under their heads and cover themselves with
@@ -501,7 +517,12 @@ export class Actor {
     return this;
   }
   /** the prop actually drawn: the one set, else the automatic one (the folded garments of a sleeping kohen) */
-  get shownProp() { return this.prop || (this.autoProp ? { name: this.autoProp, side: 'r' } : null); }
+  get shownProp() {
+    if (this.prop || !this.autoProp) return this.prop;
+    // (one object per automatic prop, not one per frame — perf-cpu)
+    if (this._autoShown?.name !== this.autoProp) this._autoShown = { name: this.autoProp, side: 'r' };
+    return this._autoShown;
+  }
   /**
    * The priestly headgear (migba'at / mitznefet and tzitz) on or off — the officer lifts the mitre off one man's head
    * to start the count (Yoma 25a). Off, the hair shows (with strand shells close up). Other figures ignore it.
@@ -550,12 +571,13 @@ export class Actor {
    */
   setScale(s = null) {
     if (this.kind === 'prop') return this;
+    this._flush();
     this.scale = Number.isFinite(s) && s > 0 ? clamp(s, 0.8, 1.2) : this._scale0;
     return this;
   }
-  setVisible(b) { this.visible = !!b; this.object3D.visible = this.visible; this.sys._syncFlames(this); return this; }
+  setVisible(b) { this._flush(); this.visible = !!b; this.object3D.visible = this.visible; this.sys._syncFlames(this); return this; }
   /** auto-advanced walking speed (m/s) for locomotion poses without an explicit phase */
-  setSpeed(mps) { this.speed = mps; return this; }
+  setSpeed(mps) { this._flush(); this.speed = mps; return this; }
   dispose() {
     if (this.disposed) return;
     this.disposed = true;
@@ -567,6 +589,19 @@ export class Actor {
     this.sys._syncFlames(this);
     this.object3D.removeFromParent();
     this.sys.actors.delete(this);
+    this.sys._listsDirty = true;
+  }
+
+  /**
+   * perf-cpu: advance to the people clock. The system ticks only the figures it may draw (visible, or still cross-fading /
+   * holding a scratch frame) every frame; a hidden one catches up here in one step before anything that changes how it
+   * advances (pose, speed, size, visibility) — the same phase and fade as ticking it every frame (a loop wraps, a
+   * one-shot clamps or wraps, a fade floors at 0: one step of the summed time gives each), without 1000+ ticks a frame.
+   */
+  _flush() {
+    const d = this.sys._clock - this._t;
+    this._t = this.sys._clock;
+    if (d > 0) this._tick(d);
   }
 
   _tick(dt) {
@@ -797,7 +832,7 @@ export class Crowd {
     return this;
   }
   setCount(n) { this.count = Math.max(0, Math.min(this.capacity, n | 0)); this.sys._syncFlames(this); return this; }
-  dispose() { this.count = 0; this.prop = null; this.sys._syncFlames(this); this.sys.crowds.delete(this); }
+  dispose() { this.count = 0; this.prop = null; this.sys._syncFlames(this); this.sys.crowds.delete(this); this.sys._listsDirty = true; }
   memberVariant(i) { return this.off_ ? poseVariant(this.roleDef[i], this.poseName) : null; }
   memberArch(i) { const v = this.memberVariant(i); return v ? this.sys.arch(v.arch) : this.arch[i]; }
   memberProp(i) { const v = this.memberVariant(i); return v?.prop || (v ? null : this.prop); }
@@ -810,7 +845,7 @@ export class Crowd {
       const rate = c.stride ? (this.poseName === 'run' ? RUN_SPEED : WALK_SPEED) / c.stride : c.rate;
       this.phase += dt * rate;
       if (c.stride) this.flow += dt * rate * c.stride;
-      if (c.loop || ['prostrate', 'bow', 'kneel'].includes(this.poseName)) this.phase -= Math.floor(this.phase);
+      if (c.loop || this.poseName === 'prostrate' || this.poseName === 'bow' || this.poseName === 'kneel') this.phase -= Math.floor(this.phase);
       else this.phase = Math.min(1, this.phase);
     }
     // region crowds in a walking pose flow along their headings and wrap inside the region
@@ -861,6 +896,9 @@ export class PeopleSystem {
     this.root = new Group();
     this.root.name = 'people';
     ctx.scene.add(this.root);
+    // the actors' own transforms (Actor.object3D): a group outside the scene, at the origin (perf-cpu)
+    this.actorRoot = new Group();
+    this.actorRoot.name = 'people:actors';
     this.archs = new Map();
     this.props = new Map();
     this.batches = [];
@@ -873,6 +911,12 @@ export class PeopleSystem {
     this.released = new Set();
     this.actors = new Set();
     this.crowds = new Set();
+    // perf-cpu: the same, as arrays in the same (insertion) order, rebuilt when a figure or crowd comes or goes — the frame
+    // loops index them (a Set's for…of allocates an iterator result per element where the loop is not fully optimised)
+    this._alist = [];
+    this._clist = [];
+    this._listsDirty = true;
+    this._clock = 0;          // real seconds of update() (clamped per frame like dt): the actors' lazy ticks (Actor._flush)
     this.spawnCount = 0;
     this.snapping = false;
     this._warnedPose = new Set();
@@ -1036,11 +1080,11 @@ export class PeopleSystem {
   _refloor() {
     for (const a of this.actors) {
       const f = a._floor;
-      if (!f || a.object3D.parent !== this.root) continue;
+      if (!f || a.object3D.parent !== this.actorRoot) continue;
       const p = a.object3D.position;
       if (Math.abs(p.x - f.x) > 1e-4 || Math.abs(p.z - f.z) > 1e-4) { a._floor = null; continue; } // moved by hand
       p.y = this.resolveFloor(f);
-      a.object3D.updateMatrixWorld();
+      a._placed();
     }
     for (const c of this.crowds) {
       for (let i = 0; i < c.capacity; i++) {
@@ -1062,9 +1106,20 @@ export class PeopleSystem {
   }
 
   propVariant(name, grip, side) {
-    const key = `${name}:${grip}:${side}`;
-    if (!this.props.has(key)) this.props.set(key, new PropVariant(this, name, grip, side));
-    return this.props.get(key);
+    // perf-cpu: found through nested Maps (asked for every drawn prop every frame); this.props keeps the flat list
+    const pv = this._pv || (this._pv = new Map());
+    let m1 = pv.get(name);
+    if (!m1) pv.set(name, (m1 = new Map()));
+    let m2 = m1.get(grip);
+    if (!m2) m1.set(grip, (m2 = new Map()));
+    let v = m2.get(side);
+    if (!v) {
+      const key = `${name}:${grip}:${side}`;
+      if (!this.props.has(key)) this.props.set(key, new PropVariant(this, name, grip, side));
+      v = this.props.get(key);
+      m2.set(side, v);
+    }
+    return v;
   }
 
   spawn({ role = 'israelite', seed, ...rest } = {}) {
@@ -1098,6 +1153,7 @@ export class PeopleSystem {
   crowd(opts) {
     const c = new Crowd(this, opts);
     this.crowds.add(c);
+    this._listsDirty = true;
     return c;
   }
 
@@ -1122,6 +1178,7 @@ export class PeopleSystem {
     while (owner.flames.length < want.length) {
       const anchor = new Object3D();
       anchor.name = 'people:torch-anchor';
+      anchor.matrixAutoUpdate = false;   // perf-cpu: placed by hand (_flameAt / _placeFlames), never recomposed by three
       this.root.add(anchor);
       const f = { anchor, handle: null, i: want[owner.flames.length], stamp: -1, hidden: -1, lit: 1, prop: pname };
       this._flameAt(owner, f); // at the hand from the start (fx samples the anchor when the fire is added)
@@ -1139,6 +1196,7 @@ export class PeopleSystem {
       if (!tip) return;
       owner.object3D.updateWorldMatrix(true, false);
       f.anchor.position.copy(tip).applyMatrix4(owner.object3D.matrixWorld);
+      f.anchor.updateMatrix();
       f.anchor.updateMatrixWorld();
       return;
     }
@@ -1246,10 +1304,19 @@ export class PeopleSystem {
     return e16;
   }
 
+  /** perf-cpu: the actor and crowd arrays (the Sets' insertion order), rebuilt only after a figure or crowd came or went */
+  _lists() {
+    if (!this._listsDirty) return;
+    this._listsDirty = false;
+    this._alist = [...this.actors];
+    this._clist = [...this.crowds];
+  }
+
   update(dtIn) {
     // a negative/huge first delta (Timer vs rAF timestamp base) must never rewind fades or phases
     const dt = Number.isFinite(dtIn) ? Math.min(Math.max(dtIn, 0), 0.25) : 0;
     const frame = ++this._frame;
+    this._clock += dt;
     const ctx = this.ctx;
     const cam = ctx.camera;
     const pv = this._physVersion();
@@ -1271,21 +1338,27 @@ export class PeopleSystem {
     const paused = !!ctx.time?.paused;
     const snap = this.snapping || paused !== this._paused || !!ctx.params?.shot;
     this._paused = paused;
-    for (const a of this.actors) a._tick(dt);
-    for (const c of this.crowds) c._tick(dt, snap);
+    this._lists();
+    const AL = this._alist, CL = this._clist;
+    // (perf-cpu: only the figures that may be drawn advance now; a hidden one catches up when needed — Actor._flush)
+    for (let q = 0; q < AL.length; q++) { const a = AL[q]; if (a.visible || a.fade > 0 || a.scratch >= 0) a._flush(); }
+    for (let q = 0; q < CL.length; q++) CL[q]._tick(dt, snap);
 
     // ---- candidates (visible & in frustum)
     let total = 0;
-    for (const c of this.crowds) total += c.visible ? c.count : 0;
-    const C = this._cands(total + this.actors.size + 1);
+    for (let q = 0; q < CL.length; q++) { const c = CL[q]; total += c.visible ? c.count : 0; }
+    const C = this._cands(total + AL.length + 1);
     let n = 0;
     let figures = 0;
-    for (const a of this.actors) {
+    // (the actors hang outside the scene — perf-cpu: hiding people.root hides them all, as when they hung under it)
+    const rootShown = isShown(this.root);
+    for (let q = 0; q < AL.length; q++) {
+      const a = AL[q];
       if (!a.visible || a.disposed) continue;
       figures++;
-      a.object3D.updateWorldMatrix(true, false);
+      // (its world matrix is current: every setter updates it, and nothing else moves an actor — perf-cpu)
       const e = a.object3D.matrixWorld.elements;
-      if (!a.object3D.parent || !isShown(a.object3D)) continue;
+      if (!a.object3D.parent || !rootShown || !isShown(a.object3D)) continue;
       const r = a.arch ? a.arch.radius : 0.6;
       _sph.center.set(e[12], e[13] + (a.arch ? a.arch.H * 0.45 : 0.2), e[14]);
       _sph.radius = r * a.scale;
@@ -1294,7 +1367,8 @@ export class PeopleSystem {
       C.d[n] = Math.sqrt(dx * dx + dy * dy + dz * dz) - 1e5; // actors first
       C.owner[n] = a; C.idx[n] = -1; n++;
     }
-    for (const c of this.crowds) {
+    for (let q = 0; q < CL.length; q++) {
+      const c = CL[q];
       if (!c.visible) continue;
       figures += c.count;
       for (let i = 0; i < c.count; i++) {
@@ -1314,31 +1388,24 @@ export class PeopleSystem {
     if (n > 1) {
       order = this._order && this._order.length >= n ? this._order : (this._order = new Int32Array(Math.max(n, 64)));
       for (let i = 0; i < n; i++) order[i] = i;
-      const sub = order.subarray(0, n);
-      const d = C.d;
-      sub.sort((i, j) => d[i] - d[j]);
+      // (a comparator made once that returns −1 / 0 / 1: the same order as d[i] − d[j], without a closure and a boxed
+      // double per comparison — perf-cpu)
+      order.subarray(0, n).sort(this._byDist ||= (i, j) => { const d = this._cand.d; return d[i] < d[j] ? -1 : d[i] > d[j] ? 1 : 0; });
     }
-    for (const b of this.batches) b.begin();
+    const BL = this.batches;
+    for (let q = 0; q < BL.length; q++) BL[q].begin();
     const ct = this.contact, cfg = this.contactCfg;
     if (ct) { ct.begin(); ct.mat.uniforms.uFocal.value = focal; }
     const st = this.stats;
     st.lod[0] = st.lod[1] = st.lod[2] = st.lod[3] = 0;
     st.props = 0;
     // every distinct prop (name × grip × hand × LOD) is its own instanced batch, i.e. a draw call: at most
-    // PROP_BATCH_CAP of them per frame by tier, given out nearest first — a rare prop far away is not drawn
-    let propBatches = 0;
-    const propCap = PROP_BATCH_CAP[Math.max(0, Math.min(3, this.detail | 0))];
-    const propBatch = (v, lod) => {
-      let b = v.batch(lod);
-      // still compiling: the LOD 1 prop (small geometry, the shared non-detail material, linked at boot) meanwhile
-      if (lod === 0 && !this._drawable(b)) { if (this.held(b.material)) this._want(b.material); const b1 = v.batch(1); if (this._drawable(b1)) b = b1; }
-      // gate-core: as _batchFor — a held or still-linking program (not the props' LOD1) waits
-      if (!this._drawable(b)) { if (this.held(b.material)) this._want(b.material); if (this._waits(b)) return null; }
-      if (b.n === 0) { if (propBatches >= propCap && v.name !== 'torch') return null; propBatches++; }   // a burning torch always shows
-      return b;
-    };
+    // PROP_BATCH_CAP of them per frame by tier, given out nearest first — a rare prop far away is not drawn (_propBatch)
+    this._propBatches = 0;
+    this._propCap = PROP_BATCH_CAP[Math.max(0, Math.min(3, this.detail | 0))];
     let heroes = 0;
     const e16 = this._e;
+    const PL = this._pl || (this._pl = []);   // (props to draw for one figure: name, side, grip class, … — perf-cpu)
     // the far cap: figures ranked in its last FAR_BAND fade out (and back in below 2 × FAR_BAND — hysteresis, so a
     // figure on the boundary does not flicker as the camera moves), over FADE_S of real time
     const band = Math.max(2, Math.round(farCap * FAR_BAND));
@@ -1347,15 +1414,16 @@ export class PeopleSystem {
     for (let k = 0; k < limit; k++) {
       const ci = order ? order[k] : k;
       const owner = C.owner[ci];
+      const crowd = owner instanceof Crowd;
       const dist = C.d[ci] < 0 ? C.d[ci] + 1e5 : C.d[ci];
-      let arch, clip, phase, prevClip = null, prevPhase = 0, fade = 0, tint, mask, prop, alpha = 1, mA = 0, mB = 0;
-      if (owner instanceof Crowd) {
+      let arch, clip, phase, prevClip = null, prevPhase = 0, fade = 0, tint, tq = 0, mask, prop, alpha = 1, mA = 0, mB = 0;
+      if (crowd) {
         const i = C.idx[ci];
         arch = owner.memberArch(i);
         clip = (!owner.off_ && propClip(arch, owner.prop, owner.poseName)) || variantOf(arch, arch.clip(owner.poseName) || arch.clip('stand'), memberVar(owner, i));
         phase = owner.memberPhase(i, clip);
         this._crowdMatrix(owner, i, e16);
-        tint = owner.tint.subarray(i * 4, i * 4 + 4);
+        tint = owner.tint; tq = i * 4;   // (read in place: no subarray view per member per frame — perf-cpu)
         mask = owner.mask[i] | (clip.halter ? 24 : 0) | (clip.cord ? 32 : 0);
         if (owner.memberVariant(i)?.prop) mask &= ~1;   // asleep under his own mantle: not also wearing it
         mA = owner.morph[i * 2]; mB = owner.morph[i * 2 + 1];
@@ -1367,7 +1435,7 @@ export class PeopleSystem {
         prop = a.shownProp;
         if (!a.arch) { // free prop
           const v = this.propVariant(prop.name, 'free', 'r');
-          const b = propBatch(v, dist < 25 ? 0 : 1);
+          const b = this._propBatch(v, dist < 25 ? 0 : 1);
           if (b) { b.push(e16, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, -1); st.props++; }
           if (a.flames.length) this._placeFreeFlame(a, frame);
           continue;
@@ -1383,7 +1451,7 @@ export class PeopleSystem {
       alpha *= this._farFade(owner, C.idx[ci], k, cutIn, cutOut, frame, fstep);
       const near = this._nearFade(owner, C.idx[ci], e16, arch, frame, fstep, cx, cy, cz);
       if (alpha * near <= 0.004) { // faded out at the far cap or at the camera: not drawn, its torch out
-        const f = owner.flames?.length ? (owner instanceof Crowd ? owner.flames.find((q) => q.i === C.idx[ci]) : owner.flames[0]) : null;
+        const f = owner.flames?.length ? (crowd ? flameOf(owner, C.idx[ci]) : owner.flames[0]) : null;
         if (f) f.hidden = frame;
         continue;
       }
@@ -1398,7 +1466,7 @@ export class PeopleSystem {
       if (this.forceLod != null && lod < 3) lod = this.forceLod;   // dev: ctx.people.system.forceLod = 0..2 (inspection shots)
       if (lod === 0) heroes++;
       st.lod[lod]++;
-      if (!(owner instanceof Crowd)) owner.lod = lod;
+      if (!crowd) owner.lod = lod;
       if (fade === -1) { _fa[0] = _fa[1] = owner.scratch; _fa[2] = 0; } // blended pose in a scratch frame
       else this.atlas.sample(clip, phase, _fa);
       fade = 0;
@@ -1422,32 +1490,34 @@ export class PeopleSystem {
       const rid = arch.rigId;
       // (a figure fading at the camera is pushed as 2 + alpha: the colour pass dithers it, its shadow stays — material.js)
       const wA = near < 0.999 ? 2 + alpha * near : alpha;
-      if (b.flat) b.push(e16, _fa[0], _fa[1], 0, wA, rid, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
-      else b.push(e16, _fa[0], _fa[1], _fa[2], wA, rid, mA, mB, mask, tint[0], tint[1], tint[2], tint[3]);
-      if (lod === 0 && b === arch.batches[0]) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], wA, rid, 0, 0, mask, tint[0], tint[1], tint[2], tint[3]);
+      const t0 = tint[tq], t1 = tint[tq + 1], t2 = tint[tq + 2], t3 = tint[tq + 3];
+      if (b.flat) b.push(e16, _fa[0], _fa[1], 0, wA, rid, 0, 0, mask, t0, t1, t2, t3);
+      else b.push(e16, _fa[0], _fa[1], _fa[2], wA, rid, mA, mB, mask, t0, t1, t2, t3);
+      if (lod === 0 && b === arch.batches[0]) arch.shadowProxy()?.push(e16, _fa[0], _fa[1], _fa[2], wA, rid, 0, 0, mask, t0, t1, t2, t3);
       // props (none on LOD3 silhouettes except the big ones); a second prop (setProps) in the left hand
-      const prop2 = owner instanceof Crowd ? null : owner.prop2;
+      const prop2 = crowd ? null : owner.prop2;
       // ritual vessels in an actor's hands stay drawn at LOD 2 (crowds keep only the big props there)
-      const actorV = !(owner instanceof Crowd);
+      const actorV = !crowd;
       // (props do not dither: a figure fading at the camera lets go of them first)
-      const showP = (pr) => pr && near > 0.5 && (lod < 2 || (PROPS[pr.name]?.big && lod < 3) || (PROPS[pr.name]?.big && alpha > 0.5) || (lod === 2 && actorV && HELD_VESSELS.has(pr.name)));
-      if (showP(prop) || showP(prop2)) {
+      const s1 = showProp(prop, lod, alpha, near, actorV), s2 = showProp(prop2, lod, alpha, near, actorV);
+      if (s1 || s2) {
         const grip = clip.grip || 'fist';
-        const list = [];
+        let np = 0;
         if (grip === 'pair') {
           const pg = clip.pairGrip || 'fist';
-          if (showP(prop)) list.push([prop.name, 'r', pg]);
+          if (s1) { PL[np++] = prop.name; PL[np++] = 'r'; PL[np++] = pg; }
           const left = prop2 || prop;
-          if (showP(left)) list.push([left.name, 'l', pg]);
+          if (prop2 ? s2 : s1) { PL[np++] = left.name; PL[np++] = 'l'; PL[np++] = pg; }
         } else {
-          if (showP(prop)) list.push([prop.name, clip.hand || prop.side, grip]);
-          if (showP(prop2) && (grip === 'fist' || grip.startsWith('pillow')) && (clip.hand || prop?.side || 'r') !== 'l') list.push([prop2.name, 'l', 'fist']);
+          if (s1) { PL[np++] = prop.name; PL[np++] = clip.hand || prop.side; PL[np++] = grip; }
+          if (s2 && (grip === 'fist' || grip.startsWith('pillow')) && (clip.hand || prop?.side || 'r') !== 'l') { PL[np++] = prop2.name; PL[np++] = 'l'; PL[np++] = 'fist'; }
         }
-        for (const [name, side, gcls] of list) {
+        for (let q = 0; q < np; q += 3) {
+          const name = PL[q], side = PL[q + 1], gcls = PL[q + 2];
           const att = propAttach(name, gcls, side, arch.rig);
           if (!att) continue;
           const v = this.propVariant(name, att.cls || gcls, side);
-          const pb = propBatch(v, lod);
+          const pb = this._propBatch(v, lod);
           if (!pb) continue;
           pb.push(e16, _fa[0], _fa[1], _fa[2], 1, _fa[0], _fa[1], _fa[2], 0, att.x, att.y, att.z, att.bone);
           st.props++;
@@ -1455,7 +1525,7 @@ export class PeopleSystem {
       }
       // torch anchors
       if (owner.flames?.length) {
-        const f = owner instanceof Crowd ? owner.flames.find((q) => q.i === C.idx[ci]) : owner.flames[0];
+        const f = crowd ? flameOf(owner, C.idx[ci]) : owner.flames[0];
         if (f) { this._placeFlames(owner, f.i, arch, clip, e16, _fa); f.stamp = frame; }
       }
     }
@@ -1464,13 +1534,13 @@ export class PeopleSystem {
       const ci = order ? order[k] : k;
       const owner = C.owner[ci];
       if (!owner.flames?.length) continue;
-      const f = owner instanceof Crowd ? owner.flames.find((q) => q.i === C.idx[ci]) : owner.flames[0];
+      const f = owner instanceof Crowd ? flameOf(owner, C.idx[ci]) : owner.flames[0];
       if (f) f.hidden = frame;
     }
     // flames of bearers not drawn this frame (behind the camera, culled): follow the pose anyway
     this._updateFlames(frame);
     this._updateRopes();
-    for (const b of this.batches) b.end();
+    for (let q = 0; q < BL.length; q++) BL[q].end();
     ct?.end();
     st.figures = figures;
     st.drawn = limit;
@@ -1478,7 +1548,20 @@ export class PeopleSystem {
     st.overBudget = Math.max(0, n - budget);
     st.far = st.lod[3];
     st.dropped = Math.max(0, n - limit);
-    st.batches = this.batches.reduce((s, b) => s + (b.n > 0 ? 1 : 0), 0);
+    let nb = 0;
+    for (let q = 0; q < BL.length; q++) if (BL[q].n > 0) nb++;
+    st.batches = nb;
+  }
+
+  /** the batch a prop variant draws in at `lod` this frame, or null (held / linking, or over the tier's prop-batch cap) */
+  _propBatch(v, lod) {
+    let b = v.batch(lod);
+    // still compiling: the LOD 1 prop (small geometry, the shared non-detail material, linked at boot) meanwhile
+    if (lod === 0 && !this._drawable(b)) { if (this.held(b.material)) this._want(b.material); const b1 = v.batch(1); if (this._drawable(b1)) b = b1; }
+    // gate-core: as _batchFor — a held or still-linking program (not the props' LOD1) waits
+    if (!this._drawable(b)) { if (this.held(b.material)) this._want(b.material); if (this._waits(b)) return null; }
+    if (b.n === 0) { if (this._propBatches >= this._propCap && v.name !== 'torch') return null; this._propBatches++; }   // a burning torch always shows
+    return b;
   }
 
   /**
@@ -1523,8 +1606,11 @@ export class PeopleSystem {
 
   /** lead ropes: from each led animal's halter (chin ring) to its leader's fist, sagging a little */
   _updateRopes() {
-    const list = [];
-    for (const a of this.actors) {
+    const list = this._ropeList || (this._ropeList = []);
+    list.length = 0;
+    const AL = this._alist;
+    for (let q = 0; q < AL.length; q++) {
+      const a = AL[q];
       if (!a.leader || a.disposed || !a.visible || !a.arch?.isAnimal || !a.clip?.halter) continue;
       const h = a.leader;
       if (h.disposed || !h.visible || !h.arch || h.arch.isAnimal) continue;
@@ -1541,7 +1627,7 @@ export class PeopleSystem {
       const hb = h.arch.rig.index[`hand_${side}`];
       const g = gripOffset(h.arch.rig, side);
       const hr = h.arch.rig.rest[hb];
-      const Bp = this._bonePoint(h, h.arch, hb, new Vector3(hr.x + g.x, hr.y + g.y, hr.z + g.z), _v2);
+      const Bp = this._bonePoint(h, h.arch, hb, _v3.set(hr.x + g.x, hr.y + g.y, hr.z + g.z), _v2);
       if (A && Bp) R.add(Bp, A);
     }
     R.end();
@@ -1561,15 +1647,18 @@ export class PeopleSystem {
   }
 
   _updateFlames(frame) {
-    const each = (owner) => {
-      for (const f of owner.flames) {
-        if (f.stamp !== frame) this._flameAt(owner, f);
-        const want = f.hidden === frame || (owner instanceof Crowd && owner.fadeM[f.i] < 0.5) ? 0 : 1;
-        if (want !== f.lit) { f.lit = want; try { f.handle?.setIntensity?.(want * (PROPS[f.prop]?.flame?.intensity ?? 1)); } catch { /* ignore */ } }
-      }
-    };
-    for (const a of this.actors) if (a.flames.length) each(a);
-    for (const c of this.crowds) if (c.flames.length) each(c);
+    const AL = this._alist, CL = this._clist;
+    for (let q = 0; q < AL.length; q++) if (AL[q].flames.length) this._updateFlamesOf(AL[q], frame);
+    for (let q = 0; q < CL.length; q++) if (CL[q].flames.length) this._updateFlamesOf(CL[q], frame);
+  }
+  _updateFlamesOf(owner, frame) {
+    const F = owner.flames;
+    for (let q = 0; q < F.length; q++) {
+      const f = F[q];
+      if (f.stamp !== frame) this._flameAt(owner, f);
+      const want = f.hidden === frame || (owner instanceof Crowd && owner.fadeM[f.i] < 0.5) ? 0 : 1;
+      if (want !== f.lit) { f.lit = want; try { f.handle?.setIntensity?.(want * (PROPS[f.prop]?.flame?.intensity ?? 1)); } catch { /* ignore */ } }
+    }
   }
 
   _placeFreeFlame(a, frame) {
@@ -1595,7 +1684,7 @@ export class PeopleSystem {
   }
 
   _placeFlames(owner, i, arch, clip, e16, fa) {
-    const f = owner instanceof Crowd ? owner.flames.find((q) => q.i === i) : owner.flames[0];
+    const f = owner instanceof Crowd ? flameOf(owner, i) : owner.flames[0];
     if (!f || !owner.prop) return;
     const grip = clip.grip === 'pair' ? 'fist' : (clip.grip || 'fist');
     const side = clip.hand || owner.prop.side;
@@ -1609,6 +1698,7 @@ export class PeopleSystem {
     _m.fromArray(e16);
     _v.applyMatrix4(_m);
     f.anchor.position.copy(_v);
+    f.anchor.updateMatrix();
     f.anchor.updateMatrixWorld();
   }
 
@@ -1657,13 +1747,13 @@ class RopeSet {
     const r = this.n++;
     const dist = A.distanceTo(B);
     const sag = Math.max(0.03, 0.18 * Math.max(0, 1.25 - dist));
-    const T = new Vector3(), N = new Vector3(), Bn = new Vector3(), up = new Vector3(0, 1, 0), p = new Vector3(), q = new Vector3();
-    const at = (t, o) => o.lerpVectors(A, B, t).addScaledVector(up, -sag * 4 * t * (1 - t));
+    // (module temporaries: no vectors or closure made per rope per frame — perf-cpu)
+    const T = _rT, N = _rN, Bn = _rB, up = _rUp, p = _rP, q = _rQ;
     let o = r * (this.seg + 1) * this.side * 3;
     for (let i = 0; i <= this.seg; i++) {
       const t = i / this.seg;
-      at(t, p);
-      at(Math.min(1, t + 0.02), q); T.copy(q); at(Math.max(0, t - 0.02), q); T.sub(q).normalize();
+      ropeAt(A, B, sag, t, p);
+      ropeAt(A, B, sag, Math.min(1, t + 0.02), q); T.copy(q); ropeAt(A, B, sag, Math.max(0, t - 0.02), q); T.sub(q).normalize();
       N.crossVectors(T, up); if (N.lengthSq() < 1e-6) N.set(1, 0, 0); N.normalize();
       Bn.crossVectors(N, T).normalize();
       for (let k = 0; k < this.side; k++) {
@@ -1688,6 +1778,25 @@ class RopeSet {
     this.geo.computeBoundingSphere();
   }
   dispose() { this.mesh.removeFromParent(); this.geo.dispose(); this.mesh.material.dispose(); }
+}
+
+const _rT = new Vector3(), _rN = new Vector3(), _rB = new Vector3(), _rUp = new Vector3(0, 1, 0), _rP = new Vector3(), _rQ = new Vector3();
+/** a point t along a lead rope from A to B sagging by `sag` at its middle */
+function ropeAt(A, B, sag, t, o) { return o.lerpVectors(A, B, t).addScaledVector(_rUp, -sag * 4 * t * (1 - t)); }
+
+/** a crowd member's torch flame (crowd.flames hold up to 24, by member index), or undefined */
+function flameOf(c, i) {
+  const F = c.flames;
+  for (let q = 0; q < F.length; q++) if (F[q].i === i) return F[q];
+  return undefined;
+}
+
+/** is a figure's prop drawn: not on a figure fading at the camera; LOD 0–1 all, the big ones further, an actor's ritual
+ *  vessels at LOD 2 */
+function showProp(pr, lod, alpha, near, actorV) {
+  if (!pr || !(near > 0.5)) return false;
+  const big = PROPS[pr.name]?.big;
+  return lod < 2 || (big && lod < 3) || (big && alpha > 0.5) || (lod === 2 && actorV && HELD_VESSELS.has(pr.name));
 }
 
 function isShown(o) {
