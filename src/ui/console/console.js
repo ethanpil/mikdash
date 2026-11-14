@@ -268,14 +268,15 @@ export function createConsole(app) {
     app.onFree?.();
   }
   /** the Menu covers the whole screen (dock Map, full sheet, landscape Map) */
-  const fullScreen = () => isOpen && (el.classList.contains('is-wide') || (app.layout.isSheet && detent === 'full'));
+  // (a phone's portrait Map is is-wide too, but at its mini detent — a Go from it — the world is in view: ux-audit A)
+  const fullScreen = () => isOpen && ((el.classList.contains('is-wide') && app.layout.mode !== 'sheet-portrait') || (app.layout.isSheet && detent === 'full'));
 
   // ---------------- player input alongside the Menu (§2.3) ----------------
   function applyInput() {
     const P = ctx.player;
     if (!P?.setInputEnabled) return;
     const sheetFull = isOpen && app.layout.isSheet && detent === 'full' && (top()?.type !== 'section' || FULL_SECTIONS.has(top()?.id) || top()?.type === 'welcome');
-    const mapOpen = isOpen && top()?.type === 'section' && top().id === 'map';
+    const mapOpen = isOpen && top()?.type === 'section' && top().id === 'map' && fullScreen();
     try {
       if (sheetFull || mapOpen || app.welcomeOpen?.()) {
         if (P.locked) app.expectUnlock();

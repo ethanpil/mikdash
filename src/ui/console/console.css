@@ -188,7 +188,7 @@
 
 /* drill-down bar (sheets) */
 .mk-drill { display: none; align-items: center; gap: 8px; padding: 4px 10px 6px; touch-action: none; }
-#ui-root[data-layout^='sheet'] .mk-menu:not([data-view='home']) .mk-drill { display: flex; }
+#ui-root[data-layout^='sheet'] .mk-menu:not([data-view='home']):not([data-view='welcome']) .mk-drill { display: flex; }
 .mk-drill__title { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 7px; margin: 0; font: 600 18px/1.2 var(--mk-display); color: var(--mk-ink); outline: none; }
 .mk-drill__title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mk-drill__title .ico { width: 18px; height: 18px; color: var(--mk-gold); }
@@ -300,7 +300,27 @@
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__en { font-size: 15px; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__clockbtn { padding: 0 2px 0 4px; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__clocktxt { align-items: flex-end; text-align: right; }
-#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__hour { font-size: 12px; }
+/* (the seasonal hour is on the Time tile and the home header; here it squeezed the place's name — ux-audit G) */
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__hour { display: none; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__he { flex: 0 4 auto; min-width: 0; }
+#ui-root[data-layout='sheet-portrait'] .mk-menu:not([data-view='home']) .mk-head__en { flex: 0 1 auto; }
+/* phones: Happening's filter is its own heading (no "Now" above it); compact area headings — three rows at the peek */
+#ui-root[data-layout='sheet-portrait'] .mk-hap__nowh { display: none; }
+#ui-root[data-layout='sheet-portrait'] .mk-hap__filter + .mk-sec { margin-top: 6px; }
+/* rows: the place is on the row's meta line on phones (the area headings cost a row at the peek); in the dock the area
+   heading names it once for its rows */
+#ui-root[data-layout^='sheet'] .mk-hap__areah { display: none; }
+#ui-root[data-layout^='sheet'] .mk-hap__area { margin-bottom: 6px; }
+#ui-root[data-layout='dock'] .mk-hap__area .mk-row__place { display: none; }
+/* dock: one title line (its full text in the tooltip and the card), slimmer buttons without icons — five or more rows in
+   view (ux-audit E) */
+#ui-root[data-layout='dock'] .mk-row__title { -webkit-line-clamp: 1; }
+#ui-root:not(.mk-coarse) .mk-row__acts .mk-btn .ico { display: none; }
+#ui-root:not(.mk-coarse) .mk-row__acts .mk-btn { padding-left: 12px; padding-right: 12px; }
+#ui-root[data-layout='dock'] .mk-row__hit { padding-top: 6px; padding-bottom: 6px; }
+#ui-root[data-layout='sheet-portrait'] .mk-row__title { font-size: 15px; line-height: 1.15; }
+#ui-root[data-layout='sheet-portrait'] .mk-row__hit { padding-top: 5px; padding-bottom: 5px; }
+#ui-root[data-layout='sheet-portrait'] .mk-row__acts { padding-top: 4px; padding-bottom: 4px; }
 /* phones, home: names and About on the disc's row, the clock and its transport on one row under it */
 #ui-root[data-layout='sheet-portrait'] .mk-menu[data-view='home'] .mk-head { grid-template-areas: 'disc loc close' 'clock clock clock' 'search search search' 'status status status'; align-items: center; gap: 4px 12px; }
 #ui-root[data-layout='sheet-portrait'] .mk-menu[data-view='home'] .mk-head__names { flex-direction: row; align-items: baseline; gap: 8px; white-space: nowrap; overflow: hidden; }
@@ -613,8 +633,8 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
    Sections
    ============================================================================ */
 .mk-hap__filter { margin-bottom: 4px; }
-.mk-hap__area { margin-bottom: 12px; }
-.mk-hap__areah { margin: 6px 0 6px; font: 600 15px/1.2 var(--mk-display); }
+.mk-hap__area { margin-bottom: 8px; }
+.mk-hap__areah { margin: 2px 0 4px; font: 600 14.5px/1.2 var(--mk-display); }
 .mk-nearby { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; }
 .mk-nearby__b { display: flex; width: 100%; align-items: baseline; gap: 10px; min-height: 36px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--mk-ink); cursor: pointer; text-align: left; }
 .mk-nearby__b:hover { background: rgba(241, 232, 212, 0.05); }
@@ -712,5 +732,5 @@ details[open] > .mk-card__sech::after { transform: rotate(-135deg); }
 /* The Welcome is its own panel, not the whole console around it (ux-audit I: 15 controls on the first screen, one of
    which mattered); its sentence names the place and the hour. The rail, the header and the phone's drill bar
    ("‹ Menu", Close) return with the first section. */
-.mk-menu[data-view='welcome'] :is(.mk-rail, .mk-head, .mk-drill) { display: none; }
+#ui-root .mk-menu[data-view='welcome'] :is(.mk-rail, .mk-head, .mk-drill) { display: none; }
 .mk-menu[data-view='welcome'] .mk-menu__body { grid-template-columns: minmax(0, 1fr); border-top: 0; }

@@ -9,7 +9,7 @@ import { Vector3 } from 'three';
 import { h, setText } from '../dom.js';
 
 const HOVER_HZ = 10, CENTER_HZ = 5, RING_HZ = 30;
-const CHIP_MS = 4000;
+const CHIP_MS = 6000; // (long enough to read the name and reach it with a thumb)
 /** site element kinds that are the building itself, not a thing in it (site.js kinds; fixtures, curtains, fires stay) */
 const STRUCT = new Set(['wall', 'gate', 'chamber', 'stair', 'slab', 'opening', 'ramp', 'floor', 'zone']);
 

@@ -245,7 +245,8 @@ void surf(vec2 p, inout S s) {
   // (and its 0.45 occlusion) drew a dark grout line round every slab; up close the patch draws the hairline itself
   float jR = uP0.x + 0.5 * uP0.z;
   float jE = max(jR, texP * 0.6);
-  float jK = max(jR / jE, 0.5);   // (not under a half: dust settles in the joint and along its arrises)
+  float jK = max(jR / jE, mix(0.5, 0.6, lowRes));   // (not under a half — on low 0.6, where they are the
+  // floor's main cue at 5–20 m: dust settles in the joint and along its arrises)
   float faceC = mix(1.0, smoothstep(jE * 0.4, jE * 1.4, e), jK);
   float tilt = ((b.lx / b.len - 0.5) * (bh.x - 0.5) + (b.ly / uRowH - 0.5) * (bh.y - 0.5)) * 2.0 * uP1.z;
   // weathering: worn hollows, pitting, half-worn tooling

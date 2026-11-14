@@ -76,7 +76,7 @@ export function eventRow(app, ev, opts = {}) {
   const title = ev.dynamic && ev.typeName?.en ? `${ev.typeName.en}${ev.summary ? ` · ${ev.summary}` : ''}` : (ev.title?.en || ev.id);
   // compact (ux-audit E): the title line, then place · time · Hebrew on one line; Show me (gold) and Go (plain, the
   // travel defaults; the pace lives in the travel bar) beside them. ≈ 50–70 px a row instead of 133.
-  const hit = h('button.mk-row__hit', { type: 'button', 'aria-label': `${title}${zoneName ? `, ${zoneName}` : ''}. Open its card`, on: { click: () => app.card(`event:${ev.id}`) } },
+  const hit = h('button.mk-row__hit', { type: 'button', title, 'aria-label': `${title}${zoneName ? `, ${zoneName}` : ''}. Open its card`, on: { click: () => app.card(`event:${ev.id}`) } },
     h('span.mk-row__top', importance(ev.importance), h('span.mk-row__title', title)),
     h('span.mk-row__meta', opts.place !== false && zoneName ? h('span.mk-row__place', zoneName) : null, relEl,
       ev.layer === 'aggadah' ? h('span.mk-badge', { title: 'Aggadah: the narrative and miracle traditions' }, 'Legend') : null,

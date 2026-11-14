@@ -286,10 +286,12 @@ export function mountUi(ctx) {
       // the director frames its own subject while it places and sets the clock; once it is showing, a figure picked
       // beside it is framed too (a phone's tap during a Show me: the card's sheet covered the figure — ux-audit B)
       if (sh && !['done', 'cancelled', 'failed', 'showing'].includes(sh.phase)) return;
-      const s = pt || screenOf(ref);
-      if (!s) return;
       const f = app.layout.free, m = 20;
-      if (s.x >= f.l + m && s.x <= innerWidth - f.r - m && s.y >= f.t + m && s.y <= innerHeight - f.b - m) return;
+      const inside = (q) => q.x >= f.l + m && q.x <= innerWidth - f.r - m && q.y >= f.t + m && q.y <= innerHeight - f.b - m;
+      // the tap point, and on a phone sheet the subject's chest too: a tap on a head just above the sheet left the body
+      // under it (ux-audit B)
+      const pts = [pt || screenOf(ref), pt && app.layout.isSheet ? screenOf(ref) : null].filter(Boolean);
+      if (!pts.length || pts.every(inside)) return;
       framingUntil = performance.now() + 450;
       try { ctx.inspect.frame(ref)?.catch?.(() => {}); } catch (e) { console.error('[ui] frame', e); }
     });

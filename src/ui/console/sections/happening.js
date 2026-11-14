@@ -22,7 +22,7 @@ export function happeningSection(app) {
         const seg = h('div.mk-seg.mk-hap__filter', { role: 'group', 'aria-label': 'Show' });
         const nowBox = h('div.mk-hap__now');
         const nextBox = h('div.mk-evs');
-        el.append(seg, h('section.mk-sec', h('h3.mk-h', 'Now'), nowBox), h('section.mk-sec', h('h3.mk-h', 'Next'), nextBox));
+        el.append(seg, h('section.mk-sec', h('h3.mk-h.mk-hap__nowh', 'Now'), nowBox), h('section.mk-sec', h('h3.mk-h', 'Next'), nextBox));
         // "Legends": the aggadah layer in plain words (ux-audit finding 10); its title keeps the Hebrew term
         const FILTERS = [['all', 'Everywhere'], ['here', 'Here'], ['near', 'Near me'], ['aggadah', 'Legends']];
         function paintSeg() {
@@ -71,7 +71,7 @@ export function happeningSection(app) {
               const n = a.stat.length + [...a.dyn.values()].reduce((s, l) => s + l.length, 0);
               const name = (data.zone(z)?.name?.en || 'Elsewhere').split(' — ')[0];
               const box = h('div.mk-evs');
-              for (const ev of a.stat) { const r = eventRow(app, ev, { place: false }); rows.push(r); box.append(r.el); }
+              for (const ev of a.stat) { const r = eventRow(app, ev); rows.push(r); box.append(r.el); }
               for (const [pid, list] of a.dyn) {
                 const parent = ctx.schedule?.byId?.(pid);
                 const g = dynGroup(app, list, { key: `${z}-${pid}`, title: stageTitle(pid, parent?.title?.en || list[0]?.parentTitle?.en, list.length), open: openGroups.has(`${z}-${pid}`), onToggle: (on) => (on ? openGroups.add(`${z}-${pid}`) : openGroups.delete(`${z}-${pid}`)) });

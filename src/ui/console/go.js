@@ -92,6 +92,22 @@ export function createTravel(app) {
     const bearing = ((Math.atan2(dx, -dz) * 180) / Math.PI + 360) % 360;
     return { flat, heading: (bearing - yawOff + 360) % 360, pitch: Math.max(-25, Math.min(10, (Math.atan2(dy, flat) * 180) / Math.PI + pitchOff)) };
   }
+  /** the level heading (deg) with the longest view before a wall (ctx.physics.raycast, 16 rays, once), or null */
+  function openHeading() {
+    const eye = P()?.eye || ctx.camera?.position;
+    const ray = ctx.physics?.raycast;
+    if (!eye || !ray) return null;
+    const h0 = P().heading ?? 0;
+    let best = null, bd = -1;
+    for (let i = 0; i < 16; i++) {
+      const hd = (h0 + i * 22.5) % 360, r = (hd * Math.PI) / 180;
+      const dir = eye.clone().set(Math.sin(r), 0, -Math.cos(r));
+      let d = 60;
+      try { const hit = ray.call(ctx.physics, eye, dir, 60); if (hit) d = hit.distance; } catch { return null; }
+      if (d > bd + 0.5) { bd = d; best = hd; } // (ties keep the heading nearest the one you had)
+    }
+    return best;
+  }
   /** turn to a heading / pitch over ms (eased); any look or move input meanwhile wins */
   function turnTo(heading, pitch, ms = 450) {
     const pl = P();
@@ -130,7 +146,11 @@ export function createTravel(app) {
           if (!c) return;
           const z = Number.isFinite(m.floorZ) ? m.floorZ : w2m(P().position).Z;
           const t = lookAtWorld(m2w(c[0], c[1], z + 1.2));
-          if (t && t.flat > 4) turnTo(t.heading, Math.max(-12, Math.min(4, t.pitch)));
+          if (t && t.flat > 4) { turnTo(t.heading, Math.max(-12, Math.min(4, t.pitch))); return; }
+          // standing at its centre: face the most open way across it (16 level rays; the stand's own heading faced a
+          // wall a few metres off in Lishkat HaMetzora'im)
+          const open = openHeading();
+          if (open != null) turnTo(open, -4);
         }
       } catch (e) { console.error('[ui] face on arrival', e); }
     });
