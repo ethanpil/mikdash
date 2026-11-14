@@ -107,7 +107,11 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   never opens (Middot 1:3). Events may carry `onWeekday` (0 = Sunday: the showbread's reeds come out on Friday and go
   back on Sunday, Menachot 11:6, TuM 5:11). The musaf's limbs wait on the ramp's EAST lower half, the tamid's on the
   west (TuM 6:3). The afternoon call is an unnamed Levite of the officer's men (KhM 7:2), not Gevini (Yoma 20b gives
-  his cry at dawn only). Staged gaps and their sources: docs/decisions/source-gaps-staged.md.
+  his cry at dawn only). Libations are bought by day with the seals (Shekalim 5:3–5; KhM 7:10–13): one buyer per
+  libation the individuals' offerings and the nazir/metzora sets stage, with the seal its animal needs, at a desk in Beit
+  HaMoked's unsanctified half (Tamid 3:3 puts a chamber of seals in that hall; the desk's place by day is reconstruction);
+  a kohen takes the wine to the silver table, where the existing libation-bearer takes up that jug (chambers-daily
+  `seals-sale`). Staged gaps and their sources: docs/decisions/source-gaps-staged.md.
 - Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
   give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.
