@@ -91,11 +91,17 @@ function slotBits(sl) {
 /** exact solid angle of [0,x]×[0,y] at height h over its corner (signed in x, y) */
 const omegaF = (x, y, h) => Math.atan2(x * y, h * Math.sqrt(h * h + x * x + y * y));
 
+/** how far beyond an opening's plane (m) a point still reads the opening as from the plane: past the widest room margin (2.6 m) */
+const APERTURE_BEYOND = 3;
 function apertureFraction(p, a) {
   const c = a.centre;
   const d = [c.x - p.x, c.y - p.y, c.z - p.z];
   let h = d[a.axis] * a.sign;
-  if (h <= 0 || a.value <= 0) return 0;
+  // A point ON the opening's plane, or in the room's margin just beyond it (where `inside` still counts it as in the
+  // room), sees through the opening as from the plane itself: all of it inside the rectangle, none beside it. It was 0
+  // from the plane outward, so the eye standing in a stoa's open side — or stepping out through any doorway — was
+  // metered as in a closed room (V = base): 16–20× over, the court white at any hour (final QA, shots/final/sunset).
+  if (h <= -APERTURE_BEYOND || a.value <= 0) return 0;
   const o = a.axis === 0 ? [1, 2] : a.axis === 1 ? [0, 2] : [0, 1];
   const cx = d[o[0]], cy = d[o[1]];
   h = Math.max(h, 1e-3);
@@ -139,7 +145,7 @@ export function createInteriors(ctx, opts = {}) {
   const AMAH = ctx.units.AMAH;
   const volumes = defineVolumes(ctx).map((v) => {
     const wb = toWorldBox(v.min, v.max);
-    return { id: v.id, min: wb.min, max: wb.max, base: v.base, margin: v.margin, shell: Math.min(v.shell, 3.9), joins: joinBits(v.joins), probe: v.probe, gold: v.gold, site: v, apertures: v.apertures.map((a) => toWorldAperture(a, AMAH)), apStart: 0, slot: -1 };
+    return { id: v.id, min: wb.min, max: wb.max, base: v.base, margin: v.margin, shell: Math.min(v.shell, 3.9), joins: joinBits(v.joins), probe: v.probe, gold: v.gold, colonnade: !!v.colonnade, site: v, apertures: v.apertures.map((a) => toWorldAperture(a, AMAH)), apStart: 0, slot: -1 };
   });
   // the 16-bit centimetre coordinates count from here: the site from X −300, Y +900, Z −100 amot (655 m covers it)
   const origin = m2w(-300, 900, -100);
@@ -438,6 +444,37 @@ export function createInteriors(ctx, opts = {}) {
     let V = v.base;
     for (const a of v.apertures) V += apertureFraction(_h, a);
     return Math.min(1, Math.max(0, V));
+  }
+
+  // The share (0..1, centre-weighted) of the view from p that leaves room v through one of its open apertures: nine rays
+  // over the field of view, each followed to the room's box (arithmetic only, no ray cast). For a colonnade open along
+  // a whole side, where the eye looking out sees the court and little of the room it stands in (env's meter).
+  const VIEW_OUT = [[0, 0, 4], [-0.55, 0, 2], [0.55, 0, 2], [0, -0.5, 1], [0, 0.5, 2], [-0.55, 0.5, 1], [0.55, 0.5, 1], [-0.55, -0.5, 1], [0.55, -0.5, 1]];
+  const VIEW_OUT_W = VIEW_OUT.reduce((s, r) => s + r[2], 0);
+  const _vo = new Vector3();
+  function viewOut(v, cam) {
+    const th = Math.tan(((cam.fov || 60) * Math.PI) / 360), asp = cam.aspect || 1, p = cam.position;
+    let sum = 0;
+    for (let i = 0; i < VIEW_OUT.length; i++) {
+      const r = VIEW_OUT[i];
+      _vo.set(r[0] * th * asp, r[1] * th, -1).normalize().applyQuaternion(cam.quaternion);
+      // the nearest face of the box along the ray, and its axis
+      let t = Infinity, ax = -1;
+      if (Math.abs(_vo.x) > 1e-6) { const ta = ((_vo.x > 0 ? v.max.x : v.min.x) - p.x) / _vo.x; if (ta < t) { t = ta; ax = 0; } }
+      if (Math.abs(_vo.y) > 1e-6) { const ta = ((_vo.y > 0 ? v.max.y : v.min.y) - p.y) / _vo.y; if (ta < t) { t = ta; ax = 1; } }
+      if (Math.abs(_vo.z) > 1e-6) { const ta = ((_vo.z > 0 ? v.max.z : v.min.z) - p.z) / _vo.z; if (ta < t) { t = ta; ax = 2; } }
+      if (!(t > 0) || ax < 0) continue;
+      const ex = p.x + _vo.x * t, ey = p.y + _vo.y * t, ez = p.z + _vo.z * t;
+      const sign = (ax === 0 ? _vo.x : ax === 1 ? _vo.y : _vo.z) > 0 ? 1 : -1;
+      for (let k = 0; k < v.apertures.length; k++) {
+        const a = v.apertures[k];
+        if (a.axis !== ax || a.sign !== sign || !(a.value > 0)) continue;
+        const c = a.centre;
+        const du = ax === 0 ? ey - c.y : ex - c.x, dv = ax === 2 ? ey - c.y : ez - c.z;
+        if (Math.abs(du) <= a.hx && Math.abs(dv) <= a.hy) { sum += r[2] * Math.min(1, a.value); break; }
+      }
+    }
+    return sum / VIEW_OUT_W;
   }
 
   const _a = { V: 1, vol: null, s: 0 }, _b = { V: 1, vol: null, s: 0 };
@@ -766,6 +803,8 @@ export function createInteriors(ctx, opts = {}) {
     fireLuminance: (vol) => vol?.fireL || 0,
     /** sky visibility of room `vol` where the view ray from p along dir meets its walls (null: not in the room) */
     viewVisibility: (vol, p, dir) => (vol ? viewVisibility(vol, p, dir) : null),
+    /** the share of the camera's view that leaves a colonnade through its open side (0 for any other room) */
+    viewOut: (vol, cam) => (vol && vol.colonnade ? viewOut(vol, cam) : 0),
     /** a gilded room's interreflection gain for the light from its openings (rgb), else [1, 1, 1] */
     roomGain: (vol) => (gilded(vol) ? GOLD_GAIN : [1, 1, 1]),
     beginCapture,

@@ -746,8 +746,14 @@ export async function init(ctx) {
       // (at the walls the view ray meets: bright beside the great gate, dim at the far end), 0.6 / 0.4 in log
       const cdir = camera.getWorldDirection(tmp);
       const Vv = interiors.viewVisibility(ci.vol, camera.position, cdir);
-      const Lview = Vv == null ? Lopen : La * Vv;
-      const est = Math.exp(0.6 * Math.log(Math.max(Lopen + Lf, 1e-9)) + 0.4 * Math.log(Math.max(Lview + Lf, 1e-9)));
+      // a colonnade (the Mount's stoas: open along a whole side): the part of the view that leaves between the columns
+      // shows the court itself, at the outdoor level, and the more of the view it fills the more the eye adapts to it —
+      // looking out from the Royal Stoa metered the shaded walk alone and the court washed out two stops over, at any
+      // hour (fo = 0 in every other room: unchanged there)
+      const fo = interiors.viewOut(ci.vol, camera);
+      const Lview = Vv == null ? Lopen : La * (fo + (1 - fo) * Vv);
+      const wv = 0.4 + 0.6 * fo;
+      const est = Math.exp((1 - wv) * Math.log(Math.max(Lopen + Lf, 1e-9)) + wv * Math.log(Math.max(Lview + Lf, 1e-9)));
       const w = rp ? probes.coverage(rp.id) : 0;
       const Lroom = Math.max(w > 0 ? Math.exp(w * Math.log(Math.max(probes.roomLuminance(rp, camera.getWorldDirection(tmp)), 1e-9)) + (1 - w) * Math.log(est)) : est, 1e-9);
       const lo = Math.log(La);
