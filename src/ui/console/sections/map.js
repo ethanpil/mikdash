@@ -7,6 +7,8 @@ export function mapSection(app) {
   let panel = null;
   const get = () => { if (!panel) panel = createMapPanel(app); return panel; };
   app.mapPanel = get;
+  /** the panel if it has been made (no build as a side effect) */
+  app.mapPanelIfMade = () => panel;
   return {
     id: 'map',
     title: { en: 'Map', he: 'מפה' },

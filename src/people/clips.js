@@ -1528,6 +1528,116 @@ export const PEOPLE4_CLIPS = {
 Object.assign(SERVICE_CLIPS, PEOPLE4_CLIPS);
 Object.assign(HUMAN_CLIPS, PEOPLE4_CLIPS);
 
+// ------------------------------------------------------------------------------------------- bull-props (heavy loads)
+// A bull's parts are carried across both open palms in front, forearms level at the waist, close to the body (a calf's
+// head or a hind leg weighs tens of kilograms). The limbs the Mishnah gives to two or three men are carried WHOLE by them
+// together, side by side — "why is the large limb of an ox not divided? 'he shall cut it into its pieces' — not its
+// pieces into pieces" (Rambam Ma'aseh HaKorbanot 6:18–19; Tosafot Yom Tov on Yoma 2:7): every man of a group stands in
+// the same clip at the same phase, HEAVY.pair apart, and the load rides the RIGHT palm of one of them (props.js
+// heavyGrip: level in carry_heavy), reaching over his partners' palms (docs/decisions/rosh-chodesh.md "Bull-scale props").
+//   carry_heavy / carry_heavy_walk  the load on both palms (grip 'palm', right hand); walking, the shoulders kept square
+//               to it (the walk's chest twist taken out) so a load 1 m long does not swing across a partner's hands
+//   lay_heavy  one-shot: 0 → 0.4 down into a crouch, the load lowered to the floor before him; 0.4 → 0.6 held there; →
+//               1 up again, the hands empty (the props are dropped at 0.5; played 1 → 0 it picks the load up)
+//   toss_heavy one-shot: the load heaved forward and up from the waist onto the pile, let go at ≈ 0.55 (drop the props
+//               there), arms back down by 1
+//   flay_kneel kneeling on both knees beside a carcass on the pavement, the knife in the right hand working at ≈ 0.35 m,
+//               the left drawing the hide back (a bull is flayed where it fell — g7/plan.js)
+//   wipe       leaning over the altar's yesod, a folded cloth under the right palm wiped in broad rounds on the wall
+//               ≈ 0.72 m ahead at chest height, the left palm braced on the wall (Middot 3:4 "they whiten it with a cloth")
+/** the heavy carry at scale 1 (m, figure frame): palms ±x at height y, z ahead; partners `pair` apart (sim: g7/plan.js) */
+export const HEAVY = { x: 0.2, y: 0.98, z: -0.3, pair: 0.634, thumb: [1, 0.15, 0], fingers: [0, 0.1, -1] };
+function heavyArms(P, r, lift = 0, o = {}) {
+  const k = r.dims.H / 1.67;
+  const y = (o.y ?? HEAVY.y) * k + lift, z = (o.z ?? HEAVY.z) * k;
+  for (const [s, sg] of [['r', 1], ['l', -1]]) {
+    // the wrist a hand's breadth behind the palm's middle: the palm under the load at (±x, y, z)
+    openHand(P, s, V(sg * HEAVY.x * k, y - 0.02 * k, z + 0.07 * k), V(sg * HEAVY.thumb[0], HEAVY.thumb[1], HEAVY.thumb[2]), V(...HEAVY.fingers),
+      { curl: 24, icurl: 18, thumb: 12, elbow: [0.35, -1, 0.55] });
+  }
+}
+function keyHeavyCarry(P, r) { stance(P, r, { lean: 3, chest: 1.5, head: -5, dy: -0.008 }); heavyArms(P, r); }
+function keyHeavyLow(P, r) {
+  const d = r.dims, k = d.H / 1.67;
+  // a deep crouch, the back bent over the load: the palms come down to ≈ 6 cm above the floor, 0.5 m ahead
+  stance(P, r, { noLegs: true, dy: -0.56 * k, pz: 0.2 * k, pp: -34, lean: -32, chest: -22, neck: 14, head: -8 });
+  for (const [s, sg] of [['r', 1], ['l', -1]]) P.leg(s, V(sg * 0.15 * k, d.ankleY, -0.04 * k), { knee: [sg * 0.35, 0.3, -1] });
+  heavyArms(P, r, 0, { y: 0.06, z: -0.52 });
+}
+function keyHeavyEmpty(P, r) { stance(P, r, { lean: 0.5 }); armHang(P, 'l'); armHang(P, 'r'); }
+export const BULL_CLIPS = {
+  carry_heavy: {
+    frames: 16, loop: true, rate: 0.2, grip: 'palm', hand: 'r',
+    fn(P, r, ph) { keyHeavyCarry(P, r); breathe(P, ph, 0.7); },
+  },
+  carry_heavy_walk: {
+    frames: 32, loop: true, stride: 'stride', grip: 'palm', hand: 'r',
+    fn(P, r, ph) {
+      walkBody(P, r, ph, { noArms: true });
+      // the shoulders square to the load: the chest cancels the pelvis's and spine's twist (5° − 3°) and roll (3° − 1.5°)
+      const sw = cos(TAU * ph);
+      P.rot('chest', 0.5 + (r.dims.style === 'elder' ? -7 : 0), -2 * sw, -1.5 * sin(TAU * (ph - 0.05)));
+      heavyArms(P, r, 0.005 * cos(2 * TAU * ph));
+    },
+  },
+  lay_heavy: {
+    frames: 24, loop: false, rate: 1 / 2.4, grip: 'palm', hand: 'r',
+    fn: keyed([[0, keyHeavyCarry], [0.4, keyHeavyLow], [0.6, keyHeavyLow], [1, keyHeavyEmpty]]),
+  },
+  toss_heavy: {
+    frames: 24, loop: false, rate: 1 / 1.8, grip: 'palm', hand: 'r',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const back = smooth(0, 0.22, ph) * (1 - smooth(0.22, 0.4, ph));          // a short swing back to gather
+      const up = smooth(0.25, 0.55, ph) * (1 - smooth(0.72, 1, ph));
+      const rel = smooth(0.55, 0.9, ph);                                       // after the release the arms come down
+      stance(P, r, { lean: 4 * back - 14 * up, chest: -6 * up, head: -8, dy: -0.04 * back * k, rz: 0.12 * k, lz: -0.04 * k });
+      if (rel < 0.999) {
+        const y = (HEAVY.y - 0.05 * back + 0.3 * up) * k, z = (HEAVY.z + 0.06 * back - 0.36 * up) * k;
+        for (const [s, sg] of [['r', 1], ['l', -1]]) {
+          openHand(P, s, V(sg * HEAVY.x * k, y - 0.02 * k, z + 0.07 * k), V(sg * HEAVY.thumb[0], HEAVY.thumb[1] + 0.3 * up, HEAVY.thumb[2]), V(0, HEAVY.fingers[1] + 0.5 * up, -1),
+            { curl: 24 - 12 * up, icurl: 18, thumb: 12, elbow: [0.4, -1, 0.5] });
+        }
+      }
+      if (rel > 0.001) {
+        const A = _aux(r, 2);
+        A.reset(); stance(A, r, { lean: -14 * up, chest: -6 * up, head: -8 }); armHang(A, 'l'); armHang(A, 'r');
+        if (rel >= 0.999) { P.lp.q.set(A.lp.q); P.lp.t.set(A.lp.t); } else {
+          const B = _aux(r, 3);
+          B.lp.q.set(P.lp.q); B.lp.t.set(P.lp.t);
+          blendPose(P.lp, B.lp, A.lp, rel);
+        }
+      }
+    },
+  },
+  flay_kneel: {
+    frames: 32, loop: true, rate: 0.35, grip: 'fist', hand: 'r',
+    fn(P, r, ph) {
+      const k = r.dims.H / 1.67;
+      const cut = sin(ph * TAU), pull = 0.5 + 0.5 * sin(ph * TAU + 1.2);
+      keyKneel(P, r);
+      P.rot('spine', -24 + 2 * cut, 4 * cut, 0); P.rot('chest', -18, 3 * cut, 0); P.rot('neck', 10, 0, 0); P.rot('head', -24, 0, 0);
+      // the knife edge-first along the line where hide meets fat, the left hand peeling the hide back toward him
+      fist(P, r, 'r', V((0.05 + 0.04 * cut) * k, (0.34 + 0.03 * cut) * k, -(0.5 + 0.03 * cut) * k), V(-0.3, 0.2, -1), V(-1, -0.4, 0.1), { elbow: [0.6, -0.6, 0.6] });
+      openHand(P, 'l', V((-0.17 - 0.02 * pull) * k, (0.36 + 0.05 * pull) * k, -(0.46 - 0.06 * pull) * k), V(1, 0.3, -0.2), V(0.1, -0.5, -1), { curl: 64, icurl: 58, thumb: 38, elbow: [0.6, -0.6, 0.6] });
+    },
+  },
+  wipe: {
+    frames: 24, loop: true, rate: 0.25, grip: 'palm', hand: 'r',
+    fn(P, r, ph) {
+      const d = r.dims, k = d.H / 1.67;
+      const w = ph * TAU, c = cos(w), s = sin(w);
+      stance(P, r, { lean: -24 - 2 * s, chest: -12, pp: -8, cy: -5 * c, neck: 8, head: -6, lz: 0.08 * k, rz: -0.12 * k, px: 0.02 * c * k });
+      // broad rounds of the right palm on the wall (palm forward, fingers up, thumb in), pressed into the cloth
+      openHand(P, 'r', V((0.12 + 0.2 * c) * k, (1.08 + 0.13 * s) * k, -0.72 * k), V(-1, 0, 0.08 * c), V(0.12 * s, 1, 0.05), { curl: 10, icurl: 6, thumb: 8, elbow: [0.7, -0.7, 0.4] });
+      openHand(P, 'l', V(-0.24 * k, 1.16 * k, -0.71 * k), V(1, 0, 0), V(-0.15, 1, 0.05), { curl: 14, icurl: 8, thumb: 10, elbow: [-0.2, -0.8, 0.4] });
+      breathe(P, ph, 1.3);
+    },
+  },
+};
+Object.assign(SERVICE_CLIPS, BULL_CLIPS);
+Object.assign(HUMAN_CLIPS, BULL_CLIPS);
+
 // name aliases for the sim's convenience
 export const CLIP_ALIASES = {
   stand_still: 'stand', prostration: 'prostrate', kneel_down: 'kneel', lot: 'circle_lot', sleeping: 'sleep',

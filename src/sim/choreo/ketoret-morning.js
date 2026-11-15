@@ -44,8 +44,9 @@ export default {
   aliases: ['birkat-kohanim', 'menorah-lighting', 'libation-song', 'maamad'],
   always: true,
   importance: 3,
-  // shabbat-musaf publishes its concert for this module to stage (g6/musaf.js musafConcert)
-  claims: ['shabbat-musaf-song'],
+  // shabbat-musaf publishes its concert for this module to stage (g6/musaf.js musafConcert), rosh-chodesh-musaf its own
+  // (g7/concert.js rcConcert)
+  claims: ['shabbat-musaf-song', 'rc-musaf-song'],
 
   init(ctx, events, sim) {
     const P = places(ctx);

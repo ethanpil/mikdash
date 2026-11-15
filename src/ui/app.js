@@ -165,7 +165,7 @@ export function mountUi(ctx) {
 
   // layers, bottom to top (§3.1); the beacon is the first Tab stop
   root.append(beacon.el, markers.el, pick.el, app.captions.el, app.banner.el, travelSlot, app.showbar.bar, app.showbar.chip,
-    vert, menu.el, notices, welcome.coach, welcome.ghosts, app.travel.menu, pick.chooser, live, app.showbar.live);
+    vert, menu.el, notices, welcome.coach, welcome.ghosts, app.travel.menu, pick.chooser, pick.nameChip, live, app.showbar.live);
   document.body.append(app.travel.vignette, app.showbar.veilTxt);
 
   // the captions lane rides above whichever bar is at the bottom (the travel bar, the Show-me bar or its chip): their
@@ -283,11 +283,16 @@ export function mountUi(ctx) {
       frameFreeKey = freeKey();
       if (!ref || !ctx.inspect?.frame || app.cardRef() !== ref || menu.fullScreen()) return;
       const sh = ctx.inspect.show;
-      if (sh && !['done', 'cancelled', 'failed'].includes(sh.phase)) return; // the director frames its own subject
-      const s = pt || screenOf(ref);
-      if (!s) return;
+      // the director frames its own subject while it places, sets the clock and shows it; on a phone sheet, once it is
+      // showing, a figure picked beside it is framed too (the card's sheet covered the figure — ux-audit B). The dock
+      // keeps the old rule (a desktop Back must restore the view the director took, not one framed after it)
+      if (sh && !['done', 'cancelled', 'failed'].includes(sh.phase) && !(sh.phase === 'showing' && app.layout.isSheet)) return;
       const f = app.layout.free, m = 20;
-      if (s.x >= f.l + m && s.x <= innerWidth - f.r - m && s.y >= f.t + m && s.y <= innerHeight - f.b - m) return;
+      const inside = (q) => q.x >= f.l + m && q.x <= innerWidth - f.r - m && q.y >= f.t + m && q.y <= innerHeight - f.b - m;
+      // the tap point, and on a phone sheet the subject's chest too: a tap on a head just above the sheet left the body
+      // under it (ux-audit B)
+      const pts = [pt || screenOf(ref), pt && app.layout.isSheet ? screenOf(ref) : null].filter(Boolean);
+      if (!pts.length || pts.every(inside)) return;
       framingUntil = performance.now() + 450;
       try { ctx.inspect.frame(ref)?.catch?.(() => {}); } catch (e) { console.error('[ui] frame', e); }
     });
@@ -419,11 +424,28 @@ export function mountUi(ctx) {
     app.flags.closedByEsc = false;
     requestAnimationFrame(() => app.updateCaptionGap());
   };
-  app.onFree = () => { root.classList.toggle('mk-full', menu.fullScreen()); requestAnimationFrame(() => app.updateCaptionGap()); refreshFrame(); };
+  app.onFree = () => {
+    root.classList.toggle('mk-full', menu.fullScreen());
+    // the travel bar leaves the map when the map stops covering the world (a phone's mini detent), and comes back
+    try { app.mapPanelIfMade?.()?.syncTrip?.(); } catch (e) { console.error('[ui] map travel sync', e); }
+    requestAnimationFrame(() => app.updateCaptionGap());
+    refreshFrame();
+  };
   app.onTripStart = () => {
     app.showbar.noteTrip();
     if (app.layout.mode === 'sheet-portrait' && menu.isOpen) menu.setDetent('mini');
     else if (app.layout.mode === 'sheet-landscape' && menu.isOpen) menu.close();
+    // the dock's Map covers the whole window: a Go from it returns the Menu to its dock width (the section before the
+    // Map), so the walk is seen beside it, its route on the header's minimap (ux-audit finding 6)
+    else if (app.layout.mode === 'dock' && menu.isOpen && menu.view?.type === 'section' && menu.view.id === 'map') {
+      const back = menu.prevSection && menu.prevSection !== 'map' ? menu.prevSection : 'here';
+      menu.open(back, { from: 'nav', keepFocus: true });
+    }
+  };
+  /** a Show me is starting: a phone's portrait sheet drops to its mini detent first, so the director frames the subject
+   * in the strip of world above it (it reads the free area when it frames; ux-audit B) */
+  app.onShowStart = () => {
+    if (app.layout.mode === 'sheet-portrait' && menu.isOpen && menu.detent !== 'mini') menu.setDetent('mini');
   };
   app.onTripEnd = () => {};
 

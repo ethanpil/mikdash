@@ -7,7 +7,8 @@
 // Setup/view JS runs in the page with `ctx` = __mikdash and `S` = a scratch object kept across the job's views.
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,11 +24,10 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--q') opt.q = args[++i];
   else jobs = jobs.concat(JSON.parse(readFileSync(a, 'utf8')));
 }
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', hmr: false, watch: null } });
 await server.listen();
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const { browser } = await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS, '--autoplay-policy=no-user-gesture-required'] });
 mkdirSync(resolve(root, opt.out), { recursive: true });
 const run = (page, code) => page.evaluate(async (code) => {
   const ctx = globalThis.__mikdash, S = (globalThis.__S ||= {});

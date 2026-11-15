@@ -12,7 +12,8 @@
 //   blood      an olah: north-east and south-west corners below the red line, the rest on the southern base (Zevachim 5:4)
 //   flay       hung by the hind leg on the dwarf pillars, flayed and cut in the tamid's order; the morning's six bearers
 //              stand in a row for their parts (Tamid 4:2–3 ⚙ for the musaf); the hides to Lishkat HaParvah ⚙
-//   ramp       laid on the lower half of the ramp, on its west side (Shekalim 8:8), salted by the flour and wine men
+//   ramp       laid on the lower half of the ramp, on its EAST side (Rambam TuM 6:3 "בְּמִזְרָחוֹ"; the tamid's on the west,
+//              Tamid 4:3), salted by the flour and wine men
 //   up         the morning's fourth-lottery men carry them up to the great pile (TuM 4:9), the first lamb's parts then the
 //              second's; then the fine flour mixed with oil — two tenths for the two lambs (Bamidbar 28:9) — by the
 //              morning's fourth-lottery flour man (tamid-morning's U[6])
@@ -279,10 +280,13 @@ export function buildMusaf(ctx, sim, opts = {}) {
   const rowAt = (Li, i) => [Li.hook[0] - 2.6 - 1.45 * i, Li.hook[1] - 1.75 - 0.25 * (i % 2), Z];
   const take = (Li, i) => [Li.hook[0] - 2.15, Li.hook[1] - 1.35 - 0.35 * (i % 2), Z];
   const ROWH = 75;
-  // the lower half of the ramp, west side (Shekalim 8:8): lamb A's parts in the tamid's column, B's a column east ⚙
-  const Y0 = R.halfY - 1.9, DY = 1.33;
-  const placeX = (i) => [R.box.min[0] + 1.3 + 2.7 * i, R.box.min[0] + 2.45 + 2.7 * i];
-  const spot = (i, q) => [placeX(i)[1] + 1.15, Y0 - DY * q];
+  // the lower half of the ramp, its EAST side: "וְשֶׁל מוּסָפִין הָיוּ נוֹתְנִין אוֹתָן מֵחֲצִי כֶּבֶשׁ וּלְמַטָּה בְּמִזְרָחוֹ" (Rambam
+  // TuM 6:3), the tamid's being on its west (Tamid 4:3) — opposite sides in every reading of Shekalim 8:8 (source-gaps
+  // #5). Lamb A's parts in the column at the east edge, B's a column west of it; the carrier stands west of them, laying
+  // them facing east (RH) ⚙
+  const Y0 = R.halfY - 1.9, DY = 1.33, RH = 90;
+  const placeX = (i) => [R.box.max[0] - 2.45 - 2.7 * i, R.box.max[0] - 1.3 - 2.7 * i];
+  const spot = (i, q) => [placeX(i)[0] - 1.15, Y0 - DY * q];
   const file = (Li, q) => [[Li.hook[0] - 7.5, 377.0 - 0.15 * q, Z], [205.0, 376.6, Z], [205.0, 371, Z], [205, 345.5, Z], [P.apronX, 338, Z], [P.apronX, 321, Z], [199.7, 309.4, Z], [202.6, 296, Z], [206.3, 274.3, Z], [spot(0, 0)[0] + 0.3, R.foot - 1.0, Z]];
   t.laid = [[], []];
   const back = (i) => [[R.west + 2.4 + 0.3 * i, R.foot + 0.4, R.kevZ(R.foot + 0.4)], [R.west + 1.8, R.foot - 1.4, Z]];
@@ -307,11 +311,11 @@ export function buildMusaf(ctx, sim, opts = {}) {
       const sp = spot(i, q);
       const walkPose = carriers[q].pose === 'carry' ? 'carry_walk' : 'carry_limbs_walk';
       s.walk([...file(Li, q), [sp[0], sp[1], R.kevZ(sp[1])]], { speed: 1.0, pose: walkPose, props });
-      s.act(0.1, { pose: carriers[q].pose, heading: 270, props });
-      s.act(0.14, { pose: 'bow', phase: [0, 0.42], heading: 270, props });
+      s.act(0.1, { pose: carriers[q].pose, heading: RH, props });
+      s.act(0.14, { pose: 'bow', phase: [0, 0.42], heading: RH, props });
       const tl = s.now();
       t.laid[i][q] = tl;
-      s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: 270 });
+      s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: RH });
       const names = props.filter(Boolean);
       names.forEach((nm, j) => {
         const y = sp[1] + (names.length > 1 ? (j === 0 ? 0.3 : -0.3) : 0);
@@ -353,15 +357,15 @@ export function buildMusaf(ctx, sim, opts = {}) {
   const fwSpots = [spot(0, 6), spot(0, 7)];
   const waitC = [R.box.max[0] + 5.2, R.foot - 5.6, Z];
   const waitAt = (q) => { const a = (q * 51 + 30) / 57.2958; return [waitC[0] + Math.sin(a) * 1.8, waitC[1] + Math.cos(a) * 1.8, Z]; };
-  const salt = [R.box.min[0] + 0.85, R.foot + 1.7, R.kevZ(R.foot + 1.7) + 0.06];
+  const salt = [R.box.max[0] - 0.85, R.foot + 1.7, R.kevZ(R.foot + 1.7) + 0.06];
   t.fwLaid = [];
   for (const [j, slot, name] of [[0, MC.F, 'solet'], [1, MC.WN, 'wine_jug']]) {
     const s = Script.from(t.laid[0][0] - 3.6 + 0.12 * j, [chav[0], chav[1] - 0.6 + 0.8 * j, chav[2]], 270, `fw${j}`);
     const sp = fwSpots[j];
     s.walk([[246, 319.5 + 0.4 * j, 13.5], [240.5, 320 + 0.4 * j, Z], [P.way.eastLine - 0.2 * j, 300, Z], [231.2, 273.2 + 0.3 * j, Z], [sp[0] + 0.3, R.foot - 1.0, Z], [sp[0], sp[1], R.kevZ(sp[1])]], { speed: SPEED.carry, pose: 'carry_walk', props: [name, null] });
-    s.act(0.14, { pose: 'bow', phase: [0, 0.42], heading: 270, props: [name, null] });
+    s.act(0.14, { pose: 'bow', phase: [0, 0.42], heading: RH, props: [name, null] });
     t.fwLaid[j] = s.now();
-    s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: 270 });
+    s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: RH });
     const y = sp[1];
     items.push({ name, show: [t.fwLaid[j], null], keys: [{ t: t.fwLaid[j], X: (placeX(0)[0] + placeX(0)[1]) / 2, Y: y, Z: R.kevZ(y) + 0.07, h: 90 }], fw: j });
     crew[slot] = s;
@@ -374,14 +378,14 @@ export function buildMusaf(ctx, sim, opts = {}) {
       const tReady = Math.max(...t.laid[i]) + 0.1 + 0.15 * j;
       if (i === 1 || s.now() < tReady - 0.2) s.until(tReady - (i === 1 ? walkMin(s.cur, [[salt[0] + 1.6, salt[1] + 0.9, R.kevZ(salt[1] + 0.9)]], SPEED.walk) + 0.05 : 0), { pose: 'stand', face: i === 1 ? waitC : [R.mid, R.halfY], sway: 12, seed: 0x6e60 + 10 * i + j });
       const ys = salt[1] + 0.9;
-      s.walk([[spot(i, 0)[0] - (i ? 0 : 0.4) + 0.3 * j, ys + 0.95 * j, R.kevZ(ys + 0.95 * j)]], { speed: SPEED.slow });
+      s.walk([[spot(i, 0)[0] + (i ? 0 : 0.4) - 0.3 * j, ys + 0.95 * j, R.kevZ(ys + 0.95 * j)]], { speed: SPEED.slow });
       s.act(0.1, { pose: 'bow', phase: [0, 0.4], face: salt });
       s.act(0.08, { pose: 'bow', phase: [0.7, 1], face: salt, props: [null, 'salt'] });
       const qs = j === 0 ? [2, 1, 0] : [5, 4, 3];
       for (const q of qs) {
         const sp = spot(i, q);
         s.walk([[sp[0], sp[1], R.kevZ(sp[1])]], { speed: SPEED.slow, props: [null, 'salt'] });
-        s.act(0.2, { pose: 'salt', heading: 270, props: [null, 'salt'] });
+        s.act(0.2, { pose: 'salt', heading: RH, props: [null, 'salt'] });
       }
       t.salted[i] = Math.max(t.salted[i], s.now());
       const off = [[R.west + 2.4, s.cur[1] - 1.0, R.kevZ(s.cur[1] - 1.0)], [R.west + 2.4, R.foot + 0.4, R.kevZ(R.foot + 0.4)], [R.west + 1.8, R.foot - 1.4, Z]];
@@ -416,9 +420,9 @@ export function buildMusaf(ctx, sim, opts = {}) {
     const go = tAt - walkMin(s.cur, pts, SPEED.walk);
     if (go > s.now() + 0.02) s.until(go, { pose: 'stand', face: [R.mid, R.halfY], sway: 12, seed: 0x6e80 + 10 * i + q });
     s.walkBy(tAt, pts);
-    s.act(0.12, { pose: 'bow', phase: [0, 0.42], heading: 270 });
+    s.act(0.12, { pose: 'bow', phase: [0, 0.42], heading: RH });
     t.pick[i][q] = s.now();
-    s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: 270, props });
+    s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: RH, props });
     const ex = R.east + jit(0x6e90, 0.5, 'ex', i * 6 + q);
     const y1 = sp[1] + 1.2;
     s.walk([[ex, y1, R.kevZ(y1)], [ex, R.head - 0.8, R.kevZ(R.head - 0.8)], [ex, R.head + 0.6, ZT], [A.wk.E, A.wk.S, ZT], [A.wk.E - 0.5, A.great.min[1] + 1.0 + ((i * 6 + q) % 5) * 1.4, ZT]], { speed: SPEED.ramp, pose: walkPose, props });
@@ -441,9 +445,9 @@ export function buildMusaf(ctx, sim, opts = {}) {
     const pts = [[sp[0] + 0.3, R.foot - 1.2, Z], [sp[0] + 0.3, R.foot + 0.5, R.kevZ(R.foot + 0.5)], [sp[0], sp[1], R.kevZ(sp[1])]];
     s.until(tAt - walkMin(s.cur, pts, SPEED.walk), { pose: 'stand', face: [R.mid, R.halfY], sway: 12, seed: 0x6ea0 });
     s.walkBy(tAt, pts);
-    s.act(0.12, { pose: 'bow', phase: [0, 0.42], heading: 270 });
+    s.act(0.12, { pose: 'bow', phase: [0, 0.42], heading: RH });
     t.pickF = s.now();
-    s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: 270, props: ['solet', null] });
+    s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: RH, props: ['solet', null] });
     s.walk([[R.east, sp[1] + 1.2, R.kevZ(sp[1] + 1.2)], [R.east, R.head - 0.8, R.kevZ(R.head - 0.8)], [R.east, R.head + 0.6, ZT], [A.wk.E, A.wk.S, ZT], [A.wk.E - 0.5, A.great.min[1] + 2.4, ZT]], { speed: SPEED.ramp, pose: 'carry_walk', props: ['solet', null] });
     s.act(0.1, { pose: 'carry', heading: 270, props: ['solet', null] });
     t.tossF = s.now() + 0.18;
@@ -470,9 +474,9 @@ export function buildMusaf(ctx, sim, opts = {}) {
     if (s.now() > t.pickW - walkMin(s.cur, pts, SPEED.walk)) warn.push('pourer late at the ramp');
     s.until(t.pickW - walkMin(s.cur, pts, SPEED.walk), { pose: 'stand', face: [R.mid, R.halfY], sway: 12, seed: 0x6ea1 });
     s.walkBy(t.pickW, pts);
-    s.act(0.12, { pose: 'bow', phase: [0, 0.42], heading: 270 });
+    s.act(0.12, { pose: 'bow', phase: [0, 0.42], heading: RH });
     t.pickW = s.now();
-    s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: 270, props: ['wine_jug', null] });
+    s.act(0.12, { pose: 'bow', phase: [0.7, 1], heading: RH, props: ['wine_jug', null] });
     const upW = [[R.west, sp[1] + 1.2, R.kevZ(sp[1] + 1.2)], [R.west, R.head - 0.8, R.kevZ(R.head - 0.8)], [R.west, R.head + 0.6, ZT], [A.wk.W + 1.2, A.wk.S, ZT], swAt];
     s.walk(upW, { speed: SPEED.ramp, pose: 'carry_walk', props: ['wine_jug', null] });
     s.act(0.1, { pose: 'carry', heading: 225, props: ['wine_jug', null] });
@@ -572,6 +576,9 @@ export function musafPlan(ctx, sim, pourBySong = false) {
     if (M) {
       M.song = concert(ctx, M);
       M.claimed = !!pourBySong;
+      // Shabbat Rosh Chodesh: no song over this musaf — Rosh Chodesh's displaces Shabbat's, once, after both musafim's
+      // libations (Rambam TuM 6:10; Sukkah 55a with Rashi; g7/concert.js): this wine is poured by its own man, silent
+      M.noSong = !!ctx.time?.roshChodesh;
       const S = M.song, T = M.t;
       M.concert = {
         generation: gen, event: 'shabbat-musaf', claimed: !!pourBySong,
@@ -597,4 +604,4 @@ export function musafPlan(ctx, sim, pourBySong = false) {
  * libation-song's brother 12 (on Shabbat morning he hands it to the Kohen Gadol, Tamid 7:3); the jug on the ramp was
  * laid by the second lottery's wine man (MC.WN), as at the tamid.
  */
-export function musafConcert(ctx, sim) { return musafPlan(ctx, sim, true)?.concert || null; }
+export function musafConcert(ctx, sim) { return ctx.time?.roshChodesh ? null : musafPlan(ctx, sim, true)?.concert || null; }

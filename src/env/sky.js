@@ -1,8 +1,10 @@
 // Sky dome: per pixel only a sky-view-LUT lookup plus analytic sun/moon discs, aureoles, the night-sky
-// floor (airglow + unresolved starlight), and on high+ a procedural Milky Way and thin cirrus.
+// floor (airglow + unresolved starlight), fair-weather clouds from a baked tile (clouds.js; the visible dome only), and on
+// high+ a procedural Milky Way.
 // The same shader (ENV_PASS) renders the sky-only cube that is prefiltered into the PMREM environment.
-import { ShaderMaterial, BackSide, Matrix3, Vector2, Vector3, Vector4 } from 'three';
+import { ShaderMaterial, BackSide, Matrix3, Vector3, Vector4 } from 'three';
 import { ATMO_GLSL, NIGHT_FLOOR_GLSL } from './atmosphere.js';
+import { CLOUD_GLSL, createCloudUniforms } from './clouds.js';
 
 const SKY_VERT = /* glsl */`
 varying vec3 vDir;
@@ -55,10 +57,6 @@ uniform vec3 uMoonAureole;
 uniform vec3 uNightSky;       // airglow + starlight floor: zenith value / nightFloorShape(zenith) (physical)
 uniform vec3 uMilkyWay;       // peak Milky Way surface brightness (pre-exposed)
 uniform mat3 uWorldToGal;
-uniform vec3 uCloudParams;    // x coverage, y opacity, z time (minutes)
-uniform vec2 uWind;
-uniform vec3 uCloudSky;       // ambient (sky) irradiance at cloud level / PI (pre-exposed)
-uniform vec3 uCloudSun;       // TOA sun illuminance
 uniform vec3 uLocalGround;    // radiance of the sunlit local pavement (env pass lower hemisphere)
 uniform vec4 uWallShade;      // env pass: surroundings (walls, colonnades) radiance in shade, w = sin(top elevation)
 uniform vec3 uWallLit;        // env pass: extra radiance of a wall face turned fully to the key light
@@ -129,66 +127,9 @@ float milkyWay( vec3 dir ) {
 #endif
 
 #ifdef CLOUDS
-// Thin cirrus at ~8.5 km, drifting with the upper wind, lit through the atmosphere.
-// gate-env-render-r2: patches of fibrous, hooked cirrus (fibratus / uncinus), not one long band: the old field (fibres
-// 50 km long along the wind, one octave across) drew a single straight streak of even width, a jet contrail over the
-// Temple. A low-frequency mask (≈ 25 km) places the patches (coverage = how much of the layer they take); in them the
-// fibres come in tufts ≈ 7 km long down the wind, each a dense head with a trailing fall-streak that curls to one side
-// (a per-tuft hook), the tufts staggered and of uneven strength, the fibres bent by a slow cross-wind warp. So no feature
-// runs straight and even for more than a few km (≈ 10° seen 40 km off); fine ridged strands run inside each tuft. The
-// fibres' finer octaves and the strands fade where they shrink below the pixel (no shimmer toward the horizon).
-float cirrusFibres( vec3 p, float fp ) {
-  float a = 0.5, s = 0.0, per = 1.0 / 2.4; // per: the first octave's period across the fibres (km)
-  for ( int i = 0; i < 6; i ++ ) {
-    if ( i >= CLOUD_OCT ) break;
-    float k = smoothstep( 1.0, 3.0, per / fp );
-    // below the pixel: this octave and the finer ones add their mean, unsampled
-    if ( k <= 0.0 ) { s += a * ( 1.0 - exp2( float( i - CLOUD_OCT ) ) ); break; }
-    s += a * mix( 0.5, vnoise( p ), k );
-    p = p * 2.03 + 17.1; a *= 0.5; per *= 1.0 / 2.03;
-  }
-  return s;
-}
-vec4 cirrus( vec3 dir ) {
-  if ( dir.y < 0.015 ) return vec4( 0.0 );
-  float hC = 8.5;
-  float rC = RG + hC + 0.0;
-  float b = uObsR * dir.y;
-  float t = - b + sqrt( b * b - uObsR * uObsR + rC * rC ); // km to the cloud layer
-  vec3 P = vec3( 0.0, uObsR, 0.0 ) + dir * t;
-  vec2 q = P.xz + uWind * uCloudParams.z;
-  vec2 wdir = normalize( uWind + vec2( 1e-4 ) );
-  vec2 qs = vec2( dot( q, wdir ), dot( q, vec2( - wdir.y, wdir.x ) ) );
-  float cov = uCloudParams.x;
-  float pm = smoothstep( 0.5 - 0.3 * cov, 0.62 - 0.3 * cov, fbm( vec3( q * 0.04 + vec2( 3.1, -7.7 ), 1.3 ), 2 ) );
-  if ( pm <= 0.0 ) return vec4( 0.0 );
-  float v = qs.y + 9.0 * ( vnoise( vec3( qs * 0.07, 4.2 ) ) - 0.5 );
-  float tp = qs.x * ( 1.0 / 7.0 ) + 1.6 * vnoise( vec3( v * 0.45, qs.x * 0.02, 2.9 ) );
-  float sc = fract( tp ), cell = floor( tp );
-  v += 8.0 * ( vnoise( vec3( cell * 1.71, v * 0.3, 5.0 ) ) - 0.5 ) * ( 1.0 - sc ) * ( 1.0 - sc );
-  float tuft = smoothstep( 0.0, 0.7, sc ) * smoothstep( 1.0, 0.82, sc ) * ( 0.35 + 0.65 * vnoise( vec3( cell * 2.3, v * 0.6, 7.0 ) ) );
-  if ( tuft <= 0.0 ) return vec4( 0.0 );
-  // the pixel's footprint at the cloud: the geometric mean of its two axes (the radial one foreshortened by 1 / sin el)
-  float fp = t * 0.0008 * inversesqrt( max( dir.y, 0.03 ) );
-  float f = cirrusFibres( vec3( qs.x * 0.2, v * 2.4, uCloudParams.z * 0.0005 ), fp );
-  // hair: ridged noise across the fibres (≈ 170 m apart, 12 : 1), the fine strands inside a tuft, faded below the pixel
-  float hk = smoothstep( 1.0, 3.0, ( 1.0 / 6.0 ) / fp ), hair = 0.75;
-  if ( hk > 0.0 ) { float hr = 1.0 - abs( 2.0 * vnoise( vec3( qs.x * 0.5, v * 6.0, 3.3 ) ) - 1.0 ); hair = mix( 0.75, 0.35 + 0.9 * hr * hr, hk ); }
-  float d = min( pm * tuft * smoothstep( 0.4, 0.6, f ) * hair * 1.15, 1.0 );
-  d *= smoothstep( 0.015, 0.12, dir.y );
-  float alpha = d * uCloudParams.y;
-  if ( alpha <= 0.0 ) return vec4( 0.0 );
-  vec3 up = normalize( P );
-  float muS = dot( up, uSunDir );
-  vec3 Ts = textureLod( uTransmittance, transmittanceUV( length( P ), muS ), 0.0 ).rgb * planetShadow( length( P ), muS );
-  float c = dot( dir, uSunDir );
-  float ph = mix( hgPhase( c, 0.75 ), hgPhase( c, -0.2 ), 0.35 ) * 4.0 * PI;
-  vec3 Lc = uCloudSun * Ts * ph * 0.08 + uCloudSky * 0.9;
-  // attenuate by the air between observer and cloud (ratio of transmittances to the top)
-  vec3 Tv = textureLod( uTransmittance, transmittanceUV( uObsR, dir.y ), 0.0 ).rgb
-          / max( textureLod( uTransmittance, transmittanceUV( length( P ), dot( up, dir ) ), 0.0 ).rgb, vec3( 1e-4 ) );
-  return vec4( Lc * min( Tv, vec3( 1.0 ) ), alpha );
-}
+// sky-smoke-fire: fair-weather cumulus and cirrus from a baked tile (clouds.js); replaces the procedural cirrus of
+// gate-env-render(-r2) on high / ultra, which the HD 4600 could not afford on low / medium
+${CLOUD_GLSL}
 #endif
 
 void main() {
@@ -224,9 +165,11 @@ void main() {
   float cm = dot( dir, uMoonDir );
   L += ( uSunAureole * hgPhase( cs, 0.99 ) + uMoonAureole * hgPhase( cm, 0.99 ) ) * uOutScale * above;
 
+  // clouds over the sky (and in front of the Sun's and the Moon's discs, which keep discT of their light)
 #ifdef CLOUDS
-  vec4 cl = cirrus( dir );
-  L = mix( L, cl.rgb * uOutScale + L * 0.35, cl.a );
+  float discT = mkClouds( dir, Tv, uOutScale, L );
+#else
+  float discT = 1.0;
 #endif
 
 #ifdef ENV_PASS
@@ -260,7 +203,7 @@ void main() {
     // lower limb without clipping to white
     float mc = max( Ls.r, max( Ls.g, Ls.b ) );
     if ( mc > uSunDiscCap ) Ls *= uSunDiscCap * ( 1.0 + log( mc / uSunDiscCap ) ) / mc;
-    L += Ls * covS * above * planetShadow( uObsR, dir.y );
+    L += Ls * covS * above * planetShadow( uObsR, dir.y ) * discT;
   }
   // Moon disc: Lommel-Seeliger shading from the real Sun direction (phase & terminator come out right),
   // maria albedo, earthshine on the night side.
@@ -282,7 +225,7 @@ void main() {
     float alb = moonAlbedo( lat, lon );
     vec3 Lm = ( uMoonRadiance * ls + uEarthshine * muV ) * alb * uOutScale;
     // the Moon lies beyond the air: the in-scattered sky light in front of it adds on top
-    L += Lm * Tv * covM * above;
+    L += Lm * Tv * covM * above * discT;
   }
 #endif
   gl_FragColor = vec4( clamp( L, vec3( 0.0 ), vec3( 6.0e4 ) ), 1.0 );
@@ -326,10 +269,7 @@ export function createSkyUniforms() {
     uNightSky: { value: new Vector3() },
     uMilkyWay: { value: new Vector3() },
     uWorldToGal: { value: new Matrix3() },
-    uCloudParams: { value: new Vector3(0, 0, 0) },
-    uWind: { value: new Vector2(0.9, 0.25) }, // km per sim-minute (~15 m/s from the west-southwest)
-    uCloudSky: { value: new Vector3() },
-    uCloudSun: { value: new Vector3() },
+    ...createCloudUniforms(),
     uLocalGround: { value: new Vector3() },
     uWallShade: { value: new Vector4() },
     uWallLit: { value: new Vector3() },
@@ -338,14 +278,17 @@ export function createSkyUniforms() {
 }
 
 /**
- * opts: { envPass, milkyWay, clouds, mwOctaves, cloudOctaves }. Uniform objects are shared, so one update
+ * opts: { envPass, milkyWay, clouds, cloudMarch, cloudSlices, mwOctaves }. Uniform objects are shared, so one update
  * drives both materials; the env material overrides uLutScale/uOutScale with its own copies.
  */
 export function skyDefines(opts = {}) {
   const defines = {};
   if (opts.envPass) defines.ENV_PASS = '';
   if (opts.milkyWay) { defines.MILKY_WAY = ''; defines.MW_OCT = opts.mwOctaves || 4; }
-  if (opts.clouds) { defines.CLOUDS = ''; defines.CLOUD_OCT = opts.cloudOctaves || 4; }
+  if (opts.clouds) {
+    defines.CLOUDS = '';
+    if (opts.cloudMarch) { defines.CLOUD_MARCH = ''; defines.CLOUD_SLICES = opts.cloudSlices || 16; }
+  }
   return defines;
 }
 

@@ -7,7 +7,8 @@
 // arrive, restricted, breadcrumb), Welcome. Prints console errors/warnings.
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,11 +48,10 @@ const STEPS = opt.steps || [
   { js: "__mikdash.ui.banner('heichal', { kind: 'restricted' })", wait: 700, shot: 'banner-restricted' },
 ];
 
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null } });
 await server.listen();
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
+const { browser } = await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS, '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'] });
 mkdirSync(resolve(root, opt.out), { recursive: true });
 let code = 0;
 try {

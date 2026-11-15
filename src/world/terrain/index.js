@@ -22,6 +22,7 @@ import { buildCity } from './city.js';
 import { buildDraped, buildBurningPlace } from './context.js';
 import { buildFeatures } from './features.js';
 import { distToPolyline } from './plan.js';
+import { splitMeshes, sectorsOn } from '../sectors.js';
 
 export async function build(ctx) {
   const t0 = performance.now();
@@ -112,6 +113,9 @@ export async function build(ctx) {
   if (UV_SCALE !== 1) { const uv = grid.attributes.uv.array; for (let i = 0; i < uv.length; i++) uv[i] *= UV_SCALE; }
   // render tiles (index ranges of the grid: small tiles near the Mount where the cells are fine)
   const nTiles = detail === 0 ? 2 : detail === 1 ? 3 : 4;
+  // (perf-cpu round 2: cells round the Mount for the ground were tried on medium and dropped: with it the Azarah view drew 53 more calls, and the pre-pass's terrain (ground and city batches) fell
+  // only 242 k → 204 k triangles — most of the ground there is in view. The grid-index tiles stay, although all of them
+  // meet near the Mount's centre and none is culled from a viewer there)
   const tiles = splitGrid(grid, xs.length, ys.length, nTiles);
   tiles.forEach((g, i) => {
     const mesh = new Mesh(g, groundMat);
@@ -154,7 +158,11 @@ export async function build(ctx) {
   // ---------------------------------------------------------------- rocks, terraces, gardens; city massing and trees
   const feat = buildFeatures(ctx, T, kit, group, detail);
   const city = buildCity(ctx, T, kit, detail);
-  group.add(kit.build());
+  // perf-cpu round 2: the landscape's merged batches (the city's rubble, ashlar and roofs, the terraces, the streets) in
+  // cells round the Mount (world/sectors.js), so three culls what is behind the viewer; colliders were registered whole
+  const kg = kit.build();
+  if (sectorsOn(ctx)) splitMeshes(ctx, kg.children.slice());
+  group.add(kg);
   const trees = buildTrees(ctx, T, detail, { ...feat, courts: city.courtTrees });
   if (trees) group.add(trees);
   // grass, garrigue and stones round the camera, on the rendered ground (qa-r1-fix-world)

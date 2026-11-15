@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Console behaviour checks (dev only; console-design §7.1). Starts its own Vite server and drives the app in Edge
+// Console behaviour checks (dev only; console-design §7.1). Starts its own Vite server and drives the app in a headless Chromium browser
 // (Playwright) at desktop 1280×720 (mouse), 1920×1080, phone 390×844 and 360×740 (touch, DPR 2), phone landscape 844×390
 // (touch), tablet 1024×768 (touch) and 768×1024. Ports every uitest.mjs and maptest.mjs check onto the console, plus the
 // console's own: the beacon, wake, invocation per device (pointer lock emulated with a stubbed pointerLockElement, the
@@ -8,7 +8,8 @@
 //   node src/ui/dev/consoletest.mjs [--q low] [--out shots/console-test] [--only desk,phone,landscape,tablet,wide]
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -19,20 +20,22 @@ const q = arg('--q', 'low');
 const out = arg('--out', 'shots/console-test');
 const only = new Set((arg('--only', 'desk,map,phone,landscape,tablet,wide')).split(','));
 mkdirSync(resolve(root, out), { recursive: true });
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null } });
 await server.listen();
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'] });
+const { browser } = await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS, '--enable-unsafe-swiftshader'] });
 let fails = 0, passes = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${extra ? `  — ${extra}` : ''}`); if (ok) passes++; else fails++; };
 const logs = [];
-const shot = (pg, name) => pg.screenshot({ path: resolve(root, out, `${name}.png`) });
+const shot = (pg, name) => pg.screenshot({ path: resolve(root, out, `${name}.png`), timeout: 120000 });
 const overlaps = (rs) => { for (let i = 0; i < rs.length; i++) for (let j = i + 1; j < rs.length; j++) { const a = rs[i], b = rs[j]; if (a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b) return `${a.id} × ${b.id}`; } return null; };
 
 /** a fresh context; opts.fresh: no stored settings; init(page) before load; enter: dismiss the Welcome */
 async function boot(name, ctxOpts, { enter = true, query = '', init = null } = {}) {
   const context = await browser.newContext(ctxOpts);
+  // a loaded machine with software rendering: Playwright's "stable" wait (two equal boxes on consecutive frames) can take
+  // far longer than its 30 s default (ux-audit: the desktop profile aborted at the first rail click)
+  context.setDefaultTimeout(180000);
   const page = await context.newPage();
   page.on('console', (m) => { if (['error', 'warning'].includes(m.type())) logs.push(`[${name} ${m.type()}] ${m.text()}`); });
   page.on('pageerror', (e) => logs.push(`[${name} pageerror] ${e.message}`));
@@ -90,11 +93,14 @@ try {
       check('Welcome at 1280×720 and 1366×768: "Enter the courts" is in view', [cta1, cta2].every((c) => c.t >= 0 && c.b <= c.vb && c.b <= c.ih), JSON.stringify({ cta1, cta2 }));
       check('boot: the sleeping quick chips are out of the Tab order, and already labelled', await ev(() => [...document.querySelectorAll('.mk-qchip')].every((c) => c.tabIndex === -1) && /hour/.test(document.querySelector('.mk-qchip--hour').textContent)),
         JSON.stringify(await ev(() => [...document.querySelectorAll('.mk-qchip')].map((c) => `${c.tabIndex}:${c.textContent}`))));
-      // a rail tab beside the Welcome, then Close: the Welcome ends; nothing is left swallowing keys or picks
-      await page.click('.mk-tab[data-section=time]');
+      // the Welcome is its own panel: no rail, no header around it (ux-audit I)
+      check('the Welcome stands alone: the rail and the header are hidden', await ev(() => ['.mk-rail', '.mk-menu .mk-head'].every((q) => getComputedStyle(document.querySelector(q)).display === 'none')));
+      // a section opened during the Welcome (a module, a link), then Close: the Welcome ends; nothing is left swallowing
+      // keys or picks
+      await ev(() => __mikdash.ui.open('time', { from: 'nav' }));
       await page.waitForTimeout(400);
       const wr = await ev(() => ({ s: __mikdash.ui.console.state(), intro: document.getElementById('ui-root').classList.contains('mk-intro-open') }));
-      check('a rail tab during the Welcome ends it and opens that section', !wr.s.welcome && !wr.intro && wr.s.view?.type === 'section' && wr.s.view.id === 'time', JSON.stringify(wr));
+      check('a section opened during the Welcome ends it and opens that section', !wr.s.welcome && !wr.intro && wr.s.view?.type === 'section' && wr.s.view.id === 'time', JSON.stringify(wr));
       await page.click('.mk-head__close');
       await page.waitForTimeout(400);
       await ev(() => document.activeElement?.blur?.());
@@ -176,6 +182,8 @@ try {
       // ---------------- the Menu: dock, header on every view, labels ----------------
       await ev(() => __mikdash.ui.open('here'));
       await page.waitForTimeout(500);
+      // (its 180 ms slide-in can run for seconds of frames on a loaded machine)
+      await page.waitForFunction(() => { const m = document.querySelector('.mk-menu'); return m.getAnimations().every((a) => a.playState !== 'running') && Math.abs(m.getBoundingClientRect().right - 1268) < 2; }, null, { timeout: 15000 }).catch(() => {});
       const dock = await rect(page, '.mk-menu');
       const free = await ev(() => __mikdash.ui.console.free());
       check('dock: the Menu on the right, 560 px, the world free on the left', dock && Math.abs(dock.w - 560) < 2 && Math.abs(dock.r - 1268) < 2 && free.r > 560 && free.r < 590, JSON.stringify({ dock, free }));
@@ -213,7 +221,7 @@ try {
       check('a click on the world never closes the Menu', (await st(page)).open);
       await ev(() => document.activeElement?.blur?.());
       const p0 = await ev(() => __mikdash.player.position.toArray());
-      await page.keyboard.down('w'); await page.waitForTimeout(600); await page.keyboard.up('w');
+      await page.keyboard.down('w'); await page.waitForTimeout(1500); await page.keyboard.up('w'); // (slow frames: a longer hold)
       const p1 = await ev(() => __mikdash.player.position.toArray());
       check('W A S D still walk with the docked Menu open', Math.hypot(p1[0] - p0[0], p1[2] - p0[2]) > 0.2, `${Math.hypot(p1[0] - p0[0], p1[2] - p0[2]).toFixed(2)} m`);
       await ev(() => __mikdash.ui.close());
@@ -333,6 +341,8 @@ try {
       await shot(page, 'desk-happening');
       await ev(() => __mikdash.time.set(__mikdash.time.fromZmani('day', 8.6)));
       await page.waitForTimeout(700);
+      // (a loaded machine: the 4 Hz list may take a few frames longer than 700 ms to follow the clock)
+      await page.waitForFunction(() => [...document.querySelectorAll('.mk-menu__view.is-current .mk-evs > .mk-row.is-active .mk-row__title')].some((e) => /afternoon tamid/i.test(e.textContent)), null, { timeout: 15000 }).catch(() => {});
       const act = await ev(() => [...document.querySelectorAll('.mk-menu__view.is-current .mk-evs > .mk-row.is-active .mk-row__title')].map((e) => e.textContent));
       check('Happening at day 8.6 lists the afternoon tamid', act.some((t) => /afternoon tamid/i.test(t)), act.slice(0, 6).join(' | '));
       const nAll = await ev(() => document.querySelectorAll('.mk-menu .mk-hap__now .mk-row').length);
@@ -342,16 +352,23 @@ try {
       check('the Here filter narrows the list', nHere <= nAll, `${nAll} → ${nHere}`);
       await page.click('.mk-hap__filter [data-filter=all]');
       await page.waitForTimeout(400);
-      // the Go menu: way Instant becomes the default
-      await page.click('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-go__more');
+      // an event row's Go has no way / pace menu (ux-audit E: the pace lives in the travel bar); Show me is its gold action
+      check('event rows: Show me is the gold action, Go has no menu', await ev(() => { const r = document.querySelector('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn)'); return !!r && !r.querySelector('.mk-go__more') && r.querySelector('.mk-row__show').classList.contains('mk-btn--primary') && !r.querySelector('.mk-go__main').classList.contains('mk-btn--primary'); }));
+      // the Go menu (a card's): way Instant becomes the default, and the rows' Go uses it
+      await ev(() => __mikdash.ui.card('event:' + __mikdash.schedule.active().find((e) => !e.dynamic).id));
+      await page.waitForTimeout(500);
+      await page.click('.mk-cardview .mk-go__more');
       await page.click('.mk-gomenu [data-way=instant]');
-      check('the Go menu sets the default way (sticky)', await ev(() => __mikdash.settings.get('travelWay') === 'instant' && /Instant/.test(document.querySelector('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-go__sub').textContent)));
+      check('the Go menu sets the default way (sticky)', await ev(() => __mikdash.settings.get('travelWay') === 'instant' && /Instant/.test(document.querySelector('.mk-cardview .mk-go__sub').textContent)));
       await page.keyboard.press('Escape');
+      await ev(() => __mikdash.ui.open('happening'));
+      await page.waitForTimeout(400);
       const before = await ev(() => { const p = __mikdash.player.position; return [p.x, p.z]; });
       const bnBefore = await ev(() => JSON.stringify(__mikdash.ui.console.banners().slice(-1)[0] || null));
       const goTitle = await ev(() => document.querySelector('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-row__title, .mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-row__en')?.textContent || null);
       await page.click('.mk-menu__view.is-current .mk-evs > .mk-row.is-active:not(.mk-dyn) .mk-go__main');
       await page.waitForTimeout(1600);
+      await page.waitForFunction(() => __mikdash.ui.console.banners().some((b) => b.kind === 'arrive') && +getComputedStyle(document.querySelector('.mk-veil')).opacity < 0.05, null, { timeout: 15000 }).catch(() => {});
       const after = await ev(() => { const p = __mikdash.player.position; return { x: p.x, z: p.z, open: __mikdash.ui.console.state().open, veil: getComputedStyle(document.querySelector('.mk-veil')).opacity, banners: __mikdash.ui.console.banners(), kick: document.querySelector('.mk-banner__kick').textContent }; });
       check('Go (instant) moves the observer; the docked Menu stays open; the veil lifts', Math.hypot(after.x - before[0], after.z - before[1]) > 5 && after.open && +after.veil < 0.05, `veil ${after.veil}`);
       check('…and ARRIVED shows (instant too)', after.banners.some((b) => b.kind === 'arrive'), JSON.stringify(after.banners.slice(-2)));
@@ -376,10 +393,12 @@ try {
       await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
       await page.waitForTimeout(300);
       check('Esc never cancels a walk', await ev(() => __mikdash.player.mode === 'auto'));
-      await shot(page, 'desk-travel');
-      await page.click('.mk-travel__stop');
+      // Stop before the screenshot: on a loaded machine a screenshot can outlast the walk
+      const walking = await ev(() => __mikdash.player.mode === 'auto');
+      if (walking) await ev(() => document.querySelector('.mk-travel__stop').click());
       await page.waitForTimeout(500);
-      check('Stop cancels the walk and hides the bar', await ev(() => __mikdash.player.mode !== 'auto' && document.querySelector('.mk-travel').hidden));
+      check('Stop cancels the walk and hides the bar', walking && await ev(() => __mikdash.player.mode !== 'auto' && document.querySelector('.mk-travel').hidden));
+      await shot(page, 'desk-travel');
       await ev(() => __mikdash.ui.close());
 
       // ---------------- the area banner ----------------
@@ -449,7 +468,9 @@ try {
       check('area names off: no ordinary banner; the restricted notice still (its own setting, 90 s rule)', !bnOff.some((b) => b.zone === 'nikanor'), JSON.stringify(bnOff));
       await ev(() => __mikdash.settings.set('areaNames', 'always'));
       await tp('gazit');
-      await page.click('.mk-banner__main');
+      // (the banner lives 3.2 s: a loaded machine's actionability wait outlasts it, so the click is dispatched directly)
+      await page.waitForFunction(() => !document.querySelector('.mk-banner').hidden && /Gazit/.test(document.querySelector('.mk-banner').textContent), null, { timeout: 15000 }).catch(() => {});
+      await ev(() => document.querySelector('.mk-banner__main').click());
       await page.waitForTimeout(500);
       check('a click on the banner opens that place (Here)', await ev(() => __mikdash.ui.panel === 'here' && /Gazit/.test(document.querySelector('.mk-menu .mk-card__en').textContent)));
       check('Lishkat HaGazit (half kodesh, half chol) is not given one rung in the header', await ev(() => /Half kodesh, half chol/.test(document.querySelector('.mk-head__sancttxt').textContent) && /Sanhedrin/.test(document.querySelector('.mk-head__sanct').title)),
@@ -576,7 +597,8 @@ try {
           await page.waitForFunction(() => ['showing', 'done', 'failed', 'cancelled'].includes(__mikdash.inspect.show?.phase), null, { timeout: 12000 }).catch(() => {});
           const sh = await ev(() => ({ phase: __mikdash.inspect.show?.phase, chip: !document.querySelector('.mk-showchip').hidden, txt: document.querySelector('.mk-showchip').textContent, back: __mikdash.inspect.canBack }));
           check('Show me reaches "showing"; the chip reads "Showing: X · Back to …"', sh.phase === 'showing' && sh.chip && /^Showing: /.test(sh.txt) && /Back/.test(sh.txt) && !/Showing: Showing/.test(sh.txt), JSON.stringify(sh));
-          await page.waitForTimeout(500); // (the header repaints at 4 Hz)
+          await page.waitForTimeout(500); // (the header repaints at 4 Hz — a loaded machine may take a few seconds)
+          await page.waitForFunction(() => !document.querySelector('.mk-head__back').hidden, null, { timeout: 15000 }).catch(() => {});
           const hb = await ev(() => { const b = document.querySelector('.mk-head__back'); return { shown: !b.hidden, txt: b.textContent.trim(), card: document.querySelector('.mk-cardview .mk-card__back')?.textContent.trim() }; });
           check('the header\'s Back says what it undoes ("Back to 08:51"), unlike the card\'s own Back', hb.shown && /^Back to \d{2}:\d{2}$/.test(hb.txt), JSON.stringify(hb));
           await ev(() => __mikdash.bus.emit('caption', { text: 'A caption beside the Show chip, long enough to need its lane', duration: 4 }));
@@ -584,7 +606,8 @@ try {
           const capR = await ev(() => { const c = [...document.querySelectorAll('.mk-cap')].pop()?.getBoundingClientRect(), k = document.querySelector('.mk-showchip').getBoundingClientRect(); return c && { cap: Math.round(c.bottom), chip: Math.round(k.top) }; });
           check('captions ride above the Show chip', !!capR && capR.cap <= capR.chip + 1, JSON.stringify(capR));
           await shot(page, 'int-showing');
-          await page.click('.mk-showchip .mk-hbtn');
+          // (the chip lives 30 s; a loaded machine's screenshot can outlast it: Back through the chip if shown, else the header's)
+          await ev(() => { const c = document.querySelector('.mk-showchip'); (c.hidden ? document.querySelector('.mk-head__back') : c.querySelector('.mk-hbtn')).click(); });
           await page.waitForTimeout(1500);
           const bk = await ev((s) => ({ dt: Math.abs(__mikdash.time.t - s.t), dh: Math.abs(((__mikdash.player.heading - s.h + 540) % 360) - 180) }), snap);
           check('Back restores the clock and the view', bk.dt < 0.6 && bk.dh < 2, JSON.stringify(bk));
@@ -738,7 +761,9 @@ try {
           }
           return null;
         });
-        check('an open card\'s Show me follows the clock (the label says what will happen now)', !!stale && stale.before !== stale.after && stale.after === stale.want, JSON.stringify(stale));
+        // (the card words it "Show me: …" with the timing under it — ux-audit D — so the time the core names must be in it)
+        const wantAt = /≈\d{2}:\d{2}/.exec(stale?.want || '')?.[0];
+        check('an open card\'s Show me follows the clock (the label says what will happen now)', !!stale && stale.before !== stale.after && /^Show me/.test(stale.after || '') && (!wantAt || stale.after.includes(wantAt)), JSON.stringify(stale));
         // E inside the Menu does nothing (§2.3)
         await ev(() => __mikdash.ui.open('here'));
         await page.waitForTimeout(400);
@@ -1232,7 +1257,7 @@ try {
     check('Esc closes the Menu and gives input back', await ev(() => __mikdash.ui.panel === null));
     const q0 = await ev(() => __mikdash.player.position.toArray());
     await ev(() => document.activeElement?.blur?.());
-    await page.keyboard.down('w'); await page.waitForTimeout(500); await page.keyboard.up('w');
+    await page.keyboard.down('w'); await page.waitForTimeout(1500); await page.keyboard.up('w'); // (slow frames: a longer hold)
     const q1 = await ev(() => __mikdash.player.position.toArray());
     check('after closing, the observer walks again', Math.hypot(q1[0] - q0[0], q1[2] - q0[2]) > 0.1);
     await ev(() => __mikdash.ui.open('map'));
@@ -1260,8 +1285,14 @@ try {
     const gb = await stage();
     await page.mouse.dblclick(gb.x + gs[0], gb.y + gs[1]);
     await page.waitForTimeout(1000);
-    const dw = await ev(() => ({ mode: __mikdash.player.mode, open: __mikdash.ui.panel, txt: document.querySelector('.mk-travel__txt').textContent, inMap: !!document.querySelector('.mk-mapv__travel .mk-travel'), trip: __mikdash.ui.map.trip() }));
-    check('double-click goes to the place under the pointer; the travel bar and route show in the map', dw.mode === 'auto' && /Mizbeach/.test(dw.txt) && dw.inMap && !!dw.trip, JSON.stringify(dw));
+    const dw = await ev(() => ({ mode: __mikdash.player.mode, open: __mikdash.ui.panel, wide: document.querySelector('.mk-menu').classList.contains('is-wide'), txt: document.querySelector('.mk-travel__txt').textContent, inHud: !!document.querySelector('.mk-travelslot .mk-travel:not([hidden])') }));
+    // a Go from the dock's Map returns the Menu to its dock width, so the walk is seen (ux-audit F); the bar is in the HUD
+    check('double-click goes to the place under the pointer; the Menu returns to the dock and the travel bar shows', dw.mode === 'auto' && /Mizbeach/.test(dw.txt) && dw.open && dw.open !== 'map' && !dw.wide && dw.inHud, JSON.stringify(dw));
+    // the Map opened again during the walk: the bar and the route are in the map
+    await ev(() => __mikdash.ui.open('map'));
+    await page.waitForTimeout(1500);
+    const dw2 = await ev(() => ({ inMap: !!document.querySelector('.mk-mapv__travel .mk-travel'), trip: __mikdash.ui.map.trip(), mode: __mikdash.player.mode }));
+    check('…the Map opened during the walk shows the travel bar and the route', dw2.mode !== 'auto' || (dw2.inMap && !!dw2.trip), JSON.stringify(dw2));
     const pc = await ev(() => {
       const R = (s) => { const e = document.querySelector(s); return e && !e.hidden ? e.getBoundingClientRect() : null; };
       const o = (p, q2) => !!(p && q2) && p.left < q2.right && q2.left < p.right && p.top < q2.bottom && q2.top < p.bottom;
@@ -1269,10 +1300,12 @@ try {
       return { shown: !!t, tools: o(t, p), card: o(t, c) };
     });
     check('the travel bar in the map is clear of the toolbar and the card', pc.shown && !pc.tools && !pc.card, JSON.stringify(pc));
-    await shot(page, 'map-walking');
-    await page.click('.mk-mapv__travel .mk-travel__stop');
+    // (Stop before the screenshot: on a loaded machine a screenshot can outlast the walk)
+    const mWalking = await ev(() => __mikdash.player.mode === 'auto' && !!document.querySelector('.mk-mapv__travel .mk-travel__stop'));
+    if (mWalking) await ev(() => document.querySelector('.mk-mapv__travel .mk-travel__stop').click());
     await page.waitForTimeout(600);
-    check('Stop cancels the walk and hides the bar', await ev(() => __mikdash.player.mode !== 'auto' && document.querySelector('.mk-mapv__travel').hidden));
+    check('Stop cancels the walk and hides the bar', mWalking && await ev(() => __mikdash.player.mode !== 'auto' && document.querySelector('.mk-mapv__travel').hidden));
+    await shot(page, 'map-walking');
     await ev(() => __mikdash.ui.map.select('gazit'));
     await page.waitForTimeout(600);
     await page.click('.mk-mapcard__acts .mk-btn:has-text("About")');

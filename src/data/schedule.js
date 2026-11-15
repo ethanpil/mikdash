@@ -78,6 +78,12 @@
 //                     sections, each with a teki'ah and the crowd's full prostration.
 //   maamad            Israelites of the ma'amad standing in Ezrat Yisrael at both temidim (never seated).
 //   shabbat-musaf     two lambs slaughtered and offered after the tamid; its song (Ha'azinu) and nine blasts.
+//   rosh-chodesh-musaf (occasion 'rosh-chodesh') two bulls, a ram and seven lambs led in by Sha'ar HaKorban, slaughtered
+//                     at the rings, their blood thrown NE and SW; the goat's blood on the four horns from the sovev;
+//                     lambs, ram and goat hung and flayed at the nanasin, the bulls on the pavement; each animal's
+//                     carriers (24 / 11 / 8) in a file up the ramp, the limbs laid on the altar's walk between the horns,
+//                     then on the fire, the flour after them, the wine poured at the SW horn; the last jug left on the
+//                     ramp for libation-song's pourer, whose concert is the musaf's song (rc-musaf-song).
 //   shabbat-showbread eight kohanim exchanging the stacks and bazichin at the Shulchan (north brings in, south takes out);
 //                     old loaves to the gold table in the Ulam; bazichin burned on the incense pile by two of the
 //                     INCOMING mishmar (Sukkah 56b), after the musafim (Abaye, Yoma 33a–34a).
@@ -97,8 +103,10 @@
 //                     corner and the handful taken; waving east of the altar; owners carrying meat out; yesterday's
 //                     leftovers burned east of the ramp in the morning. Kayitz hamizbeach olot in idle hours.
 //   chambers-daily    chavitin bakers; blemished kohanim sorting wood; nazirites cooking and shaving; the Golah wheel;
-//                     hides salted at the Parvah; Beit Garmu baking (Friday); Yochanan and Achiyah reckoning the
-//                     seals against the coins at the NE chamber of Beit HaMoked (evening).
+//                     hides salted at the Parvah; Beit Garmu baking (Friday); by day the libations bought with a
+//                     seal at Yochanan's and Achiyah's desk in Beit HaMoked's chol half, the wine taken in by a kohen
+//                     to the silver table (`seals-sale`); Yochanan and Achiyah reckoning the seals against the coins
+//                     at the NE chamber of Beit HaMoked (evening).
 //   beit-avtinas      (occasional only) the compounding: mortars, the grinder's chant.
 //   courts-daily      Levite gatekeepers at Nikanor; women in the Ezrat Nashim; kohanim eating the most-holy portions in
 //                     the court, standing (by day and again in the evening until midnight), then scouring the copper
@@ -153,7 +161,7 @@ const V = {
   avtinas: [212.75, 261.8, 36],        // inside Beit Avtinas
 };
 
-const DUCHAN_TEXT = `No fewer than twelve Levites stood on the duchan, with no upper limit (Arachin 2:6): harps (nevalim) two to six, lyres (kinnorot) nine or more, and a single cymbal (Arachin 2:3, 2:5). Levite boys joined the song by voice, "to add spice to the sweetness"; Rabbi Eliezer ben Yaakov says they stood on the ground, their heads between the Levites' feet (Arachin 2:6). At each section of the psalm the trumpeters blew a teki'ah and the people prostrated: for every section a teki'ah, for every teki'ah a prostration (Tamid 7:3).`;
+const DUCHAN_TEXT = `No fewer than twelve Levites stood on the duchan, with no upper limit (Arachin 2:6): harps (nevalim) two to six, lyres (kinnorot) nine or more, and a single cymbal (Arachin 2:3, 2:5). Levite boys joined the song by voice, "to add spice to the sweetness"; Rabbi Eliezer ben Yaakov says they stood on the ground, their heads between the Levites' feet (Arachin 2:6). At each section of the psalm the trumpeters blew a teki'ah and the people prostrated: for every section a teki'ah, for every teki'ah a prostration (Tamid 7:3). The officer over the song chose each day who stood on the duchan, and the trumpets sounded over the offerings at his word (Rambam KhM 7:5); the Mishnah's list of officers names Hugras ben Levi over the song (Shekalim 5:1) — shown standing at the south end of the duchan, singing.`;
 
 export const DAY_TYPES = ['weekday', 'friday', 'shabbat'];
 
@@ -177,6 +185,24 @@ export const EVENTS = [
     sources: ['Middot 1:9', 'Shekalim 5:1', 'Tamid 1:1'],
     sounds: ['keys', 'gate-boom'],
     choreo: 'locking-up',
+    importance: 2,
+    layer: 'ritual',
+  },
+  {
+    id: 'gates-shut',
+    title: { en: 'The Levites shut the gates', he: 'הגפת השערים' },
+    dayTypes: ALL,
+    when: { start: tzeit(0), end: tzeit(5.5) },
+    timing: { confidence: 'reconstruction', note: 'Middot 1:9 says only "when the time of locking came"; shown as the night watch takes its posts at nightfall, the Azarah\'s gates first, then the Mount\'s.' },
+    zone: 'nikanor',
+    pos: [261, 330.5, 13.5],
+    view: { at: V.nikanorLanding, heading: 289 },
+    summary: `At each gate the Levite of the night watch swings the leaves shut and bars them — the Levites are the gatekeepers.`,
+    description: `The Levites guard the Mikdash, and some of them are gatekeepers, "to open the gates of the Mikdash and to shut its doors" (Rambam KhM 3:2); they lock and open at the word of the officer over the locking of the gates (Rambam KhM 7:3) — in the Mishnah's list Ben Gever (Shekalim 5:1). At night Levites stand at the five gates of the Mount and the five of the Azarah (Middot 1:1).\n\nThe model shows each gate's Levite stepping aside as its leaves swing shut and barring them. The keys of the Azarah stay with the elders of the beit av in Beit HaMoked (Tamid 1:1), where a kohen locks from within (Middot 1:9). Tadi, the northern gate of the Mount, "served for nothing" (Middot 1:3) and is not opened at all.`,
+    participants: [{ role: 'guard_levi', count: 9, note: 'the night watch\'s Levite at each of the four open gates of the Mount and the five of the Azarah (Middot 1:1)' }],
+    sources: ['Rambam KhM 3:2', 'Rambam KhM 7:3', 'Shekalim 5:1', 'Middot 1:1', 'Middot 1:3', 'Middot 1:9', 'Tamid 1:1'],
+    sounds: ['gate-boom'],
+    choreo: 'night-watch',
     importance: 2,
     layer: 'ritual',
   },
@@ -341,6 +367,42 @@ export const EVENTS = [
     importance: 2,
     layer: 'ritual',
     offerings: ['olah', 'chatat', 'asham', 'shelamim', 'todah', 'bechor'],
+  },
+  {
+    id: 'altar-wiping',
+    title: { en: 'Friday: the altar wiped with a cloth because of the blood', he: 'מלבנים אותו במפה מפני הדמים' },
+    dayTypes: ['friday'],
+    when: { start: dayH(9.8), end: dayH(10.45) },
+    timing: { confidence: 'reconstruction', note: 'Every erev Shabbat (Middot 3:4, Rabbi); the hour is not given — shown after the day\'s last blood, the afternoon tamid\'s.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.yesod', f: [0.97, 0.97, 1] },
+    view: { at: [239, 346, 16], heading: 228 },
+    summary: `Kohanim with cloths wipe the altar's stones where the blood is thrown and poured — every Friday, by Rabbi's teaching.`,
+    description: `The stones of the ramp and of the altar were whitened twice a year, at Pesach and at Sukkot; "Rabbi says: every erev Shabbat they whiten it with a cloth because of the blood" (Middot 3:4). Bartenura reads Rabbi as adding to the first view, not disputing it: the whitewash twice a year, and every Friday they wiped the stones with a cloth because of the blood. The model shows Rabbi's Friday wiping, the twice-yearly whitewash being a festival matter.\n\nWho wiped, with how many cloths and at what hour, the sources do not say: a few kohanim are shown at the north-east and south-west corners and along the southern yesod, where an olah's blood is thrown and the remainders are poured (Zevachim 5:4), after the afternoon tamid. No iron touched the altar's stones (Middot 3:4).`,
+    participants: [{ role: 'kohen', count: 3, note: 'how many is not recorded' }],
+    sources: ['Middot 3:4', 'Bartenura on Middot 3:4', 'Zevachim 5:4'],
+    sounds: [],
+    choreo: 'temple-duties',
+    importance: 2,
+    layer: 'ritual',
+  },
+  {
+    id: 'kanim-out',
+    title: { en: 'Friday: the kanim drawn out of the showbread', he: 'שומטין את הקנים' },
+    dayTypes: ['friday'],
+    when: { start: dayH(10.5), end: dayH(10.75) },
+    timing: { confidence: 'reconstruction', note: '"From erev Shabbat" (Menachot 11:6); the hour is not given — shown after the afternoon service.' },
+    zone: 'heichal',
+    pos: { el: 'heichal.shulchan' },
+    view: { at: [135.6, 337.5, 22], heading: 271 },
+    summary: `A kohen goes into the Heichal and draws the twenty-eight golden reeds out from between the loaves, laying them along the table — their setting and removal do not override Shabbat.`,
+    description: `Twenty-eight kanim, each like half a hollow reed, lay between the loaves, fourteen to each stack, so the air would pass through the bread. "Neither the setting of the kanim nor their removal overrides Shabbat: rather he goes in on erev Shabbat, draws them out and lays them along the length of the table" (Menachot 11:6; Rambam TuM 5:11).\n\nThe hour is not given: the model shows one kohen going in after the afternoon service. That the kanim are laid along the table is not modelled: they are drawn out of the stacks and are not seen until they are put back after Shabbat.`,
+    participants: [{ role: 'kohen', count: 1 }],
+    sources: ['Menachot 11:6', 'Rambam TuM 5:11', 'Rambam TuM 5:2'],
+    sounds: [],
+    choreo: 'temple-duties',
+    importance: 1,
+    layer: 'halachic',
   },
   {
     id: 'friday-last-fats',
@@ -858,6 +920,24 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     layer: 'ritual',
   },
   {
+    id: 'gates-opened',
+    title: { en: 'The Levites open the gates', he: 'פתיחת השערים בידי הלוים' },
+    dayTypes: ALL,
+    when: { start: sunrise(-7.5), end: sunrise(-5) },
+    timing: { confidence: 'reconstruction', note: 'With the three blasts for the opening of the gates (Sukkah 5:5), which are blown only at the word of the officer over the locking (Rambam KhM 7:3); the hour is not given.' },
+    zone: 'nikanor',
+    pos: [261, 330.5, 13.5],
+    view: { at: V.nikanorLanding, heading: 289 },
+    summary: `As the trumpets sound for the opening of the gates, the Levite at each gate draws the bar and the leaves swing open — all but Tadi, which "served for nothing".`,
+    description: `Levites are the gatekeepers, "to open the gates of the Mikdash and to shut its doors" (Rambam KhM 3:2). The officer over the locking of the gates — Ben Gever in the Mishnah's list (Shekalim 5:1) — gives the word to lock and to open, and the trumpeters blow the three blasts for the opening only with his leave (Rambam KhM 7:3). The Levites of the night watch are standing at the five gates of the Mount and the five of the Azarah (Middot 1:1).\n\nTadi, the northern gate of the Mount, "served for nothing" (Middot 1:3) and stays shut; Rabbi Eliezer ben Yaakov has the kohen who became impure in the night go out by it, by the passage under the Chel (Middot 1:9). Which leaf first and how they were barred is not recorded: the model shows each Levite drawing the bar, stepping aside along the wall, and watching his gate swing open.`,
+    participants: [{ role: 'guard_levi', count: 9, note: 'the night watch\'s Levite at each of the four open gates of the Mount and the five of the Azarah (Middot 1:1)' }],
+    sources: ['Rambam KhM 3:2', 'Rambam KhM 7:3', 'Shekalim 5:1', 'Middot 1:1', 'Middot 1:3', 'Middot 1:9', 'Sukkah 5:5'],
+    sounds: ['gate-boom'],
+    choreo: 'night-watch',
+    importance: 2,
+    layer: 'ritual',
+  },
+  {
     id: 'great-gate',
     title: { en: 'The great gate of the Heichal opens', he: 'פתיחת השער הגדול' },
     dayTypes: ALL,
@@ -991,6 +1071,24 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     choreo: 'tamid-morning',
     importance: 2,
     layer: 'ritual',
+  },
+  {
+    id: 'ramp-salt',
+    title: { en: 'Salt strewn on the ramp so no one slips', he: 'זריקת מלח על גבי הכבש' },
+    dayTypes: ALL,
+    when: { start: sunrise(31.5), end: sunrise(35) },
+    timing: { confidence: 'ordering', note: 'With the salting of the limbs on the ramp (Rambam TuM 6:3) — shown as the nine leave it for the Shema; the minutes are reconstruction.' },
+    zone: 'kevesh',
+    pos: [221.5, 292, 20.6],
+    view: { at: [232, 286, 16], heading: 282 },
+    summary: `A kohen casts handfuls of salt over the ramp's walking surface, so the kohanim going up with the wood do not slip — on Shabbat too.`,
+    description: `The limbs are salted on the ramp, "and salt is thrown on the ramp, even on Shabbat, so that the kohanim do not slip and fall there when they go up with the wood to the pile; and though the salt is between their feet and the ramp, they do not mind it, since this walking is not a service" (Rambam TuM 6:3). The Mishnah lists it among what is permitted in the Mikdash on Shabbat: "they strew salt on the ramp so that they will not slip" (Eruvin 10:14).\n\nWho strewed it and when are not recorded: the model shows one kohen with salt in his hand walking up the ramp's east half and down its west, casting it, once the tamid's limbs are laid and salted and the nine have gone to the Shema.`,
+    participants: [{ role: 'kohen', count: 1, note: 'who did it is not recorded' }],
+    sources: ['Rambam TuM 6:3', 'Eruvin 10:14'],
+    sounds: [],
+    choreo: 'temple-duties',
+    importance: 1,
+    layer: 'halachic',
   },
   {
     id: 'gazit-shema',
@@ -1182,6 +1280,25 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     layer: 'ritual',
   },
   {
+    id: 'kanim-in',
+    title: { en: 'Sunday: the kanim put back between the loaves', he: 'מכניס את הקנים בין החלות' },
+    dayTypes: ['weekday'],
+    onWeekday: 0,
+    when: { start: sunrise(78), end: sunrise(83) },
+    timing: { confidence: 'reconstruction', note: '"On the first day of the week" (Rambam TuM 5:11); the hour is not given — shown by day, after the morning incense and the blessing.' },
+    zone: 'heichal',
+    pos: { el: 'heichal.shulchan' },
+    view: { at: [135.6, 337.5, 22], heading: 271 },
+    summary: `After Shabbat a kohen goes into the Heichal and puts the twenty-eight golden reeds back between the loaves of the showbread.`,
+    description: `The kanim were drawn out of the bread on Friday, for neither setting them nor removing them overrides Shabbat (Menachot 11:6). "And on the first day of the week he goes in and puts the kanim back between the loaves" (Rambam TuM 5:11). The Mishnah says only how they were taken out; the day they went back is the Rambam's.\n\n"The first day of the week" could begin at nightfall on Saturday; the model shows it by day on Sunday, after the morning incense and the priestly blessing, when the Heichal is free. One kohen is shown; the hour is reconstruction.`,
+    participants: [{ role: 'kohen', count: 1 }],
+    sources: ['Rambam TuM 5:11', 'Menachot 11:6'],
+    sounds: [],
+    choreo: 'temple-duties',
+    importance: 1,
+    layer: 'halachic',
+  },
+  {
     id: 'limbs-up',
     title: { en: 'The limbs, the minchah and the chavitin go up', he: 'העלאת האברים, המנחה והחביתין' },
     dayTypes: ALL,
@@ -1336,12 +1453,20 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     choreo: 'shabbat-musaf',
     importance: 2,
     layer: 'ritual',
+    byOccasion: {
+      'rosh-chodesh': {
+        summary: `Shabbat Rosh Chodesh: the two Shabbat lambs go first; Ha'azinu is not sung today — the song of Rosh Chodesh displaces it, after both musafim.`,
+        description: `On Shabbat two more yearling lambs are offered as an olah, with their flour-offering and their wine (Bamidbar 28:9–10), by the outgoing mishmar, whoever won a task at the morning tamid doing it for the two lambs (Rambam TuM 4:9). When Rosh Chodesh falls on Shabbat both musafim are offered, Shabbat's first: "the more frequent comes first" (Zevachim 10:1; Rambam TuM 9:2).\n\nThe song of Rosh Chodesh displaces Shabbat's, to make it known that it is Rosh Chodesh (Rambam TuM 6:10; Sukkah 54b): Ha'azinu is not sung, and one set of nine blasts serves both musafim (Sukkah 55a). Rashi there has the one song after both libations; the Yerushalmi has the song of Rosh Chodesh said over the Shabbat musaf (Yerushalmi Shekalim 8:4). Shown: Rashi's order — this wine poured without song.`,
+        sounds: ['sheep'],
+      },
+    },
   },
   {
     id: 'showbread-swap',
     title: { en: 'The showbread is changed', he: 'סידור לחם הפנים' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(150), end: sunrise(160) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(212), end: sunrise(222) } } },
     timing: { confidence: 'ordering', note: 'The bazichin follow the musafim in Abaye\'s order (Yoma 33a), so the change is shown after musaf. A braita has the bazichin before the musafim; the Gemara calls it a dispute of Tannaim, and Abaye prefers the musafim first, which is shown (Yoma 34a). Minutes reconstruction.' },
     zone: 'heichal',
     pos: { el: 'heichal.shulchan' },
@@ -1360,6 +1485,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'The bread as warm as when it was set', he: 'סילוקו כסידורו' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(157), end: sunrise(162) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(219), end: sunrise(224) } } },
     timing: { confidence: 'ordering', note: 'At the removal of the old loaves (Menachot 11:7).' },
     zone: 'ulam',
     pos: { el: 'heichal.ulam.tables' },
@@ -1378,6 +1504,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'The frankincense of the showbread is burned', he: 'הקטרת הבזיכין' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(160), end: sunrise(166) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(222), end: sunrise(228) } } },
     timing: { confidence: 'ordering', note: 'After the change (Menachot 11:7); after the musafim and before the afternoon tamid in Abaye\'s order (Yoma 33a). A braita has the bazichin before the musafim; Abaye\'s order is shown (Yoma 34a). Minutes reconstruction.' },
     zone: 'mizbeach',
     pos: [206, 311.5, 25],
@@ -1396,6 +1523,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'The watches divide the bread, north and south', he: 'חילוק לחם הפנים' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(166), end: sunrise(190) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(228), end: sunrise(252) } } },
     timing: { confidence: 'ordering', note: 'After the bazichin (Menachot 11:7); minutes reconstruction.' },
     zone: 'ezrat-kohanim',
     pos: [236, 330.5, 16],
@@ -1414,6 +1542,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Shabbat: the Kohen Gadol\'s loaves eaten in the court', he: 'חלקו של כהן גדול בלחם הפנים' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(190), end: dayH(8.1) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(252), end: dayH(8.1) } } },
     timing: { confidence: 'reconstruction', note: 'Not before the frankincense is burned (Rambam TuM 4:10) and by midnight (Rambam MK 10:7–8). Whether the Kohen Gadol ate his loaves in the court that day, who ate with him and for how long are not recorded: shown from the division until the incoming watch gathers for the afternoon lottery.' },
     zone: 'ezrat-kohanim',
     pos: [236, 330.5, 16],
@@ -1435,6 +1564,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Shabbat day: the morning\'s limbs on the fire', he: 'אברי שבת על המערכה' },
     dayTypes: ['shabbat'],
     when: { start: sunrise(166), end: dayH(8.3) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(228), end: dayH(8.3) } } },
     timing: { confidence: 'reconstruction', note: 'Shabbat\'s limbs burn in their day (Rambam MK 4:3); who tended the pile between the services, and how often, is not recorded. Shown from the bazichin until just before the afternoon tamid.' },
     zone: 'mizbeach',
     pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
@@ -1467,6 +1597,130 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     layer: 'ritual',
   },
 
+  // ======================================================================================== ROSH CHODESH, LATE MORNING
+  // occasion 'rosh-chodesh' (ctx.time.occasions — the 1st of a month, not 1 Tishrei): active only on such a day, of any
+  // day type. The musaf follows the morning tamid (Rambam TuM 7:1); on Shabbat after the Shabbat musaf, "the more
+  // frequent first" (Zevachim 10:1; Rambam TuM 9:2), so its windows move by 44 minutes (byDay.shabbat). Staged by
+  // rosh-chodesh-musaf (src/sim/choreo/g7/); its song by libation-song (docs/decisions/rosh-chodesh.md).
+  {
+    id: 'rc-musaf-slaughter',
+    title: { en: 'Rosh Chodesh musaf: two bulls, a ram and seven lambs slaughtered in the north', he: 'מוסף ראש חודש — שחיטה בצפון' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(106), end: sunrise(124) },
+    timing: { confidence: 'ordering', note: 'The musaf of Rosh Chodesh after the morning tamid (Rambam TuM 7:1), its libations and song done (Yoma 33a: the libations before the musafim). The animals one after another in the verse\'s order, three rings at once, and the minutes are reconstruction.' },
+    zone: 'slaughter-zone',
+    pos: [219, 359.5, 16],
+    view: { at: [236, 360, 16], heading: 268 },
+    summary: `"On your new moons": two young bulls, a ram and seven yearling lambs, all olot, are slaughtered at the rings north of the altar and their blood thrown at the corners.`,
+    description: `"On your new moons you shall offer an olah to the Lord: two young bulls, one ram, seven yearling lambs without blemish" (Bamidbar 28:11), after the morning tamid (Rambam TuM 7:1). Every olah is done as the tamid (Rambam TuM 7:2): slaughtered in the north and its blood received there in a vessel of service, then thrown at the north-east and south-west corners, "two gifts that are four" (Zevachim 5:4).\n\nThe verse lists the bulls, the ram and the lambs, then the goat (Bamidbar 28:11–15), and a baraita puts bulls before rams, rams before lambs and lambs before goats (Zevachim 90a); the Gemara leaves open whether it speaks of the festivals' musafim (Zevachim 90b). How many were slaughtered at once, at which rings and by whom is not recorded: the model shows three slaughterers at work, in the verse's order, with the animals led in by Sha'ar HaKorban.`,
+    participants: [
+      { role: 'kohen', count: 3, note: 'slaughterers — how many at once is not recorded' },
+      { role: 'kohen', count: 3, note: 'receiving the blood and throwing it' },
+      { role: 'kohen', count: 11, note: 'leading the animals in and holding them' },
+    ],
+    sources: ['Bamidbar 28:11', 'Rambam TuM 7:1–2', 'Zevachim 5:4', 'Zevachim 90a–b', 'Middot 1:5'],
+    sounds: ['sheep'],
+    choreo: 'rosh-chodesh-musaf',
+    importance: 3,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(150), end: sunrise(168) } } },
+  },
+  {
+    id: 'rc-goat-chatat',
+    title: { en: 'The goat of Rosh Chodesh: its blood on the four horns', he: 'שעיר ראש חודש — ארבע מתנות על ארבע קרנות' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(119), end: sunrise(129) },
+    timing: { confidence: 'reconstruction', note: 'After the olot in the verse\'s order (Bamidbar 28:15); the minutes are reconstruction.' },
+    zone: 'mizbeach',
+    pos: [231.5, 307, 22],
+    view: { at: [229.8, 288.6, 16], heading: 2 },
+    summary: `A male goat, a chatat for the public: its blood is put with the finger on the four horns, walking round the sovev from the south-east horn.`,
+    description: `"And one male goat as a chatat to the Lord" (Bamidbar 28:15). The goats of Rosh Chodesh are the public's chatat: slaughtered in the north, the blood received in a vessel of service, and put on the four horns. He goes up the ramp, turns to the sovev and comes to the south-east horn, then the north-east, north-west and south-west; the rest of the blood is poured on the southern yesod (Zevachim 5:3). He dips his right finger in the blood and draws it down against the point of each horn (Rambam MK 5:7, 5:10).\n\nIt is done as the chatat that is eaten (Rambam TuM 7:2): its fats are burned on the altar, and its meat is eaten inside the court by male kohanim, prepared in any way, that day and the night until midnight (Zevachim 5:3).`,
+    participants: [
+      { role: 'kohen', count: 1, note: 'slaughtering it' },
+      { role: 'kohen', count: 1, note: 'putting the blood on the horns' },
+      { role: 'kohen', count: 1, note: 'flaying it and taking up the fats' },
+    ],
+    sources: ['Bamidbar 28:15', 'Zevachim 5:3', 'Rambam MK 5:7', 'Rambam MK 5:10', 'Rambam TuM 7:2'],
+    sounds: [],
+    choreo: 'rosh-chodesh-musaf',
+    importance: 3,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(163), end: sunrise(173) } } },
+  },
+  {
+    id: 'rc-musaf-flaying',
+    title: { en: 'Rosh Chodesh: the musaf flayed and cut', he: 'הפשט ונתוח של מוסף ראש חודש' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(108), end: sunrise(150) },
+    timing: { confidence: 'reconstruction', note: 'Flayed as soon as each is slaughtered; the minutes are reconstruction.' },
+    zone: 'slaughter-zone',
+    pos: [213, 383.75, 16],
+    view: { at: V.flaying, heading: 350 },
+    summary: `The lambs, the ram and the goat hang from the hooks of the dwarf pillars to be flayed and cut; the two bulls are flayed where they lie.`,
+    description: `The flaying and cutting of public and private offerings is the same (Yoma 2:7); an olah "requires flaying and cutting, and is wholly for the fire" (Zevachim 5:4). The lambs, the ram and the goat are hung from the iron hooks of the dwarf pillars and flayed (Middot 3:5; Tamid 4:2).\n\nHow a bull was handled is not recorded: hung from a pillar's hooks it would not clear the pavement. The model shows the bulls flayed on the pavement by the rings, two men to each, and each animal's carriers coming in a file for their parts as they are cut, as at the tamid (Tamid 4:3).`,
+    participants: [{ role: 'kohen', count: 13, note: 'one flayer to each animal, two to each bull ⚙' }],
+    sources: ['Yoma 2:7', 'Zevachim 5:4', 'Middot 3:5', 'Tamid 4:2–3'],
+    sounds: [],
+    choreo: 'rosh-chodesh-musaf',
+    importance: 2,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(152), end: sunrise(194) } } },
+  },
+  {
+    id: 'rc-musaf-limbs',
+    title: { en: 'Rosh Chodesh: the limbs laid on the altar between the horns', he: 'אברי ראש חודש על המזבח בין קרן לקרן' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(118), end: sunrise(156) },
+    timing: { confidence: 'reconstruction', note: 'After the flaying of each animal; the minutes are reconstruction.' },
+    zone: 'mizbeach',
+    pos: { el: 'altar.walkway', f: [0.97, 0.5, 1] },
+    view: { at: [238.5, 290, 16], heading: 300 },
+    summary: `Each animal's parts go up the ramp in a file — twenty-four kohanim to a bull, eleven to the ram — and are laid on the altar itself, between horn and horn, so that all may know it is Rosh Chodesh.`,
+    description: `A bull is offered by twenty-four kohanim: the head by one and the right leg by two, the tail by two and the left leg by two, the breast by one and the neck by three, the two forelegs by two, the two flanks by two, the innards, the flour and the wine by three each. A ram by eleven: the flesh by five, the innards, the flour and the wine by two each (Yoma 2:6–7); a lamb as the tamid (Yoma 2:5; Rambam TuM 7:2). With them their flour mixed with oil — three tenths of an ephah for a bull, two for the ram, one for a lamb — and wine, half a hin, a third and a quarter (Bamidbar 28:12–14).\n\nThe limbs of the tamid were laid on the lower half of the ramp; those of Rosh Chodesh were laid on the altar above, between horn and horn, on the walk of the kohanim's feet, "to make it known that it is Rosh Chodesh" (Rambam TuM 6:3; Yerushalmi Shekalim 8:4; Mishnah Shekalim 8:8 reads "below the karkov", Rashi on Sukkah 54b the top of the ramp). They are salted there and burned (Rambam TuM 6:3). Shown: laid along the walk on the east side ⚙, salted, then thrown on the great pile; the flour thrown on the fire after them, and the wine poured at the south-west horn, one carrier after another ⚙.`,
+    participants: [
+      { role: 'kohen', count: 48, note: 'twenty-four to each bull (Yoma 2:7)' },
+      { role: 'kohen', count: 11, note: 'the ram (Yoma 2:6)' },
+      { role: 'kohen', count: 56, note: 'eight to each lamb: as the tamid, without the chavitin (Yoma 2:5) ⚙' },
+    ],
+    sources: ['Yoma 2:5–7', 'Bamidbar 28:12–14', 'Rambam TuM 6:3', 'Rambam TuM 7:2', 'Yerushalmi Shekalim 8:4', 'Shekalim 8:8', 'Rashi Sukkah 54b'],
+    sounds: [],
+    choreo: 'rosh-chodesh-musaf',
+    importance: 3,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(162), end: sunrise(200) } } },
+  },
+  {
+    id: 'rc-musaf-song',
+    title: { en: 'Rosh Chodesh: the musaf\'s wine, nine more blasts and the song', he: 'שיר של ראש חודש' },
+    dayTypes: ALL,
+    occasion: 'rosh-chodesh',
+    when: { start: sunrise(156), end: sunrise(168) },
+    timing: { confidence: 'ordering', note: 'The song with the pouring of the wine (Rambam TuM 6:5); on Shabbat one song after both musafim\'s libations (Rashi on Sukkah 55a). The minutes are reconstruction.' },
+    zone: 'ezrat-kohanim',
+    pos: [243, 330.5, 15],
+    view: { at: V.duchan, heading: 90 },
+    summary: `"On your new moons you shall blow the trumpets over your olot": the musaf's wine is poured, the trumpets add nine blasts, and the Levites sing.`,
+    description: `"And on your days of joy, your festivals and your new moons you shall blow the trumpets over your olot" (Bamidbar 10:10). Twenty-one blasts were blown each day, and on a day with musafim nine more (Sukkah 5:5): at the pouring of the wine the Levites sing and the trumpets sound at each section (Rambam TuM 6:5–7). Song is said only over the public's obligatory offerings (Rambam TuM 6:8).\n\nWhen Rosh Chodesh falls on Shabbat the song of Rosh Chodesh displaces Shabbat's, "to make it known that it is Rosh Chodesh" (Rambam TuM 6:10; Sukkah 54b–55a), with one set of nine blasts (Sukkah 55a; Rashi: one song, after both libations). Which psalm the Levites sang for Rosh Chodesh is not recorded: the model sings Psalm 81 — "Blow the shofar at the new moon" (v. 4) — as a stand-in (reconstruction).`,
+    participants: [
+      { role: 'levi', count: 12, note: 'at least twelve on the duchan (Arachin 2:6)' },
+      { role: 'levi_boy', count: 4, note: 'below the platform — number not given' },
+      { role: 'kohen', count: 2, note: 'trumpeters' },
+      { role: 'kohen', count: 1, note: 'pouring the wine' },
+      { role: 'israelite', count: 60, note: 'the people in the court, prostrating at each teki\'ah' },
+    ],
+    sources: ['Bamidbar 10:10', 'Sukkah 5:5', 'Rambam TuM 6:5–8', 'Rambam TuM 6:10', 'Sukkah 54b', 'Sukkah 55a'],
+    sounds: ['trumpet-tekiah', 'trumpet-teruah', 'cymbal', 'choir-psalm', 'kinnor', 'nevel', 'crowd-prostrate'],
+    choreo: 'libation-song',
+    importance: 3,
+    layer: 'ritual',
+    byDay: { shabbat: { when: { start: sunrise(200), end: sunrise(212) } } },
+  },
+
   // ======================================================================================== THE DAY
   {
     id: 'sanhedrin',
@@ -1491,6 +1745,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Individuals\' offerings: leaning, confession, slaughter', he: 'קרבנות יחיד — סמיכה, וידוי ושחיטה' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(106), end: dayH(8.3) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(168), end: dayH(8.3) }, timing: { confidence: 'reconstruction', note: 'On Rosh Chodesh the public\'s musaf comes first, after the morning tamid (Rambam TuM 7:1); that the individuals\' offerings waited for it to be done is reconstruction.' } } },
     timing: { confidence: 'ordering', note: 'Between the two temidim: nothing before the morning tamid, nothing slaughtered after the afternoon one — "on it complete all the offerings" (Pesachim 58b–59a; Rambam TuM 1:3). The minutes are reconstruction.' },
     zone: 'slaughter-zone',
     pos: [221, 359.5, 16],
@@ -1569,6 +1824,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'A healed metzora at Sha\'ar Nikanor', he: 'טהרת המצורע' },
     dayTypes: WEEKDAYS,
     when: { start: dayH(3), end: dayH(4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(177), end: sunrise(237) } } },
     timing: { confidence: 'reconstruction', note: 'Only when a healed metzora comes on his eighth day; no hour is given.' },
     zone: 'nikanor',
     pos: [257.5, 330.5, 13.5],
@@ -1747,6 +2003,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Hooks and marble tables: flaying and rinsing', he: 'הפשט וניתוח' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(110), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(172), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'Flaying follows the blood (Rambam MK 5:18), so it trails the slaughter by a few minutes and ends before the afternoon tamid takes the hooks. The minutes are reconstruction.' },
     zone: 'slaughter-zone',
     pos: [217, 383.75, 16],
@@ -1769,6 +2026,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Blood on the altar: four horns, or two that are four', he: 'מתן דמים' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(107), end: dayH(8.35) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(169), end: dayH(8.35) } } },
     timing: { confidence: 'ordering', note: 'Each blood is thrown a minute or two after its slaughter, and the last before the afternoon tamid (Pesachim 59a). The minutes are reconstruction.' },
     zone: 'mizbeach',
     pos: [232, 336, 16],
@@ -1788,6 +2046,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Salt, ramp and fire: limbs, fats and wine', he: 'הקטרת אברים ואימורים' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(120), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(182), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'After the flaying; the fats ought to be on the fire before the afternoon tamid — "on it complete all the offerings" (Pesachim 58b–59b). The minutes are reconstruction.' },
     zone: 'mizbeach',
     pos: { el: 'altar.maarachah-area', f: [0.85, 0.5, 1] },
@@ -1807,6 +2066,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Birds at the corners of the altar', he: 'קרבנות העוף' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(110), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(172), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'Between the temidim, like every individual offering (Pesachim 59a); the minutes are reconstruction.' },
     zone: 'mizbeach',
     pos: { el: 'altar.keren.se' },
@@ -1826,6 +2086,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Meal-offerings: the handful', he: 'מנחות — קמיצה' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(115), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(177), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'By day, between the temidim (Rambam MK 4:6; Pesachim 59a); the minutes are reconstruction.' },
     zone: 'azarah',
     pos: [203, 290, 16],
@@ -1848,6 +2109,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Waving: the owner\'s hands, the kohen\'s beneath', he: 'תנופה' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(125), end: dayH(8.4) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(187), end: dayH(8.4) } } },
     timing: { confidence: 'ordering', note: 'After the blood and the flaying, before the fats go up (Rambam MK 9:6, 9:16); the minutes are reconstruction.' },
     zone: 'ezrat-kohanim',
     pos: [237.5, 321.5, 16],
@@ -1870,6 +2132,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Mothers and the healed at the eastern gate', he: 'טהרת יולדות וזבים' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(115), end: dayH(8.3) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(177), end: dayH(8.3) } } },
     timing: { confidence: 'ordering', note: 'Between the temidim, like every individual offering (Pesachim 59a); the minutes are reconstruction.' },
     zone: 'nikanor',
     pos: [257.5, 330.5, 13.5],
@@ -1893,6 +2156,7 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     title: { en: 'Yesterday\'s leftovers burned', he: 'שריפת נותר' },
     dayTypes: WEEKDAYS,
     when: { start: sunrise(106), end: sunrise(136) },
+    byOccasion: { 'rosh-chodesh': { when: { start: sunrise(168), end: sunrise(198) } } },
     timing: { confidence: 'reconstruction', note: 'Leftovers are burned by day only (Rambam Pesulei HaMukdashin 19:4–5); the hour is not given — shown after the morning tamid.' },
     zone: 'kevesh',
     pos: { el: 'altar.beit-hadeshen' },
@@ -1932,6 +2196,24 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
   },
 
   // ======================================================================================== THE AFTERNOON
+  {
+    id: 'afternoon-call',
+    title: { en: 'The call before the afternoon tamid', he: 'הכרזה לתמיד של בין הערבים' },
+    dayTypes: ALL,
+    when: { start: dayH(7.95), end: dayH(8.05) },
+    timing: { confidence: 'reconstruction', note: 'The Rambam\'s rule: "when the time of the offering comes he cries out" (KhM 7:2). No text describes the afternoon call itself; its hour and place are reconstruction.' },
+    zone: 'fifteen-steps',
+    pos: [263, 330.5, 13.5],
+    view: { at: V.nikanorLanding, heading: 305 },        // the caller at the head of the steps, from the landing's south side
+    summary: `"Arise, kohanim, to the service; Levites, to the platform; Israel, to the ma'amad!" — the time of the afternoon offering is cried out.`,
+    description: `"The officer over the times and his men keep the times: when the time of the offering comes, he or one of his men with his leave cries out and says: Arise, kohanim, to the service, Levites to the platform, and Israel to the ma'amad — and when his voice is heard each one comes to his work" (Rambam KhM 7:2). The Mishnah names Gevini the crier among the officers (Shekalim 5:1), and the Gemara gives his cry at the dawn service (Yoma 20b).\n\nThe Rambam states a rule for every offering; no text describes the call before the afternoon tamid in itself. The model applies the rule: a Levite of the officer's men cries it from the head of the fifteen steps, where the dawn call is shown — the place and the hour are reconstruction, and he is not named.`,
+    participants: [{ role: 'levi', count: 1, note: 'one of the men of the officer over the times — not named' }],
+    sources: ['Rambam KhM 7:2', 'Shekalim 5:1', 'Yoma 20b'],
+    sounds: ['gevini'],
+    choreo: 'temple-duties',
+    importance: 2,
+    layer: 'ritual',
+  },
   {
     id: 'afternoon-lottery',
     title: { en: 'A lottery for the afternoon incense', he: 'פייס לקטרת של בין הערבים' },
@@ -2130,11 +2412,34 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
     layer: 'ritual',
   },
   {
+    id: 'seals-sale',
+    title: { en: 'Libations bought with a seal', he: 'החותמות והנסכים' },
+    dayTypes: WEEKDAYS,
+    when: { start: sunrise(108), end: dayH(8.3) },
+    timing: { confidence: 'reconstruction', note: 'The Mishnah gives the order — money to Yochanan for a seal, the seal to Achiyah for the libations, the reckoning "in the evening" (Shekalim 5:4) — not the hours. Shown while the individuals\' offerings run (none on Shabbat, Temurah 2:1), each buyer a few minutes before his offering\'s wine is poured; the listed window is the staged one (chambers-daily retimes it).' },
+    zone: 'beit-hamoked',
+    pos: [205.8, 404.6, 16],
+    view: { at: [209.0, 399.8, 16], heading: 320 },
+    summary: `A man pays Yochanan ben Pinchas and receives a seal marked with what his animal's libations need; he gives it to Achiyah and receives the wine.`,
+    description: `"Whoever wants libations goes to Yochanan, who is over the seals, gives him money and receives a seal from him; he comes to Achiyah, who is over the libations, gives him the seal and receives the libations from him" (Shekalim 5:4). The seal names the libations: "calf" for cattle, large and small, male and female; "kid" for the flock, large and small, male and female, except rams; "male" for rams only; "sinner" for the three animals of a metzora (Shekalim 5:3). Ben Azzai says there were five, written in Aramaic, with a poor sinner and a rich one; the halachah follows the first tanna, and a poor metzora's one lamb takes "kid" (Bartenura). The day's name was written on each seal against cheats, who might keep a seal bought cheap until the libations grew dear (Shekalim 5:5; Rambam KhM 7:12). Achiyah sold libations prepared in purity so that no one bringing an offering need go looking for them (Bartenura on Shekalim 5:4).\n\nOnly olot and shelamim of cattle and flock take libations, and of the sin- and guilt-offerings only a metzora's (Menachot 9:6; Rambam MK 2:2): a buyer is shown for each such offering staged today. Where the two officers sat, what a seal was made of, who carried the libations in and where they waited are not recorded. The model seats them in the west of Beit HaMoked's chol half, the hall where Tamid 3:3 places a chamber of seals; a kohen takes the wine across the kodesh line and sets it on the silver table west of the ramp, "on which the service vessels" stood (Shekalim 6:4), until its bearer takes it up (all reconstruction).`,
+    participants: [
+      { role: 'israelite', count: 1, note: 'Yochanan ben Pinchas, over the seals (Shekalim 5:1) — lineage not stated' },
+      { role: 'israelite', count: 1, note: 'Achiyah, over the libations (Shekalim 5:1) — lineage not stated' },
+      { role: 'israelite', count: 1, note: 'one buyer at the desks at a time; one for each offering whose libations are staged — whether the owner went himself or sent someone is not stated' },
+      { role: 'kohen', count: 1, note: 'takes the wine in to the silver table — who did is not recorded' },
+    ],
+    sources: ['Shekalim 5:1', 'Shekalim 5:3', 'Shekalim 5:4', 'Shekalim 5:5', 'Rambam KhM 7:10–12', 'Bartenura on Shekalim 5:3–4', 'Menachot 9:6', 'Rambam MK 2:2', 'Tamid 3:3', 'Shekalim 6:4', 'Reconstruction (model)'],
+    sounds: [],
+    choreo: 'chambers-daily',
+    importance: 1,
+    layer: 'ritual',
+  },
+  {
     id: 'seals',
     title: { en: 'The evening reckoning of the seals', he: 'חשבון החותמות' },
     dayTypes: WEEKDAYS,
     when: { start: dayH(10.2), end: dayH(10.7) },
-    timing: { confidence: 'reconstruction', note: '"In the evening" (Shekalim 5:4); shown after the afternoon libation, the day\'s last. The hour is reconstruction.' },
+    timing: { confidence: 'ordering', note: '"In the evening the two come to each other" (Shekalim 5:4; Rambam KhM 7:12): after the day\'s sale, which ends with the private offerings. Shown after the afternoon libation, the day\'s last; the hour is reconstruction.' },
     zone: 'beit-hamoked',
     pos: [217, 409, 16],
     view: { at: [208.5, 399, 16], heading: 50 },
@@ -2193,17 +2498,36 @@ In Abaye's order of the service the two logs follow the incense pile (Yoma 33a),
 // spilled coals are covered, not swept). eventsFor(dayType) returns, for such an event, one stable copy per day type
 // with those fields replaced; every other event is the data's own object. A byDay text must be true of the WHOLE civil
 // date of that day type: a window that wraps midnight holds two nights (a 'friday' date's small hours are Thursday night).
+//
+// OCCASIONS (docs/decisions/rosh-chodesh.md): ctx.time.occasions lists what the civil date's daytime is besides its day
+// type — ['rosh-chodesh'] on the 1st of a month (not 1 Tishrei). An event with `occasion: 'rosh-chodesh'` runs only on
+// such a day; an ordinary event may carry `byOccasion: { 'rosh-chodesh': { when?, timing?, summary?, description?,
+// sounds? } }` — what changes on it that day (the individuals' offerings wait for the musaf; on Shabbat the showbread
+// follows both musafim). A byDay text of an occasion event may also give its `when` (the Shabbat Rosh Chodesh windows).
+// eventsFor(dayType, time) reads time.occasions and time.weekday (`onWeekday`: an event of one civil weekday only — none
+// without a time) (no occasions when no time is given: the ordinary day, as before); on an
+// ordinary day every event is returned exactly as before.
+export const OCCASIONS = ['rosh-chodesh'];
 const DAY_COPIES = new Map();
-function onDay(ev, dayType) {
+function onDay(ev, dayType, occ) {
   const o = ev.byDay?.[dayType];
-  if (!o) return ev;
-  const k = `${ev.id}|${dayType}`;
+  const oo = occ.length && ev.byOccasion ? occ.map((k) => ev.byOccasion[k]).filter(Boolean) : [];
+  if (!o && !oo.length) return ev;
+  const k = `${ev.id}|${dayType}|${oo.length ? occ.join(',') : ''}`;
   let c = DAY_COPIES.get(k);
-  if (!c) DAY_COPIES.set(k, (c = { ...ev, ...o }));
+  if (!c) DAY_COPIES.set(k, (c = Object.assign({ ...ev }, o || {}, ...oo)));
   return c;
 }
 
-/** Events of a day type ('weekday' | 'friday' | 'shabbat'; 'occasional' lists the reference-only events). */
-export function eventsFor(dayType) {
-  return EVENTS.filter((e) => !e.dayTypes || e.dayTypes.includes(dayType)).map((e) => onDay(e, dayType));
+/**
+ * Events of a day type ('weekday' | 'friday' | 'shabbat'; 'occasional' lists the reference-only events) on a date with
+ * the occasions of `time` (ctx.time, or any { occasions }).
+ */
+export function eventsFor(dayType, time) {
+  const occ = Array.isArray(time?.occasions) ? time.occasions.filter((k) => OCCASIONS.includes(k)) : [];
+  // an event of one civil weekday (`onWeekday`: 0 = Sunday — the kanim put back after Shabbat) only when time says so
+  const wd = Number.isInteger(time?.weekday) ? time.weekday : null;
+  return EVENTS.filter((e) => (!e.dayTypes || e.dayTypes.includes(dayType)) && (!e.occasion || occ.includes(e.occasion))
+    && (!Number.isInteger(e.onWeekday) || e.onWeekday === wd))
+    .map((e) => onDay(e, dayType, occ));
 }

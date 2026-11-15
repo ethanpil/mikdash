@@ -117,7 +117,7 @@ try {
       }, js).catch((e) => `ERR ${e.message}`));
     }
     const file = resolve(root, opt.out, `${name || opt.name || slug(query)}.png`);
-    await page.screenshot({ path: file });
+    await page.screenshot({ path: file, timeout: opt.timeout * 1000 });
     console.log(`\n=== ${file}  (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
     console.log(`url: ${url}`);
     console.log(`info: ${JSON.stringify(info)}`);

@@ -14,6 +14,13 @@ export const DEVICES = [
 /** The essentials, printed at the top of Help and on the Welcome (console §2.4) */
 export const ESSENTIALS = 'Esc = Menu · E / click / tap = learn about anything · Go ▸ = travel.';
 
+/** the essentials in one line for a device (the Welcome; touch has no Esc, E or click) */
+export function essentialsFor(device) {
+  if (device === 'touch') return 'The Menu button = everything · tap = learn about anyone or anything · Show me ▸ = see it happen.';
+  if (device === 'pad') return '☰ = Menu · X = learn about what you face · Show me ▸ = see it happen.';
+  return ESSENTIALS;
+}
+
 /** the device a fresh page most likely uses */
 export function guessDevice() {
   const mq = (q) => { try { return matchMedia(q).matches; } catch { return false; } };
@@ -43,11 +50,11 @@ export function controlGroups(device = guessDevice()) {
       ] },
       { title: 'The Menu', rows: [
         [['Menu'], 'the button bottom-right: where you are, the map, the hour and everything else'],
-        [['Tap'], 'empty scenery to show the quick chips (the hour, Map, Search)'],
+        [['Tap'], 'a wall, a gate or the floor: its name (tap the name for its card) and the quick chips (the hour, Map, Search)'],
         [['‹ Menu'], 'back to the tiles; Close, drag the sheet down, or the system back closes'],
       ] },
       { title: 'Learn about anything', rows: [
-        [['Tap'], 'anyone or anything: its card, with Go ▸ and Show me ▸'],
+        [['Tap'], 'anyone or anything in the scene (people, animals, vessels): its card, with Show me ▸ and Go ▸'],
         [['Here'], 'Nearby lists everyone and everything around you'],
       ] },
       { title: 'On the map', rows: [
@@ -105,7 +112,8 @@ export function controlGroups(device = guessDevice()) {
       [['P'], 'pause / play the clock'],
     ] },
     { title: 'Learn about anything', rows: [
-      [['Click', 'or', 'E'], 'anyone or anything (mouse free; E at the pointer): its card, with Go ▸ and Show me ▸'],
+      [['Click'], 'a person, an animal or a thing (mouse free): its card, with Show me ▸ and Go ▸; a click on a wall or the floor captures the mouse'],
+      [['E'], 'anything at the pointer, walls and gates too'],
       [['E', 'or', 'Click'], 'what the centre dot aims at (mouse captured)'],
     ] },
     { title: 'Travelling', rows: [

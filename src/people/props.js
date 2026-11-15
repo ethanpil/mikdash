@@ -17,14 +17,15 @@
 //   palm / pour / rims — hand classes like fist with their own seating: on the open palm; upright for tipping over the
 //              lip (pour_low); a basket held by its rims (wave_basket). A prop without one falls back to its fist grip.
 import { Vector3, Matrix4, Euler, Quaternion, Color } from 'three';
-import { MeshBuilder, PAT, CLS } from './builder.js';
+import { MeshBuilder, PAT, CLS, envelope } from './builder.js';
 import { gripOffset, HUMAN_CLIPS } from './clips.js';
 import { PoseBuilder, poseToSkin } from './pose.js';
 import { clothCage, clothSkin } from './cloth.js';
 import { RECIPES } from './human.js';
 import { MAX_BONES } from './rig.js';
 import { DEG, smooth, lerp, clamp } from './util.js';
-import { STAFF, handQ, RIMS_HAND, SLAIN_HANDS } from './clips.js';
+import { STAFF, handQ, RIMS_HAND, SLAIN_HANDS, HEAVY, BULL_CLIPS } from './clips.js';
+import { QUAD_CLIPS } from './animal-clips.js';
 import { AMAH } from '../core/units.js';
 import { buildAnimalGeometry, quadHeadFrame } from './animals.js';
 import { getRig } from './rig.js';
@@ -78,7 +79,10 @@ const CHARRED = {
   string: { color: '#1a1512', rough: 0.9 }, pitch: { color: '#14100d', rough: 0.9 },
   fleeceProp: { color: '#120f0d', rough: 0.8 }, coatProp: { color: '#110d0b', rough: 0.7 }, horn: { color: '#1c1714', rough: 0.55 },
 };
+// bull-props: while FELL is set, the lamb's part builders reused at a bull's scale take the bull's fell (BULL.fell)
+let FELL = null;
 const S = (B, key, extra = {}) => {
+  if (FELL && key === 'fell' && !extra.color) extra = { ...extra, color: FELL };
   if (CHAR && CHARRED[key]) return B.set({ ...MAT[key], ...extra, ...CHARRED[key], metal: 0, pat: PAT.CHAR, cls: CLS.FIX, grp: 0 });
   return B.set({ ...MAT[key], cls: CLS.FIX, grp: 0, ...extra });
 };
@@ -942,14 +946,15 @@ function boneEnd(B, p, r) { S(B, 'bone'); B.ellipsoid(p, [r, r, r * 0.6], { nu: 
  *  flayed: the flaying runs down the hung carcass only "until he reaches the breast; on reaching the breast he cut
  *  off the head" (Tamid 4:2), so it goes up in its hair, with ears and horns. Baked from the live lamb's head.
  *  Natural frame: the palm at y = 0, fingers toward −z, the wrist +z. */
-function limbHead(B, lod) {
-  const rig = getRig('lamb');
+function limbHead(B, lod, kind = 'lamb') {
+  const rig = getRig(ANIMALS[kind].rig);
   const { fwd, up, hw, P0, len } = quadHeadFrame(rig);
+  const sz = kind === 'lamb' ? 1 : hw / 0.055;            // (bull-props: the ram's and the bull's head; the lamb's as it was)
   const I = rig.index;
   const headBones = new Set([I.head, I.jaw, I.ear_l, I.ear_r]);
   const base = B.count;
   // charred on the pyre the ears shrivel and fold back flat against the skull (standing out they read as plates)
-  const res = bakeAnimal(B, 'lamb', lod, (P) => { if (CHAR) { P.rot('ear_l', 55, 0, 45); P.rot('ear_r', 55, 0, 45); } }, {
+  const res = bakeAnimal(B, kind, lod, (P) => { if (CHAR) { P.rot('ear_l', 55, 0, 45); P.rot('ear_r', 55, 0, 45); } }, {
     tint: [0.3, 0.3, 0.4, 0.4],
     only: (si, sw, i) => { let w = 0; for (let k = 0; k < 4; k++) if (headBones.has(si[i * 4 + k])) w += sw[i * 4 + k] / 255; return w > 0.6; },
   });
@@ -959,7 +964,7 @@ function limbHead(B, lod) {
   const S0 = new Matrix4().makeBasis(side, up, fwd).invert();
   const T0 = new Matrix4().makeBasis(V(-1, 0, 0), V(0, -1, 0), V(0, 0, 1));
   const centre = P0.clone().addScaledVector(fwd, len * 0.5).addScaledVector(up, -hw * 0.1);
-  const M = new Matrix4().makeTranslation(0, hw * 0.95, 0.01).multiply(T0).multiply(S0).multiply(new Matrix4().makeTranslation(-centre.x, -centre.y, -centre.z));
+  const M = new Matrix4().makeTranslation(0, hw * 0.95, 0.01 * sz).multiply(T0).multiply(S0).multiply(new Matrix4().makeTranslation(-centre.x, -centre.y, -centre.z));
   const v = new Vector3();
   for (let i = base; i < B.count; i++) {
     v.set(B.pos[i * 3], B.pos[i * 3 + 1], B.pos[i * 3 + 2]).applyMatrix4(M);
@@ -968,12 +973,12 @@ function limbHead(B, lod) {
   // the place of slaughter: the neck cut behind the jaw, uppermost, toward the fingers
   const cut = P0.clone().addScaledVector(fwd, len * 0.12).addScaledVector(up, -hw * 0.55).applyMatrix4(M);
   S(B, 'meat');
-  B.ellipsoid(cut, [hw * 0.82, 0.006, hw * 0.7], { nu: sg(lod, 14, 7), nv: 3, bone: 0, lat: [0, 0.5] });
+  B.ellipsoid(cut, [hw * 0.82, 0.006 * sz, hw * 0.7], { nu: sg(lod, 14, 7), nv: 3, bone: 0, lat: [0, 0.5] });
   S(B, 'meat', { color: '#e3d5c6' });   // the windpipe and gullet in the cut
-  B.ellipsoid(cut.clone().add(V(0, 0.004, 0.012)), [0.009, 0.003, 0.009], { nu: 8, nv: 2, bone: 0, lat: [0, 0.5] });
+  B.ellipsoid(cut.clone().add(V(0, 0.004 * sz, 0.012 * sz)), [0.009 * sz, 0.003 * sz, 0.009 * sz], { nu: 8, nv: 2, bone: 0, lat: [0, 0.5] });
   // the fat (peder) laid over the cut
   S(B, 'fat');
-  slab(B, cut.clone().add(V(0, 0.012, -0.004)), [hw * 1.45, 0.014, hw * 1.15], { round: 0.55, nu: sg(lod, 12, 6), nv: 4, shade: (l) => 0.9 + 0.1 * Math.sin(l.x * 160) });
+  slab(B, cut.clone().add(V(0, 0.012 * sz, -0.004 * sz)), [hw * 1.45, 0.014 * sz, hw * 1.15], { round: 0.55, nu: sg(lod, 12, 6), nv: 4, shade: (l) => 0.9 + 0.1 * Math.sin(l.x * 160 / sz) });
 }
 
 /** a fore leg (zeroa + the shoulder): shoulder blade end on the palm, the shank toward the fingers */
@@ -1064,7 +1069,12 @@ function entrailsBazach(B, lod) {
 // --- baked animals (the live rigs posed and skinned on the CPU, palette baked into the vertex colours) ---------
 function bakeAnimal(B, kind, lod, poseFn, o = {}) {
   const def = ANIMALS[kind], rig = getRig(def.rig);
-  const g = buildAnimalGeometry(def, rig, Math.min(1, lod));
+  // perf-cpu: the animal's geometry is built once per kind and LOD (read here, never changed): a carcass, a dove in the
+  // hand or a cage of birds first drawn in play built it anew for every prop variant (and twice per cage) — 40–150 ms
+  // in the frame it appeared (CPU arrays only: nothing on the GPU to free)
+  const gk = `${kind}:${Math.min(1, lod)}`;
+  let g = _baked.get(gk);
+  if (!g) _baked.set(gk, (g = buildAnimalGeometry(def, rig, Math.min(1, lod))));
   const P = new PoseBuilder(rig);
   P.reset();
   poseFn(P, rig);
@@ -1087,7 +1097,6 @@ function bakeAnimal(B, kind, lod, poseFn, o = {}) {
   for (let i = 0; i < pos.length / 3; i++) {
     const cg = mat[i * 4 + 3];
     const grp = Math.floor((cg + 0.5) / 8), cls = Math.round(cg) & 7;
-    keep[i] = grp === 0 && (!o.only || o.only(si, sw, i)) ? 1 : 0;
     let x = 0, y = 0, z = 0;
     for (let k = 0; k < 4; k++) {
       const w = sw[i * 4 + k] / 255;
@@ -1097,6 +1106,8 @@ function bakeAnimal(B, kind, lod, poseFn, o = {}) {
       y += w * (M[b + 4] * px + M[b + 5] * py + M[b + 6] * pz + M[b + 7]);
       z += w * (M[b + 8] * px + M[b + 9] * py + M[b + 10] * pz + M[b + 11]);
     }
+    // (bull-props: `only` also sees the posed position — the half of a lying bull still in its hide)
+    keep[i] = grp === 0 && (!o.only || o.only(si, sw, i, x, y, z)) ? 1 : 0;
     const pc = palCol(cls);
     B.pos.push(x, y, z);
     B.uv.push(uv[i * 2], uv[i * 2 + 1]);
@@ -1109,9 +1120,9 @@ function bakeAnimal(B, kind, lod, poseFn, o = {}) {
     const a = idx[i], b = idx[i + 1], c = idx[i + 2];
     if (keep[a] && keep[b] && keep[c]) B.idx.push(base + a, base + b, base + c);
   }
-  g.dispose();
   return { rig, P };
 }
+const _baked = new Map();
 
 /** the lamb hung for flaying: pierced through the left hind hock and hung on the iron hook head-down (Tamid 4:2 —
  *  "he did not break the leg but pierced it through the hock and hung it"; the right hind leg is cut off while it
@@ -2305,6 +2316,449 @@ export const PEOPLE4_PROPS = {
   dough: { build(B, lod) { dough(B, lod); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } },
   measure: { build(B, lod) { measure(B, lod); }, grips: { tray: { grip: [0, 0, 0], rot: ID() }, palm: { grip: [0, 0, 0], rot: PALM }, pour: { grip: [0, ISARON.h * 0.85, ISARON.r + 0.006], rot: PAN_FIST }, free: { rot: ID(), pos: [0, 0, 0] } } },
 };
+// ---------------------------------------------------------------------------------------------- bull-props
+// (docs/decisions/rosh-chodesh.md "Bull-scale props") The musaf of Rosh Chodesh brings two young bulls (Bamidbar 28:11):
+// their parts are built at the bull's own scale (rig 'bull' — withers 1.3 m, body 1.5 m, about twice the lamb — and its
+// own barrel, neck, legs and head) and carried as Yoma 2:7 gives them, across both palms (clips.js carry_heavy), the
+// limbs given to two or three men WHOLE between them (Rambam MK 6:19). A heavy part's natural frame is its carrier's own:
+// X his right, Y up, −Z ahead, the origin at his middle on the palms' line (the 'palm' grip below seats it level in
+// carry_heavy); a partner stands HEAVY.pair to his left, the third of the neck's men as far to his right. The bull is
+// flayed on the pavement where it fell (g7/plan.js): the bound pose of animal-clips at phase 0, the pose the sim holds.
+const BULL = {
+  fell: '#d9b096',     // a young bull's flayed outside: thinner, yellower fat over redder muscle than a sheep's (reconstruction)
+  hide: 0.016,         // hide and hair off the live animal's surface (m)
+};
+/** apply m to the positions B added since `base` (normals are made at build; m must not mirror) */
+function xfRange(B, base, m) {
+  const v = new Vector3();
+  for (let i = base; i < B.count; i++) {
+    v.set(B.pos[i * 3], B.pos[i * 3 + 1], B.pos[i * 3 + 2]).applyMatrix4(m);
+    B.pos[i * 3] = v.x; B.pos[i * 3 + 1] = v.y; B.pos[i * 3 + 2] = v.z;
+  }
+}
+/** move what B added since `base` to lie on the palms (its lowest point at y = 0), centred on z = 0, its +x end at xMax
+ *  (or its x centred on xMid) */
+function seatRange(B, base, o = {}) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = base; i < B.count; i++) for (let a = 0; a < 3; a++) { const p = B.pos[i * 3 + a]; if (p < lo[a]) lo[a] = p; if (p > hi[a]) hi[a] = p; }
+  const dx = Number.isFinite(o.xMax) ? o.xMax - hi[0] : (o.xMid ?? 0) - (lo[0] + hi[0]) / 2;
+  xfRange(B, base, new Matrix4().makeTranslation(dx, -lo[1], -(lo[2] + hi[2]) / 2));
+}
+/** a part builder run at a bull's (or ram's) scale: the lamb's shape, the kind's fell, then m */
+function scaledPart(B, lod, fn, m, fell = null) {
+  const base = B.count;
+  FELL = fell;
+  try { fn(B, lod); } finally { FELL = null; }
+  xfRange(B, base, m);
+  return base;
+}
+const scl = (x, y, z) => new Matrix4().makeScale(x, y, z);
+const Z2X = () => new Matrix4().makeBasis(V(0, 0, -1), V(0, 1, 0), V(1, 0, 0));   // a part built along z turned to lie across x
+
+// the 'palm' grip of a heavy part (clips.js carry_heavy at scale 1, 'man' rig): the right palm's anchor posed once, the
+// part's frame turned so that it lies level whatever the hand's own rotation (rot = (hand · fist→hand)⁻¹, as the basket's
+// rims), its origin on the palms' line at his middle, 2.2 cm above the anchor (the palm's surface over the fist centre)
+let _heavyGrip = null;
+function heavyGrip() {
+  if (_heavyGrip) return _heavyGrip;
+  const rig = getRig('man'), P = new PoseBuilder(rig);
+  P.reset(); BULL_CLIPS.carry_heavy.fn(P, rig, 0);
+  const q = P.worldQ('hand_r'), a = P.worldPos('hand_r').add(gripOffset(rig, 'r').applyQuaternion(q));
+  const rot = M_R.clone().invert().multiply(new Matrix4().makeRotationFromQuaternion(q).invert());
+  _heavyGrip = { grip: [a.x, -0.022, 0], rot };
+  return _heavyGrip;
+}
+const HEAVY_GRIPS = { get palm() { return heavyGrip(); }, free: { rot: ID(), pos: [0, 0, 0] } };
+
+/** the bull as it lies bound for the slaughter and the flaying (animal-clips 'bound', phase 0), its skinning matrices */
+let _bound = null;
+function boundBull() {
+  if (_bound) return _bound;
+  const rig = getRig('bull'), P = new PoseBuilder(rig);
+  P.reset(); QUAD_CLIPS.bound.fn(P, rig, 0);
+  const M = new Float32Array(rig.n * 12);
+  poseToSkin(rig, P.lp, M, 0);
+  return (_bound = { rig, P, M, pose: (Q, r) => QUAD_CLIPS.bound.fn(Q, r, 0) });
+}
+/** skin what B added since `base` (built in the rig's rest space with real bone weights) by M, then pin it to bone 0 */
+function skinRange(B, base, M) {
+  for (let i = base; i < B.count; i++) {
+    const px = B.pos[i * 3], py = B.pos[i * 3 + 1], pz = B.pos[i * 3 + 2];
+    let x = 0, y = 0, z = 0;
+    for (let k = 0; k < 4; k++) {
+      const w = B.sw[i * 4 + k];
+      if (!(w > 0)) continue;
+      const b = B.si[i * 4 + k] * 12;
+      x += w * (M[b] * px + M[b + 1] * py + M[b + 2] * pz + M[b + 3]);
+      y += w * (M[b + 4] * px + M[b + 5] * py + M[b + 6] * pz + M[b + 7]);
+      z += w * (M[b + 8] * px + M[b + 9] * py + M[b + 10] * pz + M[b + 11]);
+    }
+    B.pos[i * 3] = x; B.pos[i * 3 + 1] = y; B.pos[i * 3 + 2] = z;
+    B.si[i * 4] = 0; B.si[i * 4 + 1] = 0; B.si[i * 4 + 2] = 0; B.si[i * 4 + 3] = 0;
+    B.sw[i * 4] = 1; B.sw[i * 4 + 1] = 0; B.sw[i * 4 + 2] = 0; B.sw[i * 4 + 3] = 0;
+  }
+}
+
+/**
+ * The flayed bull as it lies (natural frame = the live bull's: the bound pose): the barrel and neck of the bull's own
+ * lines (animals.js quad) inside the hide, the shoulders and haunches down to the knees and hocks, the tail flayed to its
+ * tip. dressed: the head off behind the jaw (a stump: the neck's cut with the windpipe and a vertebra), the lower legs off
+ * at the knees and hocks (bone ends — they go up with the innards, Tamid 4:3), the belly opened and emptied (Tamid 4:2
+ * "he opened it and all of it lay open before him"); else (the flaying) the neck runs on into the head and the legs into
+ * the lower legs, both still in their hide. Returns the posed vertices' range and the body's line for the hide.
+ */
+function bullCarcass(B, lod, o = {}) {
+  const { rig, M } = boundBull();
+  const d = rig.dims, H = d.H, L = d.L, W = d.W, I = rig.index, R = (n) => rig.rest[I[n]];
+  const dressed = !!o.dressed, h = BULL.hide;
+  const base = B.count;
+  const env = (q) => envelope(rig, q, { pelvis: 1, spine: 1, chest: 1, neck: 0.5, neck2: 0.5, fl_up: 0.15, fr_up: 0.15, hl_up: 0.2, hr_up: 0.2, tail: 0.1 }, 3);
+  // ---- the barrel (rear → withers) and the neck, as quad() builds the bull's, less the hide
+  const zA = d.zr + 0.08 * L, zB = d.zf - 0.08 * L;
+  const N = sg(lod, 22, 10), rings = [];
+  for (let j = 0; j <= N; j++) {
+    const t = (j / N) * 0.84;
+    const z = lerp(zA, zB, t), end = Math.min(t, 1 - t), taper = smooth(0, 0.16, end);
+    const top = H * (0.965 - 0.02 * Math.sin(Math.PI * t) + 0.07 * smooth(0.55, 0.78, t) * (1 - smooth(0.82, 0.97, t)));
+    const bot = H * 0.43 + H * 0.1 * (1 - smooth(0.0, 0.35, t)) - H * 0.06 * smooth(0.55, 0.85, t) + H * 0.06 * smooth(0.88, 1, t);
+    const mid = (top + bot) / 2, ry = (top - bot) / 2;
+    const wf = W * (t > 0.55 ? 1.08 : 1) * (1 + 0.05 * smooth(0.1, 0.3, t) * (1 - smooth(0.4, 0.55, t)));
+    rings.push({ c: V(0, mid - ry * (1 - taper) * 0.15, z), rx: Math.max(0.03, wf * (0.35 + 0.65 * taper) - h), rz: Math.max(0.03, ry * (0.42 + 0.58 * taper) - h), ax: V(1, 0, 0), az: V(0, 1, 0), t });
+  }
+  const last = rings[rings.length - 1];
+  const hdB = R('head'), endN = hdB.clone().add(V(0, -0.02, 0.06));
+  const midN = V(0, lerp(last.c.y, endN.y, 0.45), lerp(last.c.z, endN.z, 0.5));
+  const nN = sg(lod, 7, 3), uEnd = dressed ? 0.8 : 1;
+  for (let i = 1; i <= nN; i++) {
+    const u = (i / nN) * uEnd;
+    const c = last.c.clone().multiplyScalar((1 - u) ** 2).addScaledVector(midN, 2 * u * (1 - u)).addScaledVector(endN, u * u);
+    rings.push({ c, rx: lerp(last.rx, 0.13 - h, smooth(0, 1, u ** 0.85)), rz: lerp(last.rz, 0.2 - h, smooth(0, 1, u ** 0.8)), ax: V(1, 0, 0), az: V(0, 1, 0), t: 0.84 + u * 0.3, neck: u });
+  }
+  for (let j = N + 1; j < rings.length; j++) {
+    const a = rings[j - 1].c, b = rings[Math.min(rings.length - 1, j + 1)].c;
+    const dir = b.clone().sub(a).normalize();
+    rings[j].az = V(0, 1, 0).addScaledVector(dir, -dir.y).normalize();
+  }
+  S(B, 'fell', { color: BULL.fell });
+  B.tube(rings, {
+    seg: sg(lod, 30, 14), weights: env, capA: 'dome', domeH: 0.5, capB: dressed ? null : 'dome',
+    // the ribs under the thin fell of the flanks, the ridge of the spine, the hip bones (lod 0)
+    radial: lod === 0 ? (th, j, Rg) => {
+      const t = Rg.t, side = Math.abs(Math.cos(th));
+      const ribs = 0.018 * side * smooth(0.42, 0.52, t) * (1 - smooth(0.78, 0.86, t)) * (0.5 + 0.5 * Math.cos(j * Math.PI));
+      return 1 + ribs + 0.035 * Math.max(0, Math.sin(th)) ** 14 + 0.04 * side * Math.max(0, Math.sin(th)) * Math.exp(-(((t - 0.12) / 0.06) ** 2));
+    } : null,
+    // opened along the belly and emptied (dressed): a dark cleft from the brisket to the pelvis; the intercostal hollows
+    shade: (th, j) => {
+      const t = rings[j].t;
+      const open = dressed && Math.sin(th) < -0.9 && t > 0.14 && t < 0.72 ? 0.3 : 1;
+      return open * (lod === 0 ? 1 - 0.12 * Math.abs(Math.cos(th)) * smooth(0.42, 0.52, t) * (1 - smooth(0.78, 0.86, t)) * (0.5 - 0.5 * Math.cos(j * Math.PI)) : 1);
+    },
+  });
+  if (dressed) {
+    // the neck's cut behind the head: marbled meat, the windpipe's pale ring, a vertebra at the crest
+    const Rn = rings[rings.length - 1], nrm = new Vector3().crossVectors(Rn.ax, Rn.az).normalize();
+    if (nrm.dot(Rn.c.clone().sub(rings[rings.length - 2].c)) < 0) nrm.negate();
+    const xf = new Matrix4().makeBasis(Rn.ax, Rn.az, nrm);
+    const w2 = [[I.neck2, 1]];
+    S(B, 'meat');
+    B.ellipsoid(Rn.c, [Rn.rx * 1.03, Rn.rz * 1.03, 0.006], { nu: sg(lod, 16, 8), nv: 4, weights: w2, xf });
+    S(B, 'meat', { color: '#e3d5c6', rough: 0.3 });
+    B.ellipsoid(Rn.c.clone().addScaledVector(Rn.az, -Rn.rz * 0.55).addScaledVector(nrm, 0.006), [0.024, 0.024, 0.004], { nu: 10, nv: 3, weights: w2, xf });
+    S(B, 'bone');
+    B.ellipsoid(Rn.c.clone().addScaledVector(Rn.az, Rn.rz * 0.35).addScaledVector(nrm, 0.007), [0.032, 0.028, 0.004], { nu: 10, nv: 3, weights: w2, xf });
+  }
+  // ---- the shoulders and haunches, from inside the barrel to the knees / hocks
+  for (const leg of ['fl', 'fr', 'hl', 'hr']) {
+    const hind = leg[0] === 'h', bi = I[`${leg}_up`];
+    const a = R(`${leg}_up`), b = R(`${leg}_lo`);
+    const root = V(a.x * 0.4, a.y + 0.06, a.z);
+    const pts = [root, a.clone(), a.clone().lerp(b, 0.55), b.clone().add(V(0, 0.02, 0))];
+    const rad = hind ? [0.15, 0.14, 0.095, 0.058] : [0.13, 0.12, 0.085, 0.06];
+    S(B, 'fell', { color: BULL.fell });
+    curve(B, pts, rad.map((r) => r - h * 0.5), sg(lod, 14, 7), { weights: () => [[bi, 1]], bone: undefined, capB: dressed ? null : 'dome' });
+    if (dressed) {   // the joint's cut: the bone's end in a ring of meat
+      const dir = b.clone().sub(pts[2]).normalize(), e = pts[3];
+      const xf = new Matrix4().makeBasis(...frameOf(dir));
+      S(B, 'meat'); B.ellipsoid(e, [rad[3] * 1.0, rad[3] * 1.0, 0.006], { nu: sg(lod, 12, 6), nv: 3, weights: [[bi, 1]], xf });
+      S(B, 'bone'); B.ellipsoid(e.clone().addScaledVector(dir, 0.006), [0.032, 0.032, 0.022], { nu: 8, nv: 4, weights: [[bi, 1]], xf });
+    }
+  }
+  // ---- the tail, flayed to its tip (the switch went with the hide)
+  const tl = R('tail'), t2 = R('tail2');
+  S(B, 'sinew', { color: '#c7907a' });
+  curve(B, [tl.clone().add(V(0, -0.02, -0.04)), tl.clone(), t2.clone(), V(0, 0.42 * H, d.zr + 0.1 * L)], [0.045, 0.038, 0.026, 0.011], sg(lod, 8, 5),
+    { weights: (q, j) => [[j < 2 ? I.tail : I.tail2, 1]], bone: undefined, capB: 'dome' });
+  skinRange(B, base, M);
+  return base;
+}
+/** an orthonormal (x, y, z) with z = dir, for flat ellipsoid caps */
+function frameOf(dir) {
+  const ref = Math.abs(dir.y) > 0.9 ? V(1, 0, 0) : V(0, 1, 0);
+  const x = new Vector3().crossVectors(ref, dir).normalize(), y = new Vector3().crossVectors(dir, x).normalize();
+  return [x, y, dir.clone()];
+}
+/** the lying bull's line from what bullCarcass made since `base`: centre height, axis (rump → neck) and the back's side,
+ *  and the back's distance from the axis at centre height, by station along it */
+function bullLine(B, base) {
+  const { P } = boundBull();
+  const pv = P.worldPos('pelvis'), ch = P.worldPos('chest');
+  const A = V(ch.x - pv.x, 0, ch.z - pv.z).normalize();
+  const Dq = V(0, 1, 0).applyQuaternion(P.worldQ('spine'));
+  const D = V(Dq.x, 0, Dq.z).addScaledVector(A, -(Dq.x * A.x + Dq.z * A.z)).normalize();     // toward the back
+  let cy = 0, n = 0, ox = 0, oz = 0;
+  for (let i = base; i < B.count; i++) { cy += B.pos[i * 3 + 1]; ox += B.pos[i * 3]; oz += B.pos[i * 3 + 2]; n++; }
+  cy /= n; ox /= n; oz /= n;
+  const O = V(ox, 0, oz);
+  const NB = 12, back = new Array(NB).fill(0);
+  let s0 = Infinity, s1 = -Infinity;
+  for (let i = base; i < B.count; i++) { const s = (B.pos[i * 3] - ox) * A.x + (B.pos[i * 3 + 2] - oz) * A.z; s0 = Math.min(s0, s); s1 = Math.max(s1, s); }
+  for (let i = base; i < B.count; i++) {
+    if (Math.abs(B.pos[i * 3 + 1] - cy) > 0.1) continue;
+    const dx = B.pos[i * 3] - ox, dz = B.pos[i * 3 + 2] - oz, s = dx * A.x + dz * A.z, b = dx * D.x + dz * D.z;
+    const k = Math.min(NB - 1, Math.max(0, Math.floor(((s - s0) / (s1 - s0)) * NB)));
+    back[k] = Math.max(back[k], b);
+  }
+  const backAt = (s) => { const f = ((s - s0) / (s1 - s0)) * NB - 0.5, k = Math.max(0, Math.min(NB - 2, Math.floor(f))), u = clamp(f - k); return lerp(back[k], back[k + 1], u); };
+  return { O, A, D, cy, s0, s1, backAt };
+}
+
+/** half-way through the flaying: the up side flayed from the belly to the backbone, its hide laid back over the back onto
+ *  the pavement (flesh side up, the hair under it), the under side, the head and the lower legs still in the hide */
+function bullFlaying(B, lod) {
+  const { pose } = boundBull();
+  const i0 = B.idx.length;
+  const base = bullCarcass(B, lod, { dressed: false });
+  const ln = bullLine(B, base);
+  // only the flayed half of the carcass is drawn: below the hide's edge the live bull's own surface (no fighting skins)
+  const lowY = ln.cy - 0.04, idx = B.idx;
+  let n = i0;
+  for (let t = i0; t < idx.length; t += 3) {
+    if (B.pos[idx[t] * 3 + 1] < lowY && B.pos[idx[t + 1] * 3 + 1] < lowY && B.pos[idx[t + 2] * 3 + 1] < lowY) continue;
+    idx[n++] = idx[t]; idx[n++] = idx[t + 1]; idx[n++] = idx[t + 2];
+  }
+  idx.length = n;
+  const rig = getRig('bull'), I = rig.index;
+  const keepAll = new Set([I.head, I.jaw, I.ear_l, I.ear_r, I.fl_lo, I.fl_ft, I.fr_lo, I.fr_ft, I.hl_lo, I.hl_ft, I.hr_lo, I.hr_ft]);
+  // the live bull below the line where the hide is still on: its cut edge wavers along the belly (the knife's strokes)
+  bakeAnimal(B, 'bull', lod, pose, {
+    tint: [0.3, 0.3, 0.4, 0.4],
+    only: (si, sw, i, x, y, z) => {
+      let w = 0;
+      for (let k = 0; k < 4; k++) if (keepAll.has(si[i * 4 + k])) w += sw[i * 4 + k] / 255;
+      return w > 0.5 || y < ln.cy + 0.015 * Math.sin(z * 23) + 0.01 * Math.sin(x * 37 + 1);
+    },
+  });
+  // the peeled hide: still fast along the backbone, fallen over the back and spread on the pavement
+  const nu = sg(lod, 20, 8), nv = sg(lod, 9, 4);
+  const sA = ln.s0 + 0.12, sB = ln.s1 - 0.42;
+  const at = (i, j, lift) => {
+    const s = lerp(sA, sB, i / nu), v = j / nv;
+    // from the backbone it falls away from the back in a slack curve to the pavement, then lies spread
+    const k = smooth(0, 0.5, v), fl = smooth(0.5, 1, v);
+    const out = ln.backAt(s) - 0.008 + 0.3 * (1 - Math.cos(k * Math.PI / 2)) + 0.32 * fl + 0.035 * Math.sin(s * 9 + 1) * fl;
+    const y = (ln.cy + 0.02) * (1 - k) ** 1.6 + 0.012 + 0.008 * Math.sin(s * 17 + v * 5) * fl + lift;
+    return ln.O.clone().addScaledVector(ln.A, s + 0.03 * Math.sin(v * 4 + s * 3)).addScaledVector(ln.D, out).setY(y);
+  };
+  const mid = ln.O.clone().addScaledVector(ln.D, ln.backAt(0) + 0.2).setY(-0.3);
+  for (const inner of [false, true]) {
+    if (inner) S(B, 'coatProp', { color: '#5c3520', rough: 0.7 }); else S(B, 'hide', { color: '#e9d3c6' });
+    B.grid(nu, nv, (i, j) => ({ p: at(i, j, inner ? -0.005 : 0), u: (i / nu) * 1.6, v: (j / nv) * 0.6, w: 0, shade: inner ? 0.8 : 0.84 + 0.16 * Math.sin(i * 1.7 + j * 2.3) ** 2 }), { inside: mid, invert: inner });
+  }
+  // the free edge rolled, the hair turned up along it
+  S(B, 'coatProp', { color: '#5c3520', rough: 0.7 });
+  const roll = [];
+  for (let i = 0; i <= nu; i++) roll.push(at(i, nv, 0.006));
+  curve(B, roll, roll.map((_, i) => 0.011 * (1 + 0.2 * Math.sin(i * 2.3))), sg(lod, 6, 4));
+}
+
+/** the flayed hide of a bull spread on the pavement, flesh side up, the hair under it (the legs' flaps, the neck, the
+ *  tail's strip), its edges curled: under the dressed carcass and left there when the parts are gone. Natural frame = the
+ *  lying bull's (the body's line along its axis) */
+function hideBull(B, lod) {
+  const { P } = boundBull();
+  const pv = P.worldPos('pelvis'), ch = P.worldPos('chest');
+  const A = V(ch.x - pv.x, 0, ch.z - pv.z).normalize();
+  const Dq = V(0, 1, 0).applyQuaternion(P.worldQ('spine'));
+  const D = V(Dq.x, 0, Dq.z).addScaledVector(A, -(Dq.x * A.x + Dq.z * A.z)).normalize();
+  const O = pv.clone().lerp(ch, 0.5).setY(0).addScaledVector(D, 0.12);
+  const Lh = 1.1, W0 = 0.78;
+  // half-width across the hide (from the backbone's line out to each side's belly edge): the four legs' flaps, the neck
+  const Wx = (x) => W0 * (1 - 0.22 * (x / Lh) ** 2) + 0.22 * Math.exp(-(((x - 0.5 * Lh) / 0.1) ** 2)) + 0.25 * Math.exp(-(((x + 0.62 * Lh) / 0.11) ** 2)) - 0.35 * smooth(0.78, 1, x / Lh);
+  const nu = sg(lod, 26, 10), nw = sg(lod, 16, 6);
+  const at = (u, w, lift) => {
+    const x = lerp(-Lh, Lh + 0.12, u);
+    const z = w * Wx(Math.min(x, Lh));
+    const y = 0.008 + lift + (lod === 0 ? 0.006 * Math.sin(x * 11 + w * 3) * Math.sin(w * 7 + 1) : 0) + 0.03 * smooth(0.85, 1, Math.abs(w)) ** 2;
+    return O.clone().addScaledVector(A, x).addScaledVector(D, z).setY(y);
+  };
+  const below = O.clone().setY(-1);
+  S(B, 'hide', { color: '#dcb6a0' });
+  B.grid(nu, nw, (i, j) => ({ p: at(i / nu, (2 * j) / nw - 1, 0), u: i / nu * 2, v: j / nw * 1.5, w: 0, shade: 0.88 + 0.12 * Math.sin(i * 1.3 + j * 2.1) }), { inside: below });
+  S(B, 'coatProp', { color: '#5c3520', rough: 0.7 });
+  B.grid(nu, nw, (i, j) => ({ p: at(i / nu, (2 * j) / nw - 1, -0.006), u: i / nu * 2, v: j / nw * 1.5, w: 0, shade: 0.8 }), { inside: O.clone().setY(1), invert: false });
+  // the curled edge all round: the hair showing
+  const edge = [];
+  const ne = sg(lod, 48, 16);
+  for (let k = 0; k <= ne; k++) {
+    const a = (k / ne) * 4;
+    const [u, w] = a < 1 ? [a, -1] : a < 2 ? [1, -1 + 2 * (a - 1)] : a < 3 ? [1 - (a - 2), 1] : [0, 1 - 2 * (a - 3)];
+    edge.push(at(u, w, 0.004));
+  }
+  curve(B, edge, edge.map((_, i) => 0.012 * (1 + 0.25 * Math.sin(i * 1.9))), sg(lod, 6, 4));
+}
+
+/** a bull's hind leg (regel) for two men: the lamb's leg at the bull's size (2.3 × its length — the leg from the hip joint to
+ *  below the hock, ≈ 0.94 m — 2.1–2.15 × its girth), across both men: the hip's cut at the right man's right palm, the
+ *  shank over his partner's (Yoma 2:7 "the leg by two") */
+function bullLeg(B, lod) {
+  // tilted 10° shank-down, so the thin shank lies on the partner's palms as the haunch lies on the lead's
+  const m = new Matrix4().makeRotationZ(10 * DEG).multiply(new Matrix4().makeBasis(V(0, -1, 0), V(1, 0, 0), V(0, 0, 1))).multiply(scl(2.15, 2.3, 2.1));
+  const base = scaledPart(B, lod, hindLeg, m, BULL.fell);
+  seatRange(B, base, { xMax: 0.16 });
+}
+/** the bull's tail-piece (oketz) for two men: the rump across them (a bull has no fat tail — the alyah is a sheep's), the
+ *  tail flayed to its tip hanging over the front between the partner's hands, the two kidneys in their suet and the finger
+ *  of the liver laid on it (Tamid 4:3 "the finger of the liver and the two kidneys with it") */
+function bullOketz(B, lod, cls) {
+  const base = B.count;
+  FELL = BULL.fell;
+  try {
+    meatLoft(B, lod, [[0.35, 0.12, 0.075, 0.08], [0.24, 0.19, 0.11, 0.11], [0.08, 0.22, 0.125, 0.125], [-0.08, 0.215, 0.12, 0.12], [-0.22, 0.18, 0.1, 0.104], [-0.34, 0.12, 0.074, 0.078]]);
+  } finally { FELL = null; }
+  // the sacrum's crest along the top
+  S(B, 'bone', { color: '#e6dccb' });
+  for (let i = 0; i < 4; i++) B.ellipsoid(V(0, 0.245, 0.2 - i * 0.13), [0.03, 0.012, 0.05], { nu: sg(lod, 10, 6), nv: 4, bone: 0, lat: [0, 0.5] });
+  xfRange(B, base, Z2X().premultiply(new Matrix4().makeTranslation(-0.19, 0, 0)));
+  // the kidneys, lobed, in their suet; the finger of the liver
+  for (const [x, z] of [[-0.06, 0.06], [-0.32, 0.06]]) {
+    // a lump of suet with the kidney's dark lobes showing where it has been cleared from them (a bull's kidney is lobed)
+    S(B, 'fat', { color: '#ece0c8', rough: 0.45, pat: PAT.NONE });
+    B.ellipsoid(V(x, 0.262, z), [0.085, 0.05, 0.065], { nu: sg(lod, 12, 6), nv: sg(lod, 8, 4), bone: 0,
+      deform: (l) => { l.y *= 1 + 0.18 * Math.sin(l.x * 70) * Math.sin(l.z * 60); return l; } });
+    S(B, 'meat', { color: '#5a1c16', rough: 0.2 });
+    for (let k = 0; k < sg(lod, 5, 2); k++) {
+      const a = k * 1.3;
+      B.ellipsoid(V(x - 0.035 + 0.018 * k, 0.29 + 0.006 * Math.cos(a), z - 0.025 + 0.012 * Math.sin(a * 1.7)), [0.024, 0.02, 0.026], { nu: 8, nv: 5, bone: 0 });
+    }
+  }
+  S(B, 'meat', { color: '#4a1210', rough: 0.15 });
+  B.ellipsoid(V(-0.18, 0.262, -0.08), [0.11, 0.018, 0.045], { nu: sg(lod, 12, 6), nv: 4, bone: 0 });
+  // the tail: from the rump's end over the front edge, hanging
+  S(B, 'sinew', { color: '#c7907a' });
+  const tail = cls === 'free'   // set down: the tail lies along the stone
+    ? [V(-0.5, 0.17, 0.0), V(-0.6, 0.12, -0.12), V(-0.66, 0.04, -0.24), V(-0.7, 0.02, -0.44), V(-0.72, 0.015, -0.64)]
+    : [V(-0.5, 0.17, 0.0), V(-0.57, 0.14, -0.14), V(-0.6, 0.05, -0.27), V(-0.6, -0.15, -0.3), V(-0.59, -0.36, -0.28)];
+  curve(B, tail, [0.04, 0.036, 0.03, 0.021, 0.012], sg(lod, 8, 5), { capB: 'dome' });
+}
+/** the bull's neck (gerah) for three men, held by the middle one: the neck along his front (its root toward him), two ribs
+ *  on each side out over his partners' palms, the windpipe, heart and lungs hanging from it (Tamid 4:3) */
+function bullNeck(B, lod, cls) {
+  const laid = cls === 'free';   // set down (on the altar's walk): the windpipe, heart and lungs lie on the stone before it
+  FELL = BULL.fell;
+  try { meatLoft(B, lod, [[0.2, 0.17, 0.15, 0.155], [0.08, 0.175, 0.155, 0.16], [-0.06, 0.16, 0.15, 0.152], [-0.2, 0.145, 0.14, 0.145], [-0.32, 0.13, 0.13, 0.135]]); } finally { FELL = null; }
+  // two ribs each side with the meat between them, reaching ≈ 0.55 m out (the first ribs of a young bull)
+  for (const s of [-1, 1]) {
+    const rib = (z) => [V(s * 0.12, 0.27, z), V(s * 0.3, 0.14, z + 0.02), V(s * 0.45, 0.035, z + 0.03), V(s * 0.58, 0.004, z + 0.02)];
+    const r1 = rib(0.17), r2 = rib(0.05);
+    S(B, 'meat');
+    B.grid(sg(lod, 8, 3), 1, (i, j) => {
+      const k = i / sg(lod, 8, 3), a = k * 3, q = Math.min(2, Math.floor(a)), f = a - q;
+      const p = (r) => r[q].clone().lerp(r[q + 1], f);
+      return { p: (j ? p(r2) : p(r1)).add(V(0, -0.004, 0)), u: k, v: j, w: 0 };
+    }, { inside: V(s * 0.3, -0.2, 0.11) });
+    B.grid(sg(lod, 8, 3), 1, (i, j) => {
+      const k = i / sg(lod, 8, 3), a = k * 3, q = Math.min(2, Math.floor(a)), f = a - q;
+      const p = (r) => r[q].clone().lerp(r[q + 1], f);
+      return { p: (j ? p(r2) : p(r1)).add(V(0, -0.01, 0)), u: k, v: j, w: 0 };
+    }, { inside: V(s * 0.3, 0.6, 0.11) });
+    S(B, 'bone', { color: '#e6dccb' });
+    for (const r of [r1, r2]) curve(B, r, [0.017, 0.015, 0.013, 0.011], 6, { capA: 'flat', capB: 'flat' });
+  }
+  // the windpipe, and the heart and lungs hanging from it before the middle man (laid down: lying on the stone ahead)
+  const P2 = laid ? (x, y, z) => V(x, 0.03 + (y + 0.6) * 0.12, -0.3 + (z + 0.3) * 0.2 - (0.08 - y) * 0.85) : (x, y, z) => V(x, y, z);
+  S(B, 'fat', { color: '#d8c3b0' });
+  curve(B, [P2(0, 0.08, -0.22), P2(0, 0.02, -0.38), P2(0, -0.12, -0.46), P2(0, -0.26, -0.48)], [0.025, 0.025, 0.024, 0.022], 8);
+  const lie = laid ? new Matrix4().makeRotationX(-Math.PI / 2) : null;
+  S(B, 'meat', { color: '#c9726a', rough: 0.25 });
+  for (const s of [-1, 1]) B.ellipsoid(P2(s * 0.085, -0.42, -0.5), [0.085, 0.16, 0.06], { nu: sg(lod, 12, 7), nv: sg(lod, 9, 5), bone: 0, xf: lie, deform: (l) => { l.x *= 1 + 0.25 * smooth(0.1, -0.16, l.y); return l; } });
+  S(B, 'meat', { color: '#5e1814', rough: 0.2 });
+  B.ellipsoid(P2(0, -0.36, -0.42), [0.07, 0.1, 0.065], { nu: sg(lod, 12, 7), nv: sg(lod, 8, 5), bone: 0, xf: lie, deform: (l) => { l.x *= 1 - 0.4 * smooth(0, -0.1, l.y); return l; } });
+  S(B, 'fat', { color: '#ece0c8', rough: 0.4 });
+  B.ellipsoid(P2(0, -0.28, -0.42), [0.06, 0.025, 0.055], { nu: 10, nv: 4, bone: 0 });
+}
+/** the innards of a bull in a large silver basin (a third of them: "the innards by three"), with n of the lower legs
+ *  (kera'ayim, from the knee: the hide on, the hooves) laid on top, as the tamid's sixth (Tamid 4:3) */
+function entrailsBull(B, lod, nLegs) {
+  S(B, 'silver');
+  vessel(B, [[0.001, 0], [0.15, 0], [0.22, 0.05], [0.245, 0.1], [0.25, 0.11]], sg(lod, 24, 12));
+  S(B, 'fat', { color: '#d9b7a3', rough: 0.2 });
+  const n = sg(lod, 36, 12), pts = [], rad = [];
+  for (let i = 0; i <= n; i++) { const a = i * 0.85; const r = 0.05 + 0.15 * (i / n); pts.push(V(Math.cos(a) * r, 0.1 + 0.02 * Math.sin(i * 1.7), Math.sin(a) * r)); rad.push(0.026); }
+  curve(B, pts, rad, sg(lod, 8, 5));
+  const rig = getRig('bull'), I = rig.index;
+  const legs = ['fl', 'fr'].slice(0, nLegs);
+  legs.forEach((leg, q) => {
+    const bones = new Set([I[`${leg}_lo`], I[`${leg}_ft`]]);
+    const b0 = B.count;
+    const res = bakeAnimal(B, 'bull', lod, () => {}, {
+      tint: [0.3, 0.3, 0.4, 0.4],
+      only: (si, sw, i) => { let w = 0; for (let k = 0; k < 4; k++) if (bones.has(si[i * 4 + k])) w += sw[i * 4 + k] / 255; return w > 0.6; },
+    });
+    if (!res) return;
+    // standing → lying across the heap: the knee's end toward −x, the hoof toward +x, the two laid head to tail
+    const kn = rig.rest[I[`${leg}_lo`]];
+    const s = q ? -1 : 1;
+    const m = new Matrix4().makeTranslation(0, 0.16 + 0.05 * q, 0.07 * (q ? -1 : 1))
+      .multiply(new Matrix4().makeRotationZ(s * Math.PI / 2 - s * 0.08))
+      .multiply(new Matrix4().makeTranslation(-kn.x, -kn.y * 0.5, -kn.z));
+    xfRange(B, b0, m);
+    // the knee's cut, facing out of the leg
+    const e = kn.clone().applyMatrix4(m), ft = rig.rest[I[`${leg}_ft`]].clone().applyMatrix4(m);
+    const dir = e.clone().sub(ft).normalize();
+    e.addScaledVector(dir, -0.05);
+    S(B, 'meat'); B.ellipsoid(e, [0.05, 0.05, 0.005], { nu: 10, nv: 3, bone: 0, xf: new Matrix4().makeBasis(...frameOf(dir)) });
+  });
+}
+
+/** a folded linen cloth under the palm for wiping (Middot 3:4 "they whiten it with a cloth"): a pad (natural Y out of the
+ *  palm, the wrist +z) and its loose end hanging from the wrist's edge */
+function wipeCloth(B, lod) {
+  S(B, 'linen', { color: '#e9e3d6', rough: 0.9 });
+  slabC(B, V(0, 0.013, -0.01), [0.15, 0.022, 0.14], { round: 0.42, nu: sg(lod, 12, 6), nv: sg(lod, 6, 4) });
+  plateGrid(B, 0.14, 0.17, (u, v) => V((u - 0.5) * (0.13 - 0.03 * v) + 0.01 * Math.sin(v * 7 + u * 3), 0.02 + 0.006 * Math.sin(u * 9 + v * 4), 0.055 + v * 0.16), sg(lod, 6, 3), sg(lod, 6, 3));
+}
+
+const RAM = 1.22;     // the ram's parts against the lamb's (CARCASS.ram: a second-year ram ≈ 1.22 × the yearling)
+export const BULL_PROPS = {
+  // the flayed bull where it lies (free; natural frame = the bound bull's) and its hide
+  bull_flaying: { flesh: true, big: true, build(B, lod) { bullFlaying(B, lod); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } },
+  bull_dressed: { flesh: true, big: true, build(B, lod) { bullCarcass(B, lod, { dressed: true }); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } },
+  hide_bull: { flesh: true, big: true, build(B, lod) { hideBull(B, lod); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } },
+  // its parts as carried (Yoma 2:7): one man the head, the breast, each fore leg, each flank, a third of the innards; two
+  // a hind leg or the tail-piece; three the neck
+  bull_head: { flesh: true, big: true, build(B, lod) { limbHead(B, lod, 'bull'); }, grips: HEAVY_GRIPS },
+  bull_leg: { flesh: true, big: true, build(B, lod) { bullLeg(B, lod); }, grips: HEAVY_GRIPS },
+  bull_oketz: { flesh: true, big: true, build(B, lod, cls) { bullOketz(B, lod, cls); }, grips: HEAVY_GRIPS },
+  bull_chazeh: { flesh: true, big: true, build(B, lod) { const b = scaledPart(B, lod, limbChazeh, scl(2.5, 2.6, 2.4), BULL.fell); seatRange(B, b); }, grips: HEAVY_GRIPS },
+  bull_neck: { flesh: true, big: true, build(B, lod, cls) { bullNeck(B, lod, cls); }, grips: HEAVY_GRIPS },
+  bull_foreleg: { flesh: true, big: true, build(B, lod) { const b = scaledPart(B, lod, limbForeleg, Z2X().multiply(scl(2.3, 2.3, 2.6)), BULL.fell); seatRange(B, b); }, grips: HEAVY_GRIPS },
+  bull_dofen: { flesh: true, big: true, build(B, lod) { const b = scaledPart(B, lod, limbDofen, scl(4.2, 2.2, 2.3), BULL.fell); seatRange(B, b); }, grips: HEAVY_GRIPS },
+  entrails_bull: { flesh: true, big: true, build(B, lod) { entrailsBull(B, lod, 2); }, grips: HEAVY_GRIPS },
+  entrails_bull1: { flesh: true, big: true, build(B, lod) { entrailsBull(B, lod, 1); }, grips: HEAVY_GRIPS },
+  wipe_cloth: { build(B, lod) { wipeCloth(B, lod); }, grips: { palm: { grip: [0, 0, 0], rot: PALM }, free: { rot: ID(), pos: [0, 0, 0] } } },
+};
+// the ram's parts at its size (Yoma 2:6 "a ram by eleven": the flesh by five, as the lamb's): the lamb's shapes × RAM, the
+// head baked from the ram (its horns); grips scaled with them (the palm's origin stays on the palm)
+{
+  const sc = (g) => (g?.grip ? { ...g, grip: g.grip.map((x) => x * RAM) } : g);
+  for (const k of ['limb', 'limb_foreleg', 'limb_oketz', 'limb_chazeh', 'limb_gerah', 'limb_dofen']) {
+    const src = PROPS[k] || OFFERING_PROPS[k];
+    BULL_PROPS[`${k}_ram`] = { ...src, build(B, lod, cls) { scaledPart(B, lod, (B2, l2) => src.build(B2, l2, cls), scl(RAM, RAM, RAM)); },
+      grips: Object.fromEntries(Object.entries(src.grips).map(([c, g]) => [c, sc(g)])) };
+  }
+  BULL_PROPS.limb_head_ram = { ...OFFERING_PROPS.limb_head, build(B, lod) { limbHead(B, lod, 'ram'); } };
+}
 // the hung states by kind (origin at the hook, free) — Tamid 4:2; a ram hangs from the middle row (G5)
 for (const kind of ['ram', 'goat', 'ewe', 'she_goat']) {
   PEOPLE4_PROPS[`${kind}_hung`] = { flesh: true, big: true, build(B, lod) { lambHung(B, lod, kind); }, grips: { free: { rot: ID(), pos: [0, 0, 0] } } };
@@ -2341,7 +2795,7 @@ export const HELD_VESSELS = new Set(['mizrak_gold', 'mizrak_silver', 'machtah_si
 // props that can stand on the palms in a two-handed carry
 for (const k of ['solet', 'chavitin', 'salt', 'wine_jug', 'marcheshet', 'machavat', 'entrails_bazach', 'cup_gold', 'kaf_covered']) VESSELS.add(k);
 
-Object.assign(PROPS, OFFERING_PROPS, SERVICE_PROPS, PEOPLE4_PROPS);
+Object.assign(PROPS, OFFERING_PROPS, SERVICE_PROPS, PEOPLE4_PROPS, BULL_PROPS);
 
 // ---------------------------------------------------------------------------------------------- placement
 const M_R = basis([0, -1, 0], [0, 0, -1], [1, 0, 0]);   // fist frame → right hand-local
@@ -2359,7 +2813,27 @@ function gripOf(name, cls) {
 }
 
 /** resolve the grip class actually available for a prop (tray/shoulder/pillow fall back to the fist) */
-export function gripClass(name, cls) { return gripOf(name, cls) ? cls : 'fist'; }
+export function gripClass(name, cls) {
+  // perf-cpu: cached per prop and class — gripOf builds fresh arrays and a matrix on every call, and the people system asks
+  // for every drawn prop and torch every frame (PROPS' grips and VESSELS are fixed once this module has loaded)
+  let m = _gripClass.get(name);
+  if (!m) _gripClass.set(name, (m = new Map()));
+  let r = m.get(cls);
+  if (r === undefined) { r = gripOf(name, cls) ? cls : 'fist'; m.set(cls, r); }
+  return r;
+}
+const _gripClass = new Map();
+/** perf-cpu: a value cached under three keys in nested Maps (no key string built per call) */
+function cached3(map, a, b, c, make) {
+  let m1 = map.get(a);
+  if (!m1) map.set(a, (m1 = new Map()));
+  let m2 = m1.get(b);
+  if (!m2) m1.set(b, (m2 = new Map()));
+  if (m2.has(c)) return m2.get(c);
+  const v = make();
+  m2.set(c, v);
+  return v;
+}
 
 function placementMatrix(name, cls, side) {
   const g = gripOf(name, cls) || gripOf(name, 'fist');
@@ -2412,13 +2886,15 @@ function* prewarmJob() {
   }
 }
 
-/** flame/tip point (geometry frame) of a prop, or null */
+/** flame/tip point (geometry frame) of a prop, or null. perf-cpu: cached and shared — read it, never change it (the
+ *  people system places every torch's flame from it every frame; each call built a vector and four matrices) */
 export function propTip(name, cls, side) {
   const p = PROPS[name];
   if (!p?.tip) return null;
   const real = cls === 'free' ? 'free' : gripClass(name, cls);
-  return new Vector3(...p.tip).applyMatrix4(placementMatrix(name, real, side));
+  return cached3(_tips, name, real, side, () => new Vector3(...p.tip).applyMatrix4(placementMatrix(name, real, side)));
 }
+const _tips = new Map();
 
 /** floor point under the head of a figure in a lying clip, in the root bone's frame */
 function pillowPoint(rig, clipName) {
@@ -2439,8 +2915,10 @@ const _attach = new Map();
  */
 export function propAttach(name, cls, side, rig) {
   const real = gripClass(name, cls);
-  const key = `${rig.key}:${real}:${side}`;
-  if (_attach.has(key)) return _attach.get(key);
+  // perf-cpu: nested Maps, not a key string per call (asked for every drawn prop every frame)
+  return cached3(_attach, rig.key, real, side, () => attachOf(real, side, rig));
+}
+function attachOf(real, side, rig) {
   let out = null;
   if (rig.kind === 'human') {
     const d = rig.dims, k = d.H / 1.67, sgn = side === 'l' ? -1 : 1;
@@ -2463,7 +2941,6 @@ export function propAttach(name, cls, side, rig) {
     // animals carry nothing; birds/beasts with props are unsupported
     out = null;
   }
-  _attach.set(key, out);
   return out;
 }
 

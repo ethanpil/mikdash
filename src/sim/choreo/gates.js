@@ -21,13 +21,18 @@ import { stagedRetime } from '../lib/watch.js';
 import { gates as inspectHooks } from './describe/dawn.js';
 
 const SEED = 0x6761;
-const MOUNT = ['mount.gate.shushan', 'mount.gate.chuldah-e', 'mount.gate.chuldah-w', 'mount.gate.kiponus', 'mount.gate.tadi'];
+// the gates of the Mount that open each day — not Tadi: "טָדִי מִן הַצָּפוֹן, לֹא הָיָה מְשַׁמֵּשׁ כְּלוּם" (Middot 1:3; source-gaps #8),
+// shut by day as by night (R. Eliezer ben Yaakov has the kohen who had an emission leave by it, Middot 1:9 — not staged)
+const MOUNT = ['mount.gate.shushan', 'mount.gate.chuldah-e', 'mount.gate.chuldah-w', 'mount.gate.kiponus'];
 // the seven gates of the Azarah (Middot 1:4)
 const COURT = ['azarah.gate.nikanor', 'azarah.gate.mayim', 'azarah.gate.bechorot', 'azarah.gate.delek', 'azarah.gate.korban', 'azarah.gate.nitzotz', 'azarah.gate.moked'];
 const GREAT = 'heichal.gate.great', WICKET = 'heichal.gate.wicket-n';
 const SWING = { mount: 0.6, court: 0.45, great: 0.5, wicket: 0.25 };  // minutes per swing ⚙
 const STAGGER = { mount: 0.15, court: 0.12 };                          // minutes between gates ⚙
-const CLOSE_AT = { great: 0.0, court: [0.2, 0.035], mount: [0.75, 0.03] }; // fractions of the locking window ⚙
+// fractions of the locking window ⚙: the Levites of the night watch shut the Azarah's and the Mount's gates when they are
+// at their posts (from tzeit, the watch's start: Rambam KhM 3:2 "שׁוֹעֲרִין לִפְתֹּחַ שַׁעֲרֵי הַמִּקְדָּשׁ וּלְהָגִיף דַּלְתוֹתָיו";
+// source-gaps #1) — the great gate first, from within
+const CLOSE_AT = { great: 0.0, court: [0.79, 0.02], mount: [0.87, 0.03] };
 const WALK = 1.2;                    // m/s — the clearing men
 const AHEAD = 1.5;                   // min: they reach the wicket this long before the great gate opens (Tamid 3:7) ⚙
 const AT_WICKET = 0.45;              // min at the wicket: the key into the lock at arm's length ⚙
@@ -196,29 +201,16 @@ function buildWalk(ctx, state) {
 /** the day's moments from the schedule (by event id), fixtures, or fallbacks on the zmanim — once per date */
 function plan(ctx, sim, state) {
   if (state.plan && state.planGen === sim.generation) return state.plan;
+  const B = baseTimes(ctx, sim);
+  if (!B) return null;
+  const { blast, close, great, greatEnd, blastsEv } = B;
   const z = ctx.time?.zmanim;
   const ev = (id) => { const e = sim.event(id); return e && Number.isFinite(e.t0) ? e : null; };
   const gen = sim.eventsOf('gates-opening').find((e) => e.id === 'gates-opening' && Number.isFinite(e.t0));
-  const genAt = (f) => (gen ? wrap(gen.t0 + f * (span(gen.t0, gen.t1) || 1)) : NaN);
   const sunrise = z?.sunrise;
-  const blastsEv = ev('gates-blasts'), greatEv = ev('great-gate'), dishunEv = ev('dishun-men'), nivEv = ev('nivreshet');
-  let blast = blastsEv ? wrap(blastsEv.t0 + CUE_LEAD) : genAt(0.55);
-  if (!Number.isFinite(blast)) blast = wrap(sunrise - 7);
-  let great = greatEv ? wrap(greatEv.t0 + CUE_LEAD) : genAt(0.8);
-  if (!Number.isFinite(great)) great = wrap(blast + 2.3);
-  const greatEnd = greatEv ? greatEv.t1 : wrap(great + 3.5);
+  const dishunEv = ev('dishun-men'), nivEv = ev('nivreshet');
   const dishun = dishunEv ? (dishunEv.tPlan ? [dishunEv.tPlan[0], dishunEv.tPlan[1]] : [dishunEv.t0, dishunEv.t1]) : gen ? [gen.t0, wrap(gen.t0 + 0.6 * (span(gen.t0, gen.t1) || 1))] : [wrap(great - 10), great];
   const niv = nivEv ? [wrap(nivEv.t0 + CUE_LEAD), wrap(nivEv.t1 + NIV_LAG)] : (gen && Number.isFinite(sunrise) ? [wrap(sunrise + CUE_LEAD), wrap(sunrise + 30)] : null);
-  // the locking: the schedule's 'locking-up', else our 'gates-closing', else before the night watch, else at tzeit
-  const lock = sim.schedule.byId('locking-up') || sim.schedule.events.find((e) => e.choreo === 'locking-up')
-    || sim.eventsOf('gates-closing').find((e) => Number.isFinite(e.t0));
-  let close = lock && Number.isFinite(lock.t0) ? [lock.t0, Math.max(1, span(lock.t0, lock.t1))] : null;
-  if (!close) {
-    const nw = sim.schedule.events.find((e) => e.choreo === 'night-watch' && Number.isFinite(e.t0));
-    const end = nw ? nw.t0 : z?.tzeit;
-    close = Number.isFinite(end) ? [wrap(end - 15), 20] : null;
-  }
-  if (!close) return null;
   // the clearing men: one continuous walk — they reach the wicket AHEAD before the great gate opens; before that they
   // stand ready at the Gazit with their vessels from the start of their event
   const N = state.nominal;
@@ -233,6 +225,7 @@ function plan(ctx, sim, state) {
   // per door: its times and cue keys, computed once here (no per-frame strings)
   const [c0, cLen] = close;
   for (const d of state.doors) {
+    if (d.kind === 'mount' || d.kind === 'court') { const T = doorTimes(B, d.kind, d.k); d.tOpen = T[0]; d.tClose = T[1]; d.tShutCue = wrap(d.tClose + SWING[d.kind]); d.keyOpen = `open:${d.id}:${Math.round(d.tOpen * 10)}`; d.keyShut = `shut:${d.id}:${Math.round(d.tClose * 10)}`; continue; }
     if (d.kind === 'great') { d.tOpen = great; d.tClose = wrap(c0 + CLOSE_AT.great * cLen); d.tShutCue = wrap(d.tClose + 2 * SWING.great); }
     else if (d.kind === 'wicket') { d.tOpen = P.wicket; d.tClose = wrap(c0 + CLOSE_AT.great * cLen + 2 * SWING.great + 0.2); d.tKeysCue = wrap(d.tOpen - 0.15); }
     else {
@@ -249,6 +242,51 @@ function plan(ctx, sim, state) {
   state.planDate = ctx.time?.dateString;
   state.rt?.apply();
   return P;
+}
+
+/**
+ * The day's base moments, from the schedule (by event id), the module's fixtures, or the zmanim: the blasts at the
+ * opening, the great gate, the locking window [start, length]. Pure function of the date (night-watch reads it too).
+ */
+function baseTimes(ctx, sim) {
+  const z = ctx.time?.zmanim;
+  const ev = (id) => { const e = sim.event(id); return e && Number.isFinite(e.t0) ? e : null; };
+  const gen = sim.eventsOf?.('gates-opening')?.find((e) => e.id === 'gates-opening' && Number.isFinite(e.t0));
+  const genAt = (f) => (gen ? wrap(gen.t0 + f * (span(gen.t0, gen.t1) || 1)) : NaN);
+  const blastsEv = ev('gates-blasts'), greatEv = ev('great-gate');
+  let blast = blastsEv ? wrap(blastsEv.t0 + CUE_LEAD) : genAt(0.55);
+  if (!Number.isFinite(blast)) blast = wrap(z?.sunrise - 7);
+  let great = greatEv ? wrap(greatEv.t0 + CUE_LEAD) : genAt(0.8);
+  if (!Number.isFinite(great)) great = wrap(blast + 2.3);
+  const greatEnd = greatEv ? greatEv.t1 : wrap(great + 3.5);
+  // the locking: the schedule's 'locking-up', else our 'gates-closing', else before the night watch, else at tzeit
+  const lock = sim.schedule.byId('locking-up') || sim.schedule.events.find((e) => e.choreo === 'locking-up')
+    || sim.eventsOf?.('gates-closing')?.find((e) => Number.isFinite(e.t0));
+  let close = lock && Number.isFinite(lock.t0) ? [lock.t0, Math.max(1, span(lock.t0, lock.t1))] : null;
+  if (!close) {
+    const nw = sim.schedule.events.find((e) => e.choreo === 'night-watch' && Number.isFinite(e.t0));
+    const end = nw ? nw.t0 : z?.tzeit;
+    close = Number.isFinite(end) ? [wrap(end - 15), 20] : null;
+  }
+  if (!close || !Number.isFinite(blast)) return null;
+  return { blast, great, greatEnd, close, blastsEv };
+}
+/** [tOpen, tClose] of a Mount ('mount', k = its index in MOUNT) or Azarah ('court', COURT) gate */
+function doorTimes(B, kind, k) {
+  const c = CLOSE_AT[kind];
+  return [wrap(kind === 'mount' ? B.blast + STAGGER.mount * k : B.blast + 0.2 + STAGGER.court * k), wrap(B.close[0] + (c[0] + c[1] * k) * B.close[1])];
+}
+/**
+ * For night-watch (its Levites at the gates open them at dawn and shut them at the locking — Rambam KhM 3:2; Middot
+ * 1:1): element id → { tOpen, tClose, swing (min) } of every Mount and Azarah gate this module swings. {} without a plan.
+ */
+export function gateTimes(ctx, sim) {
+  const B = baseTimes(ctx, sim);
+  const out = {};
+  if (!B) return out;
+  MOUNT.forEach((id, k) => { const T = doorTimes(B, 'mount', k); out[id] = { tOpen: T[0], tClose: T[1], swing: SWING.mount }; });
+  COURT.forEach((id, k) => { const T = doorTimes(B, 'court', k); out[id] = { tOpen: T[0], tClose: T[1], swing: SWING.court }; });
+  return out;
 }
 
 function doorCues(ctx, state, sim, d) {

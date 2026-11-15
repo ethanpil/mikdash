@@ -8,7 +8,7 @@
 // brother 12). The lambs come up the flight of Sha'ar HaKorban (Middot 1:5), led by two Levites ⚙, just before the
 // window, so they stand at the rings with the crew from its start; slaughter at two rings of the second row, both bloods
 // by the same receiver, flaying at two dwarf pillars,
-// the parts on the lower half of the ramp on its west side (Shekalim 8:8), salted, up onto the great pile, then the
+// the parts on the lower half of the ramp on its east side (Rambam TuM 6:3), salted, up onto the great pile, then the
 // flour mixed with oil; the wine at the south-west horn. The plan is g6/musaf.js (pure function of the date).
 //
 // The song (RH 31a: Ha'azinu in six sections, הזי"ו ל"ך, one each Shabbat) with nine blasts (Sukkah 5:5) is the
@@ -31,7 +31,7 @@ const TEXT = {
   brought: { en: 'Shabbat musaf: two yearling lambs without blemish (Bamidbar 28:9), brought in through Sha\'ar HaKorban (Middot 1:5) — by which, the commentators say, the most-holy offerings came in — wait at the rings', he: 'וּבְיוֹם הַשַּׁבָּת שְׁנֵי כְבָשִׂים בְּנֵי שָׁנָה תְּמִימִם' },
   cut: { en: 'The morning\'s winners serve the musaf too — whoever won a task at the tamid does it for the two musaf lambs: the same slaughterer, the same receiver of the blood (Rambam TuM 4:9)', he: 'כָּל שֶׁזָּכָה בַּעֲבוֹדָה מֵעֲבוֹדַת הַתָּמִיד שֶׁל שַׁחַר הוּא זוֹכֶה בָּהּ בִּשְׁנֵי כִּבְשֵׂי מוּסָף' },
   blood: { en: 'An olah: its blood is thrown at the north-east corner and at the south-west, below the red line — two gifts that are four (Zevachim 5:4)', he: 'שְׁתֵּי מַתָּנוֹת שֶׁהֵן אַרְבַּע' },
-  laid: { en: 'The musaf limbs are laid on the lower half of the ramp, on its west side, and salted (Shekalim 8:8)', he: 'וְשֶׁל מוּסָפִין נִתָּנִין מֵחֲצִי כֶבֶשׁ וּלְמַטָּה בַּמַּעֲרָב' },
+  laid: { en: 'The musaf limbs are laid on the lower half of the ramp, on its EAST side — the tamid\'s lie on its west — and salted (Rambam TuM 6:3)', he: 'וְשֶׁל מוּסָפִין הָיוּ נוֹתְנִין אוֹתָן מֵחֲצִי כֶּבֶשׁ וּלְמַטָּה בְּמִזְרָחוֹ' },
   up: { en: 'Up onto the fire: the limbs of the two lambs, then their fine flour mixed with oil — two tenths of an ephah (Bamidbar 28:9)', he: 'וּשְׁנֵי עֶשְׂרֹנִים סֹלֶת מִנְחָה בְּלוּלָה בַשֶּׁמֶן' },
 };
 
@@ -89,9 +89,12 @@ export default {
     }
     S.props.update(t);
     const song = P.song;
-    if (!songClaimed(sim)) {
+    if (!P.claimed) {
       S.pourers[0] = P.pourer;
       runScripts(ctx, S.pourer, S.pourers, t, out, S.fns.pr);
+    }
+    // the fallback concert: when libation-song does not stage it — and never on Shabbat Rosh Chodesh (P.noSong)
+    if (!P.claimed && !P.noSong) {
       runScripts(ctx, S.trumpeters, song.trumpeters, t, out, S.fns.tr);
       if (crossed(S, song.L0)) {
         cueAt(S, `musaf-concert:${Math.round(song.L0 * 10)}`, song.L0, () => {
@@ -120,8 +123,9 @@ function songClaimed(sim) {
 }
 
 function plan(ctx, sim, state) {
-  // rebuilt per date, and when libation-song's claim on the concert is first seen (the runtime is not yet on ctx at init)
-  const claimed = songClaimed(sim);
+  // rebuilt per date, and when libation-song's claim on the concert is first seen (the runtime is not yet on ctx at init);
+  // on Shabbat Rosh Chodesh libation-song sings Rosh Chodesh's song only, so this module's own pourer pours (no concert)
+  const claimed = songClaimed(sim) && !ctx.time?.roshChodesh;
   if (state.planGen === sim.generation && state.claimed === claimed) return state.plan;
   state.claimed = claimed;
   state.planGen = sim.generation;
@@ -150,7 +154,10 @@ function cues(ctx, S, sim, P) {
   {
     const h = HAAZINU[P.song.section];
     // when libation-song stages the concert, the audio's own heading names the section — say only the pour and blasts
-    say(ctx, S, sim, 'mu-song', c.song, at.sw, P.claimed ? {
+    say(ctx, S, sim, 'mu-song', c.song, at.sw, P.noSong ? {
+      en: 'The Shabbat musaf\'s wine is poured without song: on Rosh Chodesh that falls on Shabbat the song of Rosh Chodesh displaces Shabbat\'s, to make it known (Rambam TuM 6:10) — sung once, after both musafim (Sukkah 55a, Rashi)',
+      he: 'שִׁירָה שֶׁל רֹאשׁ חֹדֶשׁ דּוֹחָה אֶת שִׁירָה שֶׁל שַׁבָּת',
+    } : P.claimed ? {
       en: 'The musaf wine is poured; nine more blasts for the musaf (Sukkah 5:5)',
       he: 'נִסּוּךְ הַיַּיִן שֶׁל מוּסָף',
     } : {

@@ -4,7 +4,7 @@
 import { Vector3 } from 'three';
 import { m2w } from '../core/units.js';
 import { wrap, within, since, span, DAY } from './lib/core.js';
-import { addDays, utcDayMs, computeZmanim, formatDate } from '../time/zmanim.js';
+import { addDays, utcDayMs, computeZmanim, formatDate, hebrewDate, occasionsOf } from '../time/zmanim.js';
 
 /** site point from [X,Y,Z] | { el, f } (f = fractions in the element box; default top centre) → [X,Y,Z] | null */
 export function sitePoint(ctx, spec) {
@@ -42,6 +42,9 @@ export function createSchedule(ctx, mod, zones) {
 
   function dayOk(ev) {
     const d = time?.dayType;
+    // an occasion's event (Rosh Chodesh) only on a date that has it (ctx.time.occasions)
+    if (ev.occasion && !(time?.occasions || []).includes(ev.occasion)) return false;
+    if (Number.isInteger(ev.onWeekday) && ev.onWeekday !== time?.weekday) return false;
     return !ev.dayTypes || !d || ev.dayTypes.includes(d);
   }
 
@@ -280,9 +283,11 @@ export function createSchedule(ctx, mod, zones) {
     const date = addDays(time.date, 1);
     const wd = new Date(utcDayMs(date.y, date.m, date.d)).getUTCDay();
     const dayType = wd === 5 ? 'friday' : wd === 6 ? 'shabbat' : 'weekday';
+    // the next date's own occasions (its Rosh Chodesh), not today's
+    const occasions = occasionsOf(hebrewDate(date));
     let list = null;
-    if (eventsFor) { try { list = eventsFor(dayType, time); } catch { list = null; } }
-    if (!Array.isArray(list)) list = ALL.filter((ev) => !ev.dayTypes || ev.dayTypes.includes(dayType));
+    if (eventsFor) { try { list = eventsFor(dayType, { dayType, date, occasions, weekday: wd }); } catch { list = null; } }
+    if (!Array.isArray(list)) list = ALL.filter((ev) => (!ev.dayTypes || ev.dayTypes.includes(dayType)) && (!ev.occasion || occasions.includes(ev.occasion)) && (!Number.isInteger(ev.onWeekday) || ev.onWeekday === wd));
     const out = [];
     // resolve with the next date's zmanim: time.resolve reads time.zmanim (synchronous; restored at once)
     const z0 = time.zmanim;

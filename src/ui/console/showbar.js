@@ -61,7 +61,10 @@ export function createShowBar(app) {
       backUntil = performance.now() + BACK_MS;
       // "Showing: X · ↶ Back to 08:39 at Ezrat Nashim" (§4.1): the Back button carries the place and hour it returns to
       setText(chipTxt, `Showing: ${lastLabel}`);
-      setText(chipBack, ctx.inspect?.backLabel?.en || 'Back');
+      // (phones: "Back to 04:37" — the place squeezed "Showing: …" to its first word; the title keeps it)
+      const bl = ctx.inspect?.backLabel?.en || 'Back';
+      setText(chipBack, app.layout.isSheet ? bl.replace(/\s+at\s+.*$/, '') : bl);
+      chipBack.parentElement.title = bl;
       chip.hidden = !ctx.inspect?.canBack;
       clearTimeout(chipTimer);
       chipTimer = setTimeout(() => { chip.hidden = true; }, CHIP_MS);

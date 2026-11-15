@@ -30,6 +30,44 @@ const FUZZY_BELOW = 8;
 /** a prepared static source is built in slices of this many documents between time checks */
 const CHUNK = 24;
 
+/**
+ * Everyday English → the words the documents use (UX audit: "sacrifice" found 1, "singing" and "music" 0): a query that
+ * is, or holds, one of these words is also searched for each of its terms, a result so found weighing ×SYN. Plural and
+ * -ing forms by their stem.
+ */
+export const SYNONYMS = {
+  sacrifice: ['offering', 'korban', 'olah', 'tamid'], offering: ['korban', 'olah'], burnt: ['olah'],
+  sing: ['song', 'duchan', 'shir'], song: ['shir', 'duchan'], music: ['song', 'kinnor', 'nevel', 'instruments'],
+  choir: ['duchan', 'song'], musician: ['kinnor', 'nevel', 'duchan'], instrument: ['kinnor', 'nevel', 'cymbal', 'trumpet'], harp: ['nevel', 'kinnor'],
+  woman: ['ezrat nashim', 'women', 'gezuztra'], women: ['ezrat nashim', 'women', 'gezuztra'], gallery: ['gezuztra'],
+  incense: ['ketoret'], lamp: ['menorah', 'lamps', 'candelabrum'], candle: ['menorah', 'lamps'], candlestick: ['menorah'], candelabrum: ['menorah'],
+  bread: ['showbread', 'lechem hapanim', 'chavitin', 'shulchan'], showbread: ['lechem hapanim', 'shulchan'], table: ['shulchan'],
+  blood: ['zerikah', 'blood'], fire: ['maarachah', 'fire', 'pile'], ash: ['deshen', 'terumat hadeshen'], ashes: ['deshen', 'terumat hadeshen'],
+  gate: ['shaar', 'gate'], door: ['gate', 'shaar'], priest: ['kohen', 'kohanim'], priests: ['kohen', 'kohanim'], high: ['kohen gadol'],
+  levite: ['levi', 'levites'], altar: ['mizbeach'], temple: ['mikdash', 'heichal'], sanctuary: ['heichal'], holiest: ['kodesh hakodashim'],
+  court: ['azarah'], judges: ['sanhedrin'], wine: ['libation', 'nesachim'], libation: ['nesachim', 'wine'], trumpet: ['chatzotzrot', 'trumpets'],
+  wash: ['kiyor', 'tevilah'], washing: ['kiyor', 'tevilah'], bath: ['tevilah', 'mikveh'], slaughter: ['shechitah', 'slaughter'], kill: ['slaughter', 'shechitah'],
+  lamb: ['keves', 'tamid'], sheep: ['lamb', 'keves'], cow: ['bull', 'parah'], prayer: ['shema', 'blessing'], blessing: ['birkat kohanim'],
+  guard: ['watch', 'levites'], new: ['rosh chodesh'], moon: ['rosh chodesh'], salt: ['melach'], wood: ['etzim', 'wood'],
+  seal: ['chotam', 'chotamot'], token: ['chotam', 'seal'], receipt: ['chotam', 'seal'], voucher: ['chotam', 'seal'],
+};
+const SYN = 0.85;
+/** words a question is phrased with that no document needs ("where do women stand" → women stand) */
+const STOP = new Set('where what who whom whose how when why which do does did is are was were be been the a an of to in on at for from by with and or i we you he she it they me my your their its can could should would will see seen show find go get there here this that these those about some any stand stood happen happens happening'.split(' '));
+/** stem a word for SYNONYMS: singing → sing, sacrifices → sacrifice, priests → priest */
+const stem = (w) => (SYNONYMS[w] ? w : w.endsWith('ing') && SYNONYMS[w.slice(0, -3)] ? w.slice(0, -3) : w.endsWith('es') && SYNONYMS[w.slice(0, -2)] ? w.slice(0, -2) : w.endsWith('s') && SYNONYMS[w.slice(0, -1)] ? w.slice(0, -1) : w);
+/** the extra searches for q: each content word's synonyms, and (for a question) its content words themselves */
+export function expandQuery(q) {
+  const words = String(q ?? '').toLowerCase().split(/[^a-z']+/).filter(Boolean);
+  if (!words.length) return [];
+  const content = words.filter((w) => !STOP.has(w));
+  const out = new Set();
+  for (const w of content) for (const t of SYNONYMS[stem(w)] || []) out.add(t);
+  if (content.length && content.length < words.length) { out.add(content.join(' ')); if (content.length > 1) for (const w of content) out.add(w); }
+  out.delete(String(q).toLowerCase().trim());
+  return [...out];
+}
+
 // ---------------------------------------------------------------- preparing text
 
 const mk = (t, k) => ({ t, f: t.join(' '), c: t.join(''), k });
@@ -369,6 +407,18 @@ export function createEngine(opts = {}) {
         }
       };
       if (Q) scan(Q);
+      // everyday words and questions (expandQuery): each extra search's results at ×SYN, below a direct match
+      if (Q && !Q.H.length) {
+        for (const alt of expandQuery(q)) {
+          const QA = prepareQuery(alt);
+          if (!QA) continue;
+          for (const P of pool) {
+            if (!visible(P.doc) || !maybe(P, QA)) continue;
+            const m = matchDoc(P, QA);
+            if (m) keep(P, { ...m, score: m.score * SYN, tier: m.tier === 'exact' || m.tier === 'prefix' ? 'tokens' : m.tier });
+          }
+        }
+      }
       // little found: the query re-typed on the other keyboard layout, then typos (the token dictionary, the live docs)
       if (found.size < FUZZY_BELOW && QX) scan(QX);
       for (const Qa of [Q, QX]) {

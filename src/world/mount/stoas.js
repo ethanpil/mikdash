@@ -8,6 +8,7 @@
 // Over the three gates that open at the Mount level the outer aisle is raised into a gate bay (soffit above the gate
 // head and its inner lintel) so the 20-amah gates are not cut by the 18.7 ceiling ⚙.
 import { InstancedMesh, LatheGeometry, BoxGeometry, Vector2, Matrix4, Vector3, Quaternion, BufferGeometry, Float32BufferAttribute } from 'three';
+import { instancesSphere, sectorsOn, sectorMin, timed, groupInstances, geoTris, MOUNT_RINGS } from '../sectors.js';
 import { AMAH, m2w } from '../../core/units.js';
 import { mergeGeometries } from '../geom.js';
 
@@ -156,21 +157,49 @@ function buildColumns(ctx, group, cols, detail) {
     wp[i * 2] = p.x; wp[i * 2 + 1] = p.z;
     ring(p.x, p.z, S.r * A * 1.02, 0, S.abacus[1] * A);
   });
-  const all = [near, far].filter(Boolean);
-  for (const im of all) { im.castShadow = true; im.receiveShadow = true; im.frustumCulled = false; group.add(im); }
+  // perf-cpu round 2: each LOD as one mesh per piece of cells round the Mount (world/sectors.js MOUNT_RINGS, groupInstances:
+  // a cell worth its draw call — its columns × the near column's triangles over sectorMin — is a piece, the rest one
+  // remainder), culled by a fixed sphere round every column of its piece (any of them may be in either LOD as the camera
+  // moves); one mesh per LOD spanned all four stoas and was drawn from every view (34–43 % of it in the Azarah's frustum).
+  // Same geometry and material; shadows: each piece casts as the whole did (a shadow pass culls by the light's frustum).
+  const on = sectorsOn(ctx);
+  const grp = on ? timed(ctx, (st) => {
+    const gi = groupInstances(cols.length, (i, out) => { out[0] = wp[i * 2]; out[1] = wp[i * 2 + 1]; }, geoTris(near.geometry), { rings: MOUNT_RINGS, min: sectorMin(ctx) });
+    if (gi) { st.batches++; st.pieces += gi.pieces.length; }
+    return gi;
+  }) : null;
+  const pieceIds = grp ? grp.pieces : [cols.map((_, i) => i)];
+  const cellOfCol = new Int32Array(cols.length);
+  const cells = pieceIds.map((ids, k) => {
+    for (const i of ids) cellOfCol[i] = k;
+    const one = (src) => {
+      if (!src) return null;
+      if (!grp) return src;   // whole: the LOD's own mesh, never culled, as before
+      const im = new InstancedMesh(src.geometry, src.material, ids.length);
+      im.name = `${src.name}#${grp.rest && k === pieceIds.length - 1 ? 'rest' : `p${k}`}`;
+      im.boundingSphere = instancesSphere(src.geometry, mats, ids);
+      return im;
+    };
+    return { n: one(near), f: one(far), kn: 0, kf: 0 };
+  });
+  const all = cells.flatMap((c) => [c.n, c.f]).filter(Boolean);
+  for (const im of all) { im.castShadow = true; im.receiveShadow = true; group.add(im); }
+  if (!grp) for (const im of all) im.frustumCulled = false;
   const R = [0, 90, 120, 150][Math.max(0, Math.min(3, detail))];
   const assign = (cx, cz) => {
-    let kn = 0, kf = 0;
+    for (const c of cells) c.kn = c.kf = 0;
     for (let i = 0; i < cols.length; i++) {
       mtx.fromArray(mats, i * 16);
       const dx = wp[i * 2] - cx, dz = wp[i * 2 + 1] - cz;
-      if (!far || dx * dx + dz * dz < R * R) near.setMatrixAt(kn++, mtx); else far.setMatrixAt(kf++, mtx);
+      const c = cells[cellOfCol[i]];
+      if (!far || dx * dx + dz * dz < R * R) c.n.setMatrixAt(c.kn++, mtx); else c.f.setMatrixAt(c.kf++, mtx);
     }
-    near.count = kn; near.visible = kn > 0; near.instanceMatrix.needsUpdate = true;
-    if (far) { far.count = kf; far.visible = kf > 0; far.instanceMatrix.needsUpdate = true; }
+    for (const c of cells) {
+      c.n.count = c.kn; c.n.visible = c.kn > 0; c.n.instanceMatrix.needsUpdate = true;
+      if (c.f) { c.f.count = c.kf; c.f.visible = c.kf > 0; c.f.instanceMatrix.needsUpdate = true; }
+    }
   };
   assign(250 * A, -250 * A);                                        // before the first frame: near round the Mount centre
-  for (const im of all) im.computeBoundingSphere();
   if (far) {
     let lx = Infinity, lz = Infinity;
     ctx.engine.onUpdate(() => {

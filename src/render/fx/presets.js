@@ -106,6 +106,8 @@ export const KINDS = {
   },
   lamp: {
     refSize: 0.08,
+    // sky-smoke-fire: an oil lamp's flame is drawn as a steady wick flame (fx/materials.js oilFlame), not eroded noise
+    style: 'oil',
     cards: [1, 1, 1, 1],
     spread: 0, ringR: 0, cardH: [1, 1], cardW: [0.42, 0.42], core: 1.2,
     turb: 0.22, speed: 0.75,

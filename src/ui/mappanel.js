@@ -24,6 +24,8 @@ const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
 const SCALES = [2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000];
 const DYN_HZ = 15;
 const BIG_ZONE = 60; // amot: a click in a place at least this wide in both directions remembers the exact spot
+/** "The second lottery: thirteen tasks" → "The second lottery" (a map callout's few words) */
+const shortTitle = (s) => { const i = s.indexOf(': '); return i >= 8 && i <= 34 ? s.slice(0, i) : s; };
 
 export function createMapPanel(app) {
   const { ctx, data } = app;
@@ -119,7 +121,19 @@ export function createMapPanel(app) {
     vp.append(card.el);
     // controls slide aside when the card opens: measure the label no-go areas where they come to rest
     zoom.addEventListener('transitionend', measureBlockedSoon);
+    scale.addEventListener('transitionend', measureBlockedSoon);
     card.el.addEventListener('animationend', measureBlockedSoon);
+    // the card grows as its rows arrive (what is happening here, next): the controls beside or above it and the labels'
+    // no-go areas follow, and the selected place is kept clear of it (ux-audit H: the phone's Me button ended up under it)
+    let cardH = 0;
+    new ResizeObserver(() => {
+      if (!isOpen || card.el.hidden) return;
+      const hh = card.el.offsetHeight;
+      if (Math.abs(hh - cardH) < 4) return;
+      cardH = hh;
+      measureBlockedSoon();
+      if (sel?.id) { const z = model.get(sel.id); const p = sel.spot || z?.anchor; if (p) requestAnimationFrame(() => view.ensureVisible(p[0], p[1], 40)); }
+    }).observe(card.el);
     panel.body.append(places.el, vp);
     for (const z of model.list) { model.anchorOf(z); model.nameOf(z); }
     places.render();
@@ -263,12 +277,13 @@ export function createMapPanel(app) {
     const items = [];
     for (const z of model.list) {
       const evs = activity.byZone.get(z.id);
-      const top = evs?.[0];
+      // the headline rite of the place names it on the plan (ux-audit H: a bare count said that, not what)
+      const top = evs?.length ? evs.reduce((a, e) => ((e.importance || 1) > (a.importance || 1) ? e : a), evs[0]) : null;
       items.push({
-        id: z.id, tier: z.tier, level: z.level, stacked: z.stacked, name: z.name, anchor: z.anchor, room: z.room, main: z.main,
+        id: z.id, tier: z.tier, level: z.level, stacked: z.stacked, name: z.name, anchor: z.anchor, room: z.room, main: z.main, area: z.area,
         slide: z.id !== 'outside' && z.area <= 1e6, // the city and the valleys are named at their observer spots only
         active: evs ? evs.length : 0, soon: evs ? null : (activity.soon.get(z.id) ?? null),
-        callout: top ? (top.title?.en || top.id) : null,
+        callout: top ? shortTitle(top.title?.en || top.id) : null,
         selected: sel?.id === z.id, current: cur === z.id,
         force: sel?.id === z.id || !!evs,
         score: (sel?.id === z.id ? 1e7 : 0) + (evs ? 1e6 + (Math.max(...evs.map((e) => e.importance || 1))) * 1e5 : 0)
@@ -529,9 +544,13 @@ export function createMapPanel(app) {
   function syncTrip() {
     const t = app.travel.trip;
     const walking = !!t && t.way !== 'instant';
+    // the bar is hosted in here only while the map really covers the world (the dock's wide Map, a phone's full sheet):
+    // a Go drops a phone's sheet to its mini detent, where the map is off screen and the bar must return to the HUD
+    // (ux-audit A: it stayed in here, at y 964 of an 844 px screen, with no Stop or Skip)
+    const covers = walking && isOpen && app.fullScreen();
+    if (!covers && !travel.hidden) { travel.hidden = true; app.hostTravelBar(null); measureBlockedSoon(); }
     if (!walking) {
       if (trip) { trip = null; needDyn = true; }
-      if (!travel.hidden) { travel.hidden = true; app.hostTravelBar(null); measureBlockedSoon(); }
       return;
     }
     const route = app.travel.routeSite();
@@ -539,6 +558,7 @@ export function createMapPanel(app) {
     if (!trip || trip.key !== key) needDyn = true;
     trip = { key, target: t.to || route?.[route.length - 1] || null, path: route && route.length > 1 ? route : null };
     if (!trip.target) { trip = null; return; }
+    if (!covers) return;
     const wasHidden = travel.hidden;
     const w0 = travel.offsetWidth;
     if (travel.firstChild !== app.travel.bar) app.hostTravelBar(travel);
@@ -848,6 +868,8 @@ export function createMapPanel(app) {
       return [[T.X(v.l), T.Y(v.b)], [T.X(v.r), T.Y(v.t)]];
     },
     pan(dx, dy) { view?.panBy(dx, dy); },
+    /** the Menu's detent or width changed: the travel bar may have to move in or out (console.js updateFree) */
+    syncTrip() { if (isOpen && model) syncTrip(); },
     show(opts = {}) {
       const was = isOpen;
       isOpen = true;
@@ -873,7 +895,7 @@ export function createMapPanel(app) {
     },
     onEscape() {
       if (panel.body.classList.contains('is-places')) { togglePlaces(false); return true; }
-      if (vp.classList.contains('is-key') && isPhone()) { toggleKey(false); return true; }
+      if (vp.classList.contains('is-key')) { toggleKey(false); return true; }
       return false;
     },
     /** a place chosen in the search while the map is open: select it here */

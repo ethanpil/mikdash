@@ -105,6 +105,7 @@ export function createConsole(app) {
   let stack = []; // [{ type: 'home'|'section'|'card'|'search'|'welcome', id?, card? }]
   let section = null; // the current (or last) section id
   let lastSection = null; // the last one used this session
+  let prevSection = null; // the one before it (a Go from the dock's Map returns there)
   let detent = 'peek';
   let invoker = null;
   const top = () => stack[stack.length - 1] || null;
@@ -174,6 +175,7 @@ export function createConsole(app) {
     const sid = t?.type === 'section' ? t.id : null;
     if (shownSection && shownSection !== sid) { try { views.get(shownSection)?.inst?.hide?.(); } catch (e) { console.error('[ui] section hide', e); } }
     if (sid) {
+      if (section && section !== sid) prevSection = section;
       section = sid;
       lastSection = sid;
       const inst = sectionInst(sid);
@@ -203,11 +205,12 @@ export function createConsole(app) {
   function discSize() {
     if (!app.layout.isSheet) return 120;
     if (app.layout.mode === 'sheet-landscape') return 56;
-    return top()?.type === 'home' || top()?.type === 'search' ? 72 : 56;
+    return top()?.type === 'home' || top()?.type === 'search' ? 72 : 44; // (the one-row section strip, ux-audit G)
   }
   function markTabs() {
     for (const [id, v] of views) {
-      const on = id === section && isOpen;
+      // lit only while that section is the view shown (not under a card or the search results; ux-audit I)
+      const on = id === section && isOpen && top()?.type === 'section';
       v.tab?.setAttribute('aria-selected', on ? 'true' : 'false');
       if (v.tab) v.tab.tabIndex = id === (section || lastSection || 'here') ? 0 : -1;
       v.tile?.firstChild?.classList.toggle('is-current', on);
@@ -265,14 +268,15 @@ export function createConsole(app) {
     app.onFree?.();
   }
   /** the Menu covers the whole screen (dock Map, full sheet, landscape Map) */
-  const fullScreen = () => isOpen && (el.classList.contains('is-wide') || (app.layout.isSheet && detent === 'full'));
+  // (a phone's portrait Map is is-wide too, but at its mini detent — a Go from it — the world is in view: ux-audit A)
+  const fullScreen = () => isOpen && ((el.classList.contains('is-wide') && app.layout.mode !== 'sheet-portrait') || (app.layout.isSheet && detent === 'full'));
 
   // ---------------- player input alongside the Menu (§2.3) ----------------
   function applyInput() {
     const P = ctx.player;
     if (!P?.setInputEnabled) return;
     const sheetFull = isOpen && app.layout.isSheet && detent === 'full' && (top()?.type !== 'section' || FULL_SECTIONS.has(top()?.id) || top()?.type === 'welcome');
-    const mapOpen = isOpen && top()?.type === 'section' && top().id === 'map';
+    const mapOpen = isOpen && top()?.type === 'section' && top().id === 'map' && fullScreen();
     try {
       if (sheetFull || mapOpen || app.welcomeOpen?.()) {
         if (P.locked) app.expectUnlock();
@@ -497,6 +501,7 @@ export function createConsole(app) {
     get isOpen() { return isOpen; },
     get section() { return section; },
     get lastSection() { return lastSection; },
+    get prevSection() { return prevSection; },
     get detent() { return detent; },
     setDetent,
     get view() { return top(); },

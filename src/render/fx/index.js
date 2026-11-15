@@ -83,10 +83,18 @@ const OPEN_FIRES = new Set(['pyre', 'hearth', 'brazier']);
 const HAZE_MAX = 4;
 const HAZE_RAD = 3e-3;   // rad of deflection at the reference pile size (2 m); ∝ √size (a deeper plume)
 const HAZE_PX = 4;       // cap, pixels
-// low: more, smaller puffs (less stretching along the column => no torn strips), each a little thinner
-const SMOKE_PUFFS = [24, 30, 40, 52];
-const SMOKE_DENSITY = [0.8, 1, 1, 1];
-const INCENSE_PUFFS = [10, 18, 26, 34];
+// sky-smoke-fire: smoke columns are single ribbons (fx/materials.js SMOKE_VS), shaded as cylinders of smoke. A column's
+// optical depth across its base: TAU_PER_DENSITY × the caller's density (smokeColumn's old per-puff opacity)
+const TAU_PER_DENSITY = 3.0;
+// the altar's piles make ONE plume: piles nearer than SMOKE_MERGE_R (the great pile's two emitters) are one column at their
+// centroid, its smoke the sum of theirs; a smaller pile within SMOKE_FEED_R of a bigger plume smokes for a few metres
+// (SMOKE_FEED_H × its flames) and joins it — three or four parallel streaks read as separate chimneys ⚙
+const SMOKE_MERGE_R = 3.2, SMOKE_FEED_R = 9.5, SMOKE_FEED_H = 3;
+// a pyre's plume: τ across its base at the reference pile (2 m) burning fully, ∝ √ of the summed burning area (size² ×
+// intensity — a flare as limbs and fats go on thickens it: altar-night.js's wants reach 1.25), its widening dr/dh (an
+// entraining plume, half-angle ≈ 4°), the palm's sway at the top (share of the height; Yoma 21b), the dissolving top share
+const PYRE_TAU = 2.4, PYRE_SPREAD = 0.085, PYRE_SWAY = 0.012, PYRE_DISSOLVE = 0.35;
+const SMOKE_RIBBON = 24;
 
 function mulberry(seed) {
   let a = seed >>> 0;
@@ -115,11 +123,11 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   let ti = TIER_INDEX[tier] ?? 1;
   let low = ti === 0;
   const mats = createFxMaterials({ soft, low, noise });
-  const flames = new InstanceBatch('flames', { iPos: 3, iSize: 2, iParams: 4, iLean: 4, iCore: 1, iLayer: 2 }, 1024);
+  const flames = new InstanceBatch('flames', { iPos: 3, iSize: 2, iParams: 4, iLean: 4, iCore: 1, iLayer: 3 }, 1024);
   const halos = new InstanceBatch('halos', { iPos: 3, iParams: 4, iColor: 3 }, 512, { x0: -1, x1: 1, y0: -1, y1: 1 });
   const embers = new InstanceBatch('embers', { iPos: 3, iParams: 4, iParams2: 2 }, 4096);
   const beds = new InstanceBatch('beds', { iPos: 3, iParams: 4, iChar: 2 }, 512, 'box');
-  const smoke = new InstanceBatch('smoke', { iPos: 3, iCol: 4, iPuff: 4, iGlow: 3, iMisc: 2 }, 4096, { x0: -1, x1: 1, y0: -1, y1: 1 });
+  const smoke = new InstanceBatch('smoke', { iPos: 3, iCol: 4, iPuff: 4, iGlow: 3, iMisc: 2 }, 256, { ribbon: SMOKE_RIBBON });
   const spills = new InstanceBatch('spill', { iRect: 4, iY: 1 }, 32);
   // draw order: the coal-bed decal (it chars and lights the scene's own surfaces), smoke (alpha), additive glow, flames,
   // embers on top
@@ -211,8 +219,9 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
         pos: f.pos, height: sp.height * (f.kind === 'pyre' ? Math.sqrt(k) : 1),
         width: Math.max(sp.width * size, 0.05), density: sp.density * Math.min(1.5, Math.max(0.3, k ** 0.8)), rise: sp.rise, spread: sp.spread,
         kind: sp.kind, fire: f, seed: f.seedInt,
-        // the visible smoke begins where the flames end (a thin base there, thickening as it rises)
-        base: 0.75 * size * P.cardH[1],
+        // sky-smoke-fire: the smoke forms among the flames' tips (it was 0.75 × their height and faded in over ≈ 15 m: clear
+        // air read between the flames and a column that began far above them); thin there, so the flames stay bright over it
+        base: 0.6 * size * P.cardH[1],
       });
     }
     writeFire(f);
@@ -229,7 +238,7 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       flames.set(t.slot, 'iParams', t.seed, inten, t.turb, t.speed);
       flames.set(t.slot, 'iLean', L.x, L.y, bright, f.L * (f.gain ?? 1));
       flames.set(t.slot, 'iCore', t.core);
-      flames.set(t.slot, 'iLayer', t.tBoost, t.occ);
+      flames.set(t.slot, 'iLayer', t.tBoost, t.occ, f.preset.style === 'oil' ? 1 : 0);
     }
     const hp = f.preset.halo;
     halos.set(f.halo, 'iPos', f.pos.x, f.pos.y + f.size * 0.45, f.pos.z);
@@ -343,6 +352,8 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
       rise: o.rise ?? (kindNum ? 0.8 : 2.2), spread: o.spread ?? (kindNum ? 1.3 : 3.0), base: Math.max(0, o.base ?? 0),
       kind: kindNum, fire: o.fire || null, seed: ((o.seed ?? hashStr(String(Math.random()))) % 1000) / 1000,
       slots: [], glow: new Color(0, 0, 0), intensity: 1,
+      // sky-smoke-fire: plume grouping (groupColumns): the column drawing this one's smoke, and the members it draws
+      lead: null, members: null, feeder: false, centre: new Vector3(),
     };
     if (col.fire) col.pos = col.fire.pos; // shares the Vector3: follows the fire
     allocColumn(col);
@@ -353,28 +364,78 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
   function allocColumn(col) {
     for (const s of col.slots) smoke.free(s);
     col.slots = [];
-    const n = (col.kind ? INCENSE_PUFFS : SMOKE_PUFFS)[ti];
-    for (let i = 0; i < n; i++) { const s = smoke.alloc(); if (s) col.slots.push(s); }
+    const s = smoke.alloc();
+    if (s) col.slots.push(s);
+    smokeGroups = null;
     writeColumn(col);
   }
 
-  function writeColumn(col) {
-    const n = col.slots.length;
-    const k = col.fire ? col.fire.cur : col.intensity;
-    for (let i = 0; i < n; i++) {
-      const s = col.slots[i];
-      smoke.set(s, 'iPos', col.pos.x, col.pos.y, col.pos.z);
-      smoke.set(s, 'iCol', col.height, col.width, col.density * SMOKE_DENSITY[ti] * Math.min(1, k), col.seed * 7 + i * 0.13);
-      smoke.set(s, 'iPuff', (i + col.seed) / n, col.kind, col.rise, col.spread);
-      smoke.set(s, 'iGlow', col.glow.r, col.glow.g, col.glow.b);
-      smoke.set(s, 'iMisc', n, col.base);
+  /**
+   * sky-smoke-fire: which fire columns make one plume. Pyre columns within SMOKE_MERGE_R of each other (horizontally, ±2 m
+   * in height) join the biggest of them; a smaller plume within SMOKE_FEED_R of a bigger one is its feeder. Static per
+   * structure (the fires' positions and sizes), rebuilt when a column comes or goes.
+   */
+  let smokeGroups = null;
+  function groupColumns() {
+    const list = [...columns].filter((c) => c.fire && c.fire.kind === 'pyre' && !c.fire.follow);
+    for (const c of columns) { c.lead = c; c.members = [c]; c.feeder = false; }
+    list.sort((a, b) => b.fire.size - a.fire.size);
+    const near = (a, b, R) => Math.hypot(a.pos.x - b.pos.x, a.pos.z - b.pos.z) < R && Math.abs(a.pos.y - b.pos.y) < 2;
+    const leads = [];
+    for (const c of list) {
+      const L = leads.find((l) => near(l, c, SMOKE_MERGE_R));
+      if (L) { c.lead = L; c.members = null; L.members.push(c); } else leads.push(c);
     }
+    for (const c of leads) {
+      const big = leads.find((l) => l !== c && l.fire.size > c.fire.size * 1.25 && near(l, c, SMOKE_FEED_R));
+      c.feeder = !!big;
+    }
+    smokeGroups = leads;
+  }
+
+  function writeColumn(col) {
+    const s = col.slots[0];
+    if (!s) return;
+    const lead = col.lead || col;
+    if (lead !== col) {
+      // drawn by its plume's column
+      smoke.set(s, 'iCol', 1, 0.1, 0, -1);
+      return;
+    }
+    const f = col.fire;
+    let x = col.pos.x, y = col.pos.y, z = col.pos.z, H = col.height, r0 = Math.max(col.width / 2, 0.02);
+    let k = (r0 * col.spread) / Math.max(H, 0.1), tau = col.density * TAU_PER_DENSITY * Math.min(1.25, f ? f.cur : col.intensity);
+    let sway = 0, diss = 0.45, base = col.base;
+    const gl = col.glow;
+    if (f && f.kind === 'pyre' && col.members) {
+      // the plume of its members: at their centroid (weighted by their piles' areas, static), its smoke their summed
+      // burning area (× intensity), its base as wide as the piles it rises from
+      let W = 0, Fb = 0, sx = 0, sy = 0, sz = 0;
+      for (const m of col.members) { const a = m.fire.size ** 2; W += a; Fb += a * Math.min(1.25, m.fire.cur); sx += m.pos.x * a; sy += m.pos.y * a; sz += m.pos.z * a; }
+      x = sx / W; y = sy / W; z = sz / W;
+      let spreadR = 0;
+      for (const m of col.members) spreadR = Math.max(spreadR, Math.hypot(m.pos.x - x, m.pos.z - z));
+      const ref = f.preset.refSize ** 2;
+      r0 = 0.3 * Math.sqrt(W) + 0.5 * spreadR;
+      k = PYRE_SPREAD;
+      tau = PYRE_TAU * Math.sqrt(Fb / ref);
+      sway = PYRE_SWAY * H;
+      diss = PYRE_DISSOLVE;
+      if (col.feeder) { H = SMOKE_FEED_H * f.size * f.preset.cardH[1]; k = 0.1; tau *= 0.5; sway = 0; diss = 0.65; }
+    }
+    col.centre.set(x, y, z);
+    smoke.set(s, 'iPos', x, y, z);
+    smoke.set(s, 'iCol', H, r0, k, tau);
+    smoke.set(s, 'iPuff', col.seed * 7.31, col.kind, col.rise, base);
+    smoke.set(s, 'iGlow', gl.r, gl.g, gl.b);
+    smoke.set(s, 'iMisc', sway, diss);
   }
 
   function removeColumn(col) {
     for (const s of col.slots) smoke.free(s);
     col.slots = [];
     columns.delete(col);
+    smokeGroups = null;
   }
 
   function smokeColumn(o = {}) {
@@ -480,13 +541,15 @@ export function createFx(ctx, { tier = 'medium', soft = false } = {}) {
     sh.uP.value = P;
     sh.uFireGain.value = Math.min(1, (FIRE_CORE_HEADROOM * sh.uCap.value) / (FIRE_REF_CORE * P));
     if (env.whiteBalance?.isVector3) sh.uWB.value.copy(env.whiteBalance);
-    // smoke: the fire beneath lights it (physical cd; the shader applies inverse square × uP)
+    // smoke: the fire beneath lights it (physical cd; the shader applies inverse square × uP); a plume takes its members'
+    if (!smokeGroups) groupColumns();
     for (const col of columns) {
       const f = col.fire;
-      if (f) {
-        col.glow.copy(f.color).multiplyScalar(f.glowCandela * f.cur * (f.gain ?? 1));
-        writeColumn(col);
-      }
+      if (f) col.glow.copy(f.color).multiplyScalar(f.glowCandela * f.cur * (f.gain ?? 1));
+    }
+    for (const col of columns) {
+      if (col.members && col.members.length > 1) for (let i = 1; i < col.members.length; i++) col.glow.add(col.members[i].glow);
+      if (col.fire) writeColumn(col);
     }
     const su = mats.smoke.uniforms;
     const dl = envDirLights(ctx);

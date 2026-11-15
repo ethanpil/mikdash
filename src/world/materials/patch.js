@@ -8,6 +8,9 @@
 //      roughness, so repeated tiles do not show the same stone twice (faded out when minified);
 //   3. close-range detail (medium+) — a shared micro-detail map (normal.xy, albedo, roughness) tiled at
 //      millimetre scale, blended in within a few meters of the camera.
+//   4. (materials-realism) analytic hairline joints — masonry / sheet keys with a SPEC `joint` (uniform mkJoint: low and
+//      medium; the steps on every tier, on vertical faces only): box-filtered joint lines drawn per pixel where the
+//      texture is magnified, from the course coordinate and the block-local distance in the albedo alpha (ALU only).
 // Per-material options:
 //   blend   — terrain_blend: three layer sets (rock, soil, vegetation) mixed by the vertex colour weights
 //             (r, g, b), with height-aware, world-noise-broken edges that widen with distance (materials-2-fix);
@@ -92,7 +95,7 @@ uniform vec2 mkCourse;     // x tile height (m), y entries (cm)
 uniform sampler2D mkFootMap; // per 0.5 m cell: (lowest, highest) walkable floor, world y (m); 9999 = none
 uniform vec4 mkFoot;       // xy world origin (x, z) of the map, zw 1 / its extent (m)
 uniform vec4 mkFootK;      // x fade-in (0 until the map exists), y grime band height (m), z contact-AO height (m), w AO depth
-uniform vec2 mkFootG;      // x grime amount
+uniform vec2 mkFootG;      // x grime amount, y (materials-realism r2) the far fade of the baked occlusion (1 low / medium, 0 high)
 #endif
 #ifdef MK_ALTAR
 uniform vec4 mkAlt0;       // xy altar centre (world x, z), z half-width of the 28-square (m), w its top (world y)
@@ -124,6 +127,16 @@ uniform vec4 mkWear;
 uniform vec4 mkWearA;
 uniform vec4 mkWearB;
 uniform vec4 mkWearC;
+// materials-realism: analytic hairline joints (masonry / sheet sets; low and medium) — x strength (0 = off: every other
+// material and tier), y the open joint's half-width (m), z its rounded arris (m), w the set's texel (m);
+// mkJoint2: x albedo in the open joint (multiplier), y course joints 1 / vertical joints only 0 / −1 vertical joints on
+// vertical faces only (the steps' risers: a tread's world UVs run the other way), the per-block variation likewise
+uniform vec4 mkJoint;
+uniform vec2 mkJoint2;
+// the share of a pixel's footprint (width fw, centred at s) that lies inside [-w, w]: a box-filtered line, alias-free
+float mkCov( float s, float fw, float w ) { return clamp( ( min( s + 0.5 * fw, w ) - max( s - 0.5 * fw, - w ) ) / fw, 0.0, 1.0 ); }
+// the joint's profile: 0 in the open joint, rising over the rounded arris to the face (1)
+float mkArr( float s, float w, float a ) { return clamp( ( abs( s ) - w ) / a, 0.0, 1.0 ); }
 float mkSegD( vec2 p, vec4 s ) {
   vec2 ab = s.zw - s.xy;
   float t = clamp( dot( p - s.xy, ab ) / max( dot( ab, ab ), 1e-6 ), 0.0, 1.0 );
@@ -140,6 +153,7 @@ const FRAG_MAP = /* glsl */`
 float mkRoughAdd = 0.0;
 vec2 mkDN = vec2( 0.0 );
 float mkFootAO = 1.0;
+float mkRiser = 1.0;     // (materials-realism) 0 on the horizontal faces of a risers-only masonry key (the steps)
 {
   // two oblique projections, each a 2-D function on floors and on walls of either orientation (a plain xz lookup is
   // constant along y on walls and the old (x - z, y) one constant on floors: bands and diagonal stripes)
@@ -221,11 +235,46 @@ float mkFootAO = 1.0;
   }
   #endif
   #ifdef USE_MAP
+  {
+    // materials-realism — analytic hairline joints where the texture is magnified (low / medium: a 2-5 cm texel drew
+    // each 2-3 mm joint as a soft dark band 5-10 cm wide at 1-3 m). Course joints are exact (the course coordinate);
+    // a vertical joint is where the block-local distance in the albedo alpha restarts: across the one texel that
+    // bilinear filtering mixes the two blocks, the block start (u - alpha x dMax) races along u, ≈ len / texel times
+    // faster than u (inside a block it holds still), and block starts lie on the layout's grid ((k + 1/2) q), so the
+    // joint is the nearest grid line. Each joint is a box-filtered dark line with a rounded arris (its mean slope over
+    // the pixel goes into the normal), so it stays crisp and does not alias. Derivatives outside any branch (ANGLE).
+    vec2 mkUx = dFdx( vMkUv ), mkUy = dFdy( vMkUv );
+    float mkU0j = vMkUv.x - sampledDiffuseColor.a * mkBlock.z;
+    float mkAx = dFdx( mkU0j ), mkAy = dFdy( mkU0j );
+    vec2 mkFw = max( abs( mkUx ) + abs( mkUy ), vec2( 1e-6 ) );     // the pixel's footprint along u, v (m)
+    vec3 mkGn = cross( dFdx( vMkWorld ), dFdy( vMkWorld ) );
+    mkRiser = mkJoint2.y < 0.0 ? 1.0 - smoothstep( 0.5, 0.75, abs( mkGn.y ) / max( length( mkGn ), 1e-9 ) ) : 1.0;
+    float mkJf = mkJoint.x * mkRiser * smoothstep( 1.0, 2.2, mkJoint.w / max( mkFw.x, mkFw.y ) );   // screen pixels per texel
+    if ( mkJf > 0.0 ) {
+      float mkDet = mkUx.x * mkUy.y - mkUx.y * mkUy.x;
+      float mkDu0 = abs( mkAx * mkUy.y - mkAy * mkUx.y ) / max( abs( mkDet ), 1e-12 );   // d(block start) / du
+      float mkLx = sampledDiffuseColor.a * mkBlock.z;
+      float mkVon = max( smoothstep( 3.0, 6.0, mkDu0 ), 1.0 - smoothstep( mkJoint.w + 0.03, mkJoint.w + 0.06, mkLx ) );
+      float mkSu = vMkUv.x - ( floor( vMkUv.x / mkBlock.x ) + 0.5 ) * mkBlock.x;
+      float mkSv = mkLy < 0.5 * mkRh ? mkLy : mkLy - mkRh;
+      float mkW = mkJoint.y, mkA = mkJoint.z, mkWa = mkJoint.y + mkJoint.z;
+      float mkHj = max( mkJoint2.y, 0.0 );
+      float mkCu = mkVon * mkCov( mkSu, mkFw.x, mkW ), mkCv = mkHj * mkCov( mkSv, mkFw.y, mkW );
+      float mkRu = mkVon * mkCov( mkSu, mkFw.x, mkWa ), mkRv = mkHj * mkCov( mkSv, mkFw.y, mkWa );
+      float mkCore = max( mkCu, mkCv ), mkRim = max( mkRu, mkRv );
+      diffuseColor.rgb *= 1.0 - mkJf * ( ( 1.0 - mkJoint2.x ) * mkCore + 0.12 * ( mkRim - mkCore ) );
+      // the arris: rounded about as deep as it is wide — its mean slope over the pixel
+      float mkGu = ( mkArr( mkSu + 0.5 * mkFw.x, mkW, mkA ) - mkArr( mkSu - 0.5 * mkFw.x, mkW, mkA ) ) * mkA / mkFw.x;
+      float mkGv = ( mkArr( mkSv + 0.5 * mkFw.y, mkW, mkA ) - mkArr( mkSv - 0.5 * mkFw.y, mkW, mkA ) ) * mkA / mkFw.y;
+      mkDN -= mkJf * vec2( mkVon * mkGu, mkHj * mkGv );
+      mkRoughAdd += 0.1 * mkJf * mkCore;
+    }
+  }
   if ( mkBlock.w > 0.0 ) {
     float mkU0 = vMkUv.x - sampledDiffuseColor.a * mkBlock.z;
     vec2 mkBid = vec2( floor( mkU0 / mkBlock.x ), mkRow );
     float mkPx = max( length( dFdx( vMkUv ) ), length( dFdy( vMkUv ) ) );
-    float mkFade = 1.0 - smoothstep( 0.08, 0.25, mkPx );
+    float mkFade = ( 1.0 - smoothstep( 0.08, 0.25, mkPx ) ) * mkRiser;
     float mkBh = mkHash( mkBid + 0.5 );
     float mkBh2 = mkHash( mkBid.yx + 17.31 );
     diffuseColor.rgb *= 1.0 + mkBlock.w * ( mkBh - 0.5 ) * 2.0 * mkFade;
@@ -258,7 +307,7 @@ float mkFootAO = 1.0;
     #endif
     diffuseColor.rgb *= 1.0 + mkDa * mkDf;
     mkRoughAdd += mkDr * mkDf;
-    mkDN = mkDn * mkDf;
+    mkDN += mkDn * mkDf;
   }
   #endif
   #ifdef MK_BURN
@@ -448,6 +497,15 @@ const METAL_IBL = /* glsl */`
 `;
 const FOOT_AO = /* glsl */`
 #ifdef MK_FOOT
+#ifdef USE_AOMAP
+// materials-realism r2 (the Herodian walls, low / medium): from ~8 m to 32 m the baked occlusion — the boss's pecking,
+// the bevel's foot, the joints — eases to the wall's mean (0.87), so a far wall reads as a calm surface with a faint
+// coursing instead of every block framed; near, where the margins and the patch's hairline joints resolve, it is whole
+{
+  float mkAf = mkFootG.y * smoothstep( 8.0, 32.0, length( vViewPosition ) );
+  reflectedLight.indirectDiffuse *= mix( 1.0, 0.87 / max( ambientOcclusion, 0.05 ), mkAf );
+}
+#endif
 reflectedLight.indirectDiffuse *= mkFootAO;
 reflectedLight.indirectSpecular *= mkFootAO;
 #endif

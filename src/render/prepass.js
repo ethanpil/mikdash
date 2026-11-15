@@ -21,6 +21,21 @@ export const PREPASS_LAYER = 29;
 export const PREPASS_MIN_RADIUS = 8;
 
 /**
+ * perf-cpu round 2: every light of the scene carries PREPASS_LAYER too — call it where a light is made (env's key light,
+ * fx's fire-light pool, the cascades' SunLight). The pre-pass renders ctx.scene with the camera on this layer only: with no
+ * light in it, three's light state for the scene changed twice a frame (none in the pre-pass, all in the main pass), and
+ * every lit material failed its lightsStateVersion check in the main pass and was re-keyed (getProgram: getParameters and
+ * the cache-key string, 64–77 materials a frame — ≈ 1 ms of JS and ≈ 250 KB of garbage a frame on medium). Lit on both
+ * passes, the light counts agree and the version stays. The pre-pass's own work is unchanged: its depth material uses no
+ * lights, its shadow maps stay suspended (render() below), and its program is compiled with the scene's lights (main.js,
+ * the warm-up) — three keys every program by the light counts, the depth material's too.
+ */
+export function prepassLight(light) {
+  light.layers.enable(PREPASS_LAYER);
+  return light;
+}
+
+/**
  * Mark the eligible meshes under root; returns how many. Only occluders worth a draw call: a mesh whose world-space
  * bounding radius (one instance's, for an instanced one) is at least `minRadius` m — walls, floors, roofs, the big
  * merged batches; a vessel or a lamp costs a draw call on ANGLE in both processes and hides almost nothing.

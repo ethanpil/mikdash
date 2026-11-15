@@ -56,7 +56,7 @@ export function createHeader(app) {
   const hourEl = h('span.mk-head__hour');
   const civilEl = h('span.mk-head__civil.num');
   const clockBtn = h('button.mk-head__clockbtn', { type: 'button', title: 'The hour — open Time', on: { click: () => app.open('time') } },
-    dial.el, h('span.mk-head__clocktxt', hourEl, civilEl));
+    dial.el, h('span.mk-head__clocktxt', civilEl, hourEl));
   const playIco = h('span.mk-head__playico');
   const playTxt = h('span.mk-head__playtxt');
   const playBtn = h('button.mk-hbtn.mk-head__play', { type: 'button', 'aria-keyshortcuts': 'P', on: { click: () => app.togglePause() } },

@@ -12,7 +12,8 @@
 // Each run is a fresh browser profile (cold GPU program cache), like shot.mjs.
 import { build as viteBuild, preview as vitePreview, createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from './browser.mjs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,7 +39,6 @@ for (let i = 0; i < args.length; i++) {
   else query = a.replace(/^\?/, '');
 }
 
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 
 // ------------------------------------------------------------------ in-page instrumentation
 function instrument() {
@@ -102,9 +102,9 @@ if (opt.prod) {
   await server.listen();
 }
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({
-  executablePath: EDGE, headless: true,
-  args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
+const { browser } = await launchBrowser(chromium, {
+  headless: true,
+  args: [...GPU_ARGS, '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
 });
 mkdirSync(resolve(root, opt.out), { recursive: true });
 const page = await browser.newPage({ viewport: { width: opt.w, height: opt.h } });

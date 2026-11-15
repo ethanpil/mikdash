@@ -103,7 +103,8 @@ export const SETS = {
     kind: 'paving', tile: [10, 10], px: [832, 832], seed: 31,
     layout: { rowH: 1.25, q: 0.25, minL: 1.0, maxL: 2.5, gap: 0.5, rowLens: [[0.75, 1.5], [1.0, 2.0], [1.25, 2.5], [1.75, 3.0]] },
     u: {
-      uP0: [0.002, 0.008, 0.016, 0.6], uP1: [1, 0.72, 0.004, 0.004], uP2: [0.3, 0.1, 0.08, 0.3], uP3: [0.025, 0.4, 0, 0],
+      // (uP3.z, materials-realism: soft grey drifts across some slabs)
+      uP0: [0.002, 0.008, 0.016, 0.6], uP1: [1, 0.72, 0.004, 0.004], uP2: [0.3, 0.1, 0.08, 0.3], uP3: [0.025, 0.4, 0.45, 0],
       uC0: '#d4cab5', uC1: '#cec4af', uC2: '#d6cfc0', uC3: '#aaa395', uC4: '#a39d92',
     },
   },
@@ -111,13 +112,18 @@ export const SETS = {
     kind: 'paving', tile: [10, 9.6], px: [832, 800], seed: 37,
     layout: { rowH: 1.6, q: 0.5, minL: 1.5, maxL: 3.5, gap: 0.5 },
     u: {
-      uP0: [0.0012, 0.006, 0.006, 0.15], uP1: [1, 0.36, 0.0015, 0.001], uP2: [0.85, 0.06, 0.04, 0.85],
+      // materials-realism: uP3.z — clouded white marble, soft grey drifts across the slabs (stronger on some), so the court
+      // is not one flat sheet (uP3.x / y 0: the slab spread and warm tint as before)
+      uP0: [0.0012, 0.006, 0.006, 0.15], uP1: [1, 0.36, 0.0015, 0.001], uP2: [0.85, 0.06, 0.04, 0.85], uP3: [0, 0, 1, 0],
       uC0: '#e8e3d8', uC1: '#ded6c5', uC2: '#d4d1c8', uC3: '#bdb4a6', uC4: '#a29d95',
     },
   },
+  // materials-realism: laid in blocks 0.75–1.75 m long, one course per riser (half an amah, 0.24 m at the default amah,
+  // Middot 2:3), joints broken course to course: the layout only (the patch draws the joints on the risers; recon.)
   steps: {
-    kind: 'stone', tile: [3, 3], px: [448, 448], seed: 41,
-    u: { uP0: [0.0006, 0.5, 0.6, 0.08], uC0: '#d8cdb7', uC1: '#d2c5ab' },
+    kind: 'stone', tile: [3, 2.88], px: [448, 430], seed: 41,
+    layout: { rowH: 0.24, q: 0.25, minL: 0.75, maxL: 1.75, gap: 0.25 },
+    u: { uP0: [0.0006, 0.5, 0.6, 0.08], uP1: [1, 0, 0, 0], uC0: '#d8cdb7', uC1: '#d2c5ab' },
   },
   marble_white: {
     kind: 'marble', tile: [3, 3], px: [448, 448], seed: 43,

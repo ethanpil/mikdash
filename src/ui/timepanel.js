@@ -4,8 +4,8 @@
 // Enter opens that event's card under the dial (onArc).
 import { h, he, icon, setText, clear, append } from './dom.js';
 import {
-  seasonal, seasonalLabelHe, fromDial, clock, ordinal, quarters, hebrewAt, civilDate, civilShort, addDays,
-  dayBadge, PSALM_OF_DAY, WEEKDAYS,
+  seasonal, seasonalLabelHe, fromDial, clock, ordinal, quarters, elapsedPhrase, hebrewAt, civilDate, civilShort, addDays,
+  dayBadge, isRoshChodesh, PSALM_OF_DAY, WEEKDAYS,
 } from './format.js';
 import { ZMAN_ANGLES } from '../time/zmanim.js';
 
@@ -412,7 +412,7 @@ export function createTimeControl(app, opts = {}) {
     }
     setText(roHalf, info.half === 'day' ? 'Day' : 'Night');
     setText(roHour, String(info.hour));
-    setText(roOf, `${quarters(info.elapsed)} ${info.elapsed < 0.875 ? 'hour' : 'hours'} since ${info.half === 'day' ? 'sunrise' : 'sunset'}`);
+    setText(roOf, elapsedPhrase(info.half, info.elapsed));
     setText(roHe, seasonalLabelHe(info));
     setText(roCivilT, `≈ ${clock(t)}`);
     ring.setAttribute('aria-valuenow', info.s.toFixed(2));
@@ -426,7 +426,7 @@ export function createTimeControl(app, opts = {}) {
     if (time.speed !== last.speed) for (const b of speedSeg.children) b.setAttribute('aria-pressed', +b.dataset.speed === time.speed ? 'true' : 'false');
     const evening = t >= time.zmanim.sunset;
     const badge = dayBadge(time, t);
-    const dateKey = `${time.dateString}|${evening}|${badge}`;
+    const dateKey = `${time.dateString}|${evening}|${badge}|${isRoshChodesh(time, t)}`;
     if (dateKey !== last.date) {
       const hd = hebrewAt(time, t);
       setText(dateEn, civilShort(time));
@@ -435,10 +435,14 @@ export function createTimeControl(app, opts = {}) {
       dateMain.setAttribute('aria-label', `${full}. Choose another date`);
       dateMain.title = `${full}${hd?.he ? ` · ${hd.he}` : ''} — choose another date`;
       dateInput.value = time.dateString;
+      const rc = isRoshChodesh(time, t);
       append(clear(dateMeta), [
         h('span.mk-badge.mk-badge--gold', badge),
+        rc ? h('span.mk-badge.mk-badge--gold', { title: 'The new moon: the musaf of two bulls, a ram, seven lambs and a goat after the morning Tamid (Bamidbar 28:11–15)' }, 'Rosh Chodesh') : null,
         h('span.mk-badge', { title: `The Levites' psalm for ${WEEKDAYS[time.weekday]} (Tamid 7:4)` }, `Psalm ${PSALM_OF_DAY[time.weekday]}`),
         evening ? h('span.mk-badge', { title: 'The Hebrew day begins at sunset' }, 'Evening: the Hebrew date has turned') : null,
+        // the next date whose day is Rosh Chodesh (its musaf is by day), at the same hour
+        time.nextOccasion ? h('button.mk-linkbtn', { type: 'button', title: 'Go to the next Rosh Chodesh, at this hour', on: { click: () => { const tm = T(); const d = tm?.nextOccasion?.('rosh-chodesh'); if (d) tm.setDate(d); } } }, 'Next Rosh Chodesh ›') : null,
       ]);
     }
     last = { hour: info.hour, half: info.half, date: dateKey, speed: time.speed, paused: time.paused };

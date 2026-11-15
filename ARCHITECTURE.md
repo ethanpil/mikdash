@@ -115,6 +115,10 @@ against the Mishnaic chains (Middot 5:1–2, 4:6–7, 2:5–6, 3:1, 3:6 …) and
   instancing for repeated elements (columns, rings, steps).
 * Budgets (whole world, MAIN VIEW PASS — shadow, cube-shadow and depth pre-passes are measured separately and must not
   stall frames): ≤ 350 draw calls at detail 0, ≤ 900 at 3; ≤ 1.5 M triangles at detail 0, ≤ 6 M at 3.
+* Landscape-wide batches are split into **cells round the Mount** after the kit has built them and registered their
+  colliders (`src/world/sectors.js`: `splitMeshes` for merged batches, `splitInstancedBySector` for instanced ones; same
+  material instances, a cell under 4000 triangles joins one remainder piece), so three's frustum test can drop what lies
+  behind the viewer. `?sectors=0` builds them whole (docs/decisions/perf-cpu.md, round 2).
 * Register **anchors** for important points (`ctx.addAnchor('altar.top', { pos: [X,Y,Z], heading, label })`)
   and **fires/lamps** (`ctx.addFire({ id, kind, pos, size, schedule })`) — the render task turns fires into
   flames + lights. Movable parts the sim animates (gates' doors, curtains, the kiyor rising on the muchni,
@@ -130,6 +134,9 @@ ctx.time = {
   speed, paused,     // speed = sim-seconds per real-second (1 = real time)
   date: { y, m, d }, weekday /*0=Sun*/, hebrew: { day, month, monthName, year, he },
   dayType,           // 'weekday' | 'friday' | 'shabbat'  (festivals: future)
+  occasions,         // [] | ['rosh-chodesh'] — orthogonal to dayType (a Shabbat Rosh Chodesh is both); belongs to the
+                     // civil date's DAYTIME as dayType does. roshChodesh (bool), occasionsEvening, occasionsAt(t),
+                     // nextOccasion(id) -> 'YYYY-MM-DD'. Rosh Chodesh = the 1st of a month only, never 1 Tishrei.
   zmanim: { alot, sunrise, chatzot, minchaGedola, minchaKetana, plagHamincha, sunset, tzeit, midnight,
             shaahDay, shaahNight },   // minutes; GRA hours (sunrise→sunset; sunset→sunrise), alot = sun −16.1°
   set(t), setDate('YYYY-MM-DD'), setSpeed(n), pause(bool),
@@ -154,6 +161,16 @@ Default date **2026-11-02** (Monday, 22 Cheshvan — ordinary weekday, psalm 48)
   (`quality.maxFireLights`, nearest to camera win); also `ctx.fx.attachTorch(object3D) -> handle`,
   `ctx.fx.smokeColumn({pos, …})` (altar & incense smoke rise **straight up** — Avot 5:5),
   `ctx.fx.setFire(id, intensity)`. Optional **Photo mode** (path-traced still) may be added later.
+* **Lights and the depth pre-pass**: every scene light is made through `prepassLight` (render/prepass.js) so it is on
+  the pre-pass's layer too; otherwise three re-keys every lit material each frame. Warm-ups of the pre-pass and of shadow
+  depth programs pass `ctx.scene` as the light scene (render/warmup.js).
+* **Exposure in and beside rooms** (`env/interiors.js`, `env/index.js`): `interiors.at(p)` gives a point's room and sky
+  visibility; on an opening's plane and in the room's margin beyond it the opening is read as from the plane. Volumes
+  flagged `colonnade` (the Mount's stoas) meter the part of the view that leaves between the columns at the outdoor
+  level (`interiors.viewOut`, docs/decisions/final-qa.md).
+* **Clouds** (`env/clouds*.js`): one cloud tile baked in a Worker and cached in IndexedDB, drawn only by the sky dome
+  (stars hide behind it); weather is a pure function of the date (`?clouds=0`, `?cumulus=`, `?cirrus=`). The cumulus is a
+  flat loop-free layer where `ao === 'volume'` or there is no post, marched elsewhere. Baked after 'firstFrame' in play.
 * **Tier capabilities** (lowend-visuals): what each tier draws is chosen by flags in `ctx.quality` — `shadows`
   (`'static'` low: the static world only, re-rendered when it changes; `'cached'` medium; `'cascaded'` high/ultra),
   `shadowFilter` (`'pcf1'` low, `'pcf5'`), `aa` (`'fxaa'` low, `'smaa'`), `ao` (`'volume'` low/medium, `'n8ao'` high/ultra),
@@ -189,6 +206,10 @@ export const EVENTS = [{
   id: 'tamid-morning-slaughter',
   title: { en, he },
   dayTypes: ['weekday','friday','shabbat'],        // omit = all
+  occasion: 'rosh-chodesh',                        // optional: active only on a date carrying that occasion
+  onWeekday: 0,                                    // optional: only on that weekday (0 = Sunday … 6 = Shabbat)
+  byOccasion: { 'rosh-chodesh': { when, … } },     // optional overrides on such a date (as byDay per day type);
+                                                   // read through eventsFor(dayType, time)
   when: { start: <time spec>, end: <time spec> },  // see ctx.time.resolve; ordering is sourced, minutes are reconstruction
   timing: { confidence: 'explicit'|'ordering'|'reconstruction', note },
   zone: 'slaughter-zone',
@@ -219,6 +240,10 @@ re-poses every actor instantly (no accumulated state). Sound cues fire only when
 during continuous play. Choreography modules: `src/sim/choreo/<id>.js` exporting
 `{ id, init(ctx, events) -> state, update(ctx, state, t, dt) }`. `ctx.schedule = { events, active(t),
 upcoming(t, n), at(zoneId, t), resolveTimes() }`.
+Day-specific and standing duties added later live beside the daily service: `choreo/g7/` (Rosh Chodesh: the musaf's
+pool, plan and concert), `choreo/temple-duties.js` (salting the ramp, wiping the altar, the showbread's reeds, the
+afternoon call) and `gates.js gateTimes()` (door times shared with `night-watch.js`). Sources and what is staged without
+one: `docs/decisions/rosh-chodesh.md`, `docs/decisions/source-gaps-staged.md`.
 
 ## 10. People — `src/people/` (people task)
 

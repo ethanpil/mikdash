@@ -3,7 +3,7 @@
 //
 //   node tools/nav-coverage.mjs [--q low|medium|high|ultra] [--from start,azarah] [--json FILE] [--verbose] [--walk N]
 //
-// Starts its own Vite server + headless Edge (like tools/shot.mjs), boots the app, waits for ctx.nav, then runs
+// Starts its own Vite server + headless Chromium (like tools/shot.mjs), boots the app, waits for ctx.nav, then runs
 // ctx.nav.findPath from each origin to every zone 'stand' in src/data/zones-content.js and every event 'view.at' in
 // src/data/schedule.js ({el, f} forms resolved against site.js). Targets are resolved exactly as ctx.player.goTo
 // resolves them (goto.js resolveTarget: a Z picks the floor nearest it on any level).
@@ -19,7 +19,8 @@
 // Exit code 1 when any target fails from any origin (known geometry blockers are listed, not excused).
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
-import { existsSync, writeFileSync } from 'node:fs';
+import { launchBrowser, GPU_ARGS } from './browser.mjs';
+import { writeFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,17 +37,15 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--walk') opt.walk = +args[++i];
 }
 
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Microsoft/Edge/Application/msedge.exe']
-  .find((p) => existsSync(p));
 const server = await createServer({
   root, logLevel: 'error', configFile: join(root, 'vite.config.js'),
   server: { port: 0, host: '127.0.0.1', strictPort: false, hmr: false, watch: null },
 });
 await server.listen();
 const base = server.resolvedUrls.local[0];
-const browser = await chromium.launch({
-  executablePath: EDGE, headless: true,
-  args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
+const { browser } = await launchBrowser(chromium, {
+  headless: true,
+  args: [...GPU_ARGS, '--enable-unsafe-swiftshader', '--autoplay-policy=no-user-gesture-required'],
 });
 let code = 0;
 try {

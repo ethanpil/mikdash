@@ -8,6 +8,7 @@ import { Matrix4, Vector3, WebGPUCoordinateSystem, ShaderChunk, Object3D, BackSi
 import { SunLight } from 'three/addons/lights/SunLight.js';
 import { SunLightShadow } from 'three/addons/lights/SunLightShadow.js';
 import { envDirLights, lightDir } from './env-link.js';
+import { prepassLight } from './prepass.js';
 
 const _lightOrientation = new Matrix4();
 const _viewToLight = new Matrix4();
@@ -267,7 +268,7 @@ export class SunShadows {
     this.ctx = ctx;
     const p = SHADOW_PRESETS[tierKey] || SHADOW_PRESETS.high;
     this.preset = p;
-    this.light = new SunLight(0xffffff, 0);
+    this.light = prepassLight(new SunLight(0xffffff, 0));   // (perf-cpu: render/prepass.js prepassLight)
     this.light.name = 'render:sun-csm';
     this.light.castShadow = true;
     installCascadeBiasChunk();

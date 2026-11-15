@@ -47,12 +47,12 @@ Go ▸ = travel.**
 | `/` or `Ctrl` `K` | search everything: places, rites, people, things, words, settings, in English, Hebrew or transliteration |
 | `?` | help: the controls for your device |
 | `P` | pause / play the clock |
-| Click, or `E` | learn about anyone or anything: its card, with Go ▸ and Show me ▸ (`E` or a click aims at the centre dot while the mouse is captured) |
+| Click, or `E` | learn about a person, an animal or a thing: its card, with Show me ▸ and Go ▸. A click on a wall or the floor captures the mouse; `E` opens anything, walls and gates too (`E` or a click aims at the centre dot while the mouse is captured) |
 | `+` `−` | faster / slower during a trip |
 
 **Touch:** drag with the left thumb to walk and with the right thumb to look; tap with two fingers to switch between
-walking and running. Tap the Menu button for the Menu; tap empty scenery for the quick chips (the hour, Map, Search); tap
-anyone or anything to learn about it. **Gamepad:** sticks walk and look, LT runs, Y flies, Start opens the Menu, View
+walking and running. Tap the Menu button for the Menu; tap a wall, a gate or the floor for its name (tap the name for its
+card) and the quick chips (the hour, Map, Search); tap a person, an animal or a thing to learn about it. **Gamepad:** sticks walk and look, LT runs, Y flies, Start opens the Menu, View
 the map, X learns about what you face; in the Menu the D-pad moves, A chooses, B goes back, LB/RB change section.
 
 Every **Go ▸** walks, runs or moves you at once, at a pace of ½× to 10×; your choice becomes the default. Looking around
@@ -65,7 +65,7 @@ Add these parameters to the address to share a moment. All are optional.
 | Parameter | Meaning | Examples |
 |---|---|---|
 | `t=` | Time of day, Israel Standard Time. A clock time, a zman with an offset in minutes, or a seasonal hour (`d` day, `n` night). Default: 6 minutes before dawn (alot hashachar). | `t=05:30`, `t=sunrise+10`, `t=alot-6`, `t=d8.5`, `t=n11` |
-| `date=` | Civil date, which sets the sun, moon and day type. Default 2026-11-02, an ordinary Monday (22 Cheshvan 5787). | `date=2026-11-07` (Shabbat) |
+| `date=` | Civil date, which sets the sun, moon and day type. Default 2026-11-02, an ordinary Monday (22 Cheshvan 5787). | `date=2026-11-07` (Shabbat), `date=2026-11-11` (Rosh Chodesh) |
 | `at=` | Where you stand, in site amot: X east, Y north, measured from the south-west corner of the Mount's 500 x 500 amot. The floor is found for you; an optional third number picks the level on stacked floors. | `at=217.8,344.2`, `at=140,333,22` |
 | `look=` | Compass heading and pitch in degrees (0 north, 90 east; positive pitch looks up). | `look=270,5` |
 | `q=` | Graphics quality. Default `auto`. | `q=low`, `q=medium`, `q=high`, `q=ultra` |
@@ -104,8 +104,9 @@ Limits you should know about:
   sourced", "Order sourced · minutes reconstructed" or "Time reconstructed". Clock times are shown with ≈ because the
   Mishnah counts hours. Seasonal hours follow the Vilna Gaon (sunrise to sunset is twelve hours); dawn is the sun 16.1°
   below the horizon and nightfall 8.5°.
-- The calendar knows weekdays, Fridays and Shabbat only. Festivals, Rosh Chodesh, Yom Kippur and Pesach are not
-  simulated: a festival date shows an ordinary day of that weekday.
+- The calendar knows weekdays, Fridays, Shabbat and Rosh Chodesh (the first of a month, with its musaf; the Time
+  section has "Next Rosh Chodesh"). The festivals, Yom Kippur and Pesach are not simulated: a festival date shows an
+  ordinary day of that weekday.
 - Faces, clothing detail beyond what the sources describe, the melodies of the Levites' song, the fill of the city
   around the Mount and similar details are modest reconstructions. They are logged with their reasons in
   [docs/decisions/](docs/decisions/README.md).

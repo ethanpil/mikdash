@@ -1,15 +1,15 @@
 // one-off probe: load the harness with JS, wait, then evaluate an expression in the page
 import { createServer } from 'vite';
 import { chromium } from 'playwright-core';
+import { launchBrowser, GPU_ARGS } from '../../../tools/browser.mjs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync } from 'node:fs';
+
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)));
 const [query, js, expr] = process.argv.slice(2);
-const EDGE = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'].find((p) => existsSync(p));
 const server = await createServer({ root, logLevel: 'error', configFile: join(root, 'vite.config.js'), server: { port: 0, host: '127.0.0.1', hmr: false, watch: null } });
 await server.listen();
-const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const { browser } = await launchBrowser(chromium, { headless: true, args: [...GPU_ARGS] });
 const page = await browser.newPage({ viewport: { width: 800, height: 450 } });
 page.on('console', (m) => { if (['error'].includes(m.type())) console.log('[console]', m.text().slice(0, 300)); });
 page.on('pageerror', (e) => console.log('[pageerror]', e.message));

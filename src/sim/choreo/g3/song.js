@@ -18,6 +18,7 @@ import { Script } from './script.js';
 import { add, cue, SRV } from './day.js';
 import { spreadTimeline, psalmOfDay, CUE_LEAD, MAX_WALK_S, D_SET, GAP_S } from './plan.js';
 import { musafConcert } from '../g6/musaf.js';
+import { rcConcert } from '../g7/concert.js';
 import { concertClock } from '../g6/common.js';
 import { rand } from '../../lib/core.js';
 
@@ -30,6 +31,9 @@ export const LEVITES = [
   { dy: -3.2, inst: 'kinnor' }, { dy: 3.2, inst: 'kinnor' }, { dy: -4.8, inst: 'nevel' }, { dy: 4.8, inst: 'nevel' },
   { dy: -6.4, inst: 'kinnor' }, { dy: 8.6, inst: 'kinnor' }, { dy: -8.0, inst: 'kinnor' }, { dy: 10.2, inst: 'kinnor' },
   { dy: -9.6, inst: 'kinnor' }, { dy: 11.8, inst: 'kinnor' }, { dy: 13.4, inst: 'kinnor' },
+  // the officer over the song (Shekalim 5:1 "הֻגְרַס בֶּן לֵוִי עַל הַשִּׁיר"; Rambam KhM 7:5: he chooses each day who sings on
+  // the duchan, and the blasts over the offerings are at his word) at the south end, singing by mouth, no instrument ⚙
+  { dy: -11.2, inst: 'officer' },
 ];
 const BOYS = [-2.4, 2.4, -5.6, 9.4];
 const TRUMP_DY = [1.6, -1.6];          // at his right and at his left (he faces west: right = north)
@@ -147,7 +151,7 @@ export function buildSession(ctx, P, W, D, o) {
     const side = dy >= 0 ? 'N' : 'S';
     const m = P.music[side];
     const react = 0.01 + 0.05 * rand(SEED, boy ? 'br' : 'lr', i, o.key);
-    const inst = boy ? null : LEVITES[i].inst;
+    const inst = boy || LEVITES[i].inst === 'officer' ? null : LEVITES[i].inst;
     // a lyre hangs in the left hand; played, the clip holds it in the left (people draws the right-hand prop there)
     const props = inst === 'cymbal' ? ['cymbal', 'cymbal'] : inst ? [null, inst] : [null, null];
     const playing = inst && inst !== 'cymbal' ? [inst, null] : props;
@@ -325,7 +329,9 @@ function concertKohanim(ctx, P, W, D, c) {
  */
 function musafTimeline(ctx, sim) {
   let mc = null;
-  try { mc = musafConcert(ctx, sim); } catch (e) { console.warn('[sim:g3] musaf concert unavailable', e); }
+  // Rosh Chodesh (g7/concert.js): its musaf's song — on Shabbat too, the only musaf song of the day (Rambam TuM 6:10;
+  // Sukkah 55a, Rashi: one song after both libations — g6/musaf.js publishes none then)
+  try { mc = (ctx.time?.roshChodesh ? rcConcert(ctx, sim) : null) || musafConcert(ctx, sim); } catch (e) { console.warn('[sim:g3] musaf concert unavailable', e); }
   if (!mc || !Number.isFinite(mc.L0) || !mc.song) return null;
   const t1 = Number.isFinite(mc.t1) && mc.t1 > mc.L0 + 4 ? mc.t1 : mc.L0 + 8;
   const T = songTimeline(ctx, mc.L0, { song: mc.song }, 'mishnah', mc.walkS, Math.min(t1 - 1.0, mc.L0 + 14));
@@ -357,7 +363,7 @@ export function buildSongs(ctx, P, W, D, m, sim) {
   }];
   cue(D, 'song-day', W.SG[0] + CUE_LEAD, { caption: TEXT.song(psalm), at: [du.X, ax, du.Z1], range: 140, id: 'song-day' });
   let musaf = null;
-  if (sab && sim) {
+  if ((sab || ctx.time?.roshChodesh) && sim) {
     musaf = musafTimeline(ctx, sim);
     if (musaf && musaf.T.L0 > amT.end + 2) {
       const mc = musaf.mc;
@@ -368,10 +374,11 @@ export function buildSongs(ctx, P, W, D, m, sim) {
         segan: { t0: mc.wine.pick - 2.8 },
         pickJug: mc.wine.pick,
         kg: null,
-        // what is sung: this Shabbat's section of Ha'azinu, its verses captioned by the audio as it sings them
+        // what is sung: this Shabbat's section of Ha'azinu (Rosh Chodesh: the stand-in psalm), its verses captioned by
+        // the audio as it sings them
         audio: { song: musaf.T.song },
         at: { table: mc.table, benArza: mc.benArza, duchan: mc.benArza },
-        captions: { pour: false },     // shabbat-musaf captions the pour with the Ha'azinu section
+        captions: { pour: false },     // shabbat-musaf / rosh-chodesh-musaf caption the pour with what is sung
       };
       // the Levites go down to their chambers between the songs, unless the musaf's follows at once ⚙
       if (musaf.T.L0 - W.SG[1] > 8) sessions.push({ key: 'musaf', arriveLevites: musaf.T.L0 - 4.0, run: false, leave: musaf.T.end + 1.2, concerts: [mu] });

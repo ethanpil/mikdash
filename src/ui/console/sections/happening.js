@@ -4,6 +4,7 @@
 import { h } from '../../dom.js';
 import { w2m, AMAH } from '../../../core/units.js';
 import { eventRow, dynGroup, stageTitle } from '../eventrow.js';
+import { zoneGloss } from '../gloss.js';
 
 const NEAR_M = 60;
 
@@ -22,13 +23,14 @@ export function happeningSection(app) {
         const seg = h('div.mk-seg.mk-hap__filter', { role: 'group', 'aria-label': 'Show' });
         const nowBox = h('div.mk-hap__now');
         const nextBox = h('div.mk-evs');
-        el.append(seg, h('section.mk-sec', h('h3.mk-h', 'Now'), nowBox), h('section.mk-sec', h('h3.mk-h', 'Next'), nextBox));
-        const FILTERS = [['all', 'Everywhere'], ['here', 'Here'], ['near', 'Near me'], ['aggadah', 'Aggadah']];
+        el.append(seg, h('section.mk-sec', h('h3.mk-h.mk-hap__nowh', 'Now'), nowBox), h('section.mk-sec', h('h3.mk-h', 'Next'), nextBox));
+        // "Legends": the aggadah layer in plain words (ux-audit finding 10); its title keeps the Hebrew term
+        const FILTERS = [['all', 'Everywhere'], ['here', 'Here'], ['near', 'Near me'], ['aggadah', 'Legends']];
         function paintSeg() {
           const agg = ctx.settings.get('aggadah') !== false;
           if (!agg && filter === 'aggadah') filter = 'all';
           seg.replaceChildren(...FILTERS.filter(([id]) => id !== 'aggadah' || agg).map(([id, label]) => h('button', {
-            type: 'button', 'aria-pressed': filter === id ? 'true' : 'false', 'data-filter': id, on: { click: () => { filter = id; key = ''; paintSeg(); render(); } },
+            type: 'button', 'aria-pressed': filter === id ? 'true' : 'false', 'data-filter': id, title: id === 'aggadah' ? 'Aggadah: the narrative and miracle traditions the sources report' : null, on: { click: () => { filter = id; key = ''; paintSeg(); render(); } },
           }, label)));
         }
         const near = (ev) => {
@@ -51,6 +53,7 @@ export function happeningSection(app) {
           if (k !== key) {
             key = k;
             rows = [];
+            const seen = new Set(); // (terms glossed in this list: each at its first row)
             // by area: the day's events, then each stage's individual offerings as one row
             const areas = new Map();
             for (const ev of act) {
@@ -59,21 +62,28 @@ export function happeningSection(app) {
               const a = areas.get(z);
               if (ev.dynamic) { const p = ev.parent || ''; if (!a.dyn.has(p)) a.dyn.set(p, []); a.dyn.get(p).push(ev); } else a.stat.push(ev);
             }
-            const order = [...areas.entries()].sort((x, y) => (y[1].stat.length + y[1].dyn.size) - (x[1].stat.length + x[1].dyn.size));
+            // the headline rite first (ux-audit E): within an area by importance, then by start; areas by their most
+            // important rite, then by how much is going on there
+            const imp = (e) => e.importance || 1;
+            const t0 = (e) => data.times(e)?.t0 ?? 0;
+            for (const a of areas.values()) a.stat.sort((x, y) => imp(y) - imp(x) || t0(x) - t0(y));
+            const top = (a) => Math.max(0, ...a.stat.map(imp), ...[...a.dyn.values()].flat().map(imp));
+            const order = [...areas.entries()].sort((x, y) => top(y[1]) - top(x[1]) || (y[1].stat.length + y[1].dyn.size) - (x[1].stat.length + x[1].dyn.size));
             nowBox.replaceChildren(...(order.length ? order.map(([z, a]) => {
               const n = a.stat.length + [...a.dyn.values()].reduce((s, l) => s + l.length, 0);
               const name = (data.zone(z)?.name?.en || 'Elsewhere').split(' — ')[0];
               const box = h('div.mk-evs');
-              for (const ev of a.stat) { const r = eventRow(app, ev, { place: false }); rows.push(r); box.append(r.el); }
+              for (const ev of a.stat) { const r = eventRow(app, ev, { gloss: seen }); rows.push(r); box.append(r.el); }
               for (const [pid, list] of a.dyn) {
                 const parent = ctx.schedule?.byId?.(pid);
                 const g = dynGroup(app, list, { key: `${z}-${pid}`, title: stageTitle(pid, parent?.title?.en || list[0]?.parentTitle?.en, list.length), open: openGroups.has(`${z}-${pid}`), onToggle: (on) => (on ? openGroups.add(`${z}-${pid}`) : openGroups.delete(`${z}-${pid}`)) });
                 rows.push(g);
                 box.append(g.el);
               }
-              return h('div.mk-hap__area', h('h4.mk-hap__areah', h('button.mk-linkbtn', { type: 'button', on: { click: () => app.card(`zone:${z}`) } }, name), h('span.mk-muted', ` · ${n}`)), box);
+              const gl = zoneGloss(app, z);
+              return h('div.mk-hap__area', h('h4.mk-hap__areah', h('button.mk-linkbtn', { type: 'button', on: { click: () => app.card(`zone:${z}`) } }, name, gl ? h('span.mk-hap__areagl', ` — ${gl}`) : null), h('span.mk-muted', ` · ${n}`)), box);
             }) : [h('div.mk-empty', filter === 'all' ? 'Nothing in the order of the day at this hour. The fires on the altar burn on.' : 'Nothing here at this hour.')]));
-            nextBox.replaceChildren(...(next.length ? next.map((ev) => { const r = eventRow(app, ev); rows.push(r); return r.el; }) : [h('div.mk-empty', 'Nothing further scheduled for this date.')]));
+            nextBox.replaceChildren(...(next.length ? next.map((ev) => { const r = eventRow(app, ev, { gloss: seen }); rows.push(r); return r.el; }) : [h('div.mk-empty', 'Nothing further scheduled for this date.')]));
           }
           for (const r of rows) r.update(t);
         }

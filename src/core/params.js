@@ -18,6 +18,9 @@
 //   debug=boxes,zones,nav,anchors,stats   comma list of debug overlays
 //   seed=N                         deterministic seed for procedural variation
 //   fov=N                          camera vertical field of view in degrees, clamped to the settings range 40–95
+//   clouds=0                       no cloud layer; cumulus=0..1 / cirrus=0..1 override the date's weather (read in env/)
+//   sectors=0                      landscape batches whole, not in cells round the Mount (A/B switch; sectorMin=N: a cell's
+//                                  least triangles, default 4000; read in world/sectors.js)
 
 function num(v, d) {
   const n = parseFloat(v);

@@ -121,6 +121,11 @@ Added keys:
 Conventions:
 - 1 UV = 1 m (applyWorldUV); materials set their own repeat.
 - Wood grain runs along U; use the *_v keys for posts and door boards.
+- Joints on low/medium (quality.textureSize <= 1024; steps_stone on every tier): masonry and sheet keys carry a SPEC
+  `joint` preset and the patch draws their hairline joints analytically (uniforms mkJoint, mkJoint2; ALU only, no
+  extra fetch): course joints from the course coordinate, vertical joints where the block-local distance in the albedo
+  alpha restarts. steps_stone has a course layout (12 x 0.24 m: one course per half-amah riser), so tile() and
+  courseAt() work on it; its joints and per-stone tint show on risers only.
 - herodian_wall courses follow world height (v = y); its texture already includes the drafted margins and the 4 cm set-out relief in the normal map.
 
 Preview: src/world/materials/preview.js exports async buildPreview(ctx) -> Group.

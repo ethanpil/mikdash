@@ -1,7 +1,7 @@
 // Validator for src/data/schedule.js against site.js and the zmanim (run: node tools/validate-schedule.mjs)
-import { EVENTS, DAY_TYPES, eventsFor } from '../src/data/schedule.js';
+import { EVENTS, DAY_TYPES, eventsFor, OCCASIONS } from '../src/data/schedule.js';
 import { SITE, zoneAtSite } from '../src/data/site.js';
-import { computeZmanim } from '../src/time/zmanim.js';
+import { computeZmanim, hebrewDate, occasionsOf } from '../src/time/zmanim.js';
 import { OFFERING_TYPES, OFFERING_RULES, STATIONS, NESACHIM } from '../src/data/offerings.js';
 import { ZONE_CONTENT, SANCTITY_SCALE } from '../src/data/zones-content.js';
 import { GLOSSARY } from '../src/data/glossary.js';
@@ -70,30 +70,53 @@ for (const e of EVENTS) {
   if (![1, 2, 3].includes(e.importance)) err(`${tag}: importance`);
   if (!LAYERS.has(e.layer)) err(`${tag}: layer`);
   if (e.offerings !== undefined && !(Array.isArray(e.offerings) && e.offerings.length && e.offerings.every((o) => OFFERING_TYPES[o]))) err(`${tag}: offerings ${e.offerings} (ids of OFFERING_TYPES in src/data/offerings.js)`);
-  const extra = Object.keys(e).filter((k) => !['id', 'title', 'dayTypes', 'when', 'timing', 'zone', 'pos', 'view', 'summary', 'description', 'participants', 'sources', 'sounds', 'choreo', 'importance', 'layer', 'offerings', 'byDay'].includes(k));
+  const extra = Object.keys(e).filter((k) => !['id', 'title', 'dayTypes', 'when', 'timing', 'zone', 'pos', 'view', 'summary', 'description', 'participants', 'sources', 'sounds', 'choreo', 'importance', 'layer', 'offerings', 'byDay', 'occasion', 'byOccasion', 'onWeekday'].includes(k));
+  if (e.onWeekday !== undefined && !(Number.isInteger(e.onWeekday) && e.onWeekday >= 0 && e.onWeekday <= 4 && e.dayTypes?.join() === 'weekday')) err(`${tag}: onWeekday ${e.onWeekday} (0–4, with dayTypes ['weekday'])`);
   if (extra.length) err(`${tag}: unexpected keys ${extra}`);
   const BS2 = String.fromCharCode(10, 10);
   // byDay: { [dayType]: { summary?, description?, sounds? } } — that day type's own text (eventsFor returns it)
   if (e.byDay !== undefined) {
     for (const [d, o] of Object.entries(e.byDay || {})) {
       if (!e.dayTypes?.includes(d)) err(`${tag}: byDay.${d} is not one of its dayTypes`);
-      const bad = Object.keys(o || {}).filter((k) => !['summary', 'description', 'sounds'].includes(k));
+      // `when` only on an occasion's event (its Shabbat windows): an ordinary event's times are one per event
+      const bad = Object.keys(o || {}).filter((k) => !['summary', 'description', 'sounds', ...(e.occasion ? ['when'] : [])].includes(k));
       if (bad.length || !Object.keys(o || {}).length) err(`${tag}: byDay.${d} keys ${bad.length ? bad : '(none)'}`);
+      if (o.when) for (const k of ['start', 'end']) if (!Number.isFinite(resolver(DEFAULT)(o.when[k]))) err(`${tag}: byDay.${d}.when.${k} does not resolve`);
       if (o.summary !== undefined && (typeof o.summary !== 'string' || o.summary.length < 20)) err(`${tag}: byDay.${d}.summary`);
       if (o.description !== undefined && (typeof o.description !== 'string' || o.description.length < 80 || o.description.split(BS2).length > 3)) err(`${tag}: byDay.${d}.description`);
       if (o.sounds !== undefined && !(Array.isArray(o.sounds) && o.sounds.every((x) => CUES.has(x)))) err(`${tag}: byDay.${d}.sounds`);
     }
-    for (const d of Object.keys(e.byDay || {})) { const c = eventsFor(d).find((x) => x.id === e.id); if (!c || (e.byDay[d].summary && c.summary !== e.byDay[d].summary)) err(`${tag}: eventsFor('${d}') does not give its byDay text`); }
+    for (const d of Object.keys(e.byDay || {})) { const c = eventsFor(d, { occasions: e.occasion ? [e.occasion] : [] }).find((x) => x.id === e.id); if (!c || (e.byDay[d].summary && c.summary !== e.byDay[d].summary)) err(`${tag}: eventsFor('${d}') does not give its byDay text`); }
+  }
+  // occasions (Rosh Chodesh): `occasion` names one of OCCASIONS; `byOccasion` overrides only what may change that day
+  if (e.occasion !== undefined && !OCCASIONS.includes(e.occasion)) err(`${tag}: occasion ${e.occasion} (one of ${OCCASIONS})`);
+  if (e.occasion !== undefined && e.byOccasion !== undefined) err(`${tag}: an occasion's own event has no byOccasion`);
+  for (const [k, o] of Object.entries(e.byOccasion || {})) {
+    if (!OCCASIONS.includes(k)) err(`${tag}: byOccasion.${k} is not an occasion`);
+    const bad = Object.keys(o || {}).filter((x) => !['when', 'timing', 'summary', 'description', 'sounds'].includes(x));
+    if (bad.length || !Object.keys(o || {}).length) err(`${tag}: byOccasion.${k} keys ${bad.length ? bad : '(none)'}`);
+    if (o.when) for (const w of ['start', 'end']) if (!Number.isFinite(resolver(DEFAULT)(o.when[w]))) err(`${tag}: byOccasion.${k}.when.${w} does not resolve`);
+    if (o.timing && (!CONF.has(o.timing.confidence) || !o.timing.note)) err(`${tag}: byOccasion.${k}.timing`);
+    if (o.summary !== undefined && (typeof o.summary !== 'string' || o.summary.length < 20)) err(`${tag}: byOccasion.${k}.summary`);
+    if (o.description !== undefined && (typeof o.description !== 'string' || o.description.length < 80 || o.description.split(BS2).length > 3)) err(`${tag}: byOccasion.${k}.description`);
+    if (o.sounds !== undefined && !(Array.isArray(o.sounds) && o.sounds.every((x) => CUES.has(x)))) err(`${tag}: byOccasion.${k}.sounds`);
   }
 }
 
 // ---------------------------------------------------------------- durations on every date (wrap past midnight allowed)
-const times = (z) => { const r = resolver(z); const m = {}; for (const e of EVENTS) m[e.id] = { t0: r(e.when.start), t1: r(e.when.end) }; return m; };
+// times(z, list): each event's window by its own `when` — the list is EVENTS, or a day's eventsFor copies (a Rosh
+// Chodesh day's byOccasion / byDay windows)
+const times = (z, list = EVENTS) => { const r = resolver(z); const m = {}; for (const e of list) m[e.id] = { t0: r(e.when.start), t1: r(e.when.end) }; return m; };
+// the day lists checked below: every day type, as an ordinary day and as Rosh Chodesh
+const RC = { occasions: ['rosh-chodesh'] };
+const DAY_LISTS = DAY_TYPES.flatMap((dt) => [{ dt, occ: '', list: eventsFor(dt) }, { dt, occ: 'rosh-chodesh', list: eventsFor(dt, RC) }]);
 for (const ds of DATES) {
-  const T = times(zFor(ds));
-  for (const e of EVENTS) {
-    const { t0, t1 } = T[e.id], dur = wrap(t1 - t0);
-    if (!(dur > 0 && dur <= 15 * 60)) err(`${ds} ${e.id}: duration ${dur.toFixed(1)} min (${hm(t0)}→${hm(t1)})`);
+  for (const { dt, occ, list } of [{ dt: '', occ: '', list: EVENTS }, ...DAY_LISTS.filter((d) => d.occ)]) {
+    const T = times(zFor(ds), list);
+    for (const e of list) {
+      const { t0, t1 } = T[e.id], dur = wrap(t1 - t0);
+      if (!(dur > 0 && dur <= 15 * 60)) err(`${ds}${occ ? ` ${dt} ${occ}` : ''} ${e.id}: duration ${dur.toFixed(1)} min (${hm(t0)}→${hm(t1)})`);
+    }
   }
 }
 
@@ -125,6 +148,13 @@ const SEQ = [
   ['friday-blasts-work', 'friday-blasts-holy'], ['friday-blasts-holy', 'locking-up'], ['afternoon-song', 'locking-up'],
   ['afternoon-song', 'seals'], ['seals', 'friday-blasts-work'], ['seals', 'locking-up'], ['song-weekday', 'kodashim-meal'], ['kodashim-meal', 'tamid-afternoon'],
   ['locking-up', 'moked-night'],
+  // Rosh Chodesh (checked on its own day lists): the musaf after the tamid's song (Rambam TuM 7:1), on Shabbat after the
+  // Shabbat musaf (Zevachim 10:1); its song after its rites; the individuals' offerings and the showbread after it
+  ['song-weekday', 'rc-musaf-slaughter'], ['song-friday', 'rc-musaf-slaughter'], ['shabbat-musaf', 'rc-musaf-slaughter'],
+  ['shabbat-musaf', 'rc-musaf-flaying'], ['shabbat-musaf', 'rc-goat-chatat'], ['shabbat-musaf', 'rc-musaf-limbs'],
+  ['rc-musaf-slaughter', 'rc-musaf-song'], ['rc-goat-chatat', 'rc-musaf-song'], ['rc-musaf-flaying', 'rc-musaf-song'], ['rc-musaf-limbs', 'rc-musaf-song'],
+  ...['private-offerings', 'notar-burning', 'altar-blood', 'private-flaying', 'bird-offerings', 'meal-offerings', 'nikanor-purifications', 'altar-limbs', 'tenufah', 'metzora', 'showbread-swap']
+    .map((id) => ['rc-musaf-song', id]),
   // individuals' offerings (src/data/offerings.js): after the morning song, before the afternoon tamid; the evening after it
   ...['private-flaying', 'altar-blood', 'altar-limbs', 'bird-offerings', 'meal-offerings', 'tenufah', 'nikanor-purifications', 'notar-burning']
     .flatMap((id) => [['song-weekday', id], ['song-friday', id], [id, 'tamid-afternoon']]),
@@ -136,18 +166,26 @@ const SEQ = [
 const SEQ_START = [['locking-up', 'night-watch'], ['night-watch', 'ish-har-habayit'], ['fats-burning', 'locking-up'], ['maamad-morning', 'tamid-slaughter'], ['gate-levites', 'tamid-slaughter']];
 const byId = Object.fromEntries(EVENTS.map((e) => [e.id, e]));
 for (const [a, b] of SEQ) if (!byId[a] || !byId[b]) err(`SEQ names unknown event ${a} / ${b}`);
+// a pair is checked on the ordinary windows when both run on some ordinary day, else on the Rosh Chodesh day lists
+// (its windows there, a pair whose events are not on one day list is not a pair)
+const RC_ONLY = (id) => !!byId[id]?.occasion;
 // events wholly inside another's window
 const INSIDE = [['scouring', 'kodashim-meal-night'], ['late-turning', 'fats-burning'], ['night-turning', 'fats-burning'], ['sleeping-guard', 'ish-har-habayit'], ['mesibah-keri', 'moked-night'], ['magrefah', 'maamad-morning'], ['tamid-slaughter', 'maamad-morning'],
   ['impure-east-gate', 'maamad-morning'], ['tamid-afternoon', 'maamad-afternoon'], ['afternoon-song', 'maamad-afternoon']];
-for (const ds of DATES) {
-  const T = times(zFor(ds));
-  for (const [a, b] of SEQ) {
-    if (!byId[a] || !byId[b]) continue;
+const seqCheck = (ds, T, pairs, tag = '') => {
+  for (const [a, b] of pairs) {
+    if (!T[a] || !T[b]) continue;
     const A = T[a], B = T[b];
     // a ends ≤ b starts, measured forward from a.start (≤ 20 h ahead)
     const aEnd = wrap(A.t1 - A.t0), bStart = wrap(B.t0 - A.t0);
-    if (!(aEnd <= bStart + 1e-6 && bStart < 20 * 60)) err(`${ds}: ${a} (${hm(A.t0)}–${hm(A.t1)}) should end before ${b} starts (${hm(B.t0)})`);
+    if (!(aEnd <= bStart + 1e-6 && bStart < 20 * 60)) err(`${ds}${tag}: ${a} (${hm(A.t0)}–${hm(A.t1)}) should end before ${b} starts (${hm(B.t0)})`);
   }
+};
+for (const ds of DATES) {
+  const T = times(zFor(ds));
+  seqCheck(ds, T, SEQ.filter(([a, b]) => byId[a] && byId[b] && !RC_ONLY(a) && !RC_ONLY(b)));
+  // every pair again on each Rosh Chodesh day list, with that day's windows (only pairs of events both on the list)
+  for (const { dt, occ, list } of DAY_LISTS) if (occ) seqCheck(ds, times(zFor(ds), list), SEQ, ` ${dt} ${occ}`);
   for (const [a, b] of SEQ_START) { const A = T[a], B = T[b]; if (wrap(B.t0 - A.t0) > 12 * 60) err(`${ds}: ${a} (${hm(A.t0)}) should start before ${b} (${hm(B.t0)})`); }
   for (const [a, b] of INSIDE) {
     const A = T[a], B = T[b];
@@ -169,16 +207,19 @@ const CREW = {
   nine: ['second-lottery', 'lamb-watered', 'tamid-slaughter', 'flaying', 'limbs-to-ramp', 'gazit-shema', 'third-fourth-lottery', 'birkat-kohanim', 'limbs-up'],
   'incense-man': ['third-fourth-lottery', 'coal-pan', 'ketoret-morning', 'birkat-kohanim'],
   'pan-man': ['coal-pan', 'into-heichal', 'birkat-kohanim'],
-  trumpeters: ['gates-blasts', 'libation', 'song-weekday', 'song-friday', 'song-shabbat', 'shabbat-musaf', 'afternoon-song', 'afternoon-song-shabbat', 'friday-blasts-work', 'friday-blasts-holy'],
+  trumpeters: ['gates-blasts', 'libation', 'song-weekday', 'song-friday', 'song-shabbat', 'shabbat-musaf', 'rc-musaf-song', 'afternoon-song', 'afternoon-song-shabbat', 'friday-blasts-work', 'friday-blasts-holy'],
   segan: ['limbs-up', 'libation', 'afternoon-song', 'afternoon-song-shabbat'],
   'kohen-gadol': ['ketoret-morning', 'birkat-kohanim', 'limbs-up', 'showbread-eaten'],
-  choir: ['song-weekday', 'song-friday', 'song-shabbat', 'shabbat-musaf', 'afternoon-song', 'afternoon-song-shabbat'],
+  choir: ['song-weekday', 'song-friday', 'song-shabbat', 'shabbat-musaf', 'rc-musaf-song', 'afternoon-song', 'afternoon-song-shabbat'],
   maamad: ['maamad-morning', 'maamad-afternoon'],
   sanhedrin: ['sanhedrin', 'court-in-chel'],
   'ish-har-habayit': ['ish-har-habayit', 'sleeping-guard'],
   'locking-kohen': ['locking-up', 'moked-night'],
   'moked-sleepers': ['moked-night', 'memuneh-knock'],
-  'outgoing-mishmar': ['shabbat-musaf', 'showbread-swap', 'showbread-divided'],
+  // on Shabbat the outgoing watch offers the morning tamid and the musafim (Sukkah 56b), Rosh Chodesh's too
+  'outgoing-mishmar': ['shabbat-musaf', 'rc-musaf-slaughter', 'rc-musaf-limbs', 'showbread-swap', 'showbread-divided'],
+  // the Rosh Chodesh musaf's men are not in the individuals' stream that day (it waits for the musaf)
+  'rc-musaf': ['rc-musaf-slaughter', 'rc-goat-chatat', 'rc-musaf-flaying', 'rc-musaf-limbs', 'private-offerings', 'altar-blood', 'altar-limbs'],
   'incoming-mishmar': ['bazichin', 'showbread-divided', 'afternoon-lottery-shabbat', 'tamid-afternoon', 'afternoon-flaying', 'afternoon-limbs', 'afternoon-song-shabbat'],
   'seal-officers': ['seals'],
   'afternoon-crew': ['afternoon-lottery', 'tamid-afternoon', 'afternoon-flaying', 'afternoon-limbs', 'afternoon-song'],
@@ -187,16 +228,16 @@ const CREW = {
 };
 for (const [crew, list] of Object.entries(CREW)) for (const id of list) if (!byId[id]) err(`CREW ${crew}: unknown ${id}`);
 for (const ds of DATES) {
-  const T = times(zFor(ds));
-  for (const dt of DAY_TYPES) {
-    const on = new Set(eventsFor(dt).map((e) => e.id));
+  for (const { dt, occ, list } of DAY_LISTS) {
+    const T = times(zFor(ds), list);
+    const on = new Set(list.map((e) => e.id));
     for (const [crew, list] of Object.entries(CREW)) {
       const L = list.filter((id) => on.has(id));
       for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
         const A = byId[L[i]], B = byId[L[j]], a = T[A.id], b = T[B.id];
         const la = wrap(a.t1 - a.t0), lb = wrap(b.t1 - b.t0), d = wrap(b.t0 - a.t0);
         const overlap = d < la || wrap(a.t0 - b.t0) < lb;
-        if (overlap && A.zone !== B.zone && A.choreo !== B.choreo) err(`${ds} ${dt} crew ${crew}: ${A.id} (${A.zone} ${hm(a.t0)}–${hm(a.t1)}) overlaps ${B.id} (${B.zone} ${hm(b.t0)}–${hm(b.t1)})`);
+        if (overlap && A.zone !== B.zone && A.choreo !== B.choreo) err(`${ds} ${dt}${occ ? ` ${occ}` : ''} crew ${crew}: ${A.id} (${A.zone} ${hm(a.t0)}–${hm(a.t1)}) overlaps ${B.id} (${B.zone} ${hm(b.t0)}–${hm(b.t1)})`);
       }
     }
   }
@@ -338,7 +379,16 @@ for (const [id, g] of Object.entries(GLOSSARY)) scanText(`glossary ${id}`, g);
 
 // ---------------------------------------------------------------- report
 const T0 = times(DEFAULT);
-console.log(`EVENTS ${EVENTS.length}; weekday ${eventsFor('weekday').length}, friday ${eventsFor('friday').length}, shabbat ${eventsFor('shabbat').length}, occasional ${eventsFor('occasional').length}`);
+console.log(`EVENTS ${EVENTS.length}; weekday ${eventsFor('weekday').length}, friday ${eventsFor('friday').length}, shabbat ${eventsFor('shabbat').length}, occasional ${eventsFor('occasional').length}; Rosh Chodesh: weekday ${eventsFor('weekday', RC).length}, friday ${eventsFor('friday', RC).length}, shabbat ${eventsFor('shabbat', RC).length}`);
+// the calendar: the next Rosh Chodesh dates the model stages (time/zmanim.js occasionsOf), from the default date
+{
+  const out = [];
+  for (let i = 0, d = new Date(Date.UTC(2026, 10, 2)); out.length < 4 && i < 200; i++, d.setUTCDate(d.getUTCDate() + 1)) {
+    const c = { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() };
+    if (occasionsOf(hebrewDate(c)).includes('rosh-chodesh')) out.push(`${d.toISOString().slice(0, 10)} (${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()]}, ${hebrewDate(c).en})`);
+  }
+  console.log(`Rosh Chodesh after 2026-11-02: ${out.join(', ')}`);
+}
 console.log(`choreo ids (${new Set(EVENTS.map((e) => e.choreo)).size}): ${[...new Set(EVENTS.map((e) => e.choreo))].join(', ')}`);
 console.log('\n-- default date 2026-11-02 (alot 04:42, sunrise 05:56, sunset 16:49, tzeit 17:26):');
 for (const e of [...EVENTS].sort((a, b) => wrap(T0[a.id].t0 - 12 * 60) - wrap(T0[b.id].t0 - 12 * 60)))

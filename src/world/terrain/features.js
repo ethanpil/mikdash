@@ -7,6 +7,7 @@
 //   * low field walls round garden plots along the Kidron bed (Yoma 58b: the Azarah's effluent was sold to the
 //     gardeners) — the plots are returned for the garden trees
 import { InstancedMesh, IcosahedronGeometry, Matrix4, Vector3, Quaternion, Float32BufferAttribute } from 'three';
+import { splitInstancedBySector, sectorsOn, sectorMin, timed } from '../sectors.js';
 import { AMAH, m2w } from '../../core/units.js';
 import { rng, smooth } from '../mount/kit.js';
 import { distToPolyline, rectDist, inRect } from './plan.js';
@@ -263,6 +264,9 @@ function buildRocks(ctx, T, group, detail, blocked, rand, plots, ledgeLines = []
   im.castShadow = detail >= 3;
   im.receiveShadow = true;
   im.computeBoundingSphere();
-  group.add(im);
+  // perf-cpu round 2: one instanced mesh per cell round the Mount (world/sectors.js), each with its own bounding sphere:
+  // the whole set (410–1500 rocks over the landscape) was one sphere, drawn from every view (2–5 % in the view's frustum)
+  const pieces = sectorsOn(ctx) ? timed(ctx, (st) => { const ps = splitInstancedBySector(im, { min: sectorMin(ctx) }); if (ps) { st.batches++; st.pieces += ps.length; } return ps; }) : null;
+  if (pieces) for (const p of pieces) group.add(p); else group.add(im);
   return items.length;
 }

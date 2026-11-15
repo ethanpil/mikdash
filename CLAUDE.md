@@ -35,6 +35,20 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - Materials are baked on the GPU at load (`src/world/materials/gen`). On ANGLE/D3D11 keep generator shaders
   loop-free, read noise from basis textures, single output: ALU noise or MRT costs 0.3–3 s per program on the
   HD 4600. Features narrower than a texel must be widened/faded or they alias. `?matfx=0`, `?mattex=0` debug.
+- Masonry/sheet keys draw their joints analytically on low/medium (patch.js `mkJoint`: course coordinate + the jump of
+  the block-local distance in the albedo alpha, box-filtered, ALU only, no new sampler or program); bake-side, coarse
+  textures (>= 11–16 mm a texel) bake the MEAN of what they cannot resolve (pits, pecking, cavities) and drop detail
+  above their Nyquist frequency instead of aliasing it; there the wall masonry's stone-to-stone variation is halved
+  (`calm`) and the Herodian walls' baked AO eases to its mean between 8 and 32 m (`FOOT_AO`), or far walls read as a
+  patchwork of bricks (docs/decisions/materials-realism.md).
+- Clouds are one tile baked in a Worker (`src/env/clouds-core.js`, IndexedDB-cached), read only by the visible sky dome
+  and the stars: they never light the courts. Tiers with `ao: 'volume'` or no post draw the cumulus as a flat, loop-free
+  layer (512² tile, 3 fetches per sky pixel, sun colour from CPU uniforms); the others march it (1024²). In play the tile
+  is baked after 'firstFrame' and faded in; shot mode waits for it. Weather is a pure function of the date
+  (`?clouds=0`, `?cumulus=`, `?cirrus=`); opacity drops with clock speed above 60× so a scrubbed sky does not strobe.
+- The altar's smoke is one ribbon per plume, a straight column (Avot 5:5; Yoma 21b), lit by the key light at half
+  saturation; flames fade toward their card's sides and top (a torn tongue at a card edge tone-mapped to a pale flap on
+  low). Lamps use the `style: 'oil'` flame preset: one small steady teardrop, no sparks (docs/decisions/sky-smoke-fire.md).
 - Nav is built in a Worker by rasterising collider triangles into a 0.5 m multi-level grid; a coarse block graph
   steers A*. Half-amah stairs need sub-step probes (|Δh| up to 0.8 m per cell when each rise ≤ 0.35 m).
 - Audio is synthesised in module Workers (`src/audio/worker.js`); `?debug=audio` opens an audition panel.
@@ -45,6 +59,13 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   from `frequency.alone` with one seeded day quantile, never perDay plus sets.
 - People shaders: no dFdx/fwidth inside pattern branches (ANGLE/D3D11 flattens them; 10–18 s compiles); robes use
   a bake-time skirt cage + `clothSkin` flatten pass (MAX_BONES 36); people splice their own `lights_fragment_begin`.
+- People CPU: an actor's `object3D` hangs under `people.system.actorRoot`, outside the scene, with `matrixAutoUpdate`
+  off (1250+ pooled actors were 60 % of three's per-frame matrix update): move actors only through their setters; hidden
+  actors tick lazily (`Actor._flush` before any setter that changes how a figure advances), so read `actor.phase` only
+  after a flush. Per-frame code here often runs in Maglev, not TurboFan: a Set's `for…of`, closures, array literals,
+  destructuring and `subarray` in a frame loop allocate. Measure with `tools/cpu-prof.mjs` (CDP profile + heap sampling
+  that keeps what minor GCs collected); on SwiftShader measure the updaters with `engine.drawing = false`, since frames
+  that take seconds run every sim LOD every frame (docs/decisions/perf-cpu.md).
 - Curtains (the parochot, gate curtains, the lul's) and door leaves are movables, not colliders: a `ctx.physics.raycast`
   passes them. Anything that samples what the eye sees from a room must stop at the room's box unless the ray leaves
   through an open aperture (render/fx `roomExit`): fx's firelight adaptation saw past both parochot to the Azarah behind
@@ -61,9 +82,26 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   the renderer's UNLINKED PROGRAMS, not queued objects (≤ logical cores − 2, none for 2.5 s after Enter): a program issued
   while all of ANGLE's (cores − 1) link workers are busy blocks the GPU process, which froze play 1–10 s after Enter
   (gate-core-r2); a shadow pass keys its depth programs
-  with no lights but a shadow (warmup.js compileDepth); CSS animations of box-shadow/filter repaint every frame (the tag
+  with the light state the depth pre-pass left (all the scene's lights, see `prepassLight` below) and no fog, so
+  warmup.js compileDepth compiles them with the scene's lights and its fog lifted; CSS animations of box-shadow/filter repaint every frame (the tag
   pulse cost 11 fps) — animate transform/opacity only; fps here is quantized by vsync, so A/B in-page, interleaved, in
   normal play.
+- Every scene light carries the depth pre-pass's layer (render/prepass.js `prepassLight`, called where a light is made:
+  env's key light, fx's fire-light pool, the cascades' SunLight). A light without it changes three's light state twice a
+  frame and every lit material is re-keyed in the main pass (getProgram for 70+ materials: ≈ 1 ms of JS and ≈ 250 KB of
+  garbage a frame); the pre-pass's warm-up compiles with `ctx.scene` as its light scene, because three keys even
+  MeshDepthMaterial by the light counts (docs/decisions/perf-cpu.md, round 2).
+- Landscape batches (the kits' city and Mount batches, the rocks, the groves' far level, the stoa columns) are split into
+  cells round the Mount so three culls what lies behind the viewer (world/sectors.js: a disc, then rings × 6 sectors; a
+  plain wedge from the centre never culls for a viewer on the Mount, its sphere holds the apex). A cell under 4000
+  triangles joins one remainder piece per batch and a batch that would be mostly remainder stays whole: −20 to −27 % of
+  the frame's triangles for +16 to +33 draw calls. Split after the kit has registered its colliders. `?sectors=0` builds
+  them whole: the GPU benefit was never measured (no GPU where it was built), so A/B it on the HD 4600 before widening.
+- A point on an opening's plane, or in a room's margin just beyond it, reads that opening as from the plane itself
+  (env/interiors.js `apertureFraction`, `APERTURE_BEYOND`). It read 0, so an eye standing in a stoa's open side or in any
+  doorway was metered as in a closed room: the court 16–20× over, white at any hour. The stoas are `colonnade` volumes:
+  the share of the view that leaves between the columns (`viewOut`) is metered at the outdoor level. The shader's
+  `mkAperture` still returns 0 beyond the plane (left alone: it would re-key every lit program).
 - Tier features are capability flags in `src/core/quality.js` (shadows static/cached/cascaded, shadowFilter, aa, ao,
   interiors); code reads flags, never tier names. Low/medium take room sky visibility and AO from env's visibility volume
   (`env/visibility.js`): per-room bricks of each opening's solid-angle share × the live door weights in the uniform block
@@ -77,6 +115,34 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - UI is the Luach console (docs/console-design.md): one always-on Menu beacon, Esc as the only key to remember,
   one card system for every subject, a module registry for new sections (narration mounts in Listen). Inspect is
   CPU picking (no GPU queries); its describer and content load after firstFrame so cold boot does not regress.
+- A free click or tap on structure (walls, gates, chambers, stairs, floors) is scenery: a click captures the mouse, a
+  tap wakes the Menu with a name chip that opens the card; E, an aimed click and Nearby open anything
+  (`ui/console/pickui.js`). Event rows lead with Show me (gold); a clock jump of more than an hour is never a primary
+  button. On phones the Map hosts the travel bar only while it really covers the world (not at its mini detent), and a
+  Show me drops the sheet to mini before framing. Glosses come from the glossary's first clause (`console/gloss.js`),
+  never a second word list (docs/decisions/ux-audit.md, phase 2).
+- Occasions: `ctx.time.occasions` (Rosh Chodesh = the 1st of a month only, never 1 Tishrei: in the Temple the musaf
+  was offered on one day, Rambam Kiddush HaChodesh 3:5–6) are orthogonal to `dayType`; events take `occasion` /
+  `byOccasion` and are read through `eventsFor(dayType, time)`. Rosh Chodesh's limbs are laid on the altar top between
+  the horns (TuM 6:3); its musaf psalm is not recorded (Ps 81 stands in, said so in the caption). Its 123 kohanim are
+  pooled only on the first Rosh Chodesh date of a session (`src/sim/choreo/g7`), so an ordinary boot carries none.
+- A bull's limbs that Yoma 2:7 gives to two or three men are carried whole (Rambam Ma'aseh HaKorbanot 6:19: the large
+  limb of an ox is not divided): the prop rides ONE man's right palm (grip 'palm', seated level in people's
+  `carry_heavy`) and reaches over his partners' palms; the group is one centre Script whose men are placed `HEAVY.pair`
+  (0.634 m) apart each frame (g7 `bullFile` / rosh-chodesh-musaf `follow`), so the bulls and their crews are pooled at
+  scale 1. The bulls' file goes round the altar's east and up the ramp's east half (two abreast do not fit between the
+  yesod and the amah's channel). The flayed bull is the bull rig's own body lines skinned on the CPU to the bound pose
+  (props.js `bullCarcass`), in the figure's place; a new prop needs a `PROPS_INFO` entry (`objects-check.mjs`).
+- Gates: the night watch's own Levites draw the bars and open/shut the Mount and Azarah gates (Rambam KhM 3:2; door
+  times from `gates.js gateTimes`, shared with night-watch.js); the kohanim still open the great gate (Tamid 3:7); Tadi
+  never opens (Middot 1:3). Events may carry `onWeekday` (0 = Sunday: the showbread's reeds come out on Friday and go
+  back on Sunday, Menachot 11:6, TuM 5:11). The musaf's limbs wait on the ramp's EAST lower half, the tamid's on the
+  west (TuM 6:3). The afternoon call is an unnamed Levite of the officer's men (KhM 7:2), not Gevini (Yoma 20b gives
+  his cry at dawn only). Libations are bought by day with the seals (Shekalim 5:3–5; KhM 7:10–13): one buyer per
+  libation the individuals' offerings and the nazir/metzora sets stage, with the seal its animal needs, at a desk in Beit
+  HaMoked's unsanctified half (Tamid 3:3 puts a chamber of seals in that hall; the desk's place by day is reconstruction);
+  a kohen takes the wine to the silver table, where the existing libation-bearer takes up that jug (chambers-daily
+  `seals-sale`). Staged gaps and their sources: docs/decisions/source-gaps-staged.md.
 - Schedule times are relative to zmanim with a confidence level (explicit / ordering / reconstruction); the sources
   give the ORDER of the service, rarely minutes. The first lottery is staged in Beit HaMoked (Tamid 1:2), not the
   Gazit as report §27.2 has it. Report self-contradictions found while building are in `docs/report-errata.md`.

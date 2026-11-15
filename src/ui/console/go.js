@@ -5,7 +5,8 @@
 // travel:* events (distance, progress, ETA, pace; docs/decisions/console-travel.md).
 import { h, setText } from '../dom.js';
 import { ico } from './icons.js';
-import { w2m } from '../../core/units.js';
+import { w2m, m2w } from '../../core/units.js';
+import { showAction } from './eventrow.js';
 import { PACES } from '../settings.js';
 
 const WAYS = [['walk', 'Walk'], ['run', 'Run'], ['instant', 'Instant']];
@@ -40,7 +41,8 @@ export function createTravel(app) {
     const way = opts.way || d.way;
     const pace = opts.pace || d.pace;
     const evTitle = opts.event || null;
-    const label = evTitle ? `watch: ${evTitle}` : midSentence(opts.label);
+    // "Walking to the chavitin bakers at work" (the old "Walking to watch: The …" read oddly; ux-audit finding 12)
+    const label = evTitle ? midSentence(evTitle) : midSentence(opts.label);
     const my = ++token;
     const at = Array.isArray(target?.at) ? target.at : null;
     trip = { key: my, label, place: opts.label || null, way, pace, to: at, eventId: opts.eventId || null, evTitle, distance: null, remaining: null, eta: null, pathSite: null, effectivePace: pace };
@@ -56,6 +58,7 @@ export function createTravel(app) {
       trip = null;
       showBar(false);
       if (ok) {
+        faceOnArrival(opts);
         // ARRIVED is the banner's (from travel:zone final / travel:end, with this trip's event and place as context);
         // only a travel core that reports no trip (no travel:start) leaves it to us
         if (done?.cid == null) app.banner?.arrive({ eventTitle: evTitle, label: opts.label, zone: app.data.currentZoneId(), eventId: done?.eventId });
@@ -68,7 +71,89 @@ export function createTravel(app) {
   function goEvent(ev, opts = {}) {
     const target = app.data.viewTarget(ev);
     if (!target) { app.toast('No viewing place is given for this event'); return Promise.resolve(false); }
-    return start(target, { ...opts, event: ev.title?.en || ev.id, eventId: ev.id });
+    return start(target, { ...opts, event: ev.title?.en || ev.id, eventId: ev.id, face: { event: ev } });
+  }
+
+  // ---------------- arriving: face what you came for (ux-audit F) ----------------
+  // An arrival used to keep the stand's own heading: behind a baker's back, or facing a wall with the altar behind you.
+  // To an event: the inspect director frames its subject (the event's own see-in-action subject, where it is now). To a
+  // place: its centre, when it is more than a few metres off (standing at it, the heading the trip gave is kept).
+  /** the heading (deg, the player's convention: 0 = north, 90 = east) and pitch that put world point p in the free area */
+  function lookAtWorld(p) {
+    const eye = P()?.eye || ctx.camera?.position;
+    if (!eye || !p) return null;
+    const dx = p.x - eye.x, dy = p.y - eye.y, dz = p.z - eye.z;
+    const flat = Math.hypot(dx, dz);
+    const cam = ctx.camera, f = app.layout.free;
+    const W = innerWidth, H = innerHeight;
+    const tanV = Math.tan(((cam?.fov || 60) * Math.PI) / 360), tanH = tanV * (cam?.aspect || W / H);
+    const yawOff = (Math.atan((((f.l - f.r) / 2) / (W / 2)) * tanH) * 180) / Math.PI;
+    const pitchOff = (Math.atan((((f.t - f.b) / 2) / (H / 2)) * tanV) * 180) / Math.PI;
+    const bearing = ((Math.atan2(dx, -dz) * 180) / Math.PI + 360) % 360;
+    return { flat, heading: (bearing - yawOff + 360) % 360, pitch: Math.max(-25, Math.min(10, (Math.atan2(dy, flat) * 180) / Math.PI + pitchOff)) };
+  }
+  /** the level heading (deg) with the longest view before a wall (ctx.physics.raycast, 16 rays, once), or null */
+  function openHeading() {
+    const eye = P()?.eye || ctx.camera?.position;
+    const ray = ctx.physics?.raycast;
+    if (!eye || !ray) return null;
+    const h0 = P().heading ?? 0;
+    let best = null, bd = -1;
+    for (let i = 0; i < 16; i++) {
+      const hd = (h0 + i * 22.5) % 360, r = (hd * Math.PI) / 180;
+      const dir = eye.clone().set(Math.sin(r), 0, -Math.cos(r));
+      let d = 60;
+      try { const hit = ray.call(ctx.physics, eye, dir, 60); if (hit) d = hit.distance; } catch { return null; }
+      if (d > bd + 0.5) { bd = d; best = hd; } // (ties keep the heading nearest the one you had)
+    }
+    return best;
+  }
+  /** turn to a heading / pitch over ms (eased); any look or move input meanwhile wins */
+  function turnTo(heading, pitch, ms = 450) {
+    const pl = P();
+    if (!pl?.setLook) return;
+    const h0 = pl.heading ?? 0, p0 = pl.pitch ?? 0;
+    const dh = ((heading - h0 + 540) % 360) - 180;
+    if (app.reducedMotion()) { pl.setLook(heading, pitch); return; }
+    const t0 = performance.now();
+    let stop = false;
+    const off = ctx.bus.on('player:intent', (e) => { if (e?.kind === 'look' || e?.kind === 'move') stop = true; });
+    const step = () => {
+      if (stop) { off?.(); return; }
+      const u = Math.min(1, (performance.now() - t0) / ms);
+      const e = u < 0.5 ? 2 * u * u : 1 - 2 * (1 - u) * (1 - u);
+      pl.setLook((h0 + dh * e + 360) % 360, p0 + (pitch - p0) * e);
+      if (u < 1) requestAnimationFrame(step); else off?.();
+    };
+    requestAnimationFrame(step);
+  }
+  function faceOnArrival(opts) {
+    const f = opts.face;
+    if (!f) return;
+    // a frame later: the travel core's own arrival heading is set by then
+    requestAnimationFrame(() => {
+      try {
+        if (f.event) {
+          const a = showAction(app, `event:${f.event.id}`);
+          if (a && ctx.inspect?.frame) { ctx.inspect.frame(a)?.catch?.(() => {}); return; }
+          const q = app.data.eventPos(f.event);
+          if (q) { const t = lookAtWorld(m2w(q[0], q[1], (Number.isFinite(q[2]) ? q[2] : w2m(P().position).Z) + 1.3)); if (t && t.flat > 1.5) turnTo(t.heading, t.pitch); }
+          return;
+        }
+        if (f.zone) {
+          const m = app.mapModel?.()?.get(f.zone);
+          const c = m?.main ? [(m.main[0][0] + m.main[1][0]) / 2, (m.main[0][1] + m.main[1][1]) / 2] : m?.anchor;
+          if (!c) return;
+          const z = Number.isFinite(m.floorZ) ? m.floorZ : w2m(P().position).Z;
+          const t = lookAtWorld(m2w(c[0], c[1], z + 1.2));
+          if (t && t.flat > 4) { turnTo(t.heading, Math.max(-12, Math.min(4, t.pitch))); return; }
+          // standing at its centre: face the most open way across it (16 level rays; the stand's own heading faced a
+          // wall a few metres off in Lishkat HaMetzora'im)
+          const open = openHeading();
+          if (open != null) turnTo(open, -4);
+        }
+      } catch (e) { console.error('[ui] face on arrival', e); }
+    });
   }
   function goZone(id, opts = {}) {
     const z = app.data.zone(id) || {};
@@ -77,7 +162,7 @@ export function createTravel(app) {
     const m = app.mapModel?.()?.get(id);
     if (!p && m) p = [m.anchor?.[0] ?? (m.main[0][0] + m.main[1][0]) / 2, m.anchor?.[1] ?? (m.main[0][1] + m.main[1][1]) / 2, m.floorZ];
     if (!p) return Promise.resolve(false);
-    return start(Number.isFinite(p[2]) ? { at: [p[0], p[1], p[2]] } : { at: [p[0], p[1]] }, { ...opts, label: z.name?.en?.split(' — ')[0] || id });
+    return start(Number.isFinite(p[2]) ? { at: [p[0], p[1], p[2]] } : { at: [p[0], p[1]] }, { ...opts, label: z.name?.en?.split(' — ')[0] || id, face: { zone: id } });
   }
 
   // ---------------- travel core events ----------------
@@ -135,6 +220,9 @@ export function createTravel(app) {
   }, PACE_LABEL[p])));
   const slower = h('button.mk-hbtn.mk-travel__step', { type: 'button', 'aria-label': 'Slower', on: { click: () => step(-1) } }, ico('minus'), h('span.mk-travel__lbl', 'Slower'), h('span.mk-kbd.mk-chipcap', { 'data-cap': 'slower' }));
   const faster = h('button.mk-hbtn.mk-travel__step', { type: 'button', 'aria-label': 'Faster', on: { click: () => step(1) } }, ico('plus'), h('span.mk-travel__lbl', 'Faster'), h('span.mk-kbd.mk-chipcap', { 'data-cap': 'faster' }));
+  // fine pointers: Slower / Faster around the pace they set (the five pills did the same thing twice; ux-audit I); touch
+  // keeps the pills (its Slower / Faster are hidden)
+  const paceNow = h('span.mk-travel__pacenow.num', { 'aria-live': 'off' });
   const waySeg = h('div.mk-seg.mk-travel__way', { role: 'group', 'aria-label': 'Way' },
     h('button', { type: 'button', 'data-way': 'walk', on: { click: () => setWay('walk') } }, 'Walk'),
     h('button', { type: 'button', 'data-way': 'run', on: { click: () => setWay('run') } }, 'Run'));
@@ -142,7 +230,7 @@ export function createTravel(app) {
   const stopBtn = h('button.mk-hbtn.mk-travel__stop', { type: 'button', on: { click: stop } }, ico('stop'), h('span', 'Stop'));
   const bar = h('div.mk-travel.mk-glass.mk-live', { hidden: true, role: 'group', 'aria-label': 'Travelling' },
     h('div.mk-travel__line', icoBox, txt),
-    h('div.mk-travel__ctl', paceSeg, h('div.mk-travel__steps', slower, faster), waySeg, skipBtn, stopBtn), live);
+    h('div.mk-travel__ctl', paceSeg, h('div.mk-travel__steps', slower, paceNow, faster), waySeg, skipBtn, stopBtn), live);
   const vignette = h('div.mk-vignette', { 'aria-hidden': 'true' });
 
   function showBar(on) {
@@ -159,6 +247,7 @@ export function createTravel(app) {
       lastKey = key;
       icoBox.replaceChildren(ico(trip.way === 'run' ? 'run' : 'walk'));
       for (const b of paceSeg.children) b.setAttribute('aria-pressed', +b.dataset.pace === trip.pace ? 'true' : 'false');
+      setText(paceNow, PACE_LABEL[trip.pace] || `${trip.pace}×`);
       for (const b of waySeg.children) b.setAttribute('aria-pressed', b.dataset.way === trip.way ? 'true' : 'false');
       vignette.classList.toggle('on', (trip.effectivePace || trip.pace) >= 5 && trip.way !== 'instant');
     }
@@ -262,11 +351,13 @@ export function createTravel(app) {
       type: 'button', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', title: 'How to go: walk, run or at once; pace',
       on: { click: (e) => { e.stopPropagation(); openMenu(more, run); } },
     }, sub, ico('down'));
-    const el = h('span.mk-go', main, more);
+    // menu: false — a lone Go with the defaults (an event row: the pace lives in the travel bar; ux-audit E)
+    if (opts.menu === false) main.classList.add('mk-go__main--solo');
+    const el = h('span.mk-go', main, opts.menu === false ? null : more);
     const paintOne = () => {
       const d = defaults();
       const t = wayLabel(d.way, d.pace);
-      if (sub.textContent !== t) { setText(sub, t); more.setAttribute('aria-label', `How to go: ${t}. Change`); main.setAttribute('aria-label', `${opts.label || 'Go'}: ${t}`); }
+      if (sub.textContent !== t) { setText(sub, t); more.setAttribute('aria-label', `How to go: ${t}. Change`); main.setAttribute('aria-label', `${opts.label || 'Go'}: ${t}`); main.title = `${opts.label || 'Go'} there: ${t}`; }
       for (const k of el.querySelectorAll('[data-cap]')) { const v = app.input.cap(k.dataset.cap); setText(k, v || ''); k.hidden = !v; }
     };
     el._mkPaint = paintOne;
@@ -290,6 +381,7 @@ export function createTravel(app) {
         case 'see-in-action': {
           if (!ctx.inspect?.seeInAction) return null;
           if (trip) stop();
+          app.onShowStart?.(); // (a phone sheet drops to mini first: the director frames in the free area it then reads)
           return ctx.inspect.seeInAction(a);
         }
         case 'follow': return ctx.inspect?.follow?.(a.ref || card?.ref || null);

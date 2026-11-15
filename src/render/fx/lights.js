@@ -11,6 +11,7 @@
 // (intensity / distance²) and toward 0 otherwise; a slot is only handed over once its previous owner has
 // faded out => no popping. A cluster moving between pools cross-fades (both weights ease at the same rate).
 import { PointLight, Vector3, Color, ShaderChunk } from 'three';
+import { prepassLight } from '../prepass.js';
 
 const MERGE = 1.6;
 // qa-r1-fix-env-render: a fire is not a point. Close to the flames a point light's 1 / d² singularity burned a hot disc
@@ -124,7 +125,7 @@ export class FireLights {
     const shadowLights = [];
     const plainLights = [];
     for (let i = 0; i < this.max; i++) {
-      const l = new PointLight(0xff9040, 0, 10, 2);
+      const l = prepassLight(new PointLight(0xff9040, 0, 10, 2));   // (perf-cpu: render/prepass.js prepassLight)
       const sh = i < nShadow;
       l.name = sh ? `fx:firelight-shadow${i}` : `fx:firelight${i}`;
       l.castShadow = sh;

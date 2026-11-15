@@ -476,8 +476,9 @@ span.mk-src { color: var(--mk-ink-2); border-color: var(--mk-line-2); background
 #ui-root[data-layout='sheet-landscape'] .mk-mapcard__acts .mk-mapcard__lbl { display: none; }
 #ui-root[data-layout='sheet-landscape'] .mk-mapcard__acts .mk-btn { min-width: 40px; min-height: 40px; padding: 0 9px; }
 #ui-root[data-layout='sheet-landscape'] .mk-mapv__north { display: none; }
-#ui-root[data-layout^='sheet'] .mk-mapv__legend { display: none; }
-#ui-root[data-layout^='sheet'] .mk-mapv.is-key .mk-mapv__legend { display: flex; }
+/* the legend is behind the labelled Key chip on every layout, closed by default (ux-audit H: it sat over the plan) */
+#ui-root .mk-mapv__legend { display: none; }
+#ui-root .mk-mapv.is-key .mk-mapv__legend { display: flex; }
 #ui-root[data-layout^='sheet'] .mk-dialwrap { width: min(230px, 62vw); min-width: 0; }
 
 /* touch: map controls at least 40 px tall (44 on phones in portrait); level tags stay legible */

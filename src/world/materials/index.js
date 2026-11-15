@@ -116,6 +116,19 @@ const PAROCHET = {
     confidence: 'derived', note: 'cord size (8 mm), twill, twist and dye tones: reconstruction; figures not attested and not drawn; the two faces are not differentiated (one texture both sides)',
   },
 };
+// materials-realism: analytic hairline joints (patch.js mkJoint) where a low / medium texture is magnified (its 2–5 cm
+// texels drew every 2–3 mm joint as a soft dark band 5–10 cm wide at 1–3 m): [open joint half-width (m), rounded arris
+// (m), albedo in the open joint, course joints (1) or vertical joints only (0)] — the widths of the baked joints (sets.js)
+const JOINT = {
+  herodian: [0.0012, 0.004, 0.4, 1],     // laid dry: 1 mm joints, 4 mm rounded arrises
+  ashlar: [0.0015, 0.004, 0.45, 1],
+  wash: [0.001, 0.005, 0.75, 1],         // the Heichal's lime wash fills most of the joint
+  paveAz: [0.0012, 0.005, 0.42, 1],      // the Azarah's tight joints
+  paveMt: [0.002, 0.008, 0.4, 1],        // the Mount's, worn
+  sheet: [0.0005, 0.002, 0.4, 1],        // the gold sheets' overlapping seams
+  // the steps (−1: on vertical faces only — the risers; nothing of the blocks is baked, so on every tier)
+  steps: [0.0012, 0.005, 0.45, -1],
+};
 // Herodian drafted margins (patch.js MK_COMB): [comb detail set, margin -> boss roughness step lo, hi, normal strength,
 // top/bottom margin band (m: below it the strokes run vertically, above it horizontally)]
 const COMB = ['d_comb', 0.64, 0.72, 0.7, 0.15];
@@ -187,7 +200,7 @@ const LATER_GROUPS = [
 export const SPEC = {
   // ----------------------------------------------------------------- stone
   herodian_wall: {
-    set: 'herodian', macro: MAC.wall, block: BLOCK_HERODIAN, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
+    set: 'herodian', macro: MAC.wall, block: BLOCK_HERODIAN, calm: 0.5, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
     info: {
       en: 'Herodian marble ashlar — stones of white, blue-green and veined marble, each stone its own ("the stones differ in appearance one from another", Rashi), one course set out and one drawn in, left unplastered ("like the waves of the sea"); drafted, comb-dressed margins and a raised, pointed boss',
       sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi', 'Part VII §21 #1, §25', 'Part V §13.11'],
@@ -195,7 +208,7 @@ export const SPEC = {
     },
   },
   herodian_wall_inner: {
-    set: 'herodian_inner', macro: MAC.wall, block: BLOCK_HERODIAN, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
+    set: 'herodian_inner', macro: MAC.wall, block: BLOCK_HERODIAN, calm: 0.5, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
     info: {
       en: 'The same marble ashlar on the inner / court faces — drafted, combed margins round a lower, finer boss',
       sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi'], confidence: 'reconstruction', note: 'face finish of inner faces unattested',
@@ -218,28 +231,28 @@ export const SPEC = {
     info: { en: 'Marmara — veined marble', sources: ['Bava Batra 4a', 'Part VII §21 #1'], confidence: 'derived' },
   },
   ashlar_plain: {
-    set: 'ashlar', macro: MAC.wall, block: [0.07, 0.05, 0.03], detail: DET.stone, flat: ['#d9cfbb', 0.75, 0],
+    set: 'ashlar', macro: MAC.wall, block: [0.07, 0.05, 0.03], calm: 0.5, joint: JOINT.ashlar, detail: DET.stone, flat: ['#d9cfbb', 0.75, 0],
     info: {
       en: 'Large whole dressed stones (chambers, inner faces) — hewn off-site, no iron on site',
       sources: ['Rambam BhB 1:8–9', 'Part V §13.11'], confidence: 'derived', note: 'limestone colour, 0.96 m courses: reconstruction',
     },
   },
   paving_mount: {
-    set: 'paving_mount', macro: MAC.mount, block: [0.015, 0.06, 0.008], low: { block: 0.5 }, detail: DET.stone, wear: true, flat: ['#cfc4ad', 0.8, 0],
+    set: 'paving_mount', macro: MAC.mount, block: [0.015, 0.06, 0.008], low: { block: 0.5 }, joint: JOINT.paveMt, detail: DET.stone, wear: true, flat: ['#cfc4ad', 0.8, 0],
     info: {
       en: 'Har HaBayit pavement — large weathered pale marble slabs in rows',
       sources: ['Ezrat Kohanim I p.184 (Part X)'], confidence: 'reconstruction', note: 'slab sizes (rows 1.25 m) reconstruction',
     },
   },
   paving_azarah: {
-    set: 'paving_azarah', macro: MAC.pave, block: [0.05, 0.08, 0.02], low: { block: 0.5 }, detail: DET.marble, flat: ['#d6cdbd', 0.55, 0],
+    set: 'paving_azarah', macro: MAC.pave, block: [0.05, 0.08, 0.02], low: { block: 0.5 }, joint: JOINT.paveAz, detail: DET.marble, flat: ['#d6cdbd', 0.55, 0],
     info: {
       en: 'Azarah floor — "precious stones" (avanim yekarot): large fitted fine marble slabs, tight joints, worn smooth by bare feet',
       sources: ['Rambam BhB 1:10', 'Zevachim 24a', 'Part VII §21 #9'], confidence: 'derived', note: 'slab sizes and stone colour: reconstruction',
     },
   },
   steps_stone: {
-    set: 'steps', macro: MAC.stone, detail: DET.stone, flat: ['#d3c8b2', 0.7, 0],
+    set: 'steps', macro: MAC.stone, block: [0.05, 0.06, 0.012], joint: JOINT.steps, detail: DET.stone, flat: ['#d3c8b2', 0.7, 0],
     info: { en: 'Stone steps (Chel, the 15 steps, Ulam steps) — dressed hard limestone', sources: ['Middot 2:3, 2:5, 3:6'], confidence: 'derived' },
   },
   lime_whitewash: {
@@ -288,7 +301,7 @@ export const SPEC = {
   },
   // ----------------------------------------------------------------- metal (colour = F0, sRGB)
   gold_plate: {
-    set: 'goldplate', color: GOLD_PLATE, rough: 1, metal: 1, macro: MAC.metal, block: [0.005, 0, 0.002], detail: DET.gold, ibl: IBL.gold,
+    set: 'goldplate', color: GOLD_PLATE, rough: 1, metal: 1, macro: MAC.metal, block: [0.005, 0, 0.002], joint: JOINT.sheet, detail: DET.gold, ibl: IBL.gold,
     flat: ['#d4a640', 0.22, 1],
     info: {
       en: 'Beaten gold sheets (rikuei zahav) over walls and gate doors — visible seams, hammer dishing',
@@ -420,7 +433,7 @@ export const SPEC = {
     },
   },
   heichal_whitewash: {
-    set: 'ashlar_wash', macro: MAC.lime, block: [0.025, 0.03, 0.01], detail: DET.lime, flat: ['#efebe2', 0.88, 0],
+    set: 'ashlar_wash', macro: MAC.lime, block: [0.025, 0.03, 0.01], joint: JOINT.wash, detail: DET.lime, flat: ['#efebe2', 0.88, 0],
     info: {
       en: 'Lime whitewash over large dressed ashlar — the Heichal, whitewashed once a year at Pesach (Middot 3:4 "וההיכל, פעם אחת, בפסח"): joints softened and mostly filled, fresher and brighter than bare stone',
       sources: ['Middot 3:4', 'Rambam BhB 4:13', 'Part V §13.6, §13.11'], confidence: 'derived',
@@ -533,14 +546,14 @@ export const SPEC = {
   // the same Herodian walls with course heights of 1.00–1.20 m from a course table: builders that model the set-out
   // courses from ctx.mats.courseAt(key, y) switch to these keys (the 1.1 m keys stay for the current geometry)
   herodian_wall_courses: {
-    set: 'herodian_c', macro: MAC.wall, block: BLOCK_HERODIAN, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
+    set: 'herodian_c', macro: MAC.wall, block: BLOCK_HERODIAN, calm: 0.5, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.6, 0],
     info: {
       en: 'herodian_wall with course heights varying 1.00–1.20 m (a course table: ctx.mats.courseAt(key, y)), the marble chosen stone by stone',
       sources: ['Bava Batra 4a', 'Part V §13.11'], confidence: 'reconstruction', note: 'course heights: reconstruction',
     },
   },
   herodian_wall_inner_courses: {
-    set: 'herodian_inner_c', macro: MAC.wall, block: BLOCK_HERODIAN, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
+    set: 'herodian_inner_c', macro: MAC.wall, block: BLOCK_HERODIAN, calm: 0.5, joint: JOINT.herodian, detail: DET.stone, comb: true, foot: true, flat: ['#ddd6c6', 0.65, 0],
     info: { en: 'herodian_wall_inner on the same course table as herodian_wall_courses', sources: ['Bava Batra 4a', 'Sukkah 51b with Rashi'], confidence: 'reconstruction' },
   },
   // bark of one species per log (Tamid 2:3: fig, walnut and oil-tree, never olive or vine) and the olive groves' trunks
@@ -641,7 +654,8 @@ export function createMaterialLibrary(ctx) {
     mkFootMap: { value: null },
     mkFoot: { value: new Vector4(0, 0, 1, 1) },
     mkFootK: { value: new Vector4(0, FOOT[0], FOOT[1], FOOT[2]) },
-    mkFootG: { value: new Vector2(FOOT[3], 0) },
+    // (y, materials-realism r2: the far fade of the walls' baked occlusion on the tiers with coarse textures)
+    mkFootG: { value: new Vector2(FOOT[3], (q.textureSize || 1024) <= 1024 ? 1 : 0) },
   };
   let altarU = null;
   const t0Lib = performance.now();
@@ -757,17 +771,22 @@ export function createMaterialLibrary(ctx) {
     const mac = s.macro || MAC.none;
     const det = s.detail;
     const blk = (set?.layout && s.block) || null;
-    const blkA = blk ? blk[0] * lowOf(s, 'block', 1) : 0;
+    // materials-realism r2: the wall masonry's per-stone value / hue spread halved where textures are coarse (calm)
+    const calm = s.calm && (q.textureSize || 1024) <= 1024 ? s.calm : 1;
+    const blkA = blk ? blk[0] * lowOf(s, 'block', 1) * calm : 0;
     const ibl = iblOf(s);
     const dtex = det && patchState.detail ? detailTex(det[0]) : null;
     const ctex = s.comb && patchState.detail ? detailTex(COMB[0]) : null;
     const lay = set?.layout;
+    // materials-realism: analytic joints on the tiers whose textures cannot draw a hairline joint up close (≤ 1024 px)
+    const jt = s.joint && lay && ((q.textureSize || 1024) <= 1024 || s.joint[3] < 0) ? s.joint : null;
     return {
       mkMacroMap: { value: macroTex() },
       mkMacro: { value: new Vector4(mac[0], mac[1], 1 / mac[2], mac[3]) },
       mkTint: { value: new Color(mac[4]) },
-      mkBlock: { value: blk ? new Vector4(lay.q, lay.rowH, lay.dMax, blkA) : new Vector4(1, lay?.rowH || 1, 1, 0) },
-      mkBlockR: { value: new Vector2(blk ? blk[1] : 0, blk ? blk[2] || 0 : 0) },
+      // (the layout's quantum and dMax also when the key has no per-block variation: the analytic joints read them)
+      mkBlock: { value: lay ? new Vector4(lay.q, lay.rowH, lay.dMax, blk ? blkA : 0) : new Vector4(1, 1, 1, 0) },
+      mkBlockR: { value: new Vector2(blk ? blk[1] : 0, blk ? (blk[2] || 0) * calm : 0) },
       mkDetailMap: { value: dtex },
       mkDetail: { value: dtex ? new Vector4(det[1], det[2], det[3], det[4]) : new Vector4(0, 0, 0, 0) },
       mkDetailFade: { value: new Vector2(2.5, 12) },
@@ -776,6 +795,8 @@ export function createMaterialLibrary(ctx) {
       mkCourseMap: { value: lay?.courseTex || null },
       mkCourse: { value: new Vector2(set?.tile?.[1] || 1, lay?.courseN || 1) },
       mkMetal: { value: new Vector4(ibl[0], ibl[1], ibl[2], 0) },
+      mkJoint: { value: new Vector4(jt ? 1 : 0, jt ? jt[0] : 0, jt ? jt[1] : 0, set?.w ? set.tile[0] / set.w : 1) },
+      mkJoint2: { value: new Vector2(jt ? jt[2] : 1, jt ? jt[3] : 1) },
       // (every patched material carries the route-wear uniforms — the program is shared — zero unless it has routes)
       ...(s.wear ? wearUniforms() : {
         mkWear: { value: new Vector4(0, 1, 0, 0) }, mkWearA: { value: new Vector4() }, mkWearB: { value: new Vector4() }, mkWearC: { value: new Vector4() },
@@ -1216,6 +1237,7 @@ export function createMaterialLibrary(ctx) {
       if (failed || !baker) return;
       Object.assign(q, nq);
       baker.rebake(nq.textureSize || 1024, nq.anisotropy || 4);
+      footU.mkFootG.value.y = (nq.textureSize || 1024) <= 1024 ? 1 : 0;
       shared.details.clear();
       for (const [id, r] of baker.baked) if (id.startsWith('d_')) shared.details.set(id, r);
       const detailWas = patchState.detail;

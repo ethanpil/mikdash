@@ -32,7 +32,7 @@ export function defineVolumes(ctx) {
     // courses: without this the Kodesh coffers sat outside the room and mirrored daylight into the gold
     if (o.ceilingTop != null) max[2] = Math.max(max[2], o.ceilingTop);
     else if ((o.shell ?? SHELL_WALLS) <= SHELL_ZONE) max[2] += 1;
-    const v = { id, min: [...b.min], max, base: o.base ?? CLOSED_ROOM, margin: o.margin ?? 0.3, shell: o.shell ?? SHELL_WALLS, joins: o.joins || [], apertures: o.apertures || [], probe: o.probe || null, gold: !!o.gold };
+    const v = { id, min: [...b.min], max, base: o.base ?? CLOSED_ROOM, margin: o.margin ?? 0.3, shell: o.shell ?? SHELL_WALLS, joins: o.joins || [], apertures: o.apertures || [], probe: o.probe || null, gold: !!o.gold, colonnade: !!o.colonnade };
     vols.push(v);
     return v;
   };
@@ -200,7 +200,9 @@ export function defineVolumes(ctx) {
   const stoa = [['south', 1, +1], ['north', 1, -1], ['west', 0, +1], ['east', 0, -1]];
   for (const [k, ax, side] of stoa) {
     const b = box(`mount.stoa.${k}`);
-    if (b) add(`mount.stoa.${k}`, b, { base: 0.05, shell: SHELL_WALLS, apertures: ap([face(b, ax, side, b, () => 0.75, 1)]) });
+    // colonnade: open along a whole side — an eye that looks out between the columns adapts to the court it sees, not to
+    // the shaded walk it stands in (env's meter, interiors.viewOut)
+    if (b) add(`mount.stoa.${k}`, b, { base: 0.05, shell: SHELL_WALLS, colonnade: true, apertures: ap([face(b, ax, side, b, () => 0.75, 1)]) });
   }
   // the Chuldah passages (mechilot) under the Mount: lit from the southern portal and the stairwell at the top
   for (const k of ['w', 'e']) {
