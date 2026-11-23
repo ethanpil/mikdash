@@ -42,6 +42,31 @@ own phase offset, so it scrubs and repeats exactly. No per-frame code, no shader
   moved.
 - Cost: +32 frames per serving rig (man, elder). Per frame: none.
 
+## Atlas and boot
+- The atlas grows from 8932 to ≈ 10 470 frames for the eight boot rigs (two more 1024-row blocks: ≈ 1.8 MB of half
+  floats on the GPU, one texture as before). The extra bake runs in the prebake worker (≈ 60 ms on this machine in
+  node). Headless low-tier boots with the changes: firstFrame 36.8 s / 38.5 s under a load average of ~38 (other agents
+  sharing the 4 cores), so not comparable to the HD 4600 numbers in CLAUDE.md; not measured there.
+
+## Images (SwiftShader, low; `?debug=people` lineup)
+- shots/lifelike/people/animals-lineup_t0900-00.png and _t0900-04.png, and animals-idle_0900-00_vs_0900-04_crop-and-diff.png
+  (the two moments and a thresholded difference): the animals render with the variants, no pops; over 4 s the visible
+  change at this distance is small (edges of heads, legs, tails), as intended. Console: warnings only, no errors.
+
+- shots/lifelike/people/standing-row_t0900-00.png / _t0900-08.png (+ _and-diff): the role row renders, no errors. These
+  two do NOT show the glance: see the finding below.
+- shots/lifelike/people/solo-glance_pphase-0.30.png / _0.62.png: five figures at a fixed clip phase (`&pphase=`), so the
+  variants whose glance falls at 0.30 (stand~1) or 0.62 (base stand) are caught mid-glance;
+  solo-glance_heads_0.30-top_0.62-bottom.png enlarges the five heads: the Israelite (1st) and the elder (4th) are turned
+  aside at 0.30 and face ahead at 0.62. At 5 m the turn reads clearly; at 20–40 m (crowd shots) it is a few pixels.
+
+## Finding (pre-existing, not changed)
+- An actor or crowd posed without an explicit phase advances it by frame time (system.js `_tick`: `phase += dt × rate`),
+  not as a function of sim time. So an idle loop's phase is not reproducible across a scrub or across two shot runs at
+  different `t` (shot mode pauses the clock; the phase drifts with frame count). The clips themselves are pure functions
+  of the phase. Making idle phases `(simTime × rate + offset) mod 1` would be a system.js change touching every auto
+  pose: left for its own change.
+
 ## Not verified
 - On a GPU: nothing was looked at on the HD 4600. Shots here are SwiftShader, low tier (see shots/lifelike/people/).
 - Whether the glance phase lines up across actors the sim starts at the same instant with the same phase (actors set
