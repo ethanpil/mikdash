@@ -76,6 +76,15 @@ function glance(ph, at, deg) {
   return deg * smooth(-0.1, -0.05, d) * (1 - smooth(0.04, 0.1, d));
 }
 
+/** a seated figure awake (lifelike-people r2): a breath every 3 s (six a loop of 18 s) and once a loop a glance of
+ *  `deg` (head 55 %, neck 45 %) at phase `at`, added on the key pose; the hands rest where the key pose put them */
+function sitIdle(P, ph, at, deg) {
+  const g = glance(ph, at, deg);
+  P.add('neck', 0, 0.45 * g, 0);
+  P.add('head', 0, 0.55 * g + 1.5 * sin(ph * TAU * 2 + 0.7), 0);
+  breathe(P, ph * 6);
+}
+
 // grip offset of the fist centre from the wrist, hand-local (right; mirror x for left)
 export function gripOffset(r, s) {
   const k = r.dims.handS || 1;
@@ -544,9 +553,10 @@ export const HUMAN_CLIPS = {
       }
     },
   },
+  // lifelike-people r2: an 18 s loop, a breath every 3 s (awake), once a loop a glance of 12° and back (sitIdle)
   sit: { // on a seat ≈ 1 amah high; origin = floor point under the seat
-    frames: 16, loop: true, rate: 0.1,
-    fn(P, r, ph) { keySit(P, r); breathe(P, ph * 2); },
+    frames: 48, loop: true, rate: 1 / 18,
+    fn(P, r, ph) { keySit(P, r); sitIdle(P, ph, 0.55, 12); },
   },
   slaughter: { // shechitah: bent over the animal, knife drawn to and fro (holachah / hava'ah)
     frames: 24, loop: true, rate: 0.8, grip: 'fist', hand: 'r',
@@ -989,8 +999,8 @@ function keyBatheStand(P, r) {
 
 export const SERVICE_CLIPS = {
   sit_floor: {
-    frames: 16, loop: true, rate: 0.1,
-    fn(P, r, ph) { keySitFloor(P, r); breathe(P, ph * 2); },
+    frames: 48, loop: true, rate: 1 / 18,
+    fn(P, r, ph) { keySitFloor(P, r); sitIdle(P, ph, 0.3, -11); },
   },
   call: {
     frames: 24, loop: true, rate: 0.2,
