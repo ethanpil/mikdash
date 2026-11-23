@@ -60,3 +60,20 @@ visitor's own movement (silent).
 - Not verified: the feel at the ear (cadence, whether the stair thump reads as a stair), and the stair test against the
   live controller on every staircase (frame rate, the auto-walk's path following): checked only by reading the
   controller's step-up code, not in play.
+
+### The steps in play (src/audio/dev/steps-play.js)
+- Run with the real controller, the real frame loop and a running AudioContext (low, SwiftShader, ~3–5 s a frame, so
+  every frame's dt is the engine's clamp, 0.1 s; the player moves by the same dt, so nothing bunches or goes missing):
+  `node src/sim/dev/run.mjs --q low --timeout 900 --keep-ui --script src/audio/dev/steps-play.js ""` (shot mode turns
+  audio off; the script enables the input the welcome card holds off and wraps `engine.cue` to count). Measured:
+  - level walk (W on the Mount's plaza): 15 cues in 11.15 m and 5 in 3.84 m (1.30–1.35 a metre; 1/0.72 = 1.39 less the
+    first stride after a start), none 'stair';
+  - level run (Shift+W, 4.5 m/s): 9 in 8.61 m (1/0.9 = 1.11), none 'stair' — not dropped by the 4.5 m/s jump gate,
+    since the controller's speed approaches 4.5 from below and the player moves by the same dt the gate uses;
+  - the twelve Chel steps from their foot (2.87 m walked, +2.88 m): 3 cues, all 'stair' (the first stride starts at 0);
+  - standing after release: 1 cue in the 0.63 m the body coasts, then none; 3 teleports: 0; fly (10 frames up and
+    forward): 0; landing from 4 m: 0;
+  - auto-walk (`goTo(…, 'walk')`, mode 'auto', grounded every frame): 3 in 2.71 m, none 'stair'.
+- So no change to `updateSteps`. Known, left: a `goTo` with `way: 'run'` (only the trip test uses it) keeps the 0.72 m
+  stride, since `running` reads the Shift key; a trip at pace ≥ ~3.3 walks faster than the gate and is silent.
+- Still not verified: the feel at the ear, the other staircases, and frame rates between 10 and 60 fps on a real GPU.
