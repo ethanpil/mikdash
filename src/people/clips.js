@@ -695,9 +695,18 @@ export const OFFERING_CLIPS = {
     frames: 32, loop: true, stride: 'stride', grip: 'pair', pairGrip: 'palm',
     fn(P, r, ph) { walkBody(P, r, ph, { noArms: true }); carryLimbsArms(P, r, ph, 0.006 * cos(2 * TAU * ph)); },
   },
+  // lifelike-people: the man waiting with his animal on the lead sways and breathes as 'stand' does (the lead hand is
+  // an IK target, so it stays put on the rope) and once a loop looks down to his right, along the lead, and back
   lead: {
-    frames: 16, loop: true, rate: 0.15, grip: 'fist', hand: 'r',
-    fn(P, r, ph) { stance(P, r, { cy: -4 }); armHang(P, 'l'); leadArm(P, r, false); breathe(P, ph); },
+    frames: 48, loop: true, rate: 0.0625, grip: 'fist', hand: 'r',
+    fn(P, r, ph) {
+      const w = sin(ph * TAU * 2), g = glance(ph, 0.45, 1);
+      stance(P, r, {
+        cy: -4, px: 0.007 * w, pr: -0.9 * w, sr: 0.6 * w, hr: 0.6 * w,
+        hy: 2 * sin(ph * TAU * 2 + 1.3) - 10 * g, ny: -4 * g, head: -11 * g, neck: 2.5 - 4 * g,
+      });
+      armHang(P, 'l'); leadArm(P, r, false); breathe(P, ph * 4);
+    },
   },
   lead_walk: {
     frames: 32, loop: true, stride: 'stride', grip: 'fist', hand: 'r',
