@@ -505,7 +505,8 @@ export const HUMAN_CLIPS = {
     },
   },
   sleep: { // on the side, knees drawn up (the young kohanim slept on the Moked floor, Tamid 1:1)
-    frames: 12, loop: true, rate: 0.08, grip: 'pillow_side',
+    // lifelike-people r2: 36 frames (was 12: four samples a breath drew it as a zig-zag) and a deeper breath
+    frames: 36, loop: true, rate: 0.08, grip: 'pillow_side',
     fn(P, r, ph) {
       const d = r.dims, k = d.H / 1.67;
       P.root(0, d.chest[0] * 0.95, 0, 0, 0, -90);
@@ -516,7 +517,7 @@ export const HUMAN_CLIPS = {
         P.rot(`shin_${s}`, -88, 0, 0);
         P.rot(`foot_${s}`, -25, 0, 0);
       }
-      breathe(P, ph * 3, 1.4);
+      breathe(P, ph * 3, 2);   // asleep: a slow, deep breath (≈ 4.2 s)
       // the arms rest on the floor in front of him (model space while lying on the right side: +y up off the floor,
       // +x toward the head, −z his front): the lower (right) arm comes forward from under the body, its hand palm down
       // before the face; the upper (left) arm has fallen forward over it, the hand on the floor before the chest. (They
@@ -531,7 +532,7 @@ export const HUMAN_CLIPS = {
   },
   lie: { // on the back, the hands resting on the belly and the elbows by the sides: ≈ 0.47 m across the elbows, so
     // the elders fit the 1-amah rovadin (Tamid 1:1) — the arms at the sides made the figure ≈ 0.7 m wide
-    frames: 12, loop: true, rate: 0.08, grip: 'pillow_back',
+    frames: 36, loop: true, rate: 0.08, grip: 'pillow_back',
     fn(P, r, ph) {
       const d = r.dims, k = d.H / 1.67;
       const lift = d.chest[1] + 0.01;
@@ -543,7 +544,7 @@ export const HUMAN_CLIPS = {
         if (s === 'r') { P.rot('thigh_r', 21, 0, 3); P.rot('shin_r', -40, 0, 0); P.rot('foot_r', -5, 0, 2); }
         else { P.rot(`thigh_${s}`, 8, 0, 2 * sg); P.rot(`shin_${s}`, -14, 0, 0); P.rot(`foot_${s}`, -25, 0, 2 * sg); }
       }
-      breathe(P, ph * 3, 1.4);
+      breathe(P, ph * 3, 2);   // asleep: a slow, deep breath (≈ 4.2 s)
       // model space while lying: +y up off the floor, +z toward the head. The wrists over the flanks on the belly's
       // top, palms down, fingers toward the navel, thumbs toward the chest; the right hand a little higher
       const yB = lift + d.waist[1] + 0.046 * k, zB = r.rest[r.index.spine].y;
