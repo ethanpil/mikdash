@@ -13,6 +13,32 @@ const MAX_DIST = { torch: 16, 'water-channel': 28, sheep: 70, fire: 220 };
 const TMIN = [6.4, 6.4, 8.4, 11.9, 15.1, 17.3, 18.9, 18.9, 17.6, 15.6, 11.8, 8.0];
 const CRICKETS = [0, 0, 0.3, 1, 1, 1, 1, 1, 1, 1, 0.35, 0];
 
+// lifelike-audio: the wind bed's level over and above the daylight term, a pure function of the sim's absolute time
+// (docs/decisions/lifelike-audio.md). Smooth value noise: hash of an integer lattice, smoothstep between knots.
+const hashI = (i) => { let h = Math.imul(i | 0, 0x27d4eb2d) ^ 0x165667b1; h ^= h >>> 15; h = Math.imul(h, 0x85ebca6b); h ^= h >>> 13; return (h >>> 0) / 4294967296; };
+const vnoise = (x) => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return hashI(i) * (1 - u) + hashI(i + 1) * u; };
+/**
+ * Wind gain multiplier (linear) for { ms: sim epoch ms, t: minutes after local midnight, zm: zmanim (minutes),
+ * speed: clock rate, cover: today's cumulus coverage 0..~0.16 (env's clouds) }:
+ *  - gusts: two octaves of value noise (37 s and 13 s) of sim seconds, −2.7..+3.3 dB, flattened when the clock runs
+ *    fast (≥ 30×: a scrubbed clock would only step the level);
+ *  - the afternoon breeze: +2 dB from ~5 h after sunrise until an hour after sunset, the quiet before dawn as is
+ *    (Jerusalem's sea breeze reaches the hills about midday — reconstruction from the modern climate);
+ *  - the weather: a day with cumulus (the early-rain season and the winter) up to +3 dB.
+ */
+export function windShape({ ms, t, zm, speed = 1, cover = 0 } = {}) {
+  let g = 1;
+  if (Number.isFinite(ms)) {
+    const s = (ms / 1000) % 1048576, depth = 1 - ss(4, 30, Math.abs(speed));
+    const n = 0.6 * vnoise(s / 37) + 0.4 * vnoise(s / 13 + 517);
+    g *= Math.pow(10, (depth * (n - 0.45) * 6) / 20);
+  }
+  if (zm && Number.isFinite(t) && Number.isFinite(zm.sunrise) && Number.isFinite(zm.sunset)) {
+    g *= 1 + 0.26 * ss(zm.sunrise + 240, zm.sunrise + 360, t) * (1 - ss(zm.sunset, zm.sunset + 60, t));
+  }
+  return g * (1 + 2.6 * Math.max(0, Math.min(0.16, cover || 0)));
+}
+
 export class Ambience {
   constructor(ctx, engine) {
     this.ctx = ctx;
@@ -126,7 +152,8 @@ export class Ambience {
     const zone = this.engine.zoneId || '';
     const high = zone === 'roof' || zone === 'har-hamishchah' ? 1.8 : 1;
     const L = this.layers;
-    this.wind?.setGain((0.65 + 0.35 * day) * high * L.wind, 2);
+    const cover = ctx.env?.clouds?.uniforms?.uCuUV?.value?.w ?? 0; // read-only: today's cumulus (env/clouds.js)
+    this.wind?.setGain((0.65 + 0.35 * day) * high * L.wind * windShape({ ms: time?.ms, t: time?.t, zm: time?.zmanim, speed: time?.speed, cover }), 2);
     this.updateInsects(night * L.insects);
     this.doves?.setGain((day * 0.8 + dawn * 0.5) * L.doves, 3);
     this.sheep?.setGain((0.35 + 0.65 * day + 0.4 * dawn) * L.sheep * this.near(this.sheep, 'sheep'), 2);
