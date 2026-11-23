@@ -41,6 +41,10 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   above their Nyquist frequency instead of aliasing it; there the wall masonry's stone-to-stone variation is halved
   (`calm`) and the Herodian walls' baked AO eases to its mean between 8 and 32 m (`FOOT_AO`), or far walls read as a
   patchwork of bricks (docs/decisions/materials-realism.md).
+- Worn ways are uniform data on the shared route code (patch.js `mkWear`; materials/index.js `wearUniforms(kind)`:
+  `wear: true` the Mount's routes, `'steps'` the middles of the east-axis flights): no new program or sampler. Inside a
+  route the code also eases the key's macro dust tint, so a "darker, polished" band nets to nothing (the Azarah's was
+  dropped for that; docs/decisions/lifelike-wear.md).
 - Clouds are one tile baked in a Worker (`src/env/clouds-core.js`, IndexedDB-cached), read only by the visible sky dome
   and the stars: they never light the courts. Tiers with `ao: 'volume'` or no post draw the cumulus as a flat, loop-free
   layer (512² tile, 3 fetches per sky pixel, sun colour from CPU uniforms); the others march it (1024²). In play the tile
