@@ -1287,7 +1287,7 @@ function carryLambArms(P, r, ph, lift = 0) {
 // how a man stands at rest, how far apart he lifts his hands — never a different act.
 // The animals' 'stand' and 'stand_halter' have three variants each too (animal-clips.js IDLE); a rig without a
 // variant falls back to the base clip.
-export const CLIP_VARIANTS = { stand: 3, raise_hands: 3, stand_halter: 3 };
+export const CLIP_VARIANTS = { stand: 3, raise_hands: 3, stand_halter: 3, walk: 3 };
 
 /** a variant of 'stand': weight on one leg (the other foot a little forward and out), the head turned and tilted, arms
  *  a touch bent or hanging further back; o: { w (weight shift −1…1), foot: [x, z], head: [pitch, yaw, roll], arm } */
@@ -1315,6 +1315,24 @@ function standVariant(o) {
 HUMAN_CLIPS['stand~1'] = standVariant({ w: 1, foot: [0.025, -0.07], head: [-1, 9, 2.5], glance: [0.3, -15, 1], arm: { r: { elbow: 16, flex: 6 } } });
 HUMAN_CLIPS['stand~2'] = standVariant({ w: -0.8, foot: [0.03, -0.05], head: [3.5, -11, -1.5], neck: 4, glance: [0.8, 14, -2], arm: { l: { elbow: 22, flex: 2, ftwist: 30 } } });
 HUMAN_CLIPS['stand~3'] = standVariant({ w: 0.35, foot: [0.04, 0.03], head: [-4.5, 4, -2.5], neck: 0.5, rate: 0.1, glance: [0.48, 12, 3], arm: { l: { flex: -2, elbow: 14 }, r: { flex: -3, elbow: 12 } } });
+
+/** a variant of 'walk' (lifelike-people r3): the same walk (hips, legs, feet, arm swing and stride untouched) with the
+ *  head carried a little differently, so a stream of walkers is not one figure copied: o = { head: [pitch (− down),
+ *  yaw, roll] }, the neck taking a share. Constant over the cycle, so the seam is the base walk's. */
+function walkVariant(o) {
+  const hp = o.head[0], hy = o.head[1], hr = o.head[2];
+  return {
+    frames: 32, loop: true, stride: 'stride',
+    fn(P, r, ph) {
+      walkBody(P, r, ph);
+      P.add('neck', 0.3 * hp, 0.4 * hy, 0);
+      P.add('head', 0.7 * hp, 0.6 * hy, hr);
+    },
+  };
+}
+HUMAN_CLIPS['walk~1'] = walkVariant({ head: [-5, 0, 0] });      // eyes a little down on the way ahead
+HUMAN_CLIPS['walk~2'] = walkVariant({ head: [-1, 5, 1.5] });    // looking a little to one side
+HUMAN_CLIPS['walk~3'] = walkVariant({ head: [3, -3.5, -1] });   // chin up, a touch to the other side
 
 /** a variant of 'raise_hands' (Birkat Kohanim in the Mikdash, hands above the head — Tamid 7:2): o = { x, y, z (the
  *  wrists: half spread, height in H, forward), spread (fingers), out (palms turned outward), head [pitch, yaw, roll],

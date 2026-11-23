@@ -103,3 +103,20 @@ script fixes the phase (they would not glance); nothing on a real GPU.
 Image (SwiftShader, low, no console errors): shots/lifelike/people/r2-sit_0.40-top_0.55-bottom.png (and the full frames
 r2-sit_pphase-0.40.png / 0.55.png): three seated figures (`&solo=…&spose=sit&pphase=`) face ahead at 0.40 and are turned
 mid-glance at 0.55 (clearest on the Levite, right). The solo lineup draws no seat under them (a demo matter).
+
+## Round 3: walkers' head carriage
+- Probe first: the walk's head is not locked (it counter-rotates ±2.5° yaw and nods 1.2° with the step), but every
+  walker of a rig ran the one `walk` clip, so a stream of walkers carried their heads identically. Checked and left:
+  `salt` (option b: its 1.7 s loop would have to double; not worth the risk to the salting's timing in the time left).
+- Choice: `walk~1..3` (clips.js `walkVariant`, `CLIP_VARIANTS.walk = 3`), picked by seed / crowd offset like the
+  other variants: the base walk plus a CONSTANT head carriage (neck 30–40 %, head the rest): ~1 eyes 5° down, ~2 5° to
+  one side and down 1°, ~3 chin up 3° and 3.5° to the other side. A slow drift within the loop was not possible: the
+  walk loop is one stride (≈ 1 s), and a multi-stride loop would change the stride coupling that keeps the feet from
+  sliding. Carry walks (carry_*_walk, lead_walk, torch_walk, …) are unchanged.
+- Evidence: `node src/people/dev/walk-variants-check.mjs` — for man, woman, elder and child, every bone of hips, legs,
+  feet, arms, hands and chest is 0.000 mm from the base walk at all 32 frames; the head offsets are constant to ±0.1°
+  (yaw 0 / +5.0 / −3.5°, pitch −5.0 / −1.0 / +3.0°). idle-probe: seams 0.00 cm, steps as the base walk.
+- Atlas: +96 frames per human rig (+480 at boot): 11 152 → 11 632 frames, which crosses into a 12th 1024-row block
+  (≈ 0.9 MB more half floats). Per-frame cost: none.
+- Not verified: no image; whether the hats and the kohen gadol's mitre/tzitz (riding the head bone) look right tilted 5°
+  (they follow the bone, as in the standing glances); animals' walks have no variants (they fall back to 'walk').
