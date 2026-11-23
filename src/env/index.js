@@ -103,6 +103,8 @@ const NIGHT_AMBIENT_CUT = 0.5;
 const lum3 = (c) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
 
 const DEG = Math.PI / 180;
+// lifelike-atmosphere: extra surface aerosol under the night's inversion (× 2.5 at dawn: visibility ≈ 50 → 20 km) ⚙
+const MORNING_HAZE = 1.5;
 const smooth = (a, b, x) => { const t = MathUtils.clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 
 // Bennett (1982) refraction for apparent altitude h (deg), arcmin; its gradient flattens a low Sun's disc
@@ -953,7 +955,14 @@ export async function init(ctx) {
     fogU.set('mkFogExtR', ATMO.rayleighScattering.map((v) => v * rho / 1000));
     const mieY0 = mie.ext[1] * Math.exp(-ATMO.observerAltitude / ATMO.mieHeight) / 1000;
     const zr = luminance(st.zenith) / Math.max(luminance(st.horizonMean), 1e-12);
-    fogU.set('mkFogParams', [mieY0 * api.haze, 1 / (ATMO.mieHeight * 1000), MathUtils.clamp(zr, 0.15, 1), hazeFar]);
+    // lifelike-atmosphere: the night's surface inversion holds the hills' and the city's aerosol near the ground; the
+    // morning Sun mixes it up through a deeper layer. Surface haze × (1 + MORNING_HAZE · w): w = 1 from the evening
+    // twilight through the night until the Sun is 4° up, 0 once it is 30° up (≈ 2½ h after sunrise in autumn) and all
+    // afternoon. A pure function of the Sun's place (azimuth < 180°: east of the meridian, the rising half of its circle).
+    const hw = sun.azimuth < 180 ? 1 - smooth(4, 30, sun.altitude) : smooth(-4, -30, sun.altitude);
+    api.hazeDiurnal = 1 + MORNING_HAZE * hw;
+    const haze = api.haze * api.hazeDiurnal;
+    fogU.set('mkFogParams', [mieY0 * haze, 1 / (ATMO.mieHeight * 1000), MathUtils.clamp(zr, 0.15, 1), hazeFar]);
     const sk = st.skyline;
     fogU.set('mkFogSky0', [sk[0], sk[1], sk[2], sk[3]]);
     fogU.set('mkFogSky1', [sk[4], sk[5], sk[6], 1]);
@@ -961,7 +970,7 @@ export async function init(ctx) {
     scene.fog.color.setRGB(F[0][0] * P, F[0][1] * P, F[0][2] * P);
     // stock exp2 consumers (FX flames/smoke, custom shaders): 1 - exp(-(ρd)²) equals the physical
     // 1 - exp(-σd) at FOG_MATCH_DIST (≈4.8e-4/m: 0.3 % at 100 m, 1.4 % at 300 m), not 50× stronger
-    const sigma = mieY0 * api.haze + ATMO.rayleighScattering[1] * rho / 1000;
+    const sigma = mieY0 * haze + ATMO.rayleighScattering[1] * rho / 1000;
     scene.fog.density = Math.sqrt(sigma / FOG_MATCH_DIST);
     api.fog.density = scene.fog.density;
     api.fog.extinction = sigma;
@@ -1040,6 +1049,8 @@ export async function init(ctx) {
     useTerrainVisibility: null,
     /** aerosol multiplier on the fog extinction (1 = the modelled Jerusalem autumn haze) */
     haze: 1,
+    /** lifelike-atmosphere: the diurnal surface-haze factor applied on top of `haze` (1 by day, up to 1 + MORNING_HAZE) */
+    hazeDiurnal: 1,
     /**
      * Aerial perspective for custom shaders. `values` is live (FogUniforms): mkFogA0…A4 the horizon in-scatter at 0, 45,
      * 90, 135, 180° from mkFogRefDir's azimuth (scene units; fog.js interpolates them geometrically), mkFogExtR Rayleigh extinction rgb (1/m), mkFogParams
