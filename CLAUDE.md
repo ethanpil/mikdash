@@ -82,7 +82,10 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   that take seconds run every sim LOD every frame (docs/decisions/perf-cpu.md).
 - Idle life is baked into the clips, at no per-frame cost (docs/decisions/lifelike-people.md): `stand`, `stand~k`,
   `stand_hold` and `lead` are 16–20 s, 48-frame loops with one glance (`clips.js glance()`); the animals' `stand` /
-  `stand_halter` have three idle variants (`animal-clips.js IDLE`) chosen by seed through `CLIP_VARIANTS`. Check a new
+  `stand_halter` have three idle variants (`animal-clips.js IDLE`) chosen by seed through `CLIP_VARIANTS`; `sit` /
+  `sit_floor` breathe and glance (`sitIdle`), `sleep` / `lie` breathe slower and deeper, a lying animal breathes and
+  flicks its ears; `walk~1..3` are the base walk with the head carried differently (legs, arms and stride identical:
+  `src/people/dev/walk-variants-check.mjs`). Rites' moments (bow, prostration, blessing, semichah) are untouched. Check a new
   idle with `node src/people/dev/idle-probe.mjs <rig> <clips>` (travel, frame step, loop seam). Auto-advanced poses
   integrate their phase by frame time (`system.js _tick`), not sim time: idle phases do not scrub and differ between
   shot runs; `&pphase=` (debug=people) shows a given moment of an idle.
