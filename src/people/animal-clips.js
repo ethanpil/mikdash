@@ -168,15 +168,22 @@ export const QUAD_CLIPS = {
       P.rot('jaw', 3 + 4 * Math.max(0, sin(ph * TAU)), 0, 0);
     },
   },
+  // lifelike-people r2: 48 frames (was 12, the head's slow nod alone moved): a breath every ≈ 3 s (the barrel's spine
+  // and chest), once a loop a look aside and back, each ear flicking on its own beat, one small tail flick
   lie: {
-    frames: 12, loop: true, rate: 0.08,
+    frames: 48, loop: true, rate: 0.08,
     fn(P, r, ph) {
       const d = r.dims;
+      const b = sin(ph * TAU * 4), look = 14 * bump(ph, 0.35, 0.13);
       // sternal recumbency: the barrel resting on the floor, fore legs folded under at the knee, hind legs tucked
       P.off('pelvis', 0, -d.H * 0.6, 0);
       P.rot('pelvis', 2, 0, 4);
-      P.rot('chest', 4, 0, -2);
-      P.rot('neck', 10 + 2 * sin(ph * TAU), 8, 0); P.rot('neck2', 6, 6, 0); P.rot('head', -6, 4, 0);
+      P.rot('spine', 0.6 * b, 0, 0);
+      P.rot('chest', 4 + 0.6 * b, 0, -2);
+      P.rot('neck', 10 + 2 * sin(ph * TAU), 8 + 0.4 * look, 0); P.rot('neck2', 6, 6 + 0.3 * look, 0); P.rot('head', -6, 4 + 0.3 * look, 0);
+      P.rot('ear_l', 0, 0, -2 - 12 * bump(ph, 0.12, 0.035) - 12 * bump(ph, 0.7, 0.035));
+      P.rot('ear_r', 0, 0, 2 + 12 * bump(ph, 0.52, 0.035));
+      P.rot('tail', 0, 0, 10 * bump(ph, 0.86, 0.04) * sin(dist(ph, 0.86) / 0.04 * Math.PI));
       for (const s of ['l', 'r']) {
         P.rot(`f${s}_up`, -14, 0, 0); P.rot(`f${s}_lo`, -150, 0, 0); P.rot(`f${s}_ft`, -12, 0, 0);
         P.rot(`h${s}_up`, 74, 0, s === 'l' ? -12 : 12); P.rot(`h${s}_lo`, -130, 0, 0); P.rot(`h${s}_ft`, -15, 0, 0);
