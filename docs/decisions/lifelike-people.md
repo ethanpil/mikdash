@@ -75,3 +75,48 @@ own phase offset, so it scrubs and repeats exactly. No per-frame code, no shader
   image at the extremes).
 - Goldens (`tools/goldens.mjs`) were not re-run: figures in the golden views will be at a different pose for the same
   time, by design.
+
+## Round 2: figures waiting or resting off their feet
+Each candidate was probed first (`node src/people/dev/idle-probe.mjs <rig> <clip>`); only the frozen or nearly frozen
+were changed. Same mechanism: baked clips, no per-frame code, loop seams 0.00 cm.
+
+| clip | before (probe) | after |
+|---|---|---|
+| `sit` (judges, scribes on seats) | 10 s, 16 frames, 5 s breath, head still (nose 0.7 cm) | 18 s, 48 frames, 3 s breath, glance 12° at 0.55 (nose 4.0 cm, step ≤ 1.9 cm), hands ≤ 0.9 cm |
+| `sit_floor` (on the heels) | same as `sit` | 18 s, 48 frames, 3 s breath, glance −11° at 0.30 (nose 3.7 cm, step ≤ 1.7 cm) |
+| `sleep` (young kohanim on the Moked floor, sleeping guard) | 4.2 s breath × 1.4, 12 frames (4 samples a breath; shoulders 0.7 cm) | 4.2 s breath × 2, 36 frames (shoulders ≈ 1 cm, step ≤ 0.3 cm); hands follow the shoulders ≤ 0.9 cm |
+| `lie` (elders on the rovadin) | as `sleep` | as `sleep`; the hands on the belly are IK targets: 0 cm |
+| animals' `lie` | neck nod 2° only, 12 frames (nose 0.8 cm, tail 0) | 48 frames: 3 s breath in the barrel, look 14° once (lamb head yaw 19 → 32 → 19°), ear flicks, a tail flick; folded legs ≤ 0.8 cm |
+
+Left alone: `kneel` (a rite's moment: the kneeling-prostration sequence), `flay`, `flay_kneel`, `knead` (already move:
+the body sways 2–6 cm with the work), `salt` (the torso is still while the right hand salts in a 1.7 s loop: a breath
+cannot fit that loop without doubling it, and the salting count may be tied to its phase; not changed in the time).
+Bowing, prostration, the blessing and semichah are untouched.
+
+Atlas: +560 frames for the five boot human rigs (`sit` +32, `sit_floor` +32, `sleep` +24, `lie` +24 each) and +36 per
+quad rig (+108 for the three boot rigs): 10 484 → 11 152 frames (`bake-stats.mjs`), still within 11 blocks of 1024 rows
+plus the scratch frames, i.e. no new texture block beyond round 1's. Prebake time unchanged within noise.
+
+Not verified: the sleeper's mantle (the cover prop) against the deeper breath (≈ 0.3 cm more lift); judges whose sim
+script fixes the phase (they would not glance); nothing on a real GPU.
+
+Image (SwiftShader, low, no console errors): shots/lifelike/people/r2-sit_0.40-top_0.55-bottom.png (and the full frames
+r2-sit_pphase-0.40.png / 0.55.png): three seated figures (`&solo=…&spose=sit&pphase=`) face ahead at 0.40 and are turned
+mid-glance at 0.55 (clearest on the Levite, right). The solo lineup draws no seat under them (a demo matter).
+
+## Round 3: walkers' head carriage
+- Probe first: the walk's head is not locked (it counter-rotates ±2.5° yaw and nods 1.2° with the step), but every
+  walker of a rig ran the one `walk` clip, so a stream of walkers carried their heads identically. Checked and left:
+  `salt` (option b: its 1.7 s loop would have to double; not worth the risk to the salting's timing in the time left).
+- Choice: `walk~1..3` (clips.js `walkVariant`, `CLIP_VARIANTS.walk = 3`), picked by seed / crowd offset like the
+  other variants: the base walk plus a CONSTANT head carriage (neck 30–40 %, head the rest): ~1 eyes 5° down, ~2 5° to
+  one side and down 1°, ~3 chin up 3° and 3.5° to the other side. A slow drift within the loop was not possible: the
+  walk loop is one stride (≈ 1 s), and a multi-stride loop would change the stride coupling that keeps the feet from
+  sliding. Carry walks (carry_*_walk, lead_walk, torch_walk, …) are unchanged.
+- Evidence: `node src/people/dev/walk-variants-check.mjs` — for man, woman, elder and child, every bone of hips, legs,
+  feet, arms, hands and chest is 0.000 mm from the base walk at all 32 frames; the head offsets are constant to ±0.1°
+  (yaw 0 / +5.0 / −3.5°, pitch −5.0 / −1.0 / +3.0°). idle-probe: seams 0.00 cm, steps as the base walk.
+- Atlas: +96 frames per human rig (+480 at boot): 11 152 → 11 632 frames, which crosses into a 12th 1024-row block
+  (≈ 0.9 MB more half floats). Per-frame cost: none.
+- Not verified: no image; whether the hats and the kohen gadol's mitre/tzitz (riding the head bone) look right tilted 5°
+  (they follow the bone, as in the standing glances); animals' walks have no variants (they fall back to 'walk').

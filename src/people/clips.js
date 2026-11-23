@@ -76,6 +76,15 @@ function glance(ph, at, deg) {
   return deg * smooth(-0.1, -0.05, d) * (1 - smooth(0.04, 0.1, d));
 }
 
+/** a seated figure awake (lifelike-people r2): a breath every 3 s (six a loop of 18 s) and once a loop a glance of
+ *  `deg` (head 55 %, neck 45 %) at phase `at`, added on the key pose; the hands rest where the key pose put them */
+function sitIdle(P, ph, at, deg) {
+  const g = glance(ph, at, deg);
+  P.add('neck', 0, 0.45 * g, 0);
+  P.add('head', 0, 0.55 * g + 1.5 * sin(ph * TAU * 2 + 0.7), 0);
+  breathe(P, ph * 6);
+}
+
 // grip offset of the fist centre from the wrist, hand-local (right; mirror x for left)
 export function gripOffset(r, s) {
   const k = r.dims.handS || 1;
@@ -496,7 +505,8 @@ export const HUMAN_CLIPS = {
     },
   },
   sleep: { // on the side, knees drawn up (the young kohanim slept on the Moked floor, Tamid 1:1)
-    frames: 12, loop: true, rate: 0.08, grip: 'pillow_side',
+    // lifelike-people r2: 36 frames (was 12: four samples a breath drew it as a zig-zag) and a deeper breath
+    frames: 36, loop: true, rate: 0.08, grip: 'pillow_side',
     fn(P, r, ph) {
       const d = r.dims, k = d.H / 1.67;
       P.root(0, d.chest[0] * 0.95, 0, 0, 0, -90);
@@ -507,7 +517,7 @@ export const HUMAN_CLIPS = {
         P.rot(`shin_${s}`, -88, 0, 0);
         P.rot(`foot_${s}`, -25, 0, 0);
       }
-      breathe(P, ph * 3, 1.4);
+      breathe(P, ph * 3, 2);   // asleep: a slow, deep breath (≈ 4.2 s)
       // the arms rest on the floor in front of him (model space while lying on the right side: +y up off the floor,
       // +x toward the head, −z his front): the lower (right) arm comes forward from under the body, its hand palm down
       // before the face; the upper (left) arm has fallen forward over it, the hand on the floor before the chest. (They
@@ -522,7 +532,7 @@ export const HUMAN_CLIPS = {
   },
   lie: { // on the back, the hands resting on the belly and the elbows by the sides: ≈ 0.47 m across the elbows, so
     // the elders fit the 1-amah rovadin (Tamid 1:1) — the arms at the sides made the figure ≈ 0.7 m wide
-    frames: 12, loop: true, rate: 0.08, grip: 'pillow_back',
+    frames: 36, loop: true, rate: 0.08, grip: 'pillow_back',
     fn(P, r, ph) {
       const d = r.dims, k = d.H / 1.67;
       const lift = d.chest[1] + 0.01;
@@ -534,7 +544,7 @@ export const HUMAN_CLIPS = {
         if (s === 'r') { P.rot('thigh_r', 21, 0, 3); P.rot('shin_r', -40, 0, 0); P.rot('foot_r', -5, 0, 2); }
         else { P.rot(`thigh_${s}`, 8, 0, 2 * sg); P.rot(`shin_${s}`, -14, 0, 0); P.rot(`foot_${s}`, -25, 0, 2 * sg); }
       }
-      breathe(P, ph * 3, 1.4);
+      breathe(P, ph * 3, 2);   // asleep: a slow, deep breath (≈ 4.2 s)
       // model space while lying: +y up off the floor, +z toward the head. The wrists over the flanks on the belly's
       // top, palms down, fingers toward the navel, thumbs toward the chest; the right hand a little higher
       const yB = lift + d.waist[1] + 0.046 * k, zB = r.rest[r.index.spine].y;
@@ -544,9 +554,10 @@ export const HUMAN_CLIPS = {
       }
     },
   },
+  // lifelike-people r2: an 18 s loop, a breath every 3 s (awake), once a loop a glance of 12° and back (sitIdle)
   sit: { // on a seat ≈ 1 amah high; origin = floor point under the seat
-    frames: 16, loop: true, rate: 0.1,
-    fn(P, r, ph) { keySit(P, r); breathe(P, ph * 2); },
+    frames: 48, loop: true, rate: 1 / 18,
+    fn(P, r, ph) { keySit(P, r); sitIdle(P, ph, 0.55, 12); },
   },
   slaughter: { // shechitah: bent over the animal, knife drawn to and fro (holachah / hava'ah)
     frames: 24, loop: true, rate: 0.8, grip: 'fist', hand: 'r',
@@ -989,8 +1000,8 @@ function keyBatheStand(P, r) {
 
 export const SERVICE_CLIPS = {
   sit_floor: {
-    frames: 16, loop: true, rate: 0.1,
-    fn(P, r, ph) { keySitFloor(P, r); breathe(P, ph * 2); },
+    frames: 48, loop: true, rate: 1 / 18,
+    fn(P, r, ph) { keySitFloor(P, r); sitIdle(P, ph, 0.3, -11); },
   },
   call: {
     frames: 24, loop: true, rate: 0.2,
@@ -1276,7 +1287,7 @@ function carryLambArms(P, r, ph, lift = 0) {
 // how a man stands at rest, how far apart he lifts his hands — never a different act.
 // The animals' 'stand' and 'stand_halter' have three variants each too (animal-clips.js IDLE); a rig without a
 // variant falls back to the base clip.
-export const CLIP_VARIANTS = { stand: 3, raise_hands: 3, stand_halter: 3 };
+export const CLIP_VARIANTS = { stand: 3, raise_hands: 3, stand_halter: 3, walk: 3 };
 
 /** a variant of 'stand': weight on one leg (the other foot a little forward and out), the head turned and tilted, arms
  *  a touch bent or hanging further back; o: { w (weight shift −1…1), foot: [x, z], head: [pitch, yaw, roll], arm } */
@@ -1304,6 +1315,24 @@ function standVariant(o) {
 HUMAN_CLIPS['stand~1'] = standVariant({ w: 1, foot: [0.025, -0.07], head: [-1, 9, 2.5], glance: [0.3, -15, 1], arm: { r: { elbow: 16, flex: 6 } } });
 HUMAN_CLIPS['stand~2'] = standVariant({ w: -0.8, foot: [0.03, -0.05], head: [3.5, -11, -1.5], neck: 4, glance: [0.8, 14, -2], arm: { l: { elbow: 22, flex: 2, ftwist: 30 } } });
 HUMAN_CLIPS['stand~3'] = standVariant({ w: 0.35, foot: [0.04, 0.03], head: [-4.5, 4, -2.5], neck: 0.5, rate: 0.1, glance: [0.48, 12, 3], arm: { l: { flex: -2, elbow: 14 }, r: { flex: -3, elbow: 12 } } });
+
+/** a variant of 'walk' (lifelike-people r3): the same walk (hips, legs, feet, arm swing and stride untouched) with the
+ *  head carried a little differently, so a stream of walkers is not one figure copied: o = { head: [pitch (− down),
+ *  yaw, roll] }, the neck taking a share. Constant over the cycle, so the seam is the base walk's. */
+function walkVariant(o) {
+  const hp = o.head[0], hy = o.head[1], hr = o.head[2];
+  return {
+    frames: 32, loop: true, stride: 'stride',
+    fn(P, r, ph) {
+      walkBody(P, r, ph);
+      P.add('neck', 0.3 * hp, 0.4 * hy, 0);
+      P.add('head', 0.7 * hp, 0.6 * hy, hr);
+    },
+  };
+}
+HUMAN_CLIPS['walk~1'] = walkVariant({ head: [-5, 0, 0] });      // eyes a little down on the way ahead
+HUMAN_CLIPS['walk~2'] = walkVariant({ head: [-1, 5, 1.5] });    // looking a little to one side
+HUMAN_CLIPS['walk~3'] = walkVariant({ head: [3, -3.5, -1] });   // chin up, a touch to the other side
 
 /** a variant of 'raise_hands' (Birkat Kohanim in the Mikdash, hands above the head — Tamid 7:2): o = { x, y, z (the
  *  wrists: half spread, height in H, forward), spread (fingers), out (palms turned outward), head [pitch, yaw, roll],
