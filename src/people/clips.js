@@ -1256,7 +1256,9 @@ function carryLambArms(P, r, ph, lift = 0) {
 // each figure keeps one (system.js variantOf: an actor by its seed, a crowd member by its own offset). CLIP_VARIANTS
 // lists how many there are beside the base clip. The variants are small, natural differences of stance and gesture —
 // how a man stands at rest, how far apart he lifts his hands — never a different act.
-export const CLIP_VARIANTS = { stand: 3, raise_hands: 3 };
+// The animals' 'stand' and 'stand_halter' have three variants each too (animal-clips.js IDLE); a rig without a
+// variant falls back to the base clip.
+export const CLIP_VARIANTS = { stand: 3, raise_hands: 3, stand_halter: 3 };
 
 /** a variant of 'stand': weight on one leg (the other foot a little forward and out), the head turned and tilted, arms
  *  a touch bent or hanging further back; o: { w (weight shift −1…1), foot: [x, z], head: [pitch, yaw, roll], arm } */

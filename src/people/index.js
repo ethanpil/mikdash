@@ -161,7 +161,7 @@ export async function init(ctx) {
     // people-4: crank (the Golah wheel's hub, spokes and the wheel angle <-> phase coupling), waveUnder (the tenufah pair's
     // spacing), knead (the working surface), eat (the bite's phase window)
     stations: { windlass: WINDLASS, windlassRaise: WINDLASS_RAISE, staff: STAFF, mitreGrasp: MITRE_GRASP, crank: CRANK, waveUnder: WAVE_UNDER, knead: KNEAD, eat: EAT },
-    animalPoses: Object.keys(QUAD_CLIPS),
+    animalPoses: Object.keys(QUAD_CLIPS).filter((n) => !n.includes('~')),
     birdPoses: Object.keys(BIRD_CLIPS),
     get actors() { return [...sys.actors]; },
     get stats() { return sys.stats; },
