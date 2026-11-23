@@ -22,8 +22,8 @@ import { createProbes } from './probes.js';
 import { createClouds, startCloudBake, CLOUD_SIZES } from './clouds.js';
 
 const TIERS = {
-  low: { skyW: 128, skyH: 64, steps: 18, envSize: 32, envInterval: 1.0, envAngle: 1.0, stars: 1200, magLimit: 5.6, milkyWay: false, twinkle: false },
-  medium: { skyW: 192, skyH: 96, steps: 26, envSize: 64, envInterval: 0.3, envAngle: 0.5, stars: 3000, magLimit: 6.2, milkyWay: false, twinkle: false },
+  low: { skyW: 128, skyH: 64, steps: 18, envSize: 32, envInterval: 1.0, envAngle: 1.0, stars: 1200, magLimit: 5.6, milkyWay: false, twinkle: true },
+  medium: { skyW: 192, skyH: 96, steps: 26, envSize: 64, envInterval: 0.3, envAngle: 0.5, stars: 3000, magLimit: 6.2, milkyWay: false, twinkle: true },
   high: { skyW: 256, skyH: 128, steps: 34, envSize: 128, envInterval: 0.15, envAngle: 0.35, stars: 5500, magLimit: 6.5, milkyWay: true, mwOct: 4, twinkle: true },
   ultra: { skyW: 320, skyH: 160, steps: 44, envSize: 128, envInterval: 0.1, envAngle: 0.25, stars: 8000, magLimit: 6.8, milkyWay: true, mwOct: 5, twinkle: true },
 };
