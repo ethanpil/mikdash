@@ -49,10 +49,20 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - The altar's smoke is one ribbon per plume, a straight column (Avot 5:5; Yoma 21b), lit by the key light at half
   saturation; flames fade toward their card's sides and top (a torn tongue at a card edge tone-mapped to a pale flap on
   low). Lamps use the `style: 'oil'` flame preset: one small steady teardrop, no sparks (docs/decisions/sky-smoke-fire.md).
+- Stars twinkle on every tier (the shader's existing term, on env's real-time clock, not sim time). Fog's surface
+  aerosol follows the night's inversion: × (1 + `MORNING_HAZE` 1.5) from evening twilight until the Sun is 4° up, × 1 by
+  30° and all afternoon, a function of the Sun's position; `api.haze` stays the user multiplier, `api.hazeDiurnal` reads
+  out the factor (reconstruction; docs/decisions/lifelike-atmosphere.md).
 - Nav is built in a Worker by rasterising collider triangles into a 0.5 m multi-level grid; a coarse block graph
   steers A*. Half-amah stairs need sub-step probes (|Δh| up to 0.8 m per cell when each rise ≤ 0.35 m).
 - Audio is synthesised in module Workers (`src/audio/worker.js`); `?debug=audio` opens an audition panel.
 - Psalm melodies, choir size on low/medium, insect season: reconstruction (see docs/decisions/audio.md).
+- Wind bed gain = daylight × `windShape` (ambience.js): sim-time value-noise gusts (flat at ≥ 30× clock), an afternoon
+  breeze (reconstruction) and env's per-date cumulus cover read from `ctx.env.clouds.uniforms.uCuUV.value.w` (no second
+  weather model). The visitor's own barefoot steps (Berakhot 9:5) are one `footsteps` cue with `steps: 1` per stride from
+  `ctx.player.position` (not in fly mode, ≤ 4.5 m/s, no camera jumps); an abrupt snap of the feet within a stride is a
+  stair (`surface: 'stair'`); `ambience.setLayer('steps', 0)` mutes them. `node src/audio/dev/lifelike-test.mjs` checks
+  both offline; nobody has listened to either (docs/decisions/lifelike-audio.md).
 - Offerings: notar is burned by day only; at night the visible burning is the fats and limbs on the altar, turned
   all night (Rambam TuM 1:6); weekday fats are not burned on Shabbat, so Friday night shows the fire alone.
   Frequencies in OFFERING_RULES are totals that include the composite sets (yoledet, zav, nazir, metzora): stage
