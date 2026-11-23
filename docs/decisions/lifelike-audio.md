@@ -32,3 +32,31 @@ visitor's own movement (silent).
   float ops every 0.5 s.
 - Not verified: how the gusts feel at the ear, and whether +5.5 dB on a cloudy afternoon is too much for a bed of
   43 dB SPL (at its loudest it stays ≈ 6 dB under the court crowd heard from 10 m by day).
+
+## The visitor's own bare feet, on the pavement and on stairs (ambience.js `updateSteps`, foley.js `footsteps`)
+
+- **One barefoot step per stride the visitor walks (0.72 m; 0.9 m running), played at the feet as the existing
+  `footsteps` cue with `steps: 1`.** — walking through silent courts felt like floating; barefoot because no one entered
+  the Mount in shoes (Berakhot 9:5) and the existing cue is already the bare foot on stone (Zevachim 24a) — a separate
+  synth (none needed).
+- **Only on the ground, not in flight, not above 4.5 m/s (fast travel) and not across a camera jump (> 1 m drop or a
+  teleport); standing still is silent.** — the step must belong to a body walking.
+- **A stride with an abrupt height change of the feet (> 0.1 m in one frame and steeper than 0.6) is a step on a stair:
+  `surface: 'stair'` renders a heavier, darker foot set down flat (heel thump ×1.5 at 170 Hz, less toe roll, no grit
+  scuff).** — the half-amah stairs snap the controller's feet up or down; a ramp (the kevesh, 9 in 32) changes height
+  smoothly and keeps the pavement step — the controller's own stairs estimate (player/, not mine to change).
+- **Level: the cue's 56 dB SPL less 10 dB, alternate feet −1 dB.** — a barefoot step heard from 1.6 m is quiet: it
+  should sit at the night wind's level and well under the crowd by day.
+- `surface` joins the cue's `synth` keys; an undefined surface leaves the existing renders' cache keys (and their bytes:
+  the rng sequence of a multi-step render is unchanged) as they were. The `?debug=audio` panel has "my step" buttons.
+- Measured (low, 32 kHz; high agrees within 0.4 dB): single step 1.06 s, peak −1 dBFS (the peak cap, so the loudest
+  400 ms is −21.8 dBFS pavement / −18.9 stair, under the −16 target), DC < 3e-10, first sample 0 and the last 64
+  samples < 3e-11 (no clicks); centroid 537–756 Hz pavement, 179–231 Hz stair (60–73 % of the energy below 300 Hz).
+  At the ear: pavement −50.7 dBFS, stair −47.8 dBFS (loudest 400 ms); the wind bed −51.9 dBFS RMS by night, −48.2 by
+  day before its gusts; the court crowd from 10 m −36.5; the pyre from 20 m −36.8 — the steps sit with the night wind
+  and 14 dB under the day's crowd.
+- Cost: per frame a few scalar reads and compares (no allocation); one cue (a voice for ~1 s) per stride, 8 cached
+  buffers of ~34–50 KB.
+- Not verified: the feel at the ear (cadence, whether the stair thump reads as a stair), and the stair test against the
+  live controller on every staircase (frame rate, the auto-walk's path following): checked only by reading the
+  controller's step-up code, not in play.

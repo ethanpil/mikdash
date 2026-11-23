@@ -7,6 +7,7 @@ import { Vector3 } from 'three';
 import { m2w } from '../core/units.js';
 
 const ss = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+const _stepPos = new Vector3();
 const MAX_DIST = { torch: 16, 'water-channel': 28, sheep: 70, fire: 220 };
 // Jerusalem: mean daily minimum temperature by month (°C, modern climate normals) — reconstruction of the
 // night's warmth; crickets call fully April–October, sparsely in March and November, not December–February
@@ -45,7 +46,9 @@ export class Ambience {
     this.engine = engine;
     this.enabled = true;
     this.population = null;   // null = automatic estimate
-    this.layers = { wind: 1, insects: 1, doves: 1, sheep: 1, crowd: 1, water: 1, fire: 1, torch: 1 };
+    this.layers = { wind: 1, insects: 1, doves: 1, sheep: 1, crowd: 1, water: 1, fire: 1, torch: 1, steps: 1 };
+    // lifelike-audio: the visitor's own bare feet (no shoes on the Mount, Berakhot 9:5) — stride state, scalars only
+    this.step = { x: 0, y: 0, z: 0, on: false, acc: 0, stair: false, side: 0 };
     this.hushUntil = 0;
     this.hushStart = 0;
     this.prostrateAt = 0;
@@ -143,6 +146,7 @@ export class Ambience {
 
   update(dt) {
     if (!this.started || !this.enabled) return;
+    this.updateSteps(dt);
     this.timer -= dt;
     if (this.timer > 0) return;
     this.timer = 0.5;
@@ -173,6 +177,31 @@ export class Ambience {
     if (this.crowdMount) { this.crowdMount.setPeople(Math.max(1, plaza)); this.crowdMount.setGain(plaza > 8 ? Math.max(hush, 0.5) * L.crowd : 0, 3); }
 
     this.updateFires();
+  }
+
+  /**
+   * The visitor's own footsteps (lifelike-audio): one barefoot step per stride walked on the ground (not flying, not
+   * travelling faster than a run, not a jump of the camera); a stride with an abrupt rise or drop of the feet (a stair's
+   * snap, not a ramp's slope) is a step set down on a stair. Per frame: a few scalar reads, no allocation; a cue per step.
+   */
+  updateSteps(dt) {
+    const st = this.step, p = this.ctx.player, f = p?.position;
+    if (!f || !(dt > 0) || p.mode === 'fly' || !p.grounded || !this.layers.steps || this.engine.ac?.state !== 'running') { st.on = false; return; }
+    if (!st.on) { st.on = true; st.x = f.x; st.y = f.y; st.z = f.z; st.acc = 0; st.stair = false; return; }
+    const dx = f.x - st.x, dz = f.z - st.z, dy = f.y - st.y, d = Math.hypot(dx, dz);
+    st.x = f.x; st.y = f.y; st.z = f.z;
+    if (d > 4.5 * Math.max(dt, 1 / 60) || Math.abs(dy) > 1) { st.acc = 0; st.stair = false; return; } // a jump or > 4.5 m/s: silent
+    if (Math.abs(dy) > 0.1 && Math.abs(dy) > 0.6 * d) st.stair = true;
+    if (d < 0.05 * dt) return; // standing
+    st.acc += d;
+    const stride = p.running ? 0.9 : 0.72;
+    if (st.acc < stride) return;
+    st.acc -= stride;
+    if (st.acc > stride) st.acc = 0;
+    st.side ^= 1;
+    _stepPos.set(f.x, f.y + 0.05, f.z);
+    this.engine.cue('footsteps', _stepPos, { steps: 1, surface: st.stair ? 'stair' : undefined, levelDb: -10 + (st.side ? 0 : -1), gain: this.layers.steps });
+    st.stair = false;
   }
 
   /** the insects bed at tonight's temperature: re-rendered (cross-faded) when it moves by 2 °C */
