@@ -80,6 +80,12 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   destructuring and `subarray` in a frame loop allocate. Measure with `tools/cpu-prof.mjs` (CDP profile + heap sampling
   that keeps what minor GCs collected); on SwiftShader measure the updaters with `engine.drawing = false`, since frames
   that take seconds run every sim LOD every frame (docs/decisions/perf-cpu.md).
+- Idle life is baked into the clips, at no per-frame cost (docs/decisions/lifelike-people.md): `stand`, `stand~k`,
+  `stand_hold` and `lead` are 16–20 s, 48-frame loops with one glance (`clips.js glance()`); the animals' `stand` /
+  `stand_halter` have three idle variants (`animal-clips.js IDLE`) chosen by seed through `CLIP_VARIANTS`. Check a new
+  idle with `node src/people/dev/idle-probe.mjs <rig> <clips>` (travel, frame step, loop seam). Auto-advanced poses
+  integrate their phase by frame time (`system.js _tick`), not sim time: idle phases do not scrub and differ between
+  shot runs; `&pphase=` (debug=people) shows a given moment of an idle.
 - Curtains (the parochot, gate curtains, the lul's) and door leaves are movables, not colliders: a `ctx.physics.raycast`
   passes them. Anything that samples what the eye sees from a room must stop at the room's box unless the ray leaves
   through an open aperture (render/fx `roomExit`): fx's firelight adaptation saw past both parochot to the Azarah behind
