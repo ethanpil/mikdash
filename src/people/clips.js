@@ -68,6 +68,14 @@ function breathe(P, ph, a = 1) {
   P.add('neck', -0.4 * b * a, 0, 0);
 }
 
+/** a glance in a standing loop (lifelike-people): the head turns `deg` (yaw) over ≈ 5 % of the loop, holds for ≈ 9 %
+ *  and comes back over ≈ 6 %, centred on phase `at` (wrapping) — once in a 16–20 s loop: ≈ 0.8 s in, 1.5 s held */
+function glance(ph, at, deg) {
+  let d = ph - at;
+  d -= Math.round(d);
+  return deg * smooth(-0.1, -0.05, d) * (1 - smooth(0.04, 0.1, d));
+}
+
 // grip offset of the fist centre from the wrist, hand-local (right; mirror x for left)
 export function gripOffset(r, s) {
   const k = r.dims.handS || 1;
@@ -294,13 +302,14 @@ function _aux(r, n) {
 // ------------------------------------------------------------------------------------------- the clips
 // frames = baked samples; loop; rate = natural cycles/second when auto-advanced; grip = prop attachment class
 export const HUMAN_CLIPS = {
+  // lifelike-people: two of the old 8 s sway-and-breath cycles per loop, and once a loop a glance (glance())
   stand: {
-    frames: 24, loop: true, rate: 0.125,
+    frames: 48, loop: true, rate: 0.0625,
     fn(P, r, ph) {
-      const w = sin(ph * TAU);
-      stance(P, r, { px: 0.009 * w, pr: -1.1 * w, sr: 0.7 * w, cr: 0.5 * w, hy: 2.2 * sin(ph * TAU + 1.3), hr: 0.8 * w });
+      const w = sin(ph * TAU * 2), g = glance(ph, 0.62, -13);
+      stance(P, r, { px: 0.009 * w, pr: -1.1 * w, sr: 0.7 * w, cr: 0.5 * w, hy: 2.2 * sin(ph * TAU * 2 + 1.3) + g, ny: 0.45 * g, hr: 0.8 * w });
       armHang(P, 'l'); armHang(P, 'r');
-      breathe(P, ph * 2);
+      breathe(P, ph * 4);
     },
   },
   walk: {
@@ -686,9 +695,18 @@ export const OFFERING_CLIPS = {
     frames: 32, loop: true, stride: 'stride', grip: 'pair', pairGrip: 'palm',
     fn(P, r, ph) { walkBody(P, r, ph, { noArms: true }); carryLimbsArms(P, r, ph, 0.006 * cos(2 * TAU * ph)); },
   },
+  // lifelike-people: the man waiting with his animal on the lead sways and breathes as 'stand' does (the lead hand is
+  // an IK target, so it stays put on the rope) and once a loop looks down to his right, along the lead, and back
   lead: {
-    frames: 16, loop: true, rate: 0.15, grip: 'fist', hand: 'r',
-    fn(P, r, ph) { stance(P, r, { cy: -4 }); armHang(P, 'l'); leadArm(P, r, false); breathe(P, ph); },
+    frames: 48, loop: true, rate: 0.0625, grip: 'fist', hand: 'r',
+    fn(P, r, ph) {
+      const w = sin(ph * TAU * 2), g = glance(ph, 0.45, 1);
+      stance(P, r, {
+        cy: -4, px: 0.007 * w, pr: -0.9 * w, sr: 0.6 * w, hr: 0.6 * w,
+        hy: 2 * sin(ph * TAU * 2 + 1.3) - 10 * g, ny: -4 * g, head: -11 * g, neck: 2.5 - 4 * g,
+      });
+      armHang(P, 'l'); leadArm(P, r, false); breathe(P, ph * 4);
+    },
   },
   lead_walk: {
     frames: 32, loop: true, stride: 'stride', grip: 'fist', hand: 'r',
@@ -1226,12 +1244,12 @@ export const SERVICE_CLIPS = {
   // handle and the arm carried steady, so the vessel stays level (the prop's fist grip is set for this hang); props
   // choose these for stand / walk through PROPS[name].poses
   stand_hold: {
-    frames: 24, loop: true, rate: 0.125, grip: 'fist', hand: 'r',
+    frames: 48, loop: true, rate: 0.0625, grip: 'fist', hand: 'r',
     fn(P, r, ph) {
-      const w = sin(ph * TAU);
-      stance(P, r, { px: 0.009 * w, pr: -1.1 * w, sr: 0.7 * w, cr: 0.5 * w, hy: 2.2 * sin(ph * TAU + 1.3), hr: 0.8 * w });
+      const w = sin(ph * TAU * 2), g = glance(ph, 0.35, 12);
+      stance(P, r, { px: 0.009 * w, pr: -1.1 * w, sr: 0.7 * w, cr: 0.5 * w, hy: 2.2 * sin(ph * TAU * 2 + 1.3) + g, ny: 0.45 * g, hr: 0.8 * w });
       armHang(P, 'l'); armHang(P, 'r', HOLD_ARM);
-      breathe(P, ph * 2);
+      breathe(P, ph * 4);
     },
   },
   walk_hold: {
@@ -1256,30 +1274,36 @@ function carryLambArms(P, r, ph, lift = 0) {
 // each figure keeps one (system.js variantOf: an actor by its seed, a crowd member by its own offset). CLIP_VARIANTS
 // lists how many there are beside the base clip. The variants are small, natural differences of stance and gesture —
 // how a man stands at rest, how far apart he lifts his hands — never a different act.
-export const CLIP_VARIANTS = { stand: 3, raise_hands: 3 };
+// The animals' 'stand' and 'stand_halter' have three variants each too (animal-clips.js IDLE); a rig without a
+// variant falls back to the base clip.
+export const CLIP_VARIANTS = { stand: 3, raise_hands: 3, stand_halter: 3 };
 
 /** a variant of 'stand': weight on one leg (the other foot a little forward and out), the head turned and tilted, arms
  *  a touch bent or hanging further back; o: { w (weight shift −1…1), foot: [x, z], head: [pitch, yaw, roll], arm } */
 function standVariant(o) {
   return {
-    frames: 24, loop: true, rate: o.rate ?? 0.12,
+    frames: 48, loop: true, rate: (o.rate ?? 0.12) / 2,
     fn(P, r, ph) {
-      const k = r.dims.H / 1.67, w = sin(ph * TAU), sh = o.w;
+      const k = r.dims.H / 1.67, w = sin(ph * TAU * 2), sh = o.w;
       const fx = o.foot[0] * k, fz = o.foot[1] * k;
       // the leg that does not bear the weight steps a little forward and out (its side is −sign(w))
       const side = sh > 0 ? { lx: -fx, lz: fz } : { rx: fx, rz: fz };
+      const g = glance(ph, o.glance[0], o.glance[1]);
       stance(P, r, {
         px: 0.022 * sh * k + 0.007 * w, pr: -3.2 * sh - 0.9 * w, sr: 1.6 * sh + 0.6 * w, cr: 0.8 * sh + 0.4 * w,
-        head: o.head[0], hy: o.head[1] + 2.4 * sin(ph * TAU + 1.3), hr: o.head[2] + 0.8 * w, neck: o.neck ?? 2.5, ...side,
+        head: o.head[0] + o.glance[2] * Math.abs(g) / Math.abs(o.glance[1]), hy: o.head[1] + 2.4 * sin(ph * TAU * 2 + 1.3) + g,
+        ny: 0.45 * g, hr: o.head[2] + 0.8 * w, neck: o.neck ?? 2.5, ...side,
       });
       armHang(P, 'l', o.arm?.l || {}); armHang(P, 'r', o.arm?.r || {});
-      breathe(P, ph * 2);
+      breathe(P, ph * 4);
     },
   };
 }
-HUMAN_CLIPS['stand~1'] = standVariant({ w: 1, foot: [0.025, -0.07], head: [-1, 9, 2.5], arm: { r: { elbow: 16, flex: 6 } } });
-HUMAN_CLIPS['stand~2'] = standVariant({ w: -0.8, foot: [0.03, -0.05], head: [3.5, -11, -1.5], neck: 4, arm: { l: { elbow: 22, flex: 2, ftwist: 30 } } });
-HUMAN_CLIPS['stand~3'] = standVariant({ w: 0.35, foot: [0.04, 0.03], head: [-4.5, 4, -2.5], neck: 0.5, rate: 0.1, arm: { l: { flex: -2, elbow: 14 }, r: { flex: -3, elbow: 12 } } });
+// glance: [phase, head yaw (deg, + to his left), head pitch during it]; each turns toward the side he is not already
+// facing, so the glance reads as looking across at something and back, never a turn away from his own place
+HUMAN_CLIPS['stand~1'] = standVariant({ w: 1, foot: [0.025, -0.07], head: [-1, 9, 2.5], glance: [0.3, -15, 1], arm: { r: { elbow: 16, flex: 6 } } });
+HUMAN_CLIPS['stand~2'] = standVariant({ w: -0.8, foot: [0.03, -0.05], head: [3.5, -11, -1.5], neck: 4, glance: [0.8, 14, -2], arm: { l: { elbow: 22, flex: 2, ftwist: 30 } } });
+HUMAN_CLIPS['stand~3'] = standVariant({ w: 0.35, foot: [0.04, 0.03], head: [-4.5, 4, -2.5], neck: 0.5, rate: 0.1, glance: [0.48, 12, 3], arm: { l: { flex: -2, elbow: 14 }, r: { flex: -3, elbow: 12 } } });
 
 /** a variant of 'raise_hands' (Birkat Kohanim in the Mikdash, hands above the head — Tamid 7:2): o = { x, y, z (the
  *  wrists: half spread, height in H, forward), spread (fingers), out (palms turned outward), head [pitch, yaw, roll],

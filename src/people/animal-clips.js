@@ -60,9 +60,66 @@ function quadBody(P, r, ph, o = {}) {
   const tail = o.walk ? 12 * sin(ph * TAU * 2) : 18 * Math.max(0, sin(ph * TAU * 3)) ** 6;
   P.rot('tail', 0, 0, tail);
   P.rot('tail2', 0, 0, tail * 0.6);
+  // the ears flick each on its own beat (the right ear was held still before: lifelike-people)
   const ear = 10 * Math.max(0, sin(ph * TAU * 2 + 1)) ** 8;
   P.rot('ear_l', 0, 0, -ear);
-  P.rot('ear_r', 0, 0, 0);
+  P.rot('ear_r', 0, 0, 9 * Math.max(0, sin(ph * TAU + 3.6)) ** 10);
+}
+
+/** a cosine bump of half-width w (phase units) centred at `at`, wrapping round the loop: 1 there, 0 beyond w */
+function bump(ph, at, w) {
+  let d = Math.abs(ph - at);
+  d = Math.min(d, 1 - d);
+  return d >= w ? 0 : 0.5 + 0.5 * cos(Math.PI * d / w);
+}
+/** signed phase distance from `at` (−0.5…0.5), wrapping */
+function dist(ph, at) { const d = ph - at; return d - Math.round(d); }
+
+/**
+ * An animal waiting at rest (lifelike-people): a loop of 11–15 s in which it breathes (≈ 3 s a breath), turns its head
+ * to look aside once or twice and back, flicks each ear on its own beat, swishes its tail once, and in some variants
+ * lowers its nose toward the paving and lifts it again. v = { breaths (whole, per loop), carry (neck pitch offset),
+ * yaw (head held a little to one side), looks: [[at, deg]], ears: [[at, side ±1]], tail: [at, deg], sniff (at | null) }.
+ * On a halter the head moves less (the lead is held short), and the sniff only dips.
+ */
+function quadIdle(P, r, ph, v, halter) {
+  const d = r.dims;
+  const b = sin(ph * TAU * v.breaths);
+  const k = halter ? 0.6 : 1;
+  P.off('pelvis', 0, 0.002 * b * d.H, 0);
+  P.rot('spine', 0.6 * b, 0, 0);
+  P.rot('chest', 0.5 * b, 0, 0);
+  let look = v.yaw;
+  for (let i = 0; i < v.looks.length; i++) look += v.looks[i][1] * k * bump(ph, v.looks[i][0], 0.13);
+  const sniff = v.sniff == null ? 0 : bump(ph, v.sniff, 0.12);
+  const down = v.carry - (halter ? 14 : 34) * sniff;
+  P.rot('neck', down + 1.5 * b, look * 0.4, 0);
+  P.rot('neck2', down * 0.6, look * 0.3, 0);
+  P.rot('head', 6 * sniff, look * 0.3, look * 0.06);
+  // one swish: out to one side and back across, over ≈ 1.5 s
+  const tw = 0.06, tu = dist(ph, v.tail[0]);
+  const tail = Math.abs(tu) < tw ? v.tail[1] * sin(Math.PI * tu / tw) * bump(ph, v.tail[0], tw) * 1.6 : 0;
+  P.rot('tail', 0, 0, tail);
+  P.rot('tail2', 0, 0, tail * 0.7);
+  let el = 0, er = 0;
+  for (let i = 0; i < v.ears.length; i++) {
+    const e = 12 * bump(ph, v.ears[i][0], 0.035);
+    if (v.ears[i][1] < 0) el += e; else er += e;
+  }
+  P.rot('ear_l', 0, 0, -2 - el);
+  P.rot('ear_r', 0, 0, 2 + er);
+}
+// three ways of waiting, chosen per animal by its seed (system.js variantOf, CLIP_VARIANTS in clips.js)
+const IDLE = [
+  { rate: 1 / 13, breaths: 4, carry: -3, yaw: 5, looks: [[0.32, 20]], ears: [[0.08, -1], [0.47, 1], [0.71, -1], [0.74, 1]], tail: [0.58, 16], sniff: null },
+  { rate: 1 / 15, breaths: 5, carry: 2, yaw: -4, looks: [[0.78, -17]], ears: [[0.2, 1], [0.55, -1], [0.93, 1]], tail: [0.12, -14], sniff: 0.42 },
+  { rate: 1 / 11, breaths: 4, carry: -1, yaw: 2, looks: [[0.18, 13], [0.62, -15]], ears: [[0.36, -1], [0.38, 1], [0.86, -1]], tail: [0.9, 18], sniff: null },
+];
+function idleClip(v, halter) {
+  return {
+    frames: 48, loop: true, rate: v.rate, halter,
+    fn(P, r, ph) { quadIdle(P, r, ph, v, halter); quadLegs(P, r, ph, {}); },
+  };
 }
 
 /** on the right side, the left (upper) fore and hind legs drawn together, the neck stretched back */
@@ -130,6 +187,10 @@ export const QUAD_CLIPS = {
   bound_tied: { frames: 12, loop: true, rate: 0.3, cord: true, fn(P, r, ph) { boundPose(P, r, ph, 0.3); } },
   struggle: { frames: 24, loop: true, rate: 0.9, fn(P, r, ph) { boundPose(P, r, ph, 2.5); } },
 };
+for (let i = 0; i < IDLE.length; i++) {
+  QUAD_CLIPS[`stand~${i + 1}`] = idleClip(IDLE[i], false);
+  QUAD_CLIPS[`stand_halter~${i + 1}`] = idleClip(IDLE[i], true);
+}
 
 export const BIRD_CLIPS = {
   stand: {

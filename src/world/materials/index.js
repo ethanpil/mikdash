@@ -153,6 +153,11 @@ const ALTAR = [0.8, 0.65];
 // smoothing]. The way the crowds walk from the two Chuldah gates (Middot 1:3: the people's entry and exit) round the
 // soreg's south-east corner to the chel steps on the east axis (Rambam BhB 6:1) — placed from the site model
 const WEAR = [1, 7, 0.06, 0.07];
+// lifelike-wear: the middle of the flights on the Temple's east axis (steps_stone), where the crowds and the kohanim go
+// up — the twelve Chel steps and the threshold of the Ezrat Nashim's east gate, the fifteen semicircular steps up to
+// Sha'ar Nikanor, the Ulam's twelve steps (Middot 2:3, 2:5, 3:6): dust scuffed off (the macro's dust tint eased by the
+// shared mkWear code) and the treads' crowns a little smoother. Reconstruction
+const WEAR_ST = [1, 2.4, 0.04, 0.1];
 const ALTAR_FIRES = [['great', 3.0, 0.9], ['incense', 1.6, 0.6], ['kiyum-haesh', 2.0, 0.6]];
 // burning firewood and its ash beds (patch.js MK_BURN, gate-world-materials): the char set blended over the bark, its
 // cracks glowing where the log faces the coals; the ash beds blend in the coal bed (glow in its albedo alpha). Ember
@@ -186,7 +191,7 @@ const LATER_GROUPS = [
  *   macro / detail: presets above, block: [albedo, roughness, hue] amplitudes (masonry/sheet sets),
  *   physical, sheen: [colour, roughness] (high/ultra), side, alphaTest,
  *   foot: dust band and contact AO at a wall's foot (qa-r1), altar: the altar's soot / ash masks (qa-r1),
- *   wear: the Mount's worn routes (qa-r2, patch.js mkWear),
+ *   wear: worn routes (patch.js mkWear): true the Mount's (qa-r2), 'steps' the east axis's flights (lifelike-wear),
  *   burn: { set, glow: [emissive sRGB, luminance cd/m²], mask: 'crack' (wood) | 'alpha' (ash), ash: the wood's ash crust tone
  *     (linear) / the ash's soot darkening } — a second
  *     set (char / coal bed) blended in by the geometry's per-vertex `mkBurn` attribute (x char, y ash crust, z ember
@@ -252,7 +257,7 @@ export const SPEC = {
     },
   },
   steps_stone: {
-    set: 'steps', macro: MAC.stone, block: [0.05, 0.06, 0.012], joint: JOINT.steps, detail: DET.stone, flat: ['#d3c8b2', 0.7, 0],
+    set: 'steps', macro: MAC.stone, block: [0.05, 0.06, 0.012], joint: JOINT.steps, detail: DET.stone, wear: 'steps', flat: ['#d3c8b2', 0.7, 0],
     info: { en: 'Stone steps (Chel, the 15 steps, Ulam steps) — dressed hard limestone', sources: ['Middot 2:3, 2:5, 3:6'], confidence: 'derived' },
   },
   lime_whitewash: {
@@ -744,26 +749,42 @@ export function createMaterialLibrary(ctx) {
    * (site.js context.chuldah.tunnel-*.params.exit) to a point 8 amot outside the soreg's south-east corner, then north to
    * the foot of the chel steps (mount.chel.steps.params.foot). Without the elements the amount is 0.
    */
-  let wearU = null;
-  function wearUniforms() {
-    if (wearU) return wearU;
+  const wearU = {};
+  function wearUniforms(kind) {
+    if (wearU[kind]) return wearU[kind];
+    const P = kind === 'steps' ? WEAR_ST : WEAR;
     const u = {
-      mkWear: { value: new Vector4(0, WEAR[1], WEAR[2], WEAR[3]) },
+      mkWear: { value: new Vector4(0, P[1], P[2], P[3]) },
       mkWearA: { value: new Vector4() }, mkWearB: { value: new Vector4() }, mkWearC: { value: new Vector4() },
     };
     const el = (id) => { try { return ctx.elOpt?.(id) || null; } catch { return null; } };
-    const ew = el('context.chuldah.tunnel-w')?.params?.exit, ee = el('context.chuldah.tunnel-e')?.params?.exit;
-    const foot = el('mount.chel.steps')?.params?.foot, path = el('mount.soreg')?.params?.path;
-    if (ew && ee && foot && path?.length) {
-      const se = path.reduce((a, p) => (p[0] - p[1] > a[0] - a[1] ? p : a));
-      const c = [se[0] + 8, se[1] - 8];
-      const W = (a, b) => new Vector4(a[0] * AMAH, -a[1] * AMAH, b[0] * AMAH, -b[1] * AMAH);
-      u.mkWearA.value.copy(W(ew, c));
-      u.mkWearB.value.copy(W(ee, c));
-      u.mkWearC.value.copy(W(c, foot));
-      u.mkWear.value.x = WEAR[0];
+    const W = (a, b) => new Vector4(a[0] * AMAH, -a[1] * AMAH, b[0] * AMAH, -b[1] * AMAH);
+    let segs = null;
+    if (kind === 'steps') {
+      // each flight's centre line on the axis, from just beyond its foot to just beyond its head
+      const ch = el('mount.chel.steps'), eg = el('en.gate.east')?.box, s15 = el('en.steps15'), ul = el('altar.ulam-steps')?.box;
+      if (ch?.params?.foot && eg && s15?.box && s15.params?.center && ul) {
+        const y = ch.params.foot[1];
+        segs = [[[ch.params.foot[0] + 1, y], [eg.min[0] - 1, y]],
+          [[s15.box.max[0] + 1.5, s15.params.center[1]], [s15.params.center[0], s15.params.center[1]]],
+          [[ul.max[0] + 1, (ul.min[1] + ul.max[1]) / 2], [ul.min[0], (ul.min[1] + ul.max[1]) / 2]]];
+      }
+    } else {
+      const ew = el('context.chuldah.tunnel-w')?.params?.exit, ee = el('context.chuldah.tunnel-e')?.params?.exit;
+      const foot = el('mount.chel.steps')?.params?.foot, path = el('mount.soreg')?.params?.path;
+      if (ew && ee && foot && path?.length) {
+        const se = path.reduce((a, p) => (p[0] - p[1] > a[0] - a[1] ? p : a));
+        const c = [se[0] + 8, se[1] - 8];
+        segs = [[ew, c], [ee, c], [c, foot]];
+      }
     }
-    wearU = u;
+    if (segs) {
+      u.mkWearA.value.copy(W(...segs[0]));
+      u.mkWearB.value.copy(W(...segs[1]));
+      u.mkWearC.value.copy(W(...segs[2]));
+      u.mkWear.value.x = P[0];
+    }
+    wearU[kind] = u;
     return u;
   }
 
@@ -798,7 +819,7 @@ export function createMaterialLibrary(ctx) {
       mkJoint: { value: new Vector4(jt ? 1 : 0, jt ? jt[0] : 0, jt ? jt[1] : 0, set?.w ? set.tile[0] / set.w : 1) },
       mkJoint2: { value: new Vector2(jt ? jt[2] : 1, jt ? jt[3] : 1) },
       // (every patched material carries the route-wear uniforms — the program is shared — zero unless it has routes)
-      ...(s.wear ? wearUniforms() : {
+      ...(s.wear ? wearUniforms(s.wear === true ? 'mount' : s.wear) : {
         mkWear: { value: new Vector4(0, 1, 0, 0) }, mkWearA: { value: new Vector4() }, mkWearB: { value: new Vector4() }, mkWearC: { value: new Vector4() },
       }),
       ...(s.foot ? footU : {}),

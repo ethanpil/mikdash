@@ -192,15 +192,18 @@ export function knock(sr, rng, o = {}) {
 /** Barefoot steps on stone (kohanim always barefoot — Zevachim 24a): heel thump, skin slap, toe roll. */
 export function footsteps(sr, rng, o = {}) {
   const steps = o.steps ?? 6, pace = o.pace || 0.56;
+  // lifelike-audio: o.surface 'stair' — a foot set down flat on a step (weight dropped onto it): a heavier, darker
+  // heel-and-sole thump, less toe roll and no scuff; default: the stride across the pavement
+  const stair = o.surface === 'stair';
   const out = new Float32Array(secs(steps * pace + 0.5, sr));
   const lp2 = (b, f) => { const q = new Biquad('lowpass', f, 0.7, 0, sr); q.run(b); return b; };
   const hp2 = (b, f) => { const q = new Biquad('highpass', f, 0.7, 0, sr); q.run(b); return b; };
   for (let s = 0; s < steps; s++) {
-    const at = 0.02 + s * pace + rng.uni(-0.03, 0.03), g = rng.uni(0.75, 1) * (s % 2 ? 0.92 : 1);
-    addInto(out, lp2(burst(rng, sr, 0.07, 0.014), 220), at * sr, 2.2 * g);                       // heel: soft low thump
-    addInto(out, lp2(hp2(burst(rng, sr, 0.03, 0.005), 700), 2600), at * sr, 0.5 * g);            // skin slap on stone
-    addInto(out, lp2(hp2(burst(rng, sr, 0.04, 0.008), 500), 1900), (at + rng.uni(0.07, 0.11)) * sr, 0.35 * g); // toe roll-off
-    if (rng.chance(0.3)) addInto(out, lp2(hp2(burst(rng, sr, 0.06, 0.02), 2500), 6000), (at + 0.1) * sr, 0.05 * g); // grit scuff
+    const at = 0.02 + s * pace + (steps > 1 ? rng.uni(-0.03, 0.03) : 0), g = rng.uni(0.75, 1) * (s % 2 ? 0.92 : 1);
+    addInto(out, lp2(burst(rng, sr, 0.07, stair ? 0.02 : 0.014), stair ? 170 : 220), at * sr, (stair ? 3.4 : 2.2) * g); // heel: soft low thump
+    addInto(out, lp2(hp2(burst(rng, sr, 0.03, 0.005), 700), stair ? 2000 : 2600), at * sr, (stair ? 0.4 : 0.5) * g);   // skin slap on stone
+    addInto(out, lp2(hp2(burst(rng, sr, 0.04, 0.008), 500), 1900), (at + rng.uni(0.07, 0.11)) * sr, (stair ? 0.15 : 0.35) * g); // toe roll-off
+    if (!stair && rng.chance(0.3)) addInto(out, lp2(hp2(burst(rng, sr, 0.06, 0.02), 2500), 6000), (at + 0.1) * sr, 0.05 * g); // grit scuff
   }
   return out;
 }

@@ -41,6 +41,10 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   above their Nyquist frequency instead of aliasing it; there the wall masonry's stone-to-stone variation is halved
   (`calm`) and the Herodian walls' baked AO eases to its mean between 8 and 32 m (`FOOT_AO`), or far walls read as a
   patchwork of bricks (docs/decisions/materials-realism.md).
+- Worn ways are uniform data on the shared route code (patch.js `mkWear`; materials/index.js `wearUniforms(kind)`:
+  `wear: true` the Mount's routes, `'steps'` the middles of the east-axis flights): no new program or sampler. Inside a
+  route the code also eases the key's macro dust tint, so a "darker, polished" band nets to nothing (the Azarah's was
+  dropped for that; docs/decisions/lifelike-wear.md).
 - Clouds are one tile baked in a Worker (`src/env/clouds-core.js`, IndexedDB-cached), read only by the visible sky dome
   and the stars: they never light the courts. Tiers with `ao: 'volume'` or no post draw the cumulus as a flat, loop-free
   layer (512² tile, 3 fetches per sky pixel, sun colour from CPU uniforms); the others march it (1024²). In play the tile
@@ -49,10 +53,20 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
 - The altar's smoke is one ribbon per plume, a straight column (Avot 5:5; Yoma 21b), lit by the key light at half
   saturation; flames fade toward their card's sides and top (a torn tongue at a card edge tone-mapped to a pale flap on
   low). Lamps use the `style: 'oil'` flame preset: one small steady teardrop, no sparks (docs/decisions/sky-smoke-fire.md).
+- Stars twinkle on every tier (the shader's existing term, on env's real-time clock, not sim time). Fog's surface
+  aerosol follows the night's inversion: × (1 + `MORNING_HAZE` 1.5) from evening twilight until the Sun is 4° up, × 1 by
+  30° and all afternoon, a function of the Sun's position; `api.haze` stays the user multiplier, `api.hazeDiurnal` reads
+  out the factor (reconstruction; docs/decisions/lifelike-atmosphere.md).
 - Nav is built in a Worker by rasterising collider triangles into a 0.5 m multi-level grid; a coarse block graph
   steers A*. Half-amah stairs need sub-step probes (|Δh| up to 0.8 m per cell when each rise ≤ 0.35 m).
 - Audio is synthesised in module Workers (`src/audio/worker.js`); `?debug=audio` opens an audition panel.
 - Psalm melodies, choir size on low/medium, insect season: reconstruction (see docs/decisions/audio.md).
+- Wind bed gain = daylight × `windShape` (ambience.js): sim-time value-noise gusts (flat at ≥ 30× clock), an afternoon
+  breeze (reconstruction) and env's per-date cumulus cover read from `ctx.env.clouds.uniforms.uCuUV.value.w` (no second
+  weather model). The visitor's own barefoot steps (Berakhot 9:5) are one `footsteps` cue with `steps: 1` per stride from
+  `ctx.player.position` (not in fly mode, ≤ 4.5 m/s, no camera jumps); an abrupt snap of the feet within a stride is a
+  stair (`surface: 'stair'`); `ambience.setLayer('steps', 0)` mutes them. `node src/audio/dev/lifelike-test.mjs` checks
+  both offline; nobody has listened to either (docs/decisions/lifelike-audio.md).
 - Offerings: notar is burned by day only; at night the visible burning is the fats and limbs on the altar, turned
   all night (Rambam TuM 1:6); weekday fats are not burned on Shabbat, so Friday night shows the fire alone.
   Frequencies in OFFERING_RULES are totals that include the composite sets (yoledet, zav, nazir, metzora): stage
@@ -66,6 +80,12 @@ Read `ARCHITECTURE.md` first: it holds the contracts, ownership map, frames/unit
   destructuring and `subarray` in a frame loop allocate. Measure with `tools/cpu-prof.mjs` (CDP profile + heap sampling
   that keeps what minor GCs collected); on SwiftShader measure the updaters with `engine.drawing = false`, since frames
   that take seconds run every sim LOD every frame (docs/decisions/perf-cpu.md).
+- Idle life is baked into the clips, at no per-frame cost (docs/decisions/lifelike-people.md): `stand`, `stand~k`,
+  `stand_hold` and `lead` are 16–20 s, 48-frame loops with one glance (`clips.js glance()`); the animals' `stand` /
+  `stand_halter` have three idle variants (`animal-clips.js IDLE`) chosen by seed through `CLIP_VARIANTS`. Check a new
+  idle with `node src/people/dev/idle-probe.mjs <rig> <clips>` (travel, frame step, loop seam). Auto-advanced poses
+  integrate their phase by frame time (`system.js _tick`), not sim time: idle phases do not scrub and differ between
+  shot runs; `&pphase=` (debug=people) shows a given moment of an idle.
 - Curtains (the parochot, gate curtains, the lul's) and door leaves are movables, not colliders: a `ctx.physics.raycast`
   passes them. Anything that samples what the eye sees from a room must stop at the room's box unless the ray leaves
   through an open aperture (render/fx `roomExit`): fx's firelight adaptation saw past both parochot to the Azarah behind

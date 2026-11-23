@@ -85,6 +85,16 @@ export function installDebug(ctx, engine, amb) {
     b.onclick = async () => { await ctx.audio.unlock(); ctx.audio.cue(id, ahead()); };
     cueBox.appendChild(b);
   }
+  // lifelike-audio: the visitor's own single steps (ambience.js updateSteps), on the pavement and on a stair, at the feet
+  for (const surface of ['pavement', 'stair']) {
+    const b = document.createElement('button'); b.textContent = `my step (${surface})`;
+    b.onclick = async () => {
+      await ctx.audio.unlock();
+      const f = ctx.player?.position, p = f ? new Vector3(f.x, f.y + 0.05, f.z) : ahead();
+      engine.cue('footsteps', p, { steps: 1, surface: surface === 'stair' ? 'stair' : undefined, levelDb: -10 });
+    };
+    cueBox.appendChild(b);
+  }
   const loops = new Map();
   for (const id of Object.keys(LOOP_LIB)) {
     const b = document.createElement('button'); b.textContent = id;

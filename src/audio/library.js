@@ -41,7 +41,7 @@ export const CUE_LIB = {
   sheep: C(88, 1, { cat: 'animal', variants: 6, send: 0.45, synth: ['kind'] }),
   doves: C(70, 1, { cat: 'animal', variants: 4, send: 0.4 }),
   'crowd-prostrate': C(74, 12, { cat: 'crowd', variants: 2, priority: 3, send: 0.7, people: 600 }),
-  footsteps: C(56, 1, { cat: 'foley', variants: 4, send: 0.4, synth: ['steps', 'pace'] }),
+  footsteps: C(56, 1, { cat: 'foley', variants: 4, send: 0.4, synth: ['steps', 'pace', 'surface'] }),
   keys: C(72, 1, { cat: 'foley', variants: 2, send: 0.5 }),
   // render-audio-3: an earthenware pot dashed on the pavement (the scouring: Lev 6:21, broken in a holy place, Zevachim
   // 11:4): a sharp crack and clatter, ≈ 95 dB at 1 m in its loudest 400 ms (a ceramic pot smashed on stone peaks above
